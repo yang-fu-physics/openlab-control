@@ -4,8 +4,9 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+import qtawesome as qta
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon
+from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -22,7 +23,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QStyle,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{config.title} - Simulating")
         self.resize(1480, 900)
-        self.setMinimumSize(1050, 680)
+        self.setMinimumSize(1180, 720)
         self.setAcceptDrops(True)
         self._build_ui()
         self._apply_style()
@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
         self._build_log_dock()
         self._build_actions()
         self.statusBar().showMessage("Starting simulation framework")
+        QTimer.singleShot(0, self._fit_mdi_windows)
 
     def _build_left_dock(self) -> None:
         dock = QDockWidget("Sequence Control", self)
@@ -153,8 +154,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(sequence_group)
 
         status_group = QGroupBox("Sequence Status")
+        status_group.setObjectName("statusGroup")
         status_layout = QVBoxLayout(status_group)
         self.run_status_label = QLabel("Sequence Idle")
+        self.run_status_label.setObjectName("statusBadge")
         self.run_detail_label = QLabel("")
         self.run_detail_label.setWordWrap(True)
         self.run_detail_label.setObjectName("mutedLabel")
@@ -247,16 +250,15 @@ class MainWindow(QMainWindow):
         self.log_dock = dock
 
     def _build_actions(self) -> None:
-        style = self.style()
-        self.new_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileIcon), "New", self)
-        self.open_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open", self)
-        self.save_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton), "Save", self)
-        self.save_as_action = QAction("Save As", self)
-        self.run_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay), "Run", self)
-        self.pause_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_MediaPause), "Pause/Resume", self)
-        self.stop_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_MediaStop), "Stop", self)
-        self.graph_action = QAction("Live Trend", self)
-        self.data_browser_action = QAction("Data Browser", self)
+        self.new_action = QAction(qta.icon("fa5s.file"), "New", self)
+        self.open_action = QAction(qta.icon("fa5s.folder-open"), "Open", self)
+        self.save_action = QAction(qta.icon("fa5s.save"), "Save", self)
+        self.save_as_action = QAction(qta.icon("fa5s.file-signature"), "Save As", self)
+        self.run_action = QAction(qta.icon("fa5s.play", color="green"), "Run", self)
+        self.pause_action = QAction(qta.icon("fa5s.pause", color="orange"), "Pause/Resume", self)
+        self.stop_action = QAction(qta.icon("fa5s.stop", color="red"), "Stop", self)
+        self.graph_action = QAction(qta.icon("fa5s.chart-line"), "Live Trend", self)
+        self.data_browser_action = QAction(qta.icon("fa5s.database"), "Data Browser", self)
         self.log_action = self.log_dock.toggleViewAction()
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
@@ -329,17 +331,14 @@ class MainWindow(QMainWindow):
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
-            "QMainWindow { background: #b9b9b9; }"
-            "QDockWidget::title { background: #dbe5ef; padding: 5px; border: 1px solid #aeb8c2; }"
-            "QGroupBox { font-weight: 600; border: 1px solid #c3c7cc; margin-top: 10px; padding-top: 8px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
-            "QLabel#mutedLabel { color: #6b7280; }"
-            "QLabel#tileTitle { font-weight: 600; color: #343a40; }"
-            "QLabel#tileValue { font-size: 17px; font-weight: 600; color: #182230; }"
-            "QLabel#tileDetail { color: #505862; }"
-            "QLabel#manualCurrent { font-size: 20px; font-weight: 600; padding: 10px; background: #edf3f8; }"
-            "QTreeWidget, QListWidget, QPlainTextEdit { background: #f7f7f7; alternate-background-color: #eceff2; }"
-            "QPushButton { min-height: 25px; }"
+            "QLabel#mutedLabel { color: #888888; }"
+            "QLabel#statusBadge { font-size: 21px; font-weight: bold; padding: 6px; border-radius: 6px; background: rgba(92, 107, 121, 0.15); color: #435260; }"
+            "QLabel#tileTitle { font-weight: bold; font-size: 18px; }"
+            "QLabel#tileValue { font-size: 27px; font-weight: bold; }"
+            "QLabel#tileDetail { color: #888888; font-size: 16px; }"
+            "QLabel#manualCurrent { font-size: 30px; font-weight: bold; padding: 15px; }"
+            "QGroupBox { font-weight: bold; }"
+            "QListView::item:selected, QTreeView::item:selected { background: #cce5ff; color: #000000; }"
         )
 
     def _load_default_sequence(self) -> None:
@@ -593,8 +592,35 @@ class MainWindow(QMainWindow):
         self.data_window.show()
         self.mdi.setActiveSubWindow(self.data_window)
         self.data_window.raise_()
+        QTimer.singleShot(0, self._fit_mdi_windows)
         if path is not None:
             self.data_browser.load_path(path, show_errors=True)
+
+    def _fit_mdi_windows(self) -> None:
+        """Keep floating document windows inside the current MDI viewport."""
+        viewport = self.mdi.viewport().rect()
+        if viewport.width() <= 8 or viewport.height() <= 8:
+            return
+        max_width = max(320, viewport.width() - 4)
+        max_height = max(240, viewport.height() - 4)
+        for subwindow in (self.sequence_window, self.data_window):
+            if subwindow.isMaximized():
+                continue
+            subwindow.resize(
+                min(subwindow.width(), max_width),
+                min(subwindow.height(), max_height),
+            )
+            maximum_x = max(0, viewport.width() - subwindow.width())
+            maximum_y = max(0, viewport.height() - subwindow.height())
+            subwindow.move(
+                max(0, min(subwindow.x(), maximum_x)),
+                max(0, min(subwindow.y(), maximum_y)),
+            )
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        if hasattr(self, "mdi"):
+            QTimer.singleShot(0, self._fit_mdi_windows)
 
     def _data_browser_file_changed(self, path: str) -> None:
         self.data_window.setWindowTitle(f"{Path(path).name} - Data Browser")

@@ -16,6 +16,11 @@
 
 若目录中已有 `dist/OpenLabControl/OpenLabControl.exe`，`run.bat` 会优先启动打包版本。
 
+前端或插件开发时：
+
+- `run_console.bat`：强制从源码启动，关闭程序后保留控制台和真实退出码，便于查看导入或启动错误。
+- `open_env.bat`：打开已激活 `.venv` 的命令行，便于运行测试和构建命令。
+
 ### 在另一台电脑首次启动
 
 以下步骤仅适用于源码包；使用 Windows 发布包时不需要：

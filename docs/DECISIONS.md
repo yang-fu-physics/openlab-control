@@ -98,3 +98,11 @@ PLT 写出版本升级为 2 并加入 `x_scale`、`y_scale`。读取版本 1 时
 `2nd Stage` 当前只用于观察，不能与主温度共享 `temperature` 类型。否则它会进入默认温度设备选择、中央判稳、中止 Hold 和温度 SEQ 的可控路径，容易被误当成标准温度。
 
 因此新增通用 `monitor` 能力：插件只实现 Connect、Disconnect 和 Poll，快照只有 `current`；UI 显示 `Monitoring` 和只读说明，使用普通箭头光标且不发出双击控制信号。核心在目标校验入口再次拒绝 Monitor，形成界面与运行时双重保护。Monitor 可进入 Live Trend 作为临时显示，但默认不增加 DAT 数据列。
+
+## ADR-014：轻量浅色主题与矢量工具栏图标
+
+状态：Accepted
+
+新版前端保留 Qt Fusion 基础样式，通过 Palette 和局部 QSS 建立浅色层级，并使用 QtAwesome 生成工具栏图标。关键设备值与运行状态局部放大，但全局字体固定为 10pt，避免菜单、命令栏和 SEQ 在普通分辨率下挤压内容。
+
+未采用已加入但没有实际调用的 PyQtDarkTheme：无效果依赖会增加安装和打包复杂度，也使主题来源不清晰。长 SEQ 可能令 QListWidget 自动显示当前项右端，因此重建结束必须主动回到水平起点，确保命令类型和禁用标识始终可见。

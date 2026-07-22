@@ -123,8 +123,6 @@ class SequenceEditorWidget(QWidget):
             if row.is_end or row.is_sequence_end:
                 item.setForeground(QColor("#6b7280"))
             else:
-                if command is not None and command.type.is_container:
-                    item.setForeground(QColor("#185fa5"))
                 if command is not None and command.type is CommandType.UNKNOWN:
                     item.setBackground(QColor("#fff4cc"))
             if not row.effective_enabled:
@@ -160,6 +158,10 @@ class SequenceEditorWidget(QWidget):
             item = self.list.item(self.list.count() - 1)
             item.setSelected(True)
             self.list.setCurrentItem(item, QItemSelectionModel.SelectionFlag.NoUpdate)
+        # Adding or selecting a long command can make QListWidget reveal its
+        # right edge. Always return to column zero so command prefixes remain
+        # visible, especially with larger accessibility fonts.
+        self.list.horizontalScrollBar().setValue(0)
         self._update_action_states()
 
     def selected_row(self) -> FlatRow | None:

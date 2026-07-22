@@ -45,6 +45,8 @@ flowchart TD
 | `src/labcontrol/ui/data_browser.py` | DAT 浮动窗口、自动刷新、PLT 生命周期和点详情 |
 | `src/labcontrol/ui/` | 主窗口、状态块、弹窗、编辑器和趋势图 |
 
+主界面采用 PySide6 Fusion 样式和小范围自定义 Palette/QSS。QtAwesome 仅负责工具栏矢量图标，不参与设备逻辑；全局正文使用 10pt，设备数值和运行状态通过局部 QSS 放大。未启用独立暗色主题库，以避免无效果依赖和打包体积增加。SEQ 列表重建后显式把水平滚动条归零，保证长命令不会把后续行的命令前缀留在视野外。
+
 ## 线程模型
 
 应用仅有两个逻辑执行域：

@@ -11,5 +11,6 @@ runs/*
 !runs/.gitkeep
 /work/
 /headless_demo.log
+/gui_smoke.png
 /source-gui-smoke.png
 /docs/source-gui-smoke.png

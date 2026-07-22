@@ -178,6 +178,22 @@ class SequenceEditorTests(unittest.TestCase):
         self.assertTrue(editor.copy_action.isEnabled())
         editor.close()
 
+    def test_rebuild_keeps_command_prefixes_visible(self) -> None:
+        document = SequenceDocument([
+            Command(CommandType.REMARK, {"text": "long command " * 30}),
+        ])
+        editor = SequenceEditorWidget(document)
+        editor.resize(260, 180)
+        editor.show()
+        self.application.processEvents()
+        scrollbar = editor.list.horizontalScrollBar()
+        self.assertGreater(scrollbar.maximum(), 0)
+        scrollbar.setValue(scrollbar.maximum())
+        editor.rebuild()
+        self.application.processEvents()
+        self.assertEqual(scrollbar.value(), 0)
+        editor.close()
+
 
 if __name__ == "__main__":
     unittest.main()

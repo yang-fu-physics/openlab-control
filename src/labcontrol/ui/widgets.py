@@ -106,6 +106,6 @@ class StatusTile(QFrame):
             "disconnected": "#777777",
         }.get(state, "#777777")
         self.setStyleSheet(
-            "QFrame#statusTile { background: #f4f5f7; border: 1px solid #aeb4bd; "
-            f"border-bottom: 4px solid {color}; border-radius: 3px; }}"
+            "QFrame#statusTile { background: #ffffff; border: 1px solid #c0c0c0; "
+            f"border-bottom: 4px solid {color}; border-radius: 4px; }}"
         )

@@ -1,13 +1,13 @@
-# OpenLab Control 0.7.0 验证报告
+# OpenLab Control 0.8.0 验证报告
 
-验证日期：2026-07-20  
-验证平台：Windows 11 x64（build 26200）  
-源码运行时：Python 3.13.2、PySide6 6.11.1  
-打包工具：PyInstaller 6.21.0（onedir）
+- 验证日期：2026-07-22
+- 验证平台：Windows 11 x64（build 26200）
+- 源码运行时：Python 3.13.2、PySide6 6.11.1
+- 打包工具：PyInstaller 6.21.0（onedir）
 
 ## 结论
 
-0.7.0 仿真框架达到本阶段交付条件：英文主界面、`2nd Stage` 只读辅助温度、SEQ Ctrl/Shift 多行选择和批量右键/键盘编辑、T/F 命令禁用、Data Browser 一次确认式多 Y 选择、X/Y 独立 Log10 与 `.plt` 显示恢复、源码与打包程序均可启动；多层 SEQ 能完成；数据与事件日志可生成；Warning/Error、判稳、安全限制和中止保持行为均有自动测试覆盖。
+0.8.0 仿真框架达到本阶段交付条件：英文浅色主界面、QtAwesome 矢量工具栏、`2nd Stage` 只读辅助温度、SEQ Ctrl/Shift 多行选择和批量右键/键盘编辑、T/F 命令禁用、Data Browser 一次确认式多 Y 选择、X/Y 独立 Log10 与 `.plt` 显示恢复、源码与打包程序均可启动；多层 SEQ 能完成；数据与事件日志可生成；Warning/Error、判稳、安全限制和中止保持行为均有自动测试覆盖。
 
 本结论只适用于仿真设备。由于尚未接入真实仪表，它不构成温控仪、磁体电源或测量仪器的硬件验收。
 
@@ -19,7 +19,7 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-结果：33 项通过，0 项失败。
+结果：35 项通过，0 项失败。
 
 覆盖内容：
 
@@ -43,6 +43,8 @@
 - X/Y Log10 等对数间距、非正值排除、状态标识和跨窗口恢复。
 - `.plt` v2 尺度往返、v1 Linear 兼容、同名规范路径、附加文件名兼容、格式拒绝和自动保存。
 - `2nd Stage` Monitor 的连接、只读数值、无 Target/稳定性、非控制光标与双击信号抑制，以及核心目标拒绝。
+- 长 SEQ 触发水平滚动范围后，编辑器重建仍回到行首。
+- 主窗口缩小到 1180×720 时，SEQ 和 Data Browser 浮动窗口均保持在中央工作区内。
 
 ## 端到端仿真
 
@@ -61,8 +63,9 @@
 ## GUI 与发布包验证
 
 - 源码 GUI 在 Qt 离屏平台完成启动、四个设备轮询、窗口渲染、截图和正常关闭；`2nd Stage` 显示 `Monitoring` 与只读说明。
-- Windows 发布 EXE 独立完成同一流程，退出码为 0。
-- 人工检查发布 EXE 截图：英文菜单/工具栏、左侧 Sequence Control、中间单行 SEQ、右侧命令栏以及底部温度/磁场/测量卡片均正常显示。
+- Windows 发布 EXE 独立完成同一流程，退出码为 0；QtAwesome 字体和图标资源已由 PyInstaller hook 收集。
+- 人工检查发布 EXE 截图：英文菜单、矢量工具栏、左侧 Sequence Control、中间单行 SEQ、右侧命令栏以及底部温度/磁场/测量卡片均正常显示。
+- 人工检查 1180×720 截图：SEQ 子窗口行首完整，四个状态卡片无裁切；自动布局测试同时验证 SEQ 与 Data Browser 的窗口边界。
 - 人工检查 SEQ 编辑截图：两行可同时保持选择；禁用命令和受禁用 Scan 影响的子命令均为灰色删除线；右键菜单显示 Disable、Enable、Delete、Copy、Paste 及对应快捷键。
 - Data Browser 在源码和发布 EXE 中均成功加载用户模板的 2,458 行，自动套用示例 `.plt`，显示三幅共享 X 的纵向子图和 0.75 秒刷新状态；Y 多选窗口保持打开供连续勾选，X/Y Linear/Logarithmic 菜单可独立切换。
 - 发布 EXE 运行 `disabled_commands.seq` 退出码为 0，日志包含两条 `STEP_SKIPPED_DISABLED`，未执行被禁用的 Set Temperature 和 Scan Field。
@@ -72,15 +75,14 @@
 SEQ 编辑验收图：`docs/sequence-context-menu-preview.png`。  
 数据浏览器验收图：`docs/data-browser-preview.png`。
 
-## 发布压缩包复验
+## 本地打包复验
 
-Windows 包与源码包均重新解压到全新目录后验证，没有借用源码目录中的模块或配置：
+PyInstaller 重新生成 `dist/OpenLabControl` 后完成以下独立验证：
 
-- 解压后的 Windows EXE 运行完整无界面嵌套序列，退出码 0。
-- EXE 运行带普通禁用行和禁用 Scan 子树的示例，退出码 0；跳过事件存在，运行快照保留 2 条 `F` 指令行。
-- EXE 打开用户 DAT 及示例 `.plt`，三幅共享 X 子图正常渲染，GUI 冒烟退出码 0。
-- 把同一 DAT 复制为没有对应 PLT 的新文件后由 EXE 打开，自动生成同名 `.plt`，GUI 冒烟退出码 0。
-- 解压后的源码包使用隔离 Python 环境运行全部 33 项测试，退出码 0。
+- Windows EXE 运行完整无界面嵌套序列，退出码 0。
+- EXE 运行带普通禁用行和禁用 Scan 子树的示例，退出码 0。
+- EXE 完成离屏 GUI 冒烟并显示全部 QtAwesome 工具栏图标，退出码 0。
+- EXE 打开 2,458 行示例 DAT 及同名 `.plt`，三幅共享 X 子图正常渲染，退出码 0。
 
 ## 尚未验证
 

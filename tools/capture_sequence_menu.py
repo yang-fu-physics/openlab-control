@@ -13,7 +13,7 @@ from PySide6.QtCore import QItemSelectionModel, QPoint, QTimer  # noqa: E402
 from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from labcontrol.app import configure_qt_font  # noqa: E402
+from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.sequence.parser import load_sequence  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
@@ -22,12 +22,10 @@ from labcontrol.ui.main_window import MainWindow  # noqa: E402
 def main() -> int:
     output = ROOT / "docs" / "sequence-context-menu-preview.png"
     application = QApplication([])
-    configure_qt_font(application)
+    configure_qt_appearance(application)
     window = MainWindow(load_config(ROOT / "configs" / "default.toml"))
     document = load_sequence(ROOT / "examples" / "disabled_commands.seq").document
-    window.document = document
-    window.editor.set_document(document)
-    window.sequence_window.setWindowTitle(document.name)
+    window._set_document(document)
     window.editor.list.clearSelection()
     window.editor.list.item(0).setSelected(True)
     window.editor.list.item(1).setSelected(True)

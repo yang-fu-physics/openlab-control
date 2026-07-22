@@ -13,14 +13,14 @@ from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from labcontrol.config import load_config  # noqa: E402
-from labcontrol.app import configure_qt_font  # noqa: E402
+from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
 
 def main() -> int:
     output = ROOT / "docs" / "main-window-preview.png"
     application = QApplication([])
-    configure_qt_font(application)
+    configure_qt_appearance(application)
     window = MainWindow(load_config(ROOT / "configs" / "default.toml"))
     window.resize(1480, 900)
     window.show()

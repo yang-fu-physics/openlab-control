@@ -25,8 +25,21 @@ def configure_qt_font(application) -> None:
         font_id = QFontDatabase.addApplicationFont(str(candidate))
         families = QFontDatabase.applicationFontFamilies(font_id)
         if families:
-            application.setFont(QFont(families[-1], 9))
+            application.setFont(QFont(families[-1], 10))
             return
+
+
+def configure_qt_appearance(application) -> None:
+    """Apply the same desktop appearance in production and visual QA tools."""
+    from PySide6.QtGui import QColor, QPalette
+
+    application.setStyle("Fusion")
+    palette = application.palette()
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#5c6b79"))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f7f9fa"))
+    application.setPalette(palette)
+    configure_qt_font(application)
 
 
 def _arguments(argv: list[str] | None) -> argparse.Namespace:
@@ -127,15 +140,14 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication, QMessageBox
         from .ui.main_window import MainWindow
-    except ImportError:
-        print("PySide6 is not installed. Run setup.bat first.", file=sys.stderr)
+    except ImportError as exc:
+        print(f"Missing GUI dependency: {exc}. Run setup.bat first.", file=sys.stderr)
         return 2
 
     application = QApplication(sys.argv[:1])
     application.setApplicationName("OpenLab Control")
     application.setOrganizationName("OpenLab")
-    application.setStyle("Fusion")
-    configure_qt_font(application)
+    configure_qt_appearance(application)
     try:
         window = MainWindow(config)
     except Exception as exc:
