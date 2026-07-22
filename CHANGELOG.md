@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2 - 2026-07-23
+
+- SEQ 的 Set/Scan Temperature 与 Set/Scan Field 参数弹窗现在按 `device_id` 读取配置文件中的 `min_value`、`max_value` 和 `max_rate_per_minute`。
+- 目标、扫描起止点和速率输入框直接使用配置范围，并在弹窗底部显示当前设备的有效限制及单位。
+- 磁场参数在 Oe/T 间切换时同步换算当前数值和配置限制，例如默认 ±90000 Oe、10000 Oe/min 对应 ±9 T、1 T/min。
+- Scan Temperature List 在弹窗确认时逐点检查配置上下限；越界点立即提示并阻止确认，执行器的整表预检仍作为第二道保护。
+- 增加主窗口配置传递、四类控制命令范围、磁场限制换算和温度 List 越界拦截回归测试。
+
 ## 0.9.1 - 2026-07-22
 
 - 左侧 `Change` 选择的 DAT 现在可直接写入用户指定文件夹，并在 SEQ 中以 `external` 标记持久化该次明确授权。

@@ -11,7 +11,7 @@
 ```text
 [Header]
 ; comments
-BYAPP,OpenLab Control,0.9.1
+BYAPP,OpenLab Control,0.9.2
 INFO,...
 
 [Data]

@@ -72,6 +72,8 @@ T Set Datafile open|create external D:\Experiment Data\sample.dat
 
 `external` 是对该条命令目标路径的显式授权，会随 SEQ 保存和重新加载；路径应为绝对路径。它不会改变全局配置，也不会让其他未标记的旧命令绕过路径保护。
 
+Set/Scan Temperature 和 Set/Scan Field 的参数弹窗按命令中的 `device_id` 读取设备配置。数值框直接采用 `min_value`、`max_value` 和 `max_rate_per_minute`；磁场选择 Oe 或 T 时配置范围同步换算。弹窗限制用于提前阻止误输入，执行器仍会在设备动作前独立复检，不能把界面校验当作唯一安全层。
+
 ### Wait
 
 ```text
@@ -120,7 +122,7 @@ T End Scan
 - 温度点用英文逗号分隔，至少一个、最多 100,000 个；保存时统一写为三位小数。
 - 执行顺序与列表完全一致，不排序、不去重、不在相邻点之间插值。`300, 299, 300` 会先降温再回到 300 K。
 - 每个点按同一 `Settle` 或 `Sweep` 语义到达后执行全部子命令，因此 List 仍可嵌套 Scan Field、Scan Time、Measure 或另一个 Scan Temperature。
-- 开始移动前会按配置的温度上下限和最大速率预检整份列表。任一项越界时产生 Error，列表中的早期合法点也不会先执行。
+- 参数弹窗确认时先逐点检查当前 `device_id` 的配置上下限；开始移动前执行器再按温度上下限和最大速率预检整份列表。任一项越界时列表中的早期合法点也不会先执行。
 - 空项、非数字、`NaN`、无穷值和错误的单行结构均作为 SEQ 解析 Error，不会当作未知命令静默跳过。
 
 ### Scan Field

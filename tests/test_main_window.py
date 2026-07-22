@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
+from labcontrol.sequence.model import CommandType  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -99,6 +100,32 @@ class MainWindowLayoutTests(unittest.TestCase):
             )
             self.assertIn("…", window.data_file_label.text())
             self.assertLessEqual(window.left_dock.minimumSizeHint().width(), baseline_minimum)
+        finally:
+            window.close()
+
+    def test_sequence_edit_popup_receives_device_limits_from_main_config(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            command = next(
+                item for item in window.document.commands
+                if item.type is CommandType.SET_TEMPERATURE
+            )
+            observed: dict[str, float | str] = {}
+
+            def inspect_and_reject(dialog) -> object:
+                observed["minimum"] = dialog.inputs["target"].minimum()
+                observed["maximum"] = dialog.inputs["target"].maximum()
+                observed["max_rate"] = dialog.inputs["rate"].maximum()
+                observed["summary"] = dialog.limit_label.text()
+                return dialog.DialogCode.Rejected
+
+            with patch("labcontrol.ui.main_window.CommandDialog.exec", new=inspect_and_reject):
+                window._edit_command(command)
+
+            self.assertEqual(observed["minimum"], 1.8)
+            self.assertEqual(observed["maximum"], 400.0)
+            self.assertEqual(observed["max_rate"], 30.0)
+            self.assertIn("Configured limits (temperature)", observed["summary"])
         finally:
             window.close()
 

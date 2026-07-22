@@ -138,3 +138,11 @@ Scan Temperature 的 List 是用户声明的实验路径，不是待排序的数
 把 `allow_external_paths` 默认改为 true 会使来自其他电脑的旧 SEQ 可以在任意现存目录写文件，授权范围过宽；完全禁止外部路径又会让左侧文件选择器名义上可选、执行时却重定向。框架因此把用户明确选择的 Custom folder 保存为 `Set Datafile ... external <path>`，只授权该条命令的绝对目标。
 
 未带 `external` 的命令继续服从全局配置并默认重定向；管理员仍可用 `allow_external_paths = true` 兼容受信任的旧流程。界面中的完整路径是数据，不应成为布局约束，因此文件标签采用中间省略和 Tooltip，并使用忽略水平 size hint 的策略。
+
+## ADR-019：SEQ 参数限制与设备配置同源
+
+状态：Accepted
+
+运行器原本会在设备动作前检查 `min_value`、`max_value` 和 `max_rate_per_minute`，但 SEQ 参数弹窗使用通用大范围，用户只能在运行时才发现越界。手动控制与 SEQ 因此出现两套不一致的输入边界。
+
+现在主窗口把当前 `DeviceConfig` 集合传入 SEQ 参数窗口，窗口按 `device_id` 和设备类型选取限制。Set/Linear Scan 使用数值控件范围，Temperature List 在确认时逐点检查；磁场范围随 Oe/T 选择转换。界面校验只用于尽早反馈，不能取代执行器复检，这样手写 SEQ、旧文件和绕过 GUI 的调用仍受到同一安全边界保护。

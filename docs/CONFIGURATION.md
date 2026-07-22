@@ -92,6 +92,8 @@ ui_scale = 1.4
 | `max_rate_per_minute` | 控制型 | 最大允许速率 |
 | `channels` | 测量型 | DAT 通道顺序 |
 
+控制型设备的 `min_value`、`max_value` 和 `max_rate_per_minute` 同时用于手动控制窗口、SEQ 的 Set/Scan 参数窗口和执行前安全校验。SEQ 弹窗根据 `device_id` 动态读取对应设备：目标值及 Scan 起止点限制在 `[min_value, max_value]`，速率限制在 `(0, max_rate_per_minute]`，窗口底部显示当前有效范围。磁场命令选择 T 时会把以设备原生单位保存的限制一起换算；Scan Temperature List 则在按 OK 时逐点检查范围。
+
 `monitor` 是只读单值设备。它只需要返回 `current`，不创建稳定性算法，不接受 Target/Hold/Measure，不会被温度或磁场 SEQ 自动选择。默认 `2nd Stage` 配置为：
 
 ```toml

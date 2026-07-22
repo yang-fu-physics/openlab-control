@@ -5,6 +5,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -125,6 +126,80 @@ class StatusTileTests(unittest.TestCase):
         values = dialog.values()
         self.assertEqual(values["point_mode"], "List")
         self.assertEqual(values["points"], "300.000, 299.900, 300.000")
+        dialog.close()
+
+    def test_sequence_dialog_uses_configured_target_and_rate_limits(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+
+        temperature_spec = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE]
+        temperature_dialog = CommandDialog(
+            temperature_spec.create(),
+            temperature_spec,
+            device_configs=config.devices,
+        )
+        self.assertAlmostEqual(temperature_dialog.inputs["target"].minimum(), 1.8)
+        self.assertAlmostEqual(temperature_dialog.inputs["target"].maximum(), 400.0)
+        self.assertAlmostEqual(temperature_dialog.inputs["rate"].maximum(), 30.0)
+        self.assertIn("Configured limits (temperature)", temperature_dialog.limit_label.text())
+
+        temperature_scan_spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
+        temperature_scan_dialog = CommandDialog(
+            temperature_scan_spec.create(),
+            temperature_scan_spec,
+            device_configs=config.devices,
+        )
+        for name in ("start", "stop"):
+            self.assertAlmostEqual(temperature_scan_dialog.inputs[name].minimum(), 1.8)
+            self.assertAlmostEqual(temperature_scan_dialog.inputs[name].maximum(), 400.0)
+        self.assertAlmostEqual(temperature_scan_dialog.inputs["rate"].maximum(), 30.0)
+
+        field_spec = SPECS_BY_TYPE[CommandType.SET_FIELD]
+        field_dialog = CommandDialog(
+            field_spec.create(),
+            field_spec,
+            device_configs=config.devices,
+        )
+        self.assertAlmostEqual(field_dialog.inputs["target"].minimum(), -90000.0)
+        self.assertAlmostEqual(field_dialog.inputs["target"].maximum(), 90000.0)
+        self.assertAlmostEqual(field_dialog.inputs["rate"].maximum(), 10000.0)
+        field_dialog.inputs["unit"].setCurrentText("T")
+        self.assertAlmostEqual(field_dialog.inputs["target"].minimum(), -9.0)
+        self.assertAlmostEqual(field_dialog.inputs["target"].maximum(), 9.0)
+        self.assertAlmostEqual(field_dialog.inputs["rate"].maximum(), 1.0)
+        self.assertIn("-9.000000 to 9.000000 T", field_dialog.limit_label.text())
+
+        field_scan_spec = SPECS_BY_TYPE[CommandType.SCAN_FIELD]
+        field_scan_dialog = CommandDialog(
+            field_scan_spec.create(),
+            field_scan_spec,
+            device_configs=config.devices,
+        )
+        for name in ("start", "stop"):
+            self.assertAlmostEqual(field_scan_dialog.inputs[name].minimum(), -90000.0)
+            self.assertAlmostEqual(field_scan_dialog.inputs[name].maximum(), 90000.0)
+        self.assertAlmostEqual(field_scan_dialog.inputs["rate"].maximum(), 10000.0)
+
+        temperature_dialog.close()
+        temperature_scan_dialog.close()
+        field_dialog.close()
+        field_scan_dialog.close()
+
+    def test_temperature_list_dialog_rejects_points_outside_configured_limits(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
+        dialog = CommandDialog(spec.create(), spec, device_configs=config.devices)
+        dialog.inputs["point_mode"].setCurrentText("List")
+        dialog.inputs["points"].setText("300, 500")
+
+        with patch("labcontrol.ui.dialogs.QMessageBox.warning") as warning:
+            dialog.accept()
+
+        self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
+        warning.assert_called_once()
+        self.assertIn("outside the configured range", warning.call_args.args[2])
+        dialog.inputs["points"].setText("300, 1.8")
+        dialog.accept()
+        self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
         dialog.close()
 
 

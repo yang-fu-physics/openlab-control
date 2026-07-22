@@ -466,7 +466,7 @@ class MainWindow(QMainWindow):
         command_type = CommandType(value)
         spec = SPECS_BY_TYPE[command_type]
         command = spec.create()
-        dialog = CommandDialog(command, spec, self)
+        dialog = CommandDialog(command, spec, self, device_configs=self.config.devices)
         if dialog.exec() == CommandDialog.DialogCode.Accepted:
             command.update_params(dialog.values())
             self.editor.insert_command(command)
@@ -475,7 +475,7 @@ class MainWindow(QMainWindow):
         spec = SPECS_BY_TYPE.get(command.type)
         if spec is None:
             return
-        dialog = CommandDialog(command, spec, self)
+        dialog = CommandDialog(command, spec, self, device_configs=self.config.devices)
         if dialog.exec() == CommandDialog.DialogCode.Accepted:
             command.update_params(dialog.values())
             self.editor.rebuild(command.id)

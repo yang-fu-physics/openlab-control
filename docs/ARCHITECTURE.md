@@ -115,6 +115,8 @@ SequenceDocument
 
 `Scan Temperature` 的 AST 以 `point_mode` 区分 `Linear` 与 `List`。Linear 保存起点、终点和点数；List 保存规范化的逗号分隔 K 温度点。参数窗口、文本解析器、格式化器和执行器共用同一个列表解析函数，保证输入校验与运行解释一致。执行器保留点位顺序和重复项，并在第一条设备命令前用 `DeviceManager.validate_target()` 预检全部点和速率，避免后续越界项造成部分 Scan 已经执行。
 
+`CommandDialog` 从主窗口接收本次启动的不可变 `DeviceConfig` 集合，并按命令的 `device_id` 选择同类型设备配置。目标、端点和速率的 Qt 数值控件采用配置范围；字段单位变化时先换算值，再重建换算后的范围。List 无法用单个数值控件表达，因此确认时逐点校验。这里是编辑期反馈层，运行期 `DeviceManager.validate_target()` 仍是独立的安全执行边界。
+
 ## Error 传播
 
 ```mermaid

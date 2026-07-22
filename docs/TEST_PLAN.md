@@ -16,6 +16,8 @@
 - 多层 Scan AST。
 - Scan Temperature Linear/List 参数切换、单行语法往返和错误列表拒绝。
 - 温度 List 的非单调顺序、重复点执行，以及首次移动前整表上下限预检。
+- SEQ Set/Scan Temperature 与 Set/Scan Field 参数窗口读取当前设备配置的目标/端点/速率范围，磁场 Oe/T 限制同步换算。
+- Scan Temperature List 在弹窗确认阶段拒绝超出配置上下限的任意点，执行器继续整表复检。
 - 自定义 DAT 绝对路径的 `external` SEQ 往返、实际写入与 `DATAFILE_SELECTED` 记录。
 - 未标记的旧式外部路径仍重定向并产生 `DATAFILE_RELOCATED`。
 - 未知指令保留。
@@ -79,6 +81,8 @@
 - 温度卡和手动窗口显示三位小数；磁场卡和手动窗口显示 Oe 与两位小数。
 - 双击测量块出现通道窗口。
 - 右侧双击命令出现参数弹窗。
+- 双击四类温度/磁场 Set/Scan，确认底部 Configured limits 与配置一致，目标/端点/速率无法越过范围；磁场切换 T 后限制按 10000 倍换算。
+- Scan Temperature List 输入一个越界点，确认 OK 不关闭窗口并显示具体点号和配置范围。
 - 参数确认后增加一行。
 - Scan 中插入命令后缩进正确。
 - 保存再加载结构不变。
