@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 import os
 import sys
 import time
@@ -8,6 +9,8 @@ from pathlib import Path
 
 from .config import ConfigurationError, load_config
 from .models import RunProgress, RunState
+from .measurement.manifest import activate_shared_dependencies
+from .measurement.settings import load_settings
 from .paths import default_config_path
 from .runtime import RuntimeService
 from .sequence.parser import load_sequence
@@ -60,6 +63,13 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--data-file", type=Path, help="Open an independent DAT file in Data Browser.")
     parser.add_argument("--headless-demo", action="store_true")
     parser.add_argument(
+        "--enable-module",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="Enable a measurement module before a headless demo; repeat for multiple modules.",
+    )
+    parser.add_argument(
         "--gui-smoke",
         action="store_true",
         help="Start the packaged GUI offscreen, capture it, then exit.",
@@ -69,7 +79,12 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _headless_demo(config, sequence_path: Path, timeout: float) -> int:
+def _headless_demo(
+    config,
+    sequence_path: Path,
+    timeout: float,
+    module_ids: list[str] | None = None,
+) -> int:
     diagnostic_path = config.project_root / "headless_demo.log"
     diagnostic = diagnostic_path.open("w", encoding="utf-8")
 
@@ -86,6 +101,20 @@ def _headless_demo(config, sequence_path: Path, timeout: float) -> int:
         return 2
     runtime = RuntimeService(config)
     runtime.start()
+    try:
+        for module_id in module_ids or []:
+            settings_path = (
+                config.resolve_project_path(config.modules.data_directory)
+                / module_id
+                / "settings.toml"
+            )
+            runtime.enable_module(module_id, load_settings(settings_path)).result()
+            emit(f"INFO    module:{module_id}/ENABLED: Module enabled for headless demo")
+    except Exception as exc:
+        emit(f"ERROR   module enable: {type(exc).__name__}: {exc}")
+        runtime.shutdown()
+        diagnostic.close()
+        return 2
     run_future = runtime.run_sequence(result.document)
     deadline = time.monotonic() + timeout
     terminal: RunState | None = None
@@ -128,12 +157,14 @@ def _headless_demo(config, sequence_path: Path, timeout: float) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    multiprocessing.freeze_support()
     args = _arguments(argv)
     try:
         config = load_config(args.config)
     except (OSError, ConfigurationError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
+    activate_shared_dependencies(config)
 
     sequence_path = args.sequence or (
         config.resolve_project_path(config.default_sequence)
@@ -141,7 +172,9 @@ def main(argv: list[str] | None = None) -> int:
         else config.project_root / "examples" / "nested_scan.seq"
     )
     if args.headless_demo:
-        return _headless_demo(config, sequence_path, args.timeout)
+        return _headless_demo(
+            config, sequence_path, args.timeout, list(args.enable_module)
+        )
 
     if args.gui_smoke:
         # This mode is used by release verification and never opens a visible window.

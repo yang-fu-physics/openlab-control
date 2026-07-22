@@ -1,0 +1,6 @@
+T Remark Measurement modules are selected in Modules before Run
+T Set Datafile open|create experiment.dat
+T Scan Time 2.0 secs in 3 steps
+T     Measure
+T End Scan
+T End Sequence

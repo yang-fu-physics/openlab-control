@@ -1,0 +1,18 @@
+id = "my_measurement"
+name = "My Measurement"
+version = "0.1.0"
+api_version = "1.0"
+frontend = "frontend:MyMeasurementFrontend"
+backend = "backend:MyMeasurementBackend"
+backend_type = "python"
+dependencies = []
+
+[[columns]]
+name = "Value"
+unit = "V"
+
+[[columns]]
+name = "Status"
+
+[[columns]]
+name = "Warning"

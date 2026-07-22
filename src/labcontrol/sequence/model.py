@@ -9,7 +9,6 @@ from uuid import uuid4
 
 
 class CommandType(str, Enum):
-    INITIALIZE = "initialize"
     SET_DATAFILE = "set_datafile"
     WAIT = "wait"
     SET_TEMPERATURE = "set_temperature"
@@ -198,15 +197,7 @@ class CommandSpec:
 
 
 COMMAND_SPECS: tuple[CommandSpec, ...] = (
-    CommandSpec(CommandType.MEASURE, "Measure", "Measurement Commands", (
-        FieldSpec("devices", "Measurement devices (comma-separated or all)", "text", "all"),
-        FieldSpec("repeats", "Repeat count", "int", 1, 1, 100000),
-        FieldSpec("interval_seconds", "Repeat interval (s)", "float", 0.0, 0.0, 86400.0),
-    )),
-    CommandSpec(CommandType.INITIALIZE, "Initialize", "System Commands", (
-        FieldSpec("model", "Device / model", "text", "transport"),
-        FieldSpec("config_path", "Device configuration path", "text", ""),
-    )),
+    CommandSpec(CommandType.MEASURE, "Measure", "Measurement Commands", ()),
     CommandSpec(CommandType.SET_DATAFILE, "Set Datafile", "System Commands", (
         FieldSpec("mode", "Mode", "choice", "open|create", choices=("open|create", "create", "open")),
         FieldSpec("path_scope", "Location", "choice", "Run folder", choices=("Run folder", "Custom folder")),

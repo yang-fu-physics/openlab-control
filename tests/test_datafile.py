@@ -15,6 +15,7 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import DeviceActivity, DeviceKind, DeviceSnapshot, Severity  # noqa: E402
+from labcontrol.measurement.manifest import load_manifest  # noqa: E402
 
 
 class DatafileTests(unittest.TestCase):
@@ -27,14 +28,26 @@ class DatafileTests(unittest.TestCase):
             config = load_config(config_path)
             events = EventManager()
             logger = DatRunLogger(config, events)
-            paths = logger.open_run("test.seq", "T Measure\nT End Sequence\n")
-            self.assertFalse(any("2nd Stage" in column for column in logger._columns))
+            module = load_manifest(ROOT / "modules" / "simulated_transport")
+            paths = logger.open_run(
+                "test.seq",
+                "T Measure\nT End Sequence\n",
+                (module,),
+                {module.id: {"delay_seconds": 0.01}},
+                {module.id: {"Connection": "Connected"}},
+            )
             now = time.monotonic()
             snapshots = {
                 "temperature": DeviceSnapshot("temperature", "温度", DeviceKind.TEMPERATURE, now, True, "K", 3.1236, 3.0, 1.0, DeviceActivity.HOLDING),
                 "field": DeviceSnapshot("field", "磁场", DeviceKind.FIELD, now, True, "Oe", 123.456, 100.0, 10.0, DeviceActivity.HOLDING),
+                "second_stage": DeviceSnapshot("second_stage", "2nd Stage", DeviceKind.MONITOR, now, True, "K", 4.2345),
             }
-            logger.write_measurement(snapshots, {"R1": 1.2, "R2": 2.3}, "Measure")
+            logger.write_module_row(
+                snapshots, module.id, {"R1": 1.2, "Status": "OK"}, "Measure"
+            )
+            logger.write_module_row(
+                snapshots, module.id, {"R2": 2.3, "Status": "OK"}, "Measure"
+            )
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
             events.resolve("meter", "OVERLOAD")
@@ -43,10 +56,13 @@ class DatafileTests(unittest.TestCase):
             event_data = paths.event_file.read_text(encoding="utf-8")
             self.assertIn("[Header]", data)
             self.assertIn("[Data]", data)
-            self.assertIn("R1(Ohm)", data)
+            self.assertIn("simulated_transport.R1(Ohm)", data)
             self.assertIn("Field(Oe)", data)
-            self.assertIn(",3.124,3.000,123.46,100.00,", data)
+            self.assertIn("second_stage(K)", data)
+            self.assertIn(",3.124,3.000,123.46,100.00,4.234,", data)
             self.assertEqual(sum(1 for line in data.splitlines() if ",Measure," in line), 2)
+            self.assertTrue((paths.module_settings_directory / f"{module.id}.settings.toml").exists())
+            self.assertTrue((paths.module_settings_directory / f"{module.id}.status-at-start.json").exists())
             self.assertIn("RAISED", event_data)
             self.assertIn("RESOLVED", event_data)
             self.assertIn(",2,", event_data)

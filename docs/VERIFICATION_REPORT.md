@@ -1,122 +1,106 @@
-# OpenLab Control 0.9.2 验证报告
+# OpenLab Control 0.10.0 验证报告
 
-- 验证日期：2026-07-22
+- 验证日期：2026-07-23
 - 验证平台：Windows 11 x64（build 26200）
 - 源码运行时：Python 3.13.2、PySide6 6.11.1
 - 打包工具：PyInstaller 6.21.0（onedir）
+- 自动测试：71 项通过，0 项失败
 
 ## 结论
 
-0.9.2 仿真框架达到本阶段交付条件：SEQ 的 Set/Scan Temperature 与 Set/Scan Field 参数弹窗已与当前 `device_id` 的配置上下限和最大速率同源；磁场 Oe/T 切换同步换算有效范围，Scan Temperature List 在确认时直接拒绝越界点，执行器仍保留第二次独立安全校验。自定义数据文件夹、长文件名自适应、Scan Temperature Linear/List、Oe 磁场、温度/磁场精度、英文界面、分辨率缩放、`2nd Stage`、SEQ 多行编辑与窗口恢复、Data Browser、日志、Warning/Error、判稳和中止保持继续通过回归测试。
+0.10.0 的仿真框架和 Windows 发布包达到本阶段交付条件。测量方案已与温度、磁场和只读 Monitor 设备体系分离；模块可从配置目录发现，在独立进程内运行仪表后端，并由主界面提供自定义 Settings/Status 窗口。无参数 SEQ `Measure` 可并行等待所有 Enabled 模块，并把模块流式多行结果与中央温度、磁场、Monitor 快照统一写入 DAT。
 
-本结论只适用于仿真设备。由于尚未接入真实仪表，它不构成温控仪、磁体电源或测量仪器的硬件验收。
+默认配置和示例模块均为仿真。本报告不代表任何真实温控仪、磁体电源、Keithley、Lakeshore 372 或其他硬件通过安全认证。
 
 ## 自动测试
 
 运行命令：
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```text
+.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-结果：58 项通过，0 项失败。
+结果：71 项通过，0 项失败。主要覆盖：
 
-覆盖内容：
+- 模块清单发现、API/Schema 校验、共享依赖范围冲突和设置往返。
+- initialize、apply_settings、begin_sequence、measure、end_sequence、abort 完整生命周期。
+- 多个模块同时开始测量、单模块多行流式结果、中央等待全部完成。
+- 无 Enabled 模块时 Warning 去重、系统状态行和继续执行。
+- measure/end/abort 失败语义；Error 调用 end(error) 而不自动 abort。
+- 模块窗口 Settings/Status、默认页、未应用编辑检测和禁止用户关闭。
+- 运行目录的 SEQ、主配置、desired settings、实际 Status、实验 DAT 和事件 DAT 快照。
+- 旧 Initialize 与带参数 Measure 的解析 Error 及 GUI Run 阻止。
+- 温度/磁场扫描、Temperature List、任意嵌套、Hold、Warning/Error 和数值判稳。
+- SEQ 多行选择及 Disable/Enable/Delete/Copy/Paste 的鼠标和键盘操作。
+- 温度三位、Oe 两位、配置限制、手动控制、只读 `2nd Stage` Monitor。
+- Data Browser 多 Y、Overlay/Stacked、共享 X、X/Y Log、自动刷新、点详情和 `.plt` 恢复。
+- 长路径侧栏、关闭后重建 SEQ 子窗口和 1080p/2K/4K 界面缩放。
 
-- 用户 SEQ 模板解析和文字往返保留。
-- `Set Datafile ... external <path>` 的解析、格式化和往返保留；未标记的旧绝对路径继续安全重定向到运行目录。
-- 显式授权的自定义数据目录由执行引擎直接写入，且 `DATAFILE_SELECTED` 事件返回实际目标路径。
-- 左侧 Sequence/Data File 长路径保持单行中间省略、完整路径 Tooltip，并且不抬高 Dock 的最小宽度。
-- Data File Change 生成带单次外部路径授权的 SEQ 命令，文件选择器记住本次会话目录并补全 `.dat` 后缀。
-- 主窗口向 SEQ 新建/双击参数窗口传入当前启动配置；温度和磁场 Set/Scan 的目标、端点及速率控件采用对应设备限制。
-- 默认磁场配置的 ±90000 Oe、10000 Oe/min 在参数窗口切换为 T 后对应 ±9 T、1 T/min，当前值和限制保持相同物理量。
-- Scan Temperature List 的弹窗确认逐点拒绝超出 1.800–400.000 K 配置范围的值；合法边界点可正常确认。
-- 禁用 `F` 行及禁用嵌套 Scan 的解析、序列化与执行跳过。
-- SEQ Ctrl/Shift 多行选择、批量 Ctrl+D/Ctrl+E/Delete/Ctrl+C/Ctrl+V、稳定文档顺序和完整 Scan 深复制。
-- 父 Scan、后代和 End Scan 同时选择时的结构去重，以及批量粘贴后的多项选择恢复。
-- 运行期编辑锁禁止变更操作，同时允许 Copy。
-- 任意层级 Scan 的抽象语法树结构。
-- Scan Temperature 参数窗口在 Linear/List 间切换，并只显示对应的点位字段。
-- 温度 List 单行语法解析、原文往返、三位小数规范化及空项错误拒绝。
-- 非单调温度 List 和重复点严格按声明顺序执行；后部目标越界时在首次移动前拒绝整份列表。
-- 温度扫描、磁场扫描和测量的嵌套执行。
-- 设备插件加载、单位换算和安全限值拒绝。
-- 默认 Oe 场配置与原物理边界等价；温度三位、Oe 两位精度覆盖状态卡、参数窗口、SEQ 与 DAT。
-- Oe/T 参数切换同步换算目标与速率；旧 T 命令继续使用六位小数。
-- 并发轮询旧快照不会覆盖新目标，固定小数格式消除负零。
-- 容差、窗口斜率、持续时间与超时判稳。
-- Warning 锁存去重、恢复和继续执行。
-- Error 中止、阻止后续测量和保持当前温度/磁场。
-- DAT 表头、LabVIEW 时间戳、稀疏通道行和事件恢复记录。
-- 用户原始 DAT 的 2,458 行、数值列、空单元格和四个稀疏电阻通道解析。
-- DAT 拖入、浏览点到完整源行的映射、默认轴、近邻点选择以及文件追加后的自动刷新。
-- 自动刷新时保留人工设置的框选缩放范围。
-- Overlay 多 Y 共享范围，Stacked 多图共享 X 且各自保存 Y 范围。
-- Y 多选窗口连续勾选、至少一个 Y 约束及一次应用语义。
-- X/Y Log10 等对数间距、非正值排除、状态标识和跨窗口恢复。
-- `.plt` v2 尺度往返、v1 Linear 兼容、同名规范路径、附加文件名兼容、格式拒绝和自动保存。
-- `2nd Stage` Monitor 的连接、只读数值、无 Target/稳定性、非控制光标与双击信号抑制，以及核心目标拒绝。
-- 长 SEQ 触发水平滚动范围后，编辑器重建仍回到行首。
-- 主窗口缩小到 1180×720 时，SEQ 和 Data Browser 浮动窗口均保持在中央工作区内。
-- 关闭 SEQ 子窗口后点击 New，保留的 MDI 外框和内部编辑器一起恢复，`End Sequence` 可见且窗口重新激活。
-- 1366×768、1080p、2K、4K 自动倍率，以及 1.40× 手动覆盖和越界配置拒绝。
+`compileall` 和 `git diff --check` 同时通过。
 
-## 端到端仿真
+## 源码端到端验证
 
-源码版本与打包版本均运行 `examples/nested_scan.seq`。该序列执行：
+### GUI
 
-1. 设定温度。
-2. 两点扫温。
-3. 每个温度点执行三点扫场。
-4. 每个磁场点测量四通道输运数据。
-5. 完成三点扫时间测量。
+源码以离屏 GUI 模式启动、轮询三个设备状态块、渲染完整主窗口并正常关闭，退出码 0。人工检查截图确认：
 
-两次运行均进入 `Completed`，并生成配置快照、SEQ 快照、`experiment.dat` 和 `events.dat`。打包版本进程退出码为 0。
+- 底部只有 Temperature、Magnetic Field、`2nd Stage`，没有旧 Transport 状态块；
+- 工具栏和菜单均有 Modules；
+- SEQ 编辑器、右侧命令栏、英文主界面和精度显示正常；
+- Modules Manager 只有 `Enabled / Name / Version` 三列；
+- 示例模块窗口默认显示 Settings，并包含独立 Status 页和 Apply Settings。
 
-此外，用户提供的原始 `template_original.seq` 已按原文运行完成：接受仿真 Initialize、将另一台电脑上的绝对数据路径安全重定向至本次运行目录，并在 60 秒内完成 60 个测量点，最终进入 `Completed`。四通道稀疏写入共得到 240 行数据，与预期一致。
+### 无模块运行
 
-源码和 Windows 发布 EXE 还分别运行 `examples/temperature_list.seq`，两次均进入 `Completed`。生成 DAT 的 SequenceStep 依次记录 `300.000 → 299.900 → 299.500 → 299.900 K`，证明非单调顺序和重复点在打包边界后仍被保留。
+运行 `examples/module_measurement.seq`，保持所有模块 Disabled：
 
-Windows 发布 EXE 另运行一份临时的自定义目录序列。序列中的 `Set Datafile create external <absolute-path>` 将数据直接写入指定目录，日志记录 `DATAFILE_SELECTED`，生成 DAT Header 的 BYAPP 版本为 0.9.2；验证后临时序列、数据目录和运行记录均已清理。
+- 退出码 0，最终状态 Completed；
+- 首次 Measure 产生一个 `NO_ENABLED_MODULES` Warning；
+- 后续相同活动 Warning 不重复弹出/记录 Raised；
+- 3 次 Measure 各写一行温度、磁场和 Monitor 系统状态。
 
-## GUI 与发布包验证
+### 启用示例模块
 
-- 源码 GUI 在 Qt 离屏平台完成启动、四个设备轮询、窗口渲染、截图和正常关闭；`2nd Stage` 显示 `Monitoring` 与只读说明。
-- Windows 发布 EXE 独立完成同一流程，退出码为 0；QtAwesome 字体和图标资源已由 PyInstaller hook 收集。
-- Windows 发布 EXE 完成自定义 DAT 文件夹写入，退出码为 0；未使用全局外部路径开关。
-- 自动化 GUI 测试验证超长 SEQ/DAT 路径不会扩大左侧 Dock 的最小宽度，标签悬停仍可查看完整路径。
-- 自动化 GUI 测试从主窗口打开真实 SEQ 参数弹窗，确认温度 1.800–400.000 K、30.000 K/min 限制来自当前配置；独立弹窗测试覆盖四类 Set/Scan 和磁场单位换算。
-- 人工检查发布 EXE 截图：英文菜单、矢量工具栏、左侧 Sequence Control、中间单行 SEQ、右侧命令栏以及底部温度/磁场/测量卡片均正常显示。
-- 主界面磁场状态卡显示 Oe 与两位小数，温度状态卡显示三位小数；默认嵌套 SEQ 使用 Oe。
-- 人工检查 1180×720 截图：SEQ 子窗口行首完整，四个状态卡片无裁切；自动布局测试同时验证 SEQ 与 Data Browser 的窗口边界。
-- 人工检查强制 1.40× 截图：全局字体约 14pt，工具栏、状态卡片、SEQ、Data Browser 三幅共享 X 图及坐标标签均完整；状态栏正确显示 `1.40x (Manual)`。
-- 人工检查 SEQ 编辑截图：两行可同时保持选择；禁用命令和受禁用 Scan 影响的子命令均为灰色删除线；右键菜单显示 Disable、Enable、Delete、Copy、Paste 及对应快捷键。
-- Data Browser 在源码和发布 EXE 中均成功加载用户模板的 2,458 行，自动套用示例 `.plt`，显示三幅共享 X 的纵向子图和 0.75 秒刷新状态；Y 多选窗口保持打开供连续勾选，X/Y Linear/Logarithmic 菜单可独立切换。
-- 发布 EXE 运行 `disabled_commands.seq` 退出码为 0，日志包含两条 `STEP_SKIPPED_DISABLED`，未执行被禁用的 Set Temperature 和 Scan Field。
-- 发布 EXE 运行 `temperature_list.seq` 退出码为 0，四个列表点和四轮子 Measure 顺序正确。
-- 发布 EXE 的无界面完整序列验证退出码为 0。
+无界面验收使用 `--enable-module simulated_transport` 显式启用模块：
 
-主窗口验收图：`docs/main-window-preview.png`。  
-SEQ 编辑验收图：`docs/sequence-context-menu-preview.png`。  
-数据浏览器验收图：`docs/data-browser-preview.png`。
+- 退出码 0，最终状态 Completed；
+- 模块后端在独立 spawn 进程中完成 initialize、begin、3 次 measure 和 end(completed)；
+- 每次 Measure 依次流式产生 R1、R2、R3、R4，共 12 行；
+- 每行到达时重新采集中央温度、磁场和 `2nd Stage`，没有把四个通道伪装成同一采样时刻；
+- DAT Schema 固定为 14 列，模块列自动使用 `simulated_transport.` 前缀；
+- 运行目录含 configuration、sequence、module settings、status-at-start、experiment.dat 和 events.dat。
 
-## 本地打包复验
+## Windows 发布包验证
 
-PyInstaller 重新生成 `dist/OpenLabControl` 后完成以下独立验证：
+重新构建 `dist/OpenLabControl`，并确认发布目录包含：
 
-- Windows EXE 运行完整无界面嵌套序列，退出码 0。
-- Windows EXE 运行显式温度 List 序列，退出码 0，DAT 版本与点位顺序正确。
-- Windows EXE 运行显式授权的自定义 DAT 目录序列，退出码 0，目标文件位于所选文件夹且 DAT 版本为 0.9.2。
-- EXE 运行带普通禁用行和禁用 Scan 子树的示例，退出码 0。
-- EXE 完成离屏 GUI 冒烟并显示全部 QtAwesome 工具栏图标，退出码 0。
-- EXE 打开 2,458 行示例 DAT 及同名 `.plt`，三幅共享 X 子图正常渲染，退出码 0。
-- EXE 分别使用 `ui_scale = "auto"` 和 `ui_scale = 1.4` 启动，状态栏显示正确模式与倍率，两次离屏截图均成功。
+- `OpenLabControl.exe`；
+- `configs/`、`examples/`、`docs/`、`modules/`、`plugin_templates/`；
+- 可维护的 `runs/`、`module_data/`、`module_runtime/site-packages/` 和 `wheels/`。
+
+对打包 EXE 独立执行三项验证：
+
+| 场景 | 结果 |
+|---|---|
+| 离屏 GUI 启动、截图、关闭 | 退出码 0 |
+| 所有模块 Disabled 的 headless demo | 退出码 0，Completed |
+| 启用 `simulated_transport` 的 headless demo | 退出码 0，Completed |
+
+打包后的模块验证得到 12 行数据、14 列固定 Schema；`BYAPP` 版本为 `0.10.0`。这同时验证了 EXE 边界后的模块源码发现、独立工作进程、IPC、流式行写入和生命周期收尾。
+
+## 界面验收图
+
+- 主窗口：`docs/main-window-preview.png`
+- 模块管理器：`docs/module-manager-preview.png`
+- 模块窗口：`docs/module-window-preview.png`
+- SEQ 多行菜单：`docs/sequence-context-menu-preview.png`
+- Data Browser：`docs/data-browser-preview.png`
 
 ## 尚未验证
 
 - 任何真实 GPIB、VISA、串口、以太网或厂商 SDK 通信。
-- 实际磁体和低温系统的硬件联锁。
-- 断电、线缆脱落、驱动进程崩溃等物理故障。
-- 长时间（数小时至数天）运行、磁盘写满和系统休眠。
+- 实际磁体、低温系统、测量源表的硬件联锁和量程保护。
+- 断电、线缆脱落、驱动崩溃、网络中断和磁盘写满等物理故障。
+- 数小时至数天的真实设备长时运行。
 
-接入真实设备前，必须逐项完成 `docs/TEST_PLAN.md` 的上线清单，并在设备插件配置中采用保守的上下限和速率。
+接入真实设备前，必须按 `docs/TEST_PLAN.md` 完成 Device Plugin 与 Measurement Module 两部分上线清单，并为每个通信操作设置驱动级超时。

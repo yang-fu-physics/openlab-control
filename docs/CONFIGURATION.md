@@ -1,100 +1,138 @@
 # 配置参考
 
-默认文件：`configs/default.toml`
-
-配置采用 TOML，程序启动时一次性读取。每次运行会复制一份到运行目录。
+默认配置是 `configs/default.toml`。相对路径以配置文件所在项目的根目录解析：默认配置位于 `configs/`，因此项目根目录是它的上一级。修改真实设备前先复制配置并纳入版本管理。
 
 ## `[application]`
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `title` | string | 主窗口标题 |
-| `ui_scale` | `"auto"` 或 float | 自动按屏幕原生分辨率缩放，或用 `0.75` 到 `2.0` 手动覆盖 |
-| `ui_refresh_ms` | integer | GUI 清空后台消息队列的周期 |
-| `poll_interval_seconds` | float | 设备轮询周期 |
-| `simulation_speed` | float | 仅仿真 Ramp 的时间倍率；真实插件必须忽略 |
-| `default_sequence` | string | 相对项目根目录的启动 SEQ |
-| `language` | string | 界面语言标识；当前默认 `en_US`，界面以英文为主 |
+| 键 | 默认值 | 说明 |
+|---|---:|---|
+| `title` | `OpenLab Control` | 主窗口标题 |
+| `ui_scale` | `auto` | `auto` 或 0.75–2.0；用于 1080p/2K/4K 缩放 |
+| `ui_refresh_ms` | `200` | GUI 消息刷新周期 |
+| `poll_interval_seconds` | `0.20` | 控制/Monitor 轮询周期 |
+| `simulation_speed` | `120.0` | 仿真控制器的时间倍率 |
+| `default_sequence` | `examples/nested_scan.seq` | 启动时打开的 SEQ |
+| `language` | `en_US` | 预留语言标识；当前 UI 以英文为主 |
 
-默认 `ui_scale = "auto"`。程序把 Qt 报告的逻辑尺寸乘以设备像素比得到原生像素尺寸，再计算保守倍率，因此 Windows DPI 缩放和界面倍率可以共同工作。典型结果为：
-
-| 原生分辨率 | 自动倍率 | 全局基准字号 |
-|---|---:|---:|
-| 1366×768 / 1920×1080 | 1.00× | 10 pt |
-| 2560×1440 | 1.15× | 11.5 pt |
-| 3840×2160 | 1.40× | 14 pt |
-
-如果自动结果不符合屏幕尺寸或观看距离，可直接写入固定值，例如：
-
-```toml
-[application]
-ui_scale = 1.4
-```
-
-修改后重新启动程序。状态栏和 About 窗口会显示实际倍率与 Auto/Manual 模式。
+`ui_scale = "auto"` 根据主屏原生分辨率和 DPI 选择缩放。手动值同时影响字体、固定宽高、图标和窗口初始尺寸。
 
 ## `[logging]`
 
-| 字段 | 类型 | 默认行为 |
+| 键 | 默认值 | 说明 |
 |---|---|---|
-| `directory` | string | 每次运行目录的父目录 |
-| `data_file_name` | string | 未执行 Set Datafile 时的数据文件名 |
-| `event_file_name` | string | 事件文件名 |
-| `timestamp_epoch` | string | `labview_1904` 或 `unix` |
-| `sparse_channel_rows` | bool | true 时每个通道单独一行，其他通道留空 |
-| `flush_every_row` | bool | 每行写入后刷新文件 |
-| `allow_external_paths` | bool | 是否全局允许所有 SEQ 外部绝对路径；默认 false。带 `external` 标记的用户明确选择路径不依赖此全局开关 |
+| `directory` | `runs` | 自动运行目录根位置 |
+| `data_file_name` | `experiment.dat` | 默认实验数据文件名 |
+| `event_file_name` | `events.dat` | 事件文件名 |
+| `timestamp_epoch` | `labview_1904` | `labview_1904` 或 Unix 秒 |
+| `flush_every_row` | `true` | 每写一行立即 Flush，降低断电损失 |
+| `allow_external_paths` | `false` | 是否全局允许绝对/越界数据路径 |
 
-为兼容用户模板，默认采用 LabVIEW 1904 时间基准和稀疏通道行。
+推荐保持 `allow_external_paths = false`，由单条 `Set Datafile ... external ...` 明确授权自定义目录。无论实验 DAT 选到哪里，SEQ、配置和模块快照始终保留在自动运行目录。
 
 ## `[abort]`
 
-字段：
+```toml
+[abort]
+temperature = "hold_current"
+field = "hold_current"
+```
 
-- `temperature`
-- `field`
+- `hold_current`：Stop/Error 后读取并保持当前值。
+- `keep_target`：保留原 Target。
 
-可用策略：
-
-- `hold_current`：调用插件 `hold()`，默认应把设备目标改为中止瞬间的当前值。
-- `keep_target`：不发新命令，让设备保持原目标和原动作。
-
-真实插件必须在文档中明确 `hold()` 对应的厂商命令和失败处理。
+该配置只作用于温度和磁场。测量模块在 SEQ 完成、Stop、Error 时调用 `end_sequence(reason)`；只有 Disable 和应用退出调用 `abort()`。
 
 ## `[alarms]`
 
-| 字段 | 可选值 | 说明 |
+| 键 | 可选值/类型 | 说明 |
 |---|---|---|
-| `stability_timeout` | info/warning/error | 判稳超时的级别；通常使用 error |
-| `stale_reading` | info/warning/error | 预留的数据陈旧策略 |
-| `popup_warnings` | bool | Warning 首次发生时是否弹窗 |
-| `popup_errors` | bool | Error 首次发生时是否弹窗 |
+| `stability_timeout` | `info/warning/error` | 判稳超时级别，默认 `error` |
+| `stale_reading` | `info/warning/error` | 读数过期级别 |
+| `popup_warnings` | bool | Warning 是否弹窗 |
+| `popup_errors` | bool | Error 是否弹窗 |
 
-即使关闭弹窗，事件仍会写入日志。Error 仍会中止序列。
+弹窗开关不影响事件记录或 SEQ 的 Error 中止语义。
+
+## `[modules]`
+
+```toml
+[modules]
+directory = "modules"
+data_directory = "module_data"
+shared_wheels_directory = "wheels"
+python_executable = ""
+site_packages_directory = "module_runtime/site-packages"
+```
+
+| 键 | 说明 |
+|---|---|
+| `directory` | 启动/Refresh 扫描的模块源码根目录 |
+| `data_directory` | 自动保存 `<module_id>/settings.toml` 的目录，必须与源码分离 |
+| `shared_wheels_directory` | 所有模块共用的离线 wheel 目录 |
+| `python_executable` | 安装依赖时使用的 Python；源码运行留空即使用当前 Python |
+| `site_packages_directory` | pip `--target` 的共享依赖目录，主进程和所有模块工作进程共用 |
+
+发布 EXE 不能把自身当作 pip。需要安装额外依赖时，可放置 `runtime/python/python.exe`，或把 `python_executable` 指向便携 Python。依赖始终安装到 `site_packages_directory`，不会为每个模块复制一套环境。
+
+如果不同模块对同一包声明不相容的版本范围，相关模块都禁止 Enable。若依赖缺失，先在 Modules Manager 选择模块并点击 `Install Dependencies`：程序先从共享 `wheels/` 和模块自己的 `wheels/` 离线安装；离线失败后，只有用户再次明确确认才允许在线 pip。
 
 ## `[[devices]]`
 
-每个设备是一个数组项。
+设备只用于温度、磁场与只读 Monitor。每个条目必需：
 
-公共字段：
-
-| 字段 | 必需 | 说明 |
+| 键 | 必需 | 说明 |
 |---|---|---|
-| `id` | 是 | 全局唯一，SEQ 通过它引用设备 |
-| `display_name` | 是 | 界面状态块标题 |
-| `kind` | 是 | temperature、field、measurement 或 monitor |
-| `plugin` | 是 | `python.module:ClassName` |
-| `unit` | 否 | 显示和插件原生单位 |
-| `initial_value` | 控制型/Monitor | 仿真初值 |
-| `default_rate_per_minute` | 控制型 | 默认速率 |
-| `min_value` | 控制型 | 最小允许目标 |
-| `max_value` | 控制型 | 最大允许目标 |
-| `max_rate_per_minute` | 控制型 | 最大允许速率 |
-| `channels` | 测量型 | DAT 通道顺序 |
+| `id` | 是 | 全局唯一 ID，SEQ 通过它选择设备 |
+| `display_name` | 是 | 英文 UI 名称 |
+| `kind` | 是 | `temperature`、`field` 或 `monitor` |
+| `plugin` | 是 | `package.module:ClassName` |
+| `unit` | 否 | 原生单位 |
+| `initial_value` | 仿真 | 初始值 |
 
-控制型设备的 `min_value`、`max_value` 和 `max_rate_per_minute` 同时用于手动控制窗口、SEQ 的 Set/Scan 参数窗口和执行前安全校验。SEQ 弹窗根据 `device_id` 动态读取对应设备：目标值及 Scan 起止点限制在 `[min_value, max_value]`，速率限制在 `(0, max_rate_per_minute]`，窗口底部显示当前有效范围。磁场命令选择 T 时会把以设备原生单位保存的限制一起换算；Scan Temperature List 则在按 OK 时逐点检查范围。
+旧 `kind = "measurement"` 不再支持。测量仪表应改写为 `modules/<id>/` 下的完整 Measurement Module。
 
-`monitor` 是只读单值设备。它只需要返回 `current`，不创建稳定性算法，不接受 Target/Hold/Measure，不会被温度或磁场 SEQ 自动选择。默认 `2nd Stage` 配置为：
+### 温度/磁场专用键
+
+| 键 | 说明 |
+|---|---|
+| `default_rate_per_minute` | 新建 SEQ/手动控制的默认速率 |
+| `min_value` / `max_value` | Target 硬限制；SEQ 弹窗与运行时共用 |
+| `max_rate_per_minute` | 最大速率硬限制 |
+| `stability_tolerance` | 当前值与目标值允许偏差 |
+| `stability_max_slope_per_minute` | 判稳窗口最大绝对斜率 |
+| `stability_dwell_seconds` | 同时满足偏差/斜率后需持续的时间 |
+| `stability_timeout_seconds` | 本次目标的判稳超时 |
+| `stability_window_seconds` | 计算斜率的窗口 |
+| `stale_after_seconds` | 读数超过该时间未更新视为 Stale |
+
+所有值使用设备原生单位。默认磁场原生单位为 Oe：
+
+```toml
+[[devices]]
+id = "field"
+display_name = "Magnetic Field"
+kind = "field"
+plugin = "labcontrol.devices.simulated:SimulatedFieldController"
+unit = "Oe"
+min_value = -90000.0
+max_value = 90000.0
+default_rate_per_minute = 5000.0
+max_rate_per_minute = 10000.0
+```
+
+SEQ 仍可使用 T，中央会换算为设备 Oe 后再检查上下限和速率。UI/SEQ 中 Oe 保留两位小数，T 保留六位，温度保留三位。
+
+### Monitor
+
+Monitor 是只读单值设备，只需 Poll 返回 `current`。它：
+
+- 不接受 Set/Hold；
+- 不参与标准温度/磁场自动选择或中央判稳；
+- 在底部和 Live Trend 显示；
+- 在每个模块结果行中由中央记录到 DAT；
+- 可用于设备插件产生系统 Error，例如二级冷头过温。
+
+默认示例：
 
 ```toml
 [[devices]]
@@ -107,70 +145,21 @@ initial_value = 4.2
 noise = 0.002
 ```
 
-该 Monitor 目前只显示并进入 Live Trend，不增加 DAT 数据列，也不参与主温度判稳。
+## 插件自定义键
 
-稳定性字段，仅控制型设备使用：
+未被框架识别的设备键进入 `DeviceConfig.extras`，例如仿真 `noise`。真实插件可在此放 address、baud rate、termination 等，但密码、令牌和私钥不得提交到仓库。
 
-| 字段 | 说明 |
-|---|---|
-| `stability_tolerance` | 当前值与目标值的最大允许误差 |
-| `stability_max_slope_per_minute` | 滑动窗口斜率绝对值上限 |
-| `stability_dwell_seconds` | 连续满足条件的时间 |
-| `stability_timeout_seconds` | 从目标改变到超时的时间 |
-| `stability_window_seconds` | 斜率拟合窗口 |
-| `stale_after_seconds` | 无新数据后判定陈旧的时间 |
+Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 管理并保存到 `module_data/<id>/settings.toml`。
 
-未被框架识别的设备字段会原样放入 `DeviceConfig.extras`，供插件读取。例如：
+## 配置验证
 
-```toml
-[[devices]]
-id = "my_meter"
-display_name = "组合表"
-kind = "measurement"
-plugin = "labcontrol_plugins.my_meter:MyMeter"
-unit = "Ohm"
-channels = ["Rxx", "Rxy"]
-visa_resource = "GPIB0::12::INSTR"
-timeout_ms = 5000
-retry_count = 2
-```
+启动会拒绝：
 
-插件中读取：
+- 无设备条目或重复设备 ID；
+- 未知设备 kind；
+- `min_value >= max_value`；
+- 非正默认/最大速率；
+- `ui_scale` 越界；
+- 无法解析的严重 TOML 错误。
 
-```python
-resource = self.config.extras["visa_resource"]
-timeout_ms = int(self.config.extras.get("timeout_ms", 5000))
-```
-
-## 单位
-
-- 温度基础支持 K。
-- 默认磁场设备原生单位为 Oe，基础层仍支持 T 和 Oe，换算关系为 `1 T = 10000 Oe`。
-- 速率单位与对应控制量单位每分钟一致。
-- 测量通道单位来自设备的 `unit`。
-
-默认磁场配置如下。范围、速率、误差和斜率阈值全部以设备原生 Oe 表示；它们与旧版 ±9 T、1 T/min、0.002 T 和 0.001 T/min 的物理含义相同：
-
-```toml
-[[devices]]
-id = "field"
-unit = "Oe"
-default_rate_per_minute = 5000.0
-min_value = -90000.0
-max_value = 90000.0
-max_rate_per_minute = 10000.0
-stability_tolerance = 20.0
-stability_max_slope_per_minute = 10.0
-```
-
-界面、SEQ 新命令和框架生成的 DAT 对 Oe 使用两位小数，对 K 温度使用三位小数。若硬件插件的厂商协议使用 T，优先在插件内部换算；也可把设备原生单位配置为 T，此时兼容显示使用六位小数。
-
-真实插件应以配置声明的单位与框架交换数值。厂商协议使用其他单位时，在插件内部转换。
-
-## 推荐配置管理
-
-- `default.toml` 保存实验室安全默认值。
-- 每套硬件复制一份独立配置，例如 `configs/cryostat_a.toml`。
-- 不在配置中存密码、令牌或网络凭据。
-- 修改安全限制需要代码审查或双人核对。
-- 运行目录中的配置快照只用于追溯，不应反向覆盖当前配置。
+模块清单错误不会阻止主程序启动；对应行显示 Invalid/说明并禁止 Enable，便于修复其他设备或模块。

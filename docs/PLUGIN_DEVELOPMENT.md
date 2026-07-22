@@ -1,306 +1,451 @@
-# 设备与插件完整开发工作流
+# 设备插件与测量模块完整开发工作流
 
-本文档是后续修改设备、增加温控仪、磁体电源、Keithley、Lake Shore 372 或其他仪器的标准流程。
+OpenLab Control 有两种扩展方式：
 
-## 1. 先定义设备契约
+- Device Plugin：一个温度控制器、磁体电源或只读 Monitor，由主 Runtime 统一轮询和判稳。
+- Measurement Module：一个完整测量方案，可协调多台源表、纳伏表、切换器、AC Bridge 等，拥有自定义 Settings/Status UI 和独立工作进程。
 
-在写代码前记录：
+测量仪表不能再配置成 `kind = "measurement"`。新项目先判断责任边界，再选择下面一条工作流。
 
-- 品牌、完整型号、固件版本和选件。
-- 通信方式：VISA/GPIB、串口、TCP、USB、COM/.NET 或厂商 SDK。
-- 单位和分辨率。
-- 查询指令、设置指令、完成状态和错误队列。
-- 设备允许的上下限及速率。
-- 通信超时和合理重试次数。
-- 断线、超时、过载、开路、联锁等状态属于 Warning 还是 Error。
-- Hold 的准确厂商语义。
-- 哪些安全功能由硬件完成，软件不得绕过。
+## 1. 选择扩展类型
 
-把这些信息作为插件目录中的 `README.md`，并保存对应厂商手册版本。
+| 需求 | 使用 |
+|---|---|
+| 设置并稳定样品温度 | temperature Device Plugin |
+| 设置并稳定磁场 | field Device Plugin |
+| 只读二级冷头、压力、液位等单值 | monitor Device Plugin |
+| 一台表完成一套测量 | Measurement Module |
+| 多台表并行/顺序协调、切换通道、输出电流、采集 R1–R4 | Measurement Module |
+| 自定义 Settings/Status/手动操作 | Measurement Module |
 
-## 2. 选择能力类型
+Measurement Module 可以读取控制/Monitor 快照，但不能设置温度或磁场。温场流程必须由 SEQ 管理。
 
-- 温度控制：`kind = "temperature"`，实现 Poll、Set Target、Hold。
-- 磁场控制：`kind = "field"`，实现 Poll、Set Target、Hold。
-- 测量仪器：`kind = "measurement"`，实现 Poll、Measure。
-- 只读单值监视：`kind = "monitor"`，只实现 Poll；例如 `2nd Stage` 温度。
+---
 
-不要用品牌或型号扩展 SequenceEngine。SEQ 只面向能力和逻辑设备 ID。
+# A. Device Plugin 工作流
 
-默认磁场能力以 Oe 与框架交换数值，状态、SEQ 和 DAT 使用两位小数；温度以 K 使用三位小数。若厂商 API 使用 T，插件应在协议边界按 `1 T = 10000 Oe` 换算目标、读数和速率，且配置中的上下限、判稳容差与斜率阈值必须全部采用框架原生单位。只有明确把该逻辑设备的 `unit` 配置为 T 时，才可直接向框架返回 T。
+## A1. 从模板开始
 
-## 3. 建立插件文件
+- 控制器：`plugin_templates/controller_plugin.py`
+- Monitor：`plugin_templates/monitor_plugin.py`
+- 测试骨架：`plugin_templates/test_plugin.py`
+
+将文件复制到受版本管理的 Python 包，例如：
+
+```text
+src/labcontrol_plugins/
+└─ lakeshore336.py
+```
+
+类必须继承 `labcontrol.devices.base.DevicePlugin`。
+
+## A2. 生命周期
+
+```python
+class MyController(DevicePlugin):
+    async def connect(self) -> None: ...
+    async def disconnect(self) -> None: ...
+    async def poll(self) -> DeviceSnapshot: ...
+    async def set_target(self, value, rate_per_minute, mode="Settle") -> None: ...
+    async def hold(self) -> None: ...
+```
+
+- `__init__`：只保存配置，不打开硬件。
+- `connect`：打开资源、验证型号/固件、设置通信超时，不改变危险输出。
+- `poll`：返回单调时间戳、连接状态、current/target/rate/activity；不得自行判 Stable。
+- `set_target`：框架已经做上下限/速率检查，驱动仍应保留设备侧检查。
+- `hold`：停止变化并保持当前值，不等同于关机。
+- `disconnect`：释放句柄，尽量幂等。
+
+阻塞库应通过 `asyncio.to_thread()` 调用，并在 VISA、串口、TCP 或 SDK 本身设置有限超时。不要用无限重试掩盖断线。
+
+## A3. 快照示例
+
+```python
+return DeviceSnapshot(
+    device_id=self.config.id,
+    display_name=self.config.display_name,
+    kind=self.config.kind,
+    timestamp=time.monotonic(),
+    connected=True,
+    unit=self.config.unit,
+    current=current,
+    target=target,
+    rate_per_minute=rate,
+    activity=DeviceActivity.MOVING,
+)
+```
+
+Monitor 只返回 current，不返回 target/rate，也不实现 set_target/hold。
+
+## A4. 配置
+
+```toml
+[[devices]]
+id = "temperature"
+display_name = "Temperature"
+kind = "temperature"
+plugin = "labcontrol_plugins.lakeshore336:Lakeshore336Controller"
+unit = "K"
+min_value = 1.8
+max_value = 400.0
+default_rate_per_minute = 5.0
+max_rate_per_minute = 30.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 30.0
+stability_timeout_seconds = 1800.0
+stability_window_seconds = 20.0
+address = "GPIB0::12::INSTR"
+```
+
+未知键进入 `config.extras`。安全上限必须写在主配置，不能只藏在驱动 UI。
+
+## A5. 错误映射
+
+```python
+raise DeviceWarning("Reading is near range limit", "NEAR_RANGE", channel)
+raise DeviceError("Controller reported sensor fault", "SENSOR_FAULT", input_name)
+raise SafetyViolation("Target exceeds local interlock", "LOCAL_LIMIT", device_id)
+```
+
+- Warning：可恢复，SEQ 继续。
+- DeviceError/SafetyViolation：运行中触发 fatal Stop。
+- code/context 必须稳定，才能让同一活动事件只弹一次。
+
+---
+
+# B. Measurement Module 工作流
+
+## B1. 复制完整模板
 
 复制：
 
-- 控制器：`plugin_templates/controller_plugin.py`
-- 测量设备：`plugin_templates/measurement_plugin.py`
-- 只读监视器：`plugin_templates/monitor_plugin.py`
+```text
+plugin_templates/measurement_module/
+```
 
 到：
 
 ```text
-src/labcontrol_plugins/<your_plugin>.py
+modules/my_measurement/
+├─ module.toml
+├─ frontend.py
+├─ backend.py
+└─ wheels/              可选，模块专用离线 wheel
 ```
 
-例如：
+参考实现：`modules/simulated_transport/`。
+
+模块文件夹名不是权威 ID；权威 ID 在 `module.toml`。源码目录只放代码/清单/可选 wheel，用户参数保存在 `module_data/<id>/settings.toml`。
+
+## B2. 设计仪表所有权
+
+在编码前列出完整方案：
 
 ```text
-src/labcontrol_plugins/lakeshore372.py
+模块：dc_transport
+├─ Keithley 6221：电流源
+├─ Keithley 2182A：纳伏表
+├─ Keithley 7001：通道切换
+└─ 流程：R1 → R2 → R3 → R4，每个结果立即发一行
 ```
 
-类名使用明确型号：
+原则：
 
-```python
-class LakeShore372(DevicePlugin):
-    api_version = "1.0"
-```
+- 这些仪表只归该模块 backend 所有，不同时配置成 Device Plugin。
+- 所有硬件句柄只在工作进程创建和使用。
+- frontend 不能导入/持有 VISA 资源。
+- 多模块共享同一台物理仪表时，必须先设计跨进程仲裁；0.10.0 不提供隐式共享锁，默认禁止这种配置。
 
-## 4. 隔离通信层
-
-推荐把协议通信和框架适配分开：
-
-```text
-LakeShore372 DevicePlugin
-└─ LakeShore372Transport
-   ├─ write(command)
-   ├─ query(command)
-   ├─ reconnect()
-   └─ close()
-```
-
-好处：
-
-- 可用假 Transport 做单元测试。
-- VISA、串口和 TCP 细节不会泄漏到框架。
-- 可单独验证指令编码、终止符和超时。
-
-若厂商库是同步阻塞 API，使用：
-
-```python
-result = await asyncio.to_thread(blocking_function, argument)
-```
-
-不要在异步方法里直接执行长时间阻塞调用，也不要使用无限等待。
-
-## 5. 实现生命周期
-
-### `__init__`
-
-只保存配置和建立内存状态。禁止：
-
-- 打开 VISA/串口。
-- 向设备发送命令。
-- 修改设备输出。
-- 启动不可停止的后台线程。
-
-### `connect`
-
-允许：
-
-- 建立通信。
-- 查询 `*IDN?` 或等效身份。
-- 验证型号和固件。
-- 读取现状。
-
-除非用户配置明确要求，否则不得在连接时重置、归零或改变目标。
-
-### `poll`
-
-返回 `DeviceSnapshot`：
-
-- `timestamp` 必须使用 `time.monotonic()`。
-- 数值单位必须等于设备配置的 `unit`。
-- 控制设备必须返回 `current`、`target` 和 `rate_per_minute`。
-- 测量设备返回最近通道值。
-- Monitor 只返回 `current`，不得伪造 `target`、`rate_per_minute` 或 `stability`。
-- `stability` 不由插件填写，中央算法会覆盖。
-
-Monitor 不实现 `set_target()`、`hold()` 或 `measure()`。框架会在调用插件前拒绝目标设置；真实插件也不得通过其他入口改变仪表输出。若同一台温控仪同时提供主控温和辅助温度，建议分别配置一个 `temperature` 逻辑设备和一个 `monitor` 逻辑设备，并让具体插件/通信层安全共享同一物理会话。
-
-### `set_target`
-
-框架已经检查通用上下限和速率。插件仍需检查：
-
-- 厂商模式限制。
-- 当前硬件联锁。
-- 特定量程和方向限制。
-- 单位换算后的合法性。
-
-### `hold`
-
-默认要求保持中止瞬间的当前值。推荐流程：
-
-1. 获取新鲜当前读数。
-2. 验证读数有效。
-3. 向设备发出厂商定义的 Hold 或把目标设为当前值。
-4. 读取返回状态确认。
-
-读数无效时必须抛出 Error，不能猜测或默认归零。
-
-### `measure`
-
-返回：
-
-```python
-{"R1": 1.23, "R2": 4.56}
-```
-
-键必须与配置 `channels` 对应。缺测值使用 `None`，不要使用字符串、NaN 文本或静默复用旧值。
-
-`context` 包含最近温度、磁场和其他设备快照，可用于选择量程或记录同步信息，但插件不得修改这些快照。
-
-## 6. 配置插件
-
-在 TOML 中加入：
+## B3. 编写 `module.toml`
 
 ```toml
-[[devices]]
-id = "bridge"
-display_name = "Lake Shore 372"
-kind = "measurement"
-plugin = "labcontrol_plugins.lakeshore372:LakeShore372"
+id = "dc_transport"
+name = "DC Transport"
+version = "1.0.0"
+api_version = "1.0"
+frontend = "frontend:DcTransportFrontend"
+backend = "backend:DcTransportBackend"
+backend_type = "python"
+dependencies = [
+    "pyvisa==1.14.1",
+    "pyserial>=3.5,<4",
+]
+
+[[columns]]
+name = "R1"
 unit = "Ohm"
-channels = ["R1", "R2", "R3", "R4"]
-visa_resource = "GPIB0::12::INSTR"
-timeout_ms = 5000
-retry_count = 2
+
+[[columns]]
+name = "Status"
+
+[[columns]]
+name = "Warning"
 ```
 
-框架不认识的字段自动进入 `config.extras`。
+约束：
 
-无需修改：
+- ID 必须匹配 `[a-z][a-z0-9_]*` 且全局唯一。
+- `api_version` 当前必须是 `1.0`。
+- 0.10.0 只支持 `backend_type = "python"`；未来 executable backend 会使用同一生命周期语义。
+- 至少声明一列；列名唯一、单行、不能含逗号。
+- Run 中不能动态增加列。
+- 模块应声明自己的 Status/Warning 列；框架不会替它添加。
 
-- 主界面。
-- StatusTile。
-- SequenceEngine。
-- DAT Writer。
+## B4. 依赖策略
 
-重启后状态块会按配置自动出现。
+所有模块共用：
 
-## 7. 错误映射
+```text
+module_runtime/site-packages/
+```
 
-插件异常必须映射为稳定代码：
+不要把每个模块打包成独立 venv，这会增大体积和启动时间。推荐流程：
+
+1. 在开发机统一确定并锁定版本。
+2. 把可离线分发的 wheel 放入根 `wheels/`；仅模块专用 wheel 可放模块自己的 `wheels/`。
+3. 在 Modules Manager 选择模块，点击 `Install Dependencies`。
+4. 程序先执行离线 pip `--target module_runtime/site-packages`。
+5. 离线失败时由用户明确确认是否在线安装。
+6. Refresh；依赖满足后才允许 Enable。
+
+同一包的版本范围不相交时，两个模块都标记冲突并禁止 Enable。开发者必须调整版本或替换库；框架不会偷偷为它们加载两份冲突依赖。
+
+框架自身核心依赖（PySide6、QtAwesome、packaging）应由主 requirements 管理。模块不要要求不兼容的 PySide6 版本。
+
+## B5. Backend 契约
 
 ```python
-raise DeviceWarning("一次读取超时", "READ_TIMEOUT", channel)
-raise DeviceError("设备联锁断开", "INTERLOCK_OPEN", interlock_name)
+from labcontrol.measurement.api import ModuleBackend, ModuleOperationContext
+
+class DcTransportBackend(ModuleBackend):
+    def initialize(self, settings, context): ...
+    def apply_settings(self, settings, context): ...
+    def begin_sequence(self, context): ...
+    def measure(self, context): ...
+    def end_sequence(self, reason, context): ...
+    def abort(self, context): ...
+    def read_status(self, context): ...
+    def manual_action(self, action, payload, context): ...
 ```
 
-选择准则：
+方法通常是同步函数，因为它们已经运行在独立进程；框架也接受返回 awaitable 的实现。所有返回值必须是简单 Mapping 或 None，才能通过 IPC 序列化。
 
-- Warning：本次数据可缺失或可以安全继续，设备仍处于已知安全状态。
-- Error：状态未知、控制失败、数据不可置信或继续可能危险。
+### `initialize(settings, context)`
 
-不要把异常字符串本身当代码。代码和 context 决定去重；文字可以包含当前数值。
+Enable 自动调用：
 
-当后续 Poll 或 Measure 成功时，DeviceManager 会自动解除此前同类操作产生的活动事件。反复失败只弹一次，恢复后再次失败会重新弹窗。
+- 打开并识别所有仪表；
+- 建立模块内部状态；
+- 读取必要的实际状态；
+- 把保存的 settings 当作 desired 值加载；
+- **不得把保存 settings 自动发送到仪表**。
 
-## 8. 重试策略
+成功后返回 Status，例如 `{"Connection": "Connected", "Applied Settings": "Not applied"}`。失败抛 `ModuleError`，模块保持 Disabled。
 
-仅对满足以下条件的操作重试：
+### `apply_settings(settings, context)`
 
-- 幂等查询。
-- 厂商明确允许重复的设置。
-- 能确认第一次命令未执行或重复执行无害。
+用户点击 `Apply Settings` 并确认后调用。验证整组参数，再按安全顺序发送；成功后返回实际/Applied 状态。函数失败时窗口和模块保持 Enabled，Settings 仍标为未 Apply。
 
-推荐退避：短等待、有限次数、总时间受限。禁止无限重试。最终失败按契约上升为 Warning 或 Error。
+### `begin_sequence(context)`
 
-## 9. 单元测试
+Run 开始、第一条 SEQ 之前调用。用于打开源输出、清零缓存、进入远程测量状态。不要在此改变温度或磁场。
 
-复制 `plugin_templates/test_plugin.py`，至少覆盖：
+### `measure(context)`
 
-- 身份识别正确和错误型号。
-- Connect/Disconnect 可重复调用。
-- 指令终止符、编码和解析。
-- Poll 单位与时间戳。
-- 上下限附近的设置。
-- 最大速率。
-- 超时映射。
-- 设备错误队列映射。
-- Warning 重复和恢复。
-- Hold 使用当前值而非零。
-- Measure 缺失通道返回 None。
+每条无参数 `T Measure` 调用一次。可以：
 
-测试应使用假 Transport，不要求实验室硬件。
-
-运行：
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```python
+def measure(self, context):
+    for channel in ("R1", "R2", "R3", "R4"):
+        value = self.read_channel(channel)
+        context.emit_row({channel: value, "Status": "OK", "Warning": ""})
 ```
 
-## 10. 仿真与回放
+每个 `emit_row()` 立即经 IPC 到中央写盘，不必等 R1–R4 全部完成。模块也可返回一个 Mapping 形成单行，但不能同时返回动态 Schema。
 
-真实连接前，为插件准备：
+### `end_sequence(reason, context)`
 
-- 正常响应样本。
-- 慢响应。
-- 格式错误响应。
-- 超时。
-- 断线后恢复。
-- 设备 Warning。
-- 设备 Error。
+每次 Run 最终都调用，reason 固定为：
 
-优先把厂商原始响应保存为脱敏测试 fixture，驱动解析器回放。不要把实验数据、网络凭据或序列号提交到公共仓库。
+- `completed`
+- `stopped`
+- `error`
 
-## 11. 真实硬件分阶段上线
+这里关闭源输出、退出扫描/触发状态、恢复模块自己的安全待机状态。失败会把最终运行标记为 Faulted，模块保持 Enabled 供用户检查；框架不自动调用 abort。
 
-1. 只连接，不发设置命令。
-2. 连续 Poll，核对单位和刷新周期。
-3. 在安全范围中心执行一个很小的设置变化。
-4. 验证达到目标、数值判稳和超时。
-5. 测试人工 Hold。
-6. 测试 Pause。
-7. 测试 Stop。
-8. 人工制造可恢复 Warning。
-9. 在厂商允许条件下验证 Error 路径。
-10. 运行最小 SEQ。
-11. 运行嵌套 SEQ。
-12. 核对 DAT、事件日志和设备面板。
+### `abort(context)`
 
-任何一步失败，回到仿真或假 Transport 层修复，不扩大真实硬件动作范围。
+仅在用户 Disable 或整个应用退出时调用。用于彻底停止输出、释放仪表状态。Disable 时 abort 失败会使模块保持 Enabled，窗口不隐藏。
 
-## 12. 发布插件
+### `read_status(context)`
 
-发布前记录：
+返回一组当前实际状态。Run 开始前会调用一次并保存为 `status-at-start.json`；Status 页刷新也可调用。不要在读状态时触发设置。
 
-- 插件版本。
-- `api_version`。
-- 支持型号、固件和接口。
-- 默认超时和重试。
-- 错误代码表。
-- 配置字段表。
-- 已执行的硬件验证清单。
-- 已知限制。
+### `manual_action(action, payload, context)`
 
-源代码运行时，新模块只需位于 `src/labcontrol_plugins`。若使用已打包 EXE，需要重新执行打包，让 PyInstaller 收集新模块。
+实现 Test Connection、Read Now、Measure Now 等模块自定义操作。仅 SEQ Idle 可用。成功结果更新 Status 并写事件日志，不写实验 DAT。
 
-## 13. 修改现有插件
+## B6. Context
 
-标准流程：
+`context.system` 是只读字典副本：
 
-1. 复制当前配置和一个短 SEQ 作为回归 fixture。
-2. 新增失败测试，证明现有问题。
-3. 只修改目标插件或其 Transport。
-4. 运行全部自动测试。
-5. 运行无界面仿真。
-6. 在受控硬件环境执行最小变化测试。
-7. 更新插件版本、错误代码表和 Changelog。
-8. 重新打包并保留旧版本回退包。
+```python
+temperature = context.system.get("temperature", {}).get("current")
+field_oe = context.system.get("field", {}).get("current")
+second_stage = context.system.get("second_stage", {}).get("current")
+```
 
-禁止直接在实验运行期间修改插件文件或热重载驱动。
+每个设备包含 display_name、kind、timestamp、connected、unit、current、target、rate、activity、stability、message。修改字典不会影响中央状态。
 
-## 14. 完成定义
+可用输出：
 
-一个设备插件只有在以下条件全部满足时才算完成：
+```python
+context.emit_row({...})
+context.update_status({...})
+context.warning("R1 over range", "OVER_RANGE", "R1")
+context.resolve_warning("OVER_RANGE", "R1")
+context.error("Interlock opened", "INTERLOCK_OPEN", "source")
+```
 
-- 无导入副作用。
-- 所有 I/O 有超时。
-- 单设备访问串行化。
-- 单位明确并有测试。
-- 安全限制配置化。
-- Hold 经过实机验证。
-- Warning/Error 代码稳定且可解除。
-- 仿真、单测和实机清单全部通过。
-- 配置、使用和故障处理文档齐全。
+`context.error()` 会抛 `ModuleError`。也可直接抛：
+
+```python
+raise ModuleWarning("Reading overloaded", "OVER_RANGE", channel)
+raise ModuleError("Source reported hardware fault", "SOURCE_FAULT", address)
+```
+
+Warning 的 code/context 应跨测量点保持稳定，避免把同一故障变成无数不同弹窗。
+
+## B7. Frontend 契约
+
+```python
+from labcontrol.measurement.frontend_api import ModuleFrontend
+
+class DcTransportFrontend(ModuleFrontend):
+    def create_settings_page(self, parent=None): ...
+    def create_status_page(self, parent=None): ...
+    def settings(self): ...
+    def load_settings(self, settings): ...
+    def update_status(self, status): ...
+    def set_sequence_running(self, running): ...
+```
+
+模块完全自定义两页内部布局；框架不要求统一控件。必须遵守：
+
+- Settings 是默认页；
+- 参数变化时发 `self.settingsChanged`；
+- `load_settings()` 只更新控件，不发送仪表设置；
+- `settings()` 只返回 TOML 可保存的 bool/int/有限 float/string/list/嵌套 dict；
+- `update_status()` 只显示后台返回值；
+- `set_sequence_running(True)` 禁用 Test/Read/Measure 等手动按钮；
+- 不直接导入 pyvisa/serial、不开线程持有仪表、不写 DAT。
+
+请求手动动作：
+
+```python
+self.context.request_manual_action("measure_now", {"channel": "R1"})
+self.context.request_status_refresh()
+```
+
+框架窗口已经负责 Settings/Status 页签、Apply 确认、运行锁定、不可关闭和父窗口关系。
+
+## B8. Settings 保存语义
+
+框架在以下时间自动写 `module_data/<id>/settings.toml`：
+
+- Apply；
+- Disable；
+- 应用关闭（先保存，后 abort）；
+- Run 之前。
+
+Enable 时读取保存值到 Settings 和 backend initialize，但不触发 Apply。Run 时如果用户在 UI 修改后尚未 Apply，会出现：
+
+- `Apply and Run`
+- `Run Without Applying`
+- `Cancel`
+
+无论选择前两项哪一个，运行目录保存的是当时 Settings 页的 desired 值；实际仪表状态另存 JSON。
+
+## B9. 多仪表并行与内部并发
+
+不同 Enabled 模块由框架并行调用。一个模块内部是否并行由模块自己决定：
+
+- R1–R4 依赖同一切换器时通常顺序执行；
+- 两台完全独立表可用线程/asyncio 并发，但仍需保证 `emit_row` 顺序符合业务含义；
+- 不要让后台线程在 measure 返回后继续发实验行；返回表示本模块本次 Measure 完成。
+
+同一模块的 IPC 请求串行，因此 Apply、manual_action 和 measure 不会在框架层互相重入。
+
+## B10. 通信超时与恢复
+
+框架不包一层固定生命周期超时，因为不同仪表操作时长差异很大。模块必须：
+
+- 给每次读写设置有限且合理的协议超时；
+- 把临时超量程/无效点映射为 Warning；
+- 把设备报警、掉线、互锁、二级冷头过温等映射为 Error；
+- 对写操作谨慎重试，避免重复设置/触发；
+- 让 abort 和 end_sequence 尽量幂等；
+- 在 Status 中显示 Fault/Connection/Output 等实际状态。
+
+不要无限 `while True` 等待设备；这会同时阻塞 Measure、Disable 和应用退出。
+
+## B11. 测试顺序
+
+1. 清单测试：ID、API、列、依赖、冲突。
+2. Backend 纯仿真：每个生命周期返回值和异常映射。
+3. Frontend offscreen：Settings round-trip、Status 更新、SEQ 锁定。
+4. Service 测试：独立进程 Enable/Apply/Measure/End/Disable。
+5. Schema 测试：未知列、复杂值、缺失值、多行顺序。
+6. Warning 测试：继续执行、只弹一次、events.dat 有 Count/Context。
+7. Error 测试：SEQ Faulted、执行 end_sequence(error)、不调用 abort。
+8. Disable abort 失败测试：仍 Enabled、窗口可见。
+9. 多模块并行：各模块内部顺序保持，中央 DAT 无并发写损坏。
+10. 真实硬件分阶段测试：只读 → 最小输出 → Stop/Error → 长时运行。
+
+运行仓库测试：
+
+```text
+.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+专项参考：`tests/test_measurement_modules.py` 和 `tests/test_engine.py`。
+
+## B12. 发布模块
+
+发布前：
+
+- 提升模块 `version`，不要随意改变 `id`；
+- 固定依赖版本范围，准备 Windows/目标 Python 匹配的 wheel；
+- 不提交 `module_data`、仪表地址中的秘密或运行 DAT；
+- 更新模块自己的变更记录和操作说明；
+- 在干净环境执行 Install Dependencies、Refresh、Enable 和完整生命周期测试；
+- 确认打包发布目录已包含模块源码和所需共享 wheels。
+
+0.10.0 推荐保留源代码，便于实验室审查和修改。未来 executable backend 可隐藏/隔离厂商运行时，但会增加部署、协议版本和诊断复杂度；在 API 稳定前不建议优先采用。
+
+## B13. 修改现有模块的安全流程
+
+1. Stop 当前 SEQ。
+2. Disable 所有模块，确认 abort 成功且窗口隐藏。
+3. 备份 `module_data/<id>/settings.toml`。
+4. 修改源码/清单并运行单元测试。
+5. 若 Schema 改变，提升模块版本并记录 DAT 列迁移。
+6. 若依赖改变，更新 wheels 并执行 Install Dependencies。
+7. 在 Modules Manager 点击 Refresh。
+8. Enable，检查 Settings 只加载未 Apply；检查 Status 实际状态。
+9. 用仿真/低风险 SEQ 验证 begin/measure/end/abort。
+10. 再进入真实实验。
+
+## 完成定义
+
+一个真实扩展只有同时满足以下条件才算完成：
+
+- 安全限制和通信超时明确；
+- 生命周期在 completed/stopped/error/disable/exit 全路径可预测；
+- Warning/Error code/context 稳定且有测试；
+- Settings 与实际 Status 分开保存；
+- 模块列固定、有单位、有模块前缀；
+- 断线、超量程、Stop、Error、end/abort 失败均经过验证；
+- 文档说明仪表接线、地址、输出风险、恢复和依赖安装步骤。

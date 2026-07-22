@@ -19,14 +19,14 @@ from labcontrol.units import UnitConversionError, convert_value  # noqa: E402
 
 
 class DeviceManagerTests(unittest.TestCase):
-    def test_simulated_plugins_load_and_measure(self) -> None:
+    def test_simulated_control_and_monitor_plugins_load(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
             events = EventManager()
             manager = DeviceManager(config, events)
             await manager.connect_all()
             snapshots = await manager.poll_all()
-            self.assertEqual(len(snapshots), 4)
+            self.assertEqual(len(snapshots), 3)
             self.assertEqual(manager.first_device_id(DeviceKind.TEMPERATURE), "temperature")
             second_stage = snapshots["second_stage"]
             self.assertEqual(second_stage.kind, DeviceKind.MONITOR)
@@ -36,8 +36,6 @@ class DeviceManagerTests(unittest.TestCase):
             with self.assertRaises(DeviceError) as blocked:
                 await manager.set_target("second_stage", 5.0, 1.0)
             self.assertEqual(blocked.exception.code, "TARGET_NOT_CONTROLLABLE")
-            values = await manager.measure()
-            self.assertEqual(set(values), {"R1", "R2", "R3", "R4"})
             await manager.disconnect_all()
 
         asyncio.run(scenario())
@@ -62,21 +60,21 @@ class DeviceManagerTests(unittest.TestCase):
             await manager.connect_all()
             await manager.poll_all()
 
-            transport = manager.devices["transport"]
-            original_poll = transport.poll
-            transport_started = asyncio.Event()
-            release_transport = asyncio.Event()
+            monitor = manager.devices["second_stage"]
+            original_poll = monitor.poll
+            monitor_started = asyncio.Event()
+            release_monitor = asyncio.Event()
 
-            async def delayed_transport_poll():
-                transport_started.set()
-                await release_transport.wait()
+            async def delayed_monitor_poll():
+                monitor_started.set()
+                await release_monitor.wait()
                 return await original_poll()
 
-            transport.poll = delayed_transport_poll  # type: ignore[method-assign]
+            monitor.poll = delayed_monitor_poll  # type: ignore[method-assign]
             poll_task = asyncio.create_task(manager.poll_all())
-            await transport_started.wait()
+            await monitor_started.wait()
             await manager.set_target("field", 100.0, 5000.0)
-            release_transport.set()
+            release_monitor.set()
             await poll_task
             self.assertEqual(manager.latest["field"].target, 100.0)
             await manager.disconnect_all()

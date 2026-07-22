@@ -12,7 +12,6 @@ directory = "runs"
 data_file_name = "experiment.dat"
 event_file_name = "events.dat"
 timestamp_epoch = "labview_1904"
-sparse_channel_rows = true
 flush_every_row = true
 allow_external_paths = false
 
@@ -25,6 +24,13 @@ stability_timeout = "error"
 stale_reading = "warning"
 popup_warnings = true
 popup_errors = true
+
+[modules]
+directory = "modules"
+data_directory = "module_data"
+shared_wheels_directory = "wheels"
+python_executable = ""
+site_packages_directory = "module_runtime/site-packages"
 
 [[devices]]
 id = "temperature"
@@ -70,13 +76,3 @@ plugin = "labcontrol.devices.simulated:SimulatedReadOnlyMonitor"
 unit = "K"
 initial_value = 4.2
 noise = 0.002
-
-[[devices]]
-id = "transport"
-display_name = "Transport Measurement"
-kind = "measurement"
-plugin = "labcontrol.devices.simulated:SimulatedResistanceMeter"
-unit = "Ohm"
-channels = ["R1", "R2", "R3", "R4"]
-measurement_delay_seconds = 0.02
-noise = 0.0005

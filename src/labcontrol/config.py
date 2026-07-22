@@ -35,7 +35,6 @@ class DeviceConfig:
     max_value: float = float("inf")
     max_rate_per_minute: float = float("inf")
     stability: StabilityConfig | None = None
-    channels: tuple[str, ...] = ()
     extras: dict[str, Any] = field(default_factory=dict)
 
 
@@ -45,7 +44,6 @@ class LoggingConfig:
     data_file_name: str = "experiment.dat"
     event_file_name: str = "events.dat"
     timestamp_epoch: str = "labview_1904"
-    sparse_channel_rows: bool = True
     flush_every_row: bool = True
     allow_external_paths: bool = False
 
@@ -56,6 +54,15 @@ class AlarmConfig:
     stale_reading: Severity = Severity.WARNING
     popup_warnings: bool = True
     popup_errors: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleConfig:
+    directory: str = "modules"
+    data_directory: str = "module_data"
+    shared_wheels_directory: str = "wheels"
+    python_executable: str = ""
+    site_packages_directory: str = "module_runtime/site-packages"
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +77,7 @@ class AppConfig:
     language: str
     logging: LoggingConfig
     alarms: AlarmConfig
+    modules: ModuleConfig
     abort_temperature: str
     abort_field: str
     devices: tuple[DeviceConfig, ...]
@@ -137,7 +145,7 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         "max_rate_per_minute", "stability_tolerance",
         "stability_max_slope_per_minute", "stability_dwell_seconds",
         "stability_timeout_seconds", "stability_window_seconds",
-        "stale_after_seconds", "channels",
+        "stale_after_seconds",
     }
     device = DeviceConfig(
         id=str(raw["id"]),
@@ -151,7 +159,6 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         max_value=float(raw.get("max_value", float("inf"))),
         max_rate_per_minute=float(raw.get("max_rate_per_minute", float("inf"))),
         stability=stability,
-        channels=tuple(str(item) for item in raw.get("channels", [])),
         extras={key: value for key, value in raw.items() if key not in known},
     )
     if device.min_value >= device.max_value:
@@ -170,6 +177,7 @@ def load_config(path: str | Path) -> AppConfig:
     logging_raw = raw.get("logging", {})
     alarm_raw = raw.get("alarms", {})
     abort_raw = raw.get("abort", {})
+    module_raw = raw.get("modules", {})
     devices = tuple(_device_config(item) for item in raw.get("devices", []))
     if not devices:
         raise ConfigurationError("Configuration must contain at least one [[devices]] entry")
@@ -191,7 +199,6 @@ def load_config(path: str | Path) -> AppConfig:
             data_file_name=str(logging_raw.get("data_file_name", "experiment.dat")),
             event_file_name=str(logging_raw.get("event_file_name", "events.dat")),
             timestamp_epoch=str(logging_raw.get("timestamp_epoch", "labview_1904")),
-            sparse_channel_rows=bool(logging_raw.get("sparse_channel_rows", True)),
             flush_every_row=bool(logging_raw.get("flush_every_row", True)),
             allow_external_paths=bool(logging_raw.get("allow_external_paths", False)),
         ),
@@ -200,6 +207,15 @@ def load_config(path: str | Path) -> AppConfig:
             stale_reading=_severity(str(alarm_raw.get("stale_reading", "warning")), "stale_reading"),
             popup_warnings=bool(alarm_raw.get("popup_warnings", True)),
             popup_errors=bool(alarm_raw.get("popup_errors", True)),
+        ),
+        modules=ModuleConfig(
+            directory=str(module_raw.get("directory", "modules")),
+            data_directory=str(module_raw.get("data_directory", "module_data")),
+            shared_wheels_directory=str(module_raw.get("shared_wheels_directory", "wheels")),
+            python_executable=str(module_raw.get("python_executable", "")),
+            site_packages_directory=str(
+                module_raw.get("site_packages_directory", "module_runtime/site-packages")
+            ),
         ),
         abort_temperature=str(abort_raw.get("temperature", "hold_current")),
         abort_field=str(abort_raw.get("field", "hold_current")),

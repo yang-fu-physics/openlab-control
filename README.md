@@ -1,73 +1,97 @@
 # OpenLab Control
 
-OpenLab Control 是一个面向低温、磁场与输运测量的桌面控制框架。它参考 Quantum Design MultiVu 的操作习惯，但不连接或控制 PPMS；首个版本只加载仿真设备，作为后续温控仪、磁体电源、Keithley、Lake Shore 372 等设备插件的稳定底座。
+OpenLab Control 是一个以 Quantum Design MultiVu 操作方式为参考、用于外部实验设备的 Python/PySide6 控制框架。它不控制 PPMS 本体；温控仪、磁体电源和只读监视设备由设备插件提供，吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的 Measurement Module 提供。
 
-程序界面以英文为主；操作、技术和插件开发文档保留中文。
+当前版本：`0.10.0`。界面以英文为主，技术与操作文档以中文为主。
 
-![OpenLab Control 主窗口](docs/main-window-preview.png)
+![主窗口](docs/main-window-preview.png)
 
-![SEQ 多行选择、右键菜单与禁用行](docs/sequence-context-menu-preview.png)
+## 主要能力
 
-![独立 DAT 数据浏览器](docs/data-browser-preview.png)
-
-## 当前版本包含
-
-- 温度、磁场、测量和只读监视设备的统一插件接口。
-- QtAwesome 图标与清晰的浅色桌面界面；关键设备读数保持大字号，SEQ 和命令栏保持紧凑可读。
-- 字体与窗口尺寸默认按屏幕原生分辨率自动缩放；4K 使用 1.40×，也可在配置中手动指定。
-- 独立只读监视设备；默认 `2nd Stage` 温度只显示和进入 Live Trend，不接受控制、不参与主温度判稳。
-- 配置文件控制的上下限、最大速率和数值判稳；同一限制会直接约束 SEQ 双击参数弹窗，并继续由执行器复检。
-- 默认磁场原生单位为 Oe；磁场显示/SEQ/DAT 保留两位小数，温度保留三位小数，同时兼容旧 T 单位 SEQ。
-- MultiVu 风格的单行 `.seq` 编辑器，支持多层 Scan 嵌套、Scan Temperature Linear/List 点位、Ctrl/Shift 多行选择、批量右键编辑和可持久化的命令禁用。
-- DAT 可通过左侧 `Change` 写入用户明确选择的文件夹；旧模板外部路径仍受安全策略保护。
-- 左侧长 DAT 路径和 SEQ 文件名自动中间省略，悬停显示全文，不会把侧栏强制撑宽。
-- 关闭浮动 SEQ 窗口后，New、Open 或左侧 Edit 会完整恢复文本编辑器。
-- Wait、Set Temperature、Set Field、Scan Temperature、Scan Field、Scan Time、Measure、Initialize、Set Datafile、Remark 和 Call Sequence。
-- 暂停、继续和中止；默认中止后在当前温度/磁场保持。
-- `.dat` 数据文件及独立事件文件。
-- 独立浮动 DAT 浏览器：拖入任意文件、自动刷新、一次选择多个 Y、X/Y 独立 Log10、同图多 Y、纵向多图共享 X、框选放大和数据点详情。
-- 浏览布局、X/Y 字段和缩放范围自动保存为 DAT 同目录的同名 `.plt`，再次打开时恢复。
-- Warning 继续执行、Error 中止执行；同一活动事件只弹窗一次。
-- 四个仿真插件和故障注入入口。
+- MultiVu 风格的浮动 SEQ 编辑器、右侧命令列表、双击参数设置、多行选择及 Disable/Enable/Delete/Copy/Paste。
+- Wait、Set Temperature、Set Field、Scan Temperature（Linear/List）、Scan Field、Scan Time、Measure、Set Datafile、Remark、Call Sequence，可任意多层嵌套。
+- 温度三位小数、磁场原生 Oe 两位小数；目标、速率、上下限和中央数值判稳均由配置控制。
+- 温度、磁场与 `2nd Stage` 等 Monitor 实时显示；温场状态块双击后才打开手动控制。
+- 独立 Data Browser：拖入任意 DAT 后自动追踪更新；批量选择多个 Y、Overlay/Stacked、共享 X、框选放大、数据点详情、X/Y Log，以及同目录 `.plt` 显示配置。
+- Measurement Module 动态发现、显式 Enable、独立 Settings/Status 窗口、后台进程隔离、并行测量和多行流式结果。
+- Error 中止 SEQ，Warning 继续；相同活动事件只弹一次，恢复后才允许再次弹出。
+- 每次运行保存 SEQ、主配置、模块设置、模块实际状态、实验 DAT 和事件 DAT。
 
 ## 最快启动
 
-使用 Windows 发布包时，解压整个压缩包，双击 `OpenLabControl.exe`。发布包不要求另装 Python，不能只把 EXE 单独移走（它需要同目录的 `_internal`、`configs` 和 `examples`）。
+源码运行：
 
-使用源码目录时，双击 `run.bat`。如果尚未安装依赖，先双击 `setup.bat`。
-
-前端开发时可使用 `run_console.bat` 从控制台启动并保留错误信息，或使用 `open_env.bat` 打开已激活项目虚拟环境的命令行。
-
-也可以在 PowerShell 中运行：
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe run.py
+```text
+setup.bat
+run.bat
 ```
 
-程序默认加载 `configs/default.toml` 和 `examples/nested_scan.seq`，不会向真实仪表发送命令。运行数据写入 `runs/`。
+已有环境可直接运行：
 
-`examples/template_original.seq` 和 `examples/template_original.dat` 是用户提供模板的逐字节副本，用于兼容性参考；`examples/template_original.plt` 是多图显示示例，`examples/disabled_commands.seq` 演示启用/禁用行，`examples/temperature_list.seq` 演示按任意列表顺序扫温。
-
-## 验证
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```text
+.venv\Scripts\python.exe run.py
 ```
 
-## 文档
+无界面验证：
 
-- [技术规格](docs/TECHNICAL_SPECIFICATION.md)
-- [系统架构](docs/ARCHITECTURE.md)
+```text
+.venv\Scripts\python.exe -m unittest discover -s tests -v
+.venv\Scripts\python.exe run.py --headless-demo --sequence examples\module_measurement.seq
+.venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq
+```
+
+第一条无界面运行验证“无模块时 Warning 后继续”；第二条显式启用示例模块，用于验证独立模块进程和多行测量。正常 GUI 启动仍始终从全部 Disabled 开始。
+
+构建 Windows 发布包：
+
+```text
+build.bat
+```
+
+输出位于 `dist\OpenLabControl\`。发布包旁的 `configs/`、`modules/`、`module_data/`、`module_runtime/`、`wheels/` 和 `runs/` 都会保留为可维护目录。
+
+## 第一次使用测量模块
+
+1. 点击工具栏 `Modules`。
+2. 勾选 `Simulated Transport`；初始化成功后才会显示 Enabled，并自动打开模块窗口。
+3. 在默认的 `Settings` 页检查参数。Enable 只读取保存值，不会把设置发送给仪表。
+4. 如需发送设置，点击 `Apply Settings` 并确认。
+5. 在 SEQ 中插入无参数单行 `Measure`，然后点击 `Run`。
+6. 每个 Measure 会并行调用所有 Enabled 模块，并等它们全部完成后继续。
+
+![模块管理器](docs/module-manager-preview.png)
+
+![示例模块窗口](docs/module-window-preview.png)
+
+## 目录
+
+```text
+configs/                 主程序配置
+modules/                 可发现的测量模块源码
+module_data/<id>/        模块保存设置（不放入源码目录）
+module_runtime/           所有模块共享的第三方 Python 依赖
+wheels/                   共享离线 wheel
+plugin_templates/         设备插件与测量模块模板
+examples/                 SEQ/DAT/PLT 示例
+runs/                     每次运行的完整记录
+docs/                     技术、格式、操作与测试文档
+src/labcontrol/           框架源码
+tests/                    自动测试
+```
+
+## 文档入口
+
 - [操作手册](docs/OPERATIONS.md)
-- [配置参考](docs/CONFIGURATION.md)
 - [SEQ 格式](docs/SEQUENCE_FORMAT.md)
-- [DAT 格式](docs/DAT_FORMAT.md)
-- [设备与插件完整开发工作流](docs/PLUGIN_DEVELOPMENT.md)
-- [测试与真实设备上线清单](docs/TEST_PLAN.md)
-- [本版本验证报告](docs/VERIFICATION_REPORT.md)
+- [DAT 与事件格式](docs/DAT_FORMAT.md)
+- [配置参考](docs/CONFIGURATION.md)
+- [系统架构](docs/ARCHITECTURE.md)
+- [设备插件与测量模块开发工作流](docs/PLUGIN_DEVELOPMENT.md)
+- [技术规格](docs/TECHNICAL_SPECIFICATION.md)
+- [测试计划](docs/TEST_PLAN.md)
+- [验证报告](docs/VERIFICATION_REPORT.md)
+- [架构决策](docs/DECISIONS.md)
 
 ## 安全边界
 
-本项目当前是仿真框架。接入真实温控仪或磁体电源前，必须按测试清单验证硬件联锁、通信中断、超时、中止和恢复行为。本程序不能替代磁体电源、低温系统或实验室的硬件保护。
+默认配置和示例模块全部是数值仿真。接入真实硬件前，必须在驱动层配置通信超时，在主配置中确认温场上下限与最大速率，并按 [测试计划](docs/TEST_PLAN.md) 完成只读、低风险控制、Warning、Error、Stop、Disable 和断电恢复验证。模块只获得温度、磁场及 Monitor 的只读快照，不能通过模块 API 改变温度或磁场。

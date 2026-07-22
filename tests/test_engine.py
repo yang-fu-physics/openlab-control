@@ -16,7 +16,10 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import RunState, Severity  # noqa: E402
+from labcontrol.measurement.manifest import discover_modules  # noqa: E402
+from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.plugins import DeviceManager  # noqa: E402
+from labcontrol.devices.base import DeviceError  # noqa: E402
 from labcontrol.sequence.engine import SequenceEngine  # noqa: E402
 from labcontrol.sequence.model import Command, CommandType, SequenceDocument  # noqa: E402
 
@@ -26,6 +29,7 @@ class SequenceEngineTests(unittest.TestCase):
         (temp_root / "configs").mkdir()
         target = temp_root / "configs" / "default.toml"
         shutil.copy2(ROOT / "configs" / "default.toml", target)
+        shutil.copytree(ROOT / "modules", temp_root / "modules")
         config = load_config(target)
         devices = []
         for device in config.devices:
@@ -41,7 +45,6 @@ class SequenceEngineTests(unittest.TestCase):
                 )
             extras = dict(device.extras)
             extras["noise"] = 0.0
-            extras["measurement_delay_seconds"] = 0.001
             devices.append(replace(device, stability=stability, extras=extras))
         return replace(
             config,
@@ -55,8 +58,15 @@ class SequenceEngineTests(unittest.TestCase):
         events.subscribe(notices.append)
         manager = DeviceManager(config, events)
         logger = DatRunLogger(config, events)
-        engine = SequenceEngine(config, manager, events, logger)
+        modules = MeasurementModuleService(discover_modules(config), events, manager)
+        engine = SequenceEngine(config, manager, events, logger, modules)
         await manager.connect_all()
+        await manager.poll_all()
+        await modules.enable("simulated_transport", {
+            "delay_seconds": 0.001,
+            "noise_ohm": 0.0,
+            "warning_threshold_ohm": 1e9,
+        })
 
         async def poll():
             while True:
@@ -71,12 +81,13 @@ class SequenceEngineTests(unittest.TestCase):
         finally:
             poll_task.cancel()
             await asyncio.gather(poll_task, return_exceptions=True)
+            await modules.shutdown()
             await manager.disconnect_all()
 
     def test_nested_temperature_field_measurement(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
-            measure = Command(CommandType.MEASURE, {"devices": "transport", "repeats": 1, "interval_seconds": 0.0})
+            measure = Command(CommandType.MEASURE)
             field_scan = Command(CommandType.SCAN_FIELD, {
                 "device_id": "field", "start": 0.0, "stop": 0.01, "unit": "T",
                 "steps": 2, "rate": 0.5, "mode": "Settle",
@@ -91,7 +102,7 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertEqual(state, RunState.COMPLETED)
             self.assertIsNotNone(paths)
             data = paths.data_file.read_text(encoding="utf-8")
-            self.assertGreaterEqual(data.count("Measure devices=transport"), 16)
+            self.assertGreaterEqual(data.count("Measure"), 16)
 
     def test_duplicate_warning_continues_and_only_notifies_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -99,7 +110,7 @@ class SequenceEngineTests(unittest.TestCase):
             document = SequenceDocument([
                 Command(CommandType.INJECT_WARNING, {"code": "SAME", "message": "same"}),
                 Command(CommandType.INJECT_WARNING, {"code": "SAME", "message": "same"}),
-                Command(CommandType.MEASURE, {"devices": "transport", "repeats": 1, "interval_seconds": 0.0}),
+                Command(CommandType.MEASURE),
             ], "warning.seq")
             notices = []
             state, _, _ = asyncio.run(self._run(config, document, notices))
@@ -120,7 +131,7 @@ class SequenceEngineTests(unittest.TestCase):
                 }),
                 Command(CommandType.WAIT, {"seconds": 0.03}),
                 Command(CommandType.INJECT_ERROR, {"code": "FATAL", "message": "fatal"}),
-                Command(CommandType.MEASURE, {"devices": "transport", "repeats": 1, "interval_seconds": 0.0}),
+                Command(CommandType.MEASURE),
             ], "error.seq")
             notices = []
             state, snapshots, _ = asyncio.run(self._run(config, document, notices))
@@ -144,10 +155,7 @@ class SequenceEngineTests(unittest.TestCase):
                     enabled=False,
                 ),
                 disabled_scan,
-                Command(
-                    CommandType.MEASURE,
-                    {"devices": "transport", "repeats": 1, "interval_seconds": 0.0},
-                ),
+                Command(CommandType.MEASURE),
             ], "disabled.seq")
             notices = []
             state, _, paths = asyncio.run(self._run(config, document, notices))
@@ -161,10 +169,7 @@ class SequenceEngineTests(unittest.TestCase):
     def test_temperature_list_executes_in_declared_order_with_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
-            measure = Command(
-                CommandType.MEASURE,
-                {"devices": "transport", "repeats": 1, "interval_seconds": 0.0},
-            )
+            measure = Command(CommandType.MEASURE)
             temperature_scan = Command(
                 CommandType.SCAN_TEMPERATURE,
                 {
@@ -225,10 +230,7 @@ class SequenceEngineTests(unittest.TestCase):
                     "path_scope": "Custom folder",
                     "path": str(custom_path),
                 }),
-                Command(
-                    CommandType.MEASURE,
-                    {"devices": "transport", "repeats": 1, "interval_seconds": 0.0},
-                ),
+                Command(CommandType.MEASURE),
             ], "custom-output.seq")
             notices = []
             state, _, paths = asyncio.run(self._run(config, document, notices))
@@ -239,6 +241,50 @@ class SequenceEngineTests(unittest.TestCase):
                 "DATAFILE_SELECTED",
                 [notice.event.code for notice in notices if not notice.is_resolution],
             )
+
+    def test_module_measure_error_calls_end_error_without_abort(self) -> None:
+        class FailingModules:
+            def __init__(self) -> None:
+                self.begin_called = False
+                self.end_reasons: list[str] = []
+                self.abort_called = False
+
+            async def prepare_sequence(self, settings):
+                del settings
+                return (), {}
+
+            async def begin_sequence(self):
+                self.begin_called = True
+
+            async def measure_all(self, logger, sequence_step):
+                del logger, sequence_step
+                raise DeviceError("module equipment alarm", "MODULE_EQUIPMENT_ALARM")
+
+            async def end_sequence(self, reason):
+                self.end_reasons.append(reason)
+                return True
+
+        async def scenario(config):
+            events = EventManager()
+            manager = DeviceManager(config, events)
+            logger = DatRunLogger(config, events)
+            modules = FailingModules()
+            engine = SequenceEngine(config, manager, events, logger, modules)  # type: ignore[arg-type]
+            await manager.connect_all()
+            await manager.poll_all()
+            try:
+                state = await engine.run(
+                    SequenceDocument([Command(CommandType.MEASURE)], "module-error.seq")
+                )
+            finally:
+                await manager.disconnect_all()
+            self.assertEqual(state, RunState.FAULTED)
+            self.assertTrue(modules.begin_called)
+            self.assertEqual(modules.end_reasons, ["error"])
+            self.assertFalse(modules.abort_called)
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
 
 
 if __name__ == "__main__":

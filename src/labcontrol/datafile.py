@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import csv
+import json
 import shutil
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Any, Mapping, TextIO
 
 from . import __version__
 from .config import AppConfig
 from .events import EventManager
 from .formatting import control_decimals, fixed_number
 from .models import DeviceKind, DeviceSnapshot, EventNotice, Severity
+from .measurement.manifest import ModuleDescriptor
+from .measurement.settings import save_settings
 
 
 LABVIEW_UNIX_OFFSET_SECONDS = 2_082_844_800.0
@@ -25,6 +28,7 @@ class RunPaths:
     event_file: Path
     sequence_snapshot: Path
     configuration_snapshot: Path
+    module_settings_directory: Path
 
 
 class DatRunLogger:
@@ -40,10 +44,18 @@ class DatRunLogger:
         self._event_handle: TextIO | None = None
         self._event_writer: csv.writer | None = None
         self._columns: list[str] = []
+        self._module_descriptors: tuple[ModuleDescriptor, ...] = ()
         self._pending_events: list[EventNotice] = []
         self.events.subscribe(self.on_event)
 
-    def open_run(self, sequence_name: str, sequence_text: str) -> RunPaths:
+    def open_run(
+        self,
+        sequence_name: str,
+        sequence_text: str,
+        module_descriptors: tuple[ModuleDescriptor, ...] = (),
+        module_settings: Mapping[str, Mapping[str, Any]] | None = None,
+        module_status: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> RunPaths:
         root = self.config.resolve_project_path(self.config.logging.directory)
         root.mkdir(parents=True, exist_ok=True)
         stem = Path(sequence_name).stem or "sequence"
@@ -58,9 +70,31 @@ class DatRunLogger:
         event_file = directory / self.config.logging.event_file_name
         sequence_snapshot = directory / "sequence.seq"
         config_snapshot = directory / "configuration.toml"
+        module_settings_directory = directory / "module_settings"
+        module_settings_directory.mkdir()
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot)
-        self.paths = RunPaths(directory, data_file, event_file, sequence_snapshot, config_snapshot)
+        self._module_descriptors = tuple(module_descriptors)
+        desired = module_settings or {}
+        actual = module_status or {}
+        for descriptor in self._module_descriptors:
+            save_settings(
+                module_settings_directory / f"{descriptor.id}.settings.toml",
+                dict(desired.get(descriptor.id, {})),
+            )
+            (module_settings_directory / f"{descriptor.id}.status-at-start.json").write_text(
+                json.dumps(dict(actual.get(descriptor.id, {})), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+        self.paths = RunPaths(
+            directory,
+            data_file,
+            event_file,
+            sequence_snapshot,
+            config_snapshot,
+            module_settings_directory,
+        )
         self._started_monotonic = time.monotonic()
         self._open_event_file(event_file)
         for notice in self._pending_events:
@@ -110,6 +144,7 @@ class DatRunLogger:
             self.paths.event_file,
             self.paths.sequence_snapshot,
             self.paths.configuration_snapshot,
+            self.paths.module_settings_directory,
         )
         return destination
 
@@ -141,46 +176,61 @@ class DatRunLogger:
                     "INFO",
                     f"Device {device.id}: {device.display_name}; kind={device.kind.value}; plugin={device.plugin}",
                 ])
+            for module in self._module_descriptors:
+                self._data_writer.writerow([
+                    "INFO",
+                    f"Module {module.id}: {module.name}; version={module.version}; api={module.api_version}",
+                ])
             self._data_handle.write("\n[Data]\n")
             self._data_writer.writerow(self._columns)
         self._flush_data()
 
     def _build_columns(self) -> list[str]:
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]
+        temperature_count = sum(
+            item.kind is DeviceKind.TEMPERATURE for item in self.config.devices
+        )
+        field_count = sum(item.kind is DeviceKind.FIELD for item in self.config.devices)
         for device in self.config.devices:
             if device.kind is DeviceKind.TEMPERATURE:
-                columns.extend([f"Temp({device.unit})", f"TempTarget({device.unit})"])
+                prefix = "Temp" if temperature_count == 1 else f"{device.id}.Temp"
+                columns.extend([f"{prefix}({device.unit})", f"{prefix}Target({device.unit})"])
             elif device.kind is DeviceKind.FIELD:
-                columns.extend([f"Field({device.unit})", f"FieldTarget({device.unit})"])
-            elif device.kind is DeviceKind.MEASUREMENT:
-                columns.extend([
-                    f"{channel}({device.unit})" if device.unit else channel
-                    for channel in device.channels
-                ])
+                prefix = "Field" if field_count == 1 else f"{device.id}.Field"
+                columns.extend([f"{prefix}({device.unit})", f"{prefix}Target({device.unit})"])
+            elif device.kind is DeviceKind.MONITOR:
+                columns.append(f"{device.id}({device.unit})" if device.unit else device.id)
+        for module in self._module_descriptors:
+            columns.extend(f"{module.id}.{column.label}" for column in module.columns)
         return columns
 
-    def write_measurement(
+    def write_module_row(
         self,
         snapshots: dict[str, DeviceSnapshot],
-        channels: dict[str, float | None],
+        module_id: str,
+        values: Mapping[str, Any],
         sequence_step: str,
     ) -> None:
         self.ensure_data_file()
         assert self._data_writer is not None
-        rows = []
-        if self.config.logging.sparse_channel_rows and channels:
-            for channel, value in channels.items():
-                rows.append(self._row(snapshots, {channel: value}, sequence_step))
-        else:
-            rows.append(self._row(snapshots, channels, sequence_step))
-        for row in rows:
-            self._data_writer.writerow(row)
+        self._data_writer.writerow(self._row(snapshots, module_id, values, sequence_step))
+        self._flush_data()
+
+    def write_system_row(
+        self,
+        snapshots: dict[str, DeviceSnapshot],
+        sequence_step: str,
+    ) -> None:
+        self.ensure_data_file()
+        assert self._data_writer is not None
+        self._data_writer.writerow(self._row(snapshots, None, {}, sequence_step))
         self._flush_data()
 
     def _row(
         self,
         snapshots: dict[str, DeviceSnapshot],
-        channels: dict[str, float | None],
+        module_id: str | None,
+        values: Mapping[str, Any],
         sequence_step: str,
     ) -> list[object]:
         unix_now = time.time()
@@ -198,12 +248,21 @@ class DatRunLogger:
                     "" if snapshot is None or snapshot.current is None else fixed_number(snapshot.current, decimals),
                     "" if snapshot is None or snapshot.target is None else fixed_number(snapshot.target, decimals),
                 ])
-            else:
-                for channel in device.channels:
-                    value = channels.get(channel)
-                    if value is None:
-                        value = channels.get(f"{device.id}.{channel}")
-                    row.append("" if value is None else f"{value:.9g}")
+            elif device.kind is DeviceKind.MONITOR:
+                row.append(
+                    ""
+                    if snapshot is None or snapshot.current is None
+                    else fixed_number(snapshot.current, 3)
+                )
+        for module in self._module_descriptors:
+            for column in module.columns:
+                value = values.get(column.name) if module.id == module_id else None
+                if value is None:
+                    row.append("")
+                elif isinstance(value, float):
+                    row.append(f"{value:.9g}")
+                else:
+                    row.append(str(value))
         return row
 
     def _open_event_file(self, path: Path) -> None:

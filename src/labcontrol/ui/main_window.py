@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+import subprocess
+import sys
 
 import qtawesome as qta
-from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtCore import QEvent, QSize, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDockWidget,
     QFileDialog,
-    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -34,11 +34,19 @@ from .. import __version__
 from ..config import AppConfig
 from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, EventNotice, RunProgress, RunState, Severity
+from ..measurement.manifest import (
+    ModuleDescriptor,
+    activate_shared_dependencies,
+    discover_modules,
+    missing_dependencies,
+)
+from ..measurement.settings import load_settings, save_settings
 from ..runtime import RuntimeService
 from ..sequence.model import COMMAND_SPECS, SPECS_BY_TYPE, Command, CommandType, SequenceDocument
-from ..sequence.parser import load_sequence, save_sequence
+from ..sequence.parser import load_sequence, parse_sequence, save_sequence, serialize_sequence
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
+from .measurement_modules import ModuleManagerDialog, ModuleWindow
 from .scaling import current_ui_scale, scaled
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
@@ -51,7 +59,8 @@ class MainWindow(QMainWindow):
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
         self.config = config
-        self.runtime = RuntimeService(config)
+        self.module_descriptors = self._discover_module_descriptors()
+        self.runtime = RuntimeService(config, self.module_descriptors)
         self.document = SequenceDocument()
         self.sequence_path: Path | None = None
         self._last_sequence_directory = self.config.project_root
@@ -60,6 +69,10 @@ class MainWindow(QMainWindow):
         self.current_run_state = RunState.IDLE
         self.status_tiles: dict[str, StatusTile] = {}
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
+        self.module_windows: dict[str, ModuleWindow] = {}
+        self.enabled_modules: set[str] = set()
+        self._pending_run: tuple[dict[str, dict[str, object]], list[object]] | None = None
+        self._minimized_module_windows: set[str] = set()
         self.alert_dialogs: dict[str, AlertDialog] = {}
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
@@ -80,6 +93,16 @@ class MainWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._drain_runtime_messages)
         self.timer.start(config.ui_refresh_ms)
+
+    def _discover_module_descriptors(self) -> tuple[ModuleDescriptor, ...]:
+        descriptors = discover_modules(self.config)
+        for descriptor in descriptors:
+            if not descriptor.valid or descriptor.dependency_error:
+                continue
+            missing = missing_dependencies(descriptor)
+            if missing:
+                descriptor.dependency_error = "Missing dependencies: " + ", ".join(missing)
+        return descriptors
 
     def _build_ui(self) -> None:
         self.mdi = QMdiArea()
@@ -128,7 +151,9 @@ class MainWindow(QMainWindow):
         project_group = QGroupBox("Experiment")
         project_layout = QVBoxLayout(project_group)
         project_layout.addWidget(QLabel("External Device Simulation"))
-        self.measure_status_label = QLabel("Measurement Ready")
+        self.measure_status_label = QLabel(
+            f"0 of {len(self.module_descriptors)} measurement modules enabled"
+        )
         self.measure_status_label.setObjectName("mutedLabel")
         project_layout.addWidget(self.measure_status_label)
         layout.addWidget(project_group)
@@ -258,6 +283,11 @@ class MainWindow(QMainWindow):
         self.log_dock = dock
 
     def _build_actions(self) -> None:
+        self.module_manager = ModuleManagerDialog(self.module_descriptors, self)
+        self.module_manager.enableRequested.connect(self._set_module_enabled)
+        self.module_manager.refreshRequested.connect(self._refresh_modules)
+        self.module_manager.installRequested.connect(self._install_module_dependencies)
+        self.module_manager.openRequested.connect(self._show_module_window)
         self.new_action = QAction(qta.icon("fa5s.file"), "New", self)
         self.open_action = QAction(qta.icon("fa5s.folder-open"), "Open", self)
         self.save_action = QAction(qta.icon("fa5s.save"), "Save", self)
@@ -267,6 +297,7 @@ class MainWindow(QMainWindow):
         self.stop_action = QAction(qta.icon("fa5s.stop", color="red"), "Stop", self)
         self.graph_action = QAction(qta.icon("fa5s.chart-line"), "Live Trend", self)
         self.data_browser_action = QAction(qta.icon("fa5s.database"), "Data Browser", self)
+        self.modules_action = QAction(qta.icon("fa5s.cubes"), "Modules", self)
         self.log_action = self.log_dock.toggleViewAction()
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
@@ -280,6 +311,7 @@ class MainWindow(QMainWindow):
         self.stop_action.triggered.connect(self.runtime.stop_sequence)
         self.graph_action.triggered.connect(self._show_graph)
         self.data_browser_action.triggered.connect(lambda checked=False: self._show_data_browser())
+        self.modules_action.triggered.connect(self._show_module_manager)
         self.about_action.triggered.connect(self._show_about)
         self.exit_action.triggered.connect(self.close)
 
@@ -313,6 +345,8 @@ class MainWindow(QMainWindow):
         for device in self.config.devices:
             action = instrument_menu.addAction(device.display_name)
             action.triggered.connect(lambda checked=False, device_id=device.id: self._open_manual_control(device_id))
+        modules_menu = menu.addMenu("Modules")
+        modules_menu.addAction(self.modules_action)
         simulation_menu = menu.addMenu("Simulation")
         warning_action = simulation_menu.addAction("Inject Warning")
         error_action = simulation_menu.addAction("Inject Error")
@@ -335,7 +369,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addActions([self.run_action, self.pause_action, self.stop_action])
         toolbar.addSeparator()
-        toolbar.addActions([self.graph_action, self.data_browser_action])
+        toolbar.addActions([self.graph_action, self.data_browser_action, self.modules_action])
         self.addToolBar(toolbar)
 
     def _apply_style(self) -> None:
@@ -531,8 +565,75 @@ class MainWindow(QMainWindow):
     def _run_sequence(self) -> None:
         if self.current_run_state not in self.TERMINAL_STATES:
             return
+        validation = parse_sequence(serialize_sequence(self.document), self.document.name)
+        errors = [item for item in validation.issues if item.level == "error"]
+        if errors:
+            QMessageBox.critical(
+                self,
+                "SEQ Validation Failed",
+                "\n".join(
+                    f"Line {item.line_number}: {item.message}" for item in errors[:12]
+                ),
+            )
+            return
+        try:
+            module_settings = self._save_and_collect_enabled_module_settings()
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Module Settings Save Failed",
+                f"The SEQ was not started.\n\n{exc}",
+            )
+            return
+        dirty = [
+            window.descriptor.name
+            for module_id, window in self.module_windows.items()
+            if module_id in self.enabled_modules and window.has_unapplied_edits()
+        ]
+        if dirty:
+            message = QMessageBox(self)
+            message.setIcon(QMessageBox.Icon.Warning)
+            message.setWindowTitle("Unapplied Module Settings")
+            message.setText("Some enabled modules contain unapplied setting changes.")
+            message.setInformativeText(
+                "\n".join(dirty)
+                + "\n\nChoose whether to apply those settings before the SEQ starts."
+            )
+            apply_button = message.addButton(
+                "Apply and Run", QMessageBox.ButtonRole.AcceptRole
+            )
+            run_button = message.addButton(
+                "Run Without Applying", QMessageBox.ButtonRole.DestructiveRole
+            )
+            cancel_button = message.addButton(
+                "Cancel", QMessageBox.ButtonRole.RejectRole
+            )
+            message.setDefaultButton(apply_button)
+            message.exec()
+            if message.clickedButton() is cancel_button:
+                return
+            if message.clickedButton() is apply_button:
+                futures: list[object] = []
+                for module_id in self.enabled_modules:
+                    window = self.module_windows.get(module_id)
+                    if window is not None and window.has_unapplied_edits():
+                        futures.append(
+                            self.runtime.apply_module_settings(
+                                module_id, module_settings[module_id]
+                            )
+                        )
+                self._pending_run = (module_settings, futures)
+                self._set_runtime_editable(False)
+                self.run_button.setEnabled(False)
+                self.run_status_label.setText("Applying Module Settings")
+                self.statusBar().showMessage("Applying module settings before Run...")
+                return
+            assert message.clickedButton() is run_button
+        self._start_sequence(module_settings)
+
+    def _start_sequence(self, module_settings: dict[str, dict[str, object]]) -> None:
         self.run_directory = None
-        self.runtime.run_sequence(self.document)
+        self.runtime.run_sequence(self.document, module_settings)
         self._set_runtime_editable(False)
         self.current_run_state = RunState.RUNNING
         self.run_status_label.setText("Sequence Running")
@@ -551,6 +652,10 @@ class MainWindow(QMainWindow):
         self.command_tree.setEnabled(editable)
         self.change_sequence_button.setEnabled(editable)
         self.change_data_button.setEnabled(editable)
+        self.modules_action.setEnabled(editable)
+        self.module_manager.set_operations_enabled(editable)
+        for window in self.module_windows.values():
+            window.set_sequence_running(not editable)
 
     def _drain_runtime_messages(self) -> None:
         for message in self.runtime.drain_messages():
@@ -560,10 +665,31 @@ class MainWindow(QMainWindow):
                 self._handle_event(message.payload)
             elif message.kind == "progress":
                 self._handle_progress(message.payload)
-            elif message.kind == "manual_measurement":
-                self.statusBar().showMessage("Manual measurement completed", 3000)
+            elif message.kind == "module_state":
+                self._handle_module_state(message.payload)
             elif message.kind == "startup_error":
                 QMessageBox.critical(self, "Runtime Startup Failed", str(message.payload))
+        self._check_pending_run()
+
+    def _check_pending_run(self) -> None:
+        if self._pending_run is None:
+            return
+        settings, futures = self._pending_run
+        if not all(future.done() for future in futures):
+            return
+        self._pending_run = None
+        errors = [future.exception() for future in futures if future.exception() is not None]
+        if errors:
+            self._set_runtime_editable(True)
+            self.run_button.setEnabled(True)
+            self.run_status_label.setText("Sequence Idle")
+            self.statusBar().showMessage("Run cancelled because module settings could not be applied", 5000)
+            return
+        for module_id in self.enabled_modules:
+            window = self.module_windows.get(module_id)
+            if window is not None and window.has_unapplied_edits():
+                window.mark_applied()
+        self._start_sequence(settings)
 
     def _handle_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
         self.current_snapshots = snapshots
@@ -621,6 +747,284 @@ class MainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_view.appendPlainText(f"{timestamp}  {level:<8}  {source}/{code}  {message}")
 
+    def _module_descriptor(self, module_id: str) -> ModuleDescriptor:
+        descriptor = next(
+            (item for item in self.module_descriptors if item.id == module_id), None
+        )
+        if descriptor is None:
+            raise KeyError(module_id)
+        return descriptor
+
+    def _module_settings_path(self, module_id: str) -> Path:
+        root = self.config.resolve_project_path(self.config.modules.data_directory)
+        return root / module_id / "settings.toml"
+
+    def _saved_module_settings(self, module_id: str) -> dict[str, object]:
+        return load_settings(self._module_settings_path(module_id))
+
+    def _save_module_window(self, module_id: str) -> dict[str, object]:
+        window = self.module_windows.get(module_id)
+        settings = window.settings() if window is not None else self._saved_module_settings(module_id)
+        save_settings(self._module_settings_path(module_id), settings)
+        return settings
+
+    def _save_and_collect_enabled_module_settings(self) -> dict[str, dict[str, object]]:
+        settings: dict[str, dict[str, object]] = {}
+        for module_id in sorted(self.enabled_modules):
+            settings[module_id] = self._save_module_window(module_id)
+        return settings
+
+    def _show_module_manager(self) -> None:
+        if self.module_manager.isMinimized():
+            self.module_manager.showNormal()
+        self.module_manager.show()
+        self.module_manager.raise_()
+        self.module_manager.activateWindow()
+
+    def _set_module_enabled(self, module_id: str, enabled: bool) -> None:
+        if self.current_run_state not in self.TERMINAL_STATES or self._pending_run is not None:
+            self.module_manager.update_state(
+                module_id,
+                module_id in self.enabled_modules,
+                "enabled" if module_id in self.enabled_modules else "disabled",
+                "Module changes are unavailable while a SEQ is running",
+            )
+            return
+        try:
+            if enabled:
+                settings = self._saved_module_settings(module_id)
+                self.runtime.enable_module(module_id, settings)
+                self.statusBar().showMessage(f"Initializing {self._module_descriptor(module_id).name}...")
+            else:
+                self._save_module_window(module_id)
+                self.runtime.disable_module(module_id)
+                self.statusBar().showMessage(f"Stopping {self._module_descriptor(module_id).name}...")
+        except Exception as exc:
+            self.module_manager.update_state(
+                module_id,
+                module_id in self.enabled_modules,
+                "enabled" if module_id in self.enabled_modules else "disabled",
+                str(exc),
+            )
+            QMessageBox.critical(self, "Module Operation Failed", str(exc))
+
+    def _ensure_module_window(self, module_id: str) -> ModuleWindow:
+        window = self.module_windows.get(module_id)
+        if window is not None:
+            return window
+        descriptor = self._module_descriptor(module_id)
+        window = ModuleWindow(descriptor, self)
+        window.load_settings(self._saved_module_settings(module_id))
+        window.applyRequested.connect(self._apply_module_settings)
+        window.manualActionRequested.connect(self._module_manual_action)
+        window.statusRefreshRequested.connect(self._refresh_module_status)
+        self.module_windows[module_id] = window
+        return window
+
+    def _handle_module_state(self, payload: dict[str, object]) -> None:
+        module_id = str(payload.get("module_id", ""))
+        enabled = bool(payload.get("enabled", False))
+        state = str(payload.get("state", "disabled"))
+        status = dict(payload.get("status", {}))
+        message = str(payload.get("message", ""))
+        was_enabled = module_id in self.enabled_modules
+        if enabled:
+            self.enabled_modules.add(module_id)
+        else:
+            self.enabled_modules.discard(module_id)
+        self.module_manager.update_state(module_id, enabled, state, message)
+        window = self.module_windows.get(module_id)
+        if enabled:
+            try:
+                window = self._ensure_module_window(module_id)
+            except Exception as exc:
+                QMessageBox.critical(
+                    self,
+                    "Module Window Failed",
+                    f"{module_id}: {exc}\n\nThe module will be disabled.",
+                )
+                self.runtime.disable_module(module_id)
+                return
+            window.update_runtime(state, status, message)
+            if not was_enabled:
+                window.load_settings(self._saved_module_settings(module_id))
+                window.show_in_front()
+            elif state == "faulted":
+                window.tabs.setCurrentIndex(1)
+                window.show_in_front()
+        elif window is not None and state == "disabled":
+            window.update_runtime(state, status, message)
+            window.hide()
+        self.measure_status_label.setText(
+            f"{len(self.enabled_modules)} of {len(self.module_descriptors)} measurement modules enabled"
+        )
+        if message:
+            self.statusBar().showMessage(message, 4000)
+
+    def _show_module_window(self, module_id: str) -> None:
+        if module_id not in self.enabled_modules:
+            self.statusBar().showMessage("Enable the module before opening its window", 3000)
+            return
+        window = self.module_windows.get(module_id)
+        if window is not None:
+            window.show_in_front()
+
+    def _apply_module_settings(self, module_id: str) -> None:
+        if self.current_run_state not in self.TERMINAL_STATES:
+            return
+        window = self.module_windows.get(module_id)
+        if window is None or module_id not in self.enabled_modules:
+            return
+        answer = QMessageBox.question(
+            window,
+            "Apply Module Settings",
+            "Send the displayed settings to the instrument now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        settings = window.settings()
+        try:
+            save_settings(self._module_settings_path(module_id), settings)
+        except Exception as exc:
+            QMessageBox.critical(window, "Module Settings Save Failed", str(exc))
+            return
+        self.runtime.apply_module_settings(module_id, settings)
+        window.message_label.setText("Applying settings...")
+
+    def _module_manual_action(
+        self, module_id: str, action: str, payload: dict[str, object]
+    ) -> None:
+        if self.current_run_state not in self.TERMINAL_STATES or self._pending_run is not None:
+            QMessageBox.warning(
+                self,
+                "SEQ Is Running",
+                "Manual module actions are available only while the SEQ is idle.",
+            )
+            return
+        self.runtime.module_manual_action(module_id, action, payload)
+
+    def _refresh_module_status(self, module_id: str) -> None:
+        if self.current_run_state in self.TERMINAL_STATES and self._pending_run is None:
+            self.runtime.refresh_module_status(module_id)
+
+    def _refresh_modules(self) -> None:
+        if self.enabled_modules or self.current_run_state not in self.TERMINAL_STATES:
+            QMessageBox.warning(
+                self,
+                "Refresh Unavailable",
+                "Stop the SEQ and disable every module before refreshing module sources.",
+            )
+            return
+        descriptors = self._discover_module_descriptors()
+        self.runtime.replace_module_descriptors(descriptors)
+        for window in self.module_windows.values():
+            window.allow_application_close()
+            window.close()
+        self.module_windows.clear()
+        self.module_descriptors = descriptors
+        self.module_manager.set_descriptors(descriptors)
+        self.measure_status_label.setText(
+            f"0 of {len(descriptors)} measurement modules enabled"
+        )
+        self.statusBar().showMessage(f"Found {len(descriptors)} measurement modules", 3000)
+
+    def _module_python_executable(self) -> Path | None:
+        configured = self.config.modules.python_executable.strip()
+        if configured:
+            candidate = self.config.resolve_project_path(configured)
+            return candidate if candidate.exists() else None
+        if not getattr(sys, "frozen", False):
+            return Path(sys.executable)
+        candidate = self.config.project_root / "runtime" / "python" / "python.exe"
+        return candidate if candidate.exists() else None
+
+    def _install_module_dependencies(self, module_id: str) -> None:
+        if self.enabled_modules:
+            QMessageBox.warning(
+                self,
+                "Dependency Install Unavailable",
+                "Disable every measurement module before changing the shared dependencies.",
+            )
+            return
+        descriptor = self._module_descriptor(module_id)
+        missing = missing_dependencies(descriptor)
+        if not missing:
+            QMessageBox.information(self, "Dependencies", "All declared dependencies are installed.")
+            return
+        python = self._module_python_executable()
+        if python is None:
+            QMessageBox.warning(
+                self,
+                "Python Runtime Not Configured",
+                "Set modules.python_executable in configs/default.toml or add runtime/python/python.exe.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Install Module Dependencies",
+            "Install the following packages into the shared Python environment?\n\n"
+            + "\n".join(missing),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        wheel_folders = [
+            self.config.resolve_project_path(self.config.modules.shared_wheels_directory),
+            descriptor.path / "wheels",
+        ]
+        offline_args = [str(python), "-m", "pip", "install", "--no-index"]
+        target = self.config.resolve_project_path(self.config.modules.site_packages_directory)
+        target.mkdir(parents=True, exist_ok=True)
+        offline_args.extend(["--target", str(target), "--upgrade"])
+        for folder in wheel_folders:
+            if folder.exists():
+                offline_args.extend(["--find-links", str(folder)])
+        offline_args.extend(missing)
+        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        result = subprocess.run(
+            offline_args,
+            capture_output=True,
+            text=True,
+            creationflags=creationflags,
+            check=False,
+        )
+        if result.returncode != 0:
+            online = QMessageBox.question(
+                self,
+                "Offline Install Failed",
+                "The required wheels were not available locally. Allow an online pip install?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if online != QMessageBox.StandardButton.Yes:
+                QMessageBox.warning(self, "Dependencies Not Installed", result.stderr[-2000:])
+                return
+            result = subprocess.run(
+                [
+                    str(python),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--target",
+                    str(target),
+                    "--upgrade",
+                    *missing,
+                ],
+                capture_output=True,
+                text=True,
+                creationflags=creationflags,
+                check=False,
+            )
+        if result.returncode == 0:
+            activate_shared_dependencies(self.config)
+            QMessageBox.information(self, "Dependencies Installed", "Installation completed.")
+            self._refresh_modules()
+        else:
+            QMessageBox.critical(self, "Dependency Install Failed", result.stderr[-3000:])
+
     def _open_manual_control(self, device_id: str) -> None:
         config = self.config.device(device_id)
         if config.kind is DeviceKind.MONITOR:
@@ -631,7 +1035,6 @@ class MainWindow(QMainWindow):
             dialog = ManualControlDialog(config, self)
             dialog.setRequested.connect(self._manual_set_target)
             dialog.holdRequested.connect(self.runtime.hold_device)
-            dialog.measureRequested.connect(lambda selected: self.runtime.measure_once([selected]))
             self.manual_dialogs[device_id] = dialog
         snapshot = self.current_snapshots.get(device_id)
         if snapshot is not None:
@@ -688,6 +1091,24 @@ class MainWindow(QMainWindow):
         if hasattr(self, "mdi"):
             QTimer.singleShot(0, self._fit_mdi_windows)
 
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() != QEvent.Type.WindowStateChange:
+            return
+        if self.isMinimized():
+            self._minimized_module_windows.clear()
+            for module_id in self.enabled_modules:
+                window = self.module_windows.get(module_id)
+                if window is not None and window.isVisible() and not window.isMinimized():
+                    self._minimized_module_windows.add(module_id)
+                    window.showMinimized()
+        else:
+            for module_id in tuple(self._minimized_module_windows):
+                window = self.module_windows.get(module_id)
+                if window is not None:
+                    window.showNormal()
+            self._minimized_module_windows.clear()
+
     def _data_browser_file_changed(self, path: str) -> None:
         self.data_window.setWindowTitle(f"{Path(path).name} - Data Browser")
 
@@ -714,7 +1135,8 @@ class MainWindow(QMainWindow):
             self,
             "About OpenLab Control",
             f"OpenLab Control {__version__}\n\n"
-            "Plugin-oriented control framework for external temperature, magnetic-field, and measurement devices.\n"
+            "Control framework for external temperature and magnetic-field devices, "
+            "with process-isolated measurement modules.\n"
             "Current mode: Simulating (does not control PPMS or real instruments).\n"
             f"UI scale: {self.ui_scale:.2f}x ({self.ui_scale_mode}).",
         )
@@ -731,6 +1153,18 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
+        for module_id in tuple(self.enabled_modules):
+            try:
+                self._save_module_window(module_id)
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Module Settings Save Failed",
+                    f"{module_id}: {exc}\n\nThe application will continue closing.",
+                )
+        for window in self.module_windows.values():
+            window.allow_application_close()
+            window.close()
         self.timer.stop()
         self.runtime.shutdown()
         event.accept()

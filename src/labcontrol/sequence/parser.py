@@ -235,19 +235,6 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
             source_line=line_number,
         ), None
 
-    if lowered.startswith("initialize "):
-        payload = text[len("Initialize "):].strip()
-        if " model " in payload:
-            model, config_path = payload.split(" model ", 1)
-        else:
-            model, config_path = payload, ""
-        return Command(
-            CommandType.INITIALIZE,
-            {"model": model.strip(), "config_path": config_path.strip()},
-            raw_text=text,
-            source_line=line_number,
-        ), None
-
     if lowered.startswith("set datafile "):
         payload = text[len("Set Datafile "):].strip()
         parts = payload.split(maxsplit=1)
@@ -264,20 +251,32 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
             source_line=line_number,
         ), None
 
-    if lowered == "measure" or lowered.startswith("measure "):
-        params: dict[str, object] = {"devices": "all", "repeats": 1, "interval_seconds": 0.0}
-        for token in text.split()[1:]:
-            if "=" not in token:
-                continue
-            key, value = token.split("=", 1)
-            key = key.lower()
-            if key == "devices":
-                params[key] = value
-            elif key == "repeats":
-                params[key] = int(value)
-            elif key in ("interval", "interval_seconds"):
-                params["interval_seconds"] = float(value.rstrip("sS"))
-        return Command(CommandType.MEASURE, params, raw_text=text, source_line=line_number), None
+    if lowered == "measure":
+        return Command(CommandType.MEASURE, {}, raw_text=text, source_line=line_number), None
+    if lowered.startswith("measure "):
+        return Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        ), SequenceIssue(
+            line_number,
+            "error",
+            "Measure has no parameters; use exactly 'Measure'",
+            text,
+        )
+    if lowered.startswith("initialize"):
+        return Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        ), SequenceIssue(
+            line_number,
+            "error",
+            "Initialize is no longer a SEQ command; enable the module in Modules before Run",
+            text,
+        )
 
     if lowered.startswith("remark"):
         return Command(
@@ -389,9 +388,6 @@ def format_command(command: Command) -> str:
     if command.raw_text is not None:
         return command.raw_text
     p = command.params
-    if command.type is CommandType.INITIALIZE:
-        suffix = f" model {p.get('config_path', '')}" if p.get("config_path") else ""
-        return f"Initialize {p.get('model', 'device')}{suffix}"
     if command.type is CommandType.SET_DATAFILE:
         scope = "external " if str(p.get("path_scope", "Run folder")) == "Custom folder" else ""
         return (
@@ -441,14 +437,7 @@ def format_command(command: Command) -> str:
             f"{int(p.get('steps', 60))} steps"
         )
     if command.type is CommandType.MEASURE:
-        extras: list[str] = []
-        if str(p.get("devices", "all")) != "all":
-            extras.append(f"devices={p['devices']}")
-        if int(p.get("repeats", 1)) != 1:
-            extras.append(f"repeats={int(p['repeats'])}")
-        if float(p.get("interval_seconds", 0.0)) > 0:
-            extras.append(f"interval={float(p['interval_seconds']):g}s")
-        return "Measure" + (" " + " ".join(extras) if extras else "")
+        return "Measure"
     if command.type is CommandType.REMARK:
         return f"Remark {p.get('text', '')}".rstrip()
     if command.type is CommandType.CALL_SEQUENCE:

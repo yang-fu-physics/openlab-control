@@ -11,6 +11,7 @@ from ..devices.base import DeviceError
 from ..events import EventManager
 from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, EventNotice, RunProgress, RunState, Severity, StabilityState
+from ..measurement.service import MeasurementModuleService
 from ..plugins import DeviceManager
 from ..units import convert_value
 from .model import Command, CommandType, SequenceDocument
@@ -31,12 +32,14 @@ class SequenceEngine:
         devices: DeviceManager,
         events: EventManager,
         logger: DatRunLogger,
+        modules: MeasurementModuleService | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.config = config
         self.devices = devices
         self.events = events
         self.logger = logger
+        self.modules = modules or MeasurementModuleService((), events, devices)
         self.progress_callback = progress_callback or (lambda _: None)
         self.state = RunState.IDLE
         self._pause_gate = asyncio.Event()
@@ -58,7 +61,11 @@ class SequenceEngine:
         ):
             self.request_stop(fatal=True, message=notice.event.message)
 
-    async def run(self, document: SequenceDocument) -> RunState:
+    async def run(
+        self,
+        document: SequenceDocument,
+        module_settings: dict[str, dict[str, object]] | None = None,
+    ) -> RunState:
         if self.state in (RunState.RUNNING, RunState.PAUSED, RunState.STOPPING):
             raise RuntimeError("A sequence is already running")
         self._abort_requested = False
@@ -71,7 +78,31 @@ class SequenceEngine:
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
         self.state = RunState.RUNNING
-        run_paths = self.logger.open_run(document.name, serialize_sequence(document))
+        try:
+            descriptors, module_status = await self.modules.prepare_sequence(
+                module_settings or {}
+            )
+            run_paths = self.logger.open_run(
+                document.name,
+                serialize_sequence(document),
+                descriptors,
+                module_settings or {},
+                module_status,
+            )
+        except Exception as exc:
+            self.state = RunState.FAULTED
+            self._fatal_abort = True
+            self._abort_message = str(exc)
+            self.events.report(
+                Severity.ERROR,
+                "logging",
+                "RUN_PREPARATION_FAILED",
+                str(exc),
+            )
+            await self.modules.end_sequence("error")
+            self._publish(self._abort_message)
+            self.logger.close()
+            return self.state
         self.events.report(
             Severity.INFO,
             "logging",
@@ -82,6 +113,8 @@ class SequenceEngine:
         self._publish("Sequence started")
         self.events.report(Severity.INFO, "sequence", "RUN_STARTED", f"Running {document.name}")
         try:
+            self._check_control()
+            await self.modules.begin_sequence()
             await self._execute_commands(document.commands, [])
             self._check_control()
         except SequenceAbort:
@@ -108,8 +141,24 @@ class SequenceEngine:
             self.events.report(Severity.ERROR, "sequence", "UNHANDLED_EXCEPTION", str(exc))
         else:
             self.state = RunState.COMPLETED
-            self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
         finally:
+            reason = {
+                RunState.COMPLETED: "completed",
+                RunState.STOPPED: "stopped",
+            }.get(self.state, "error")
+            cleanup_succeeded = await self.modules.end_sequence(reason)
+            if not cleanup_succeeded:
+                self.state = RunState.FAULTED
+                self._abort_message = "One or more modules failed to end the sequence safely"
+                await self.devices.hold_all()
+                self.events.report(
+                    Severity.INFO,
+                    "sequence",
+                    "MODULE_END_SEQUENCE_FAILED",
+                    self._abort_message,
+                )
+            elif self.state is RunState.COMPLETED:
+                self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
             self._publish(self._abort_message or self.state.value)
             self.logger.close()
             self.events.resolve_source("logging")
@@ -176,15 +225,6 @@ class SequenceEngine:
 
     async def _execute_command(self, command: Command, path: list[str]) -> None:
         p = command.params
-        if command.type is CommandType.INITIALIZE:
-            self.events.report(
-                Severity.INFO,
-                "sequence",
-                "INITIALIZE_ACCEPTED",
-                f"Simulated initialization: {p.get('model', 'device')} {p.get('config_path', '')}".rstrip(),
-                self._current_path,
-            )
-            return
         if command.type is CommandType.SET_DATAFILE:
             destination = self.logger.set_datafile(
                 str(p.get("path", "experiment.dat")),
@@ -240,7 +280,7 @@ class SequenceEngine:
             await self._scan_time(command, path)
             return
         if command.type is CommandType.MEASURE:
-            await self._measure(command)
+            await self._measure()
             return
         if command.type is CommandType.REMARK:
             self.events.report(
@@ -331,20 +371,9 @@ class SequenceEngine:
             point_path = path + [f"time {index}/{steps}={offset:g} s"]
             await self._execute_commands(command.children, point_path)
 
-    async def _measure(self, command: Command) -> None:
-        p = command.params
-        device_text = str(p.get("devices", "all")).strip()
-        selected = None if not device_text or device_text.lower() == "all" else [
-            item.strip() for item in device_text.split(",") if item.strip()
-        ]
-        repeats = max(1, int(p.get("repeats", 1)))
-        interval = max(0.0, float(p.get("interval_seconds", 0.0)))
-        for index in range(repeats):
-            await self._checkpoint()
-            values = await self.devices.measure(selected)
-            self.logger.write_measurement(self.devices.snapshots(), values, self._current_path)
-            if index + 1 < repeats:
-                await self._interruptible_sleep(interval)
+    async def _measure(self) -> None:
+        await self._checkpoint()
+        await self.modules.measure_all(self.logger, self._current_path)
 
     async def _call_sequence(self, requested: str, path: list[str]) -> None:
         source = Path(requested)

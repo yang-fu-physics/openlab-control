@@ -4,209 +4,198 @@
 
 运行：
 
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```text
+.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-当前覆盖：
+测试文件与重点：
 
-- 用户 SEQ 模板无警告解析。
-- 模板加载—保存逐行往返。
-- `F` 禁用行、嵌套禁用块和 T/F 往返保存。
-- 多层 Scan AST。
-- Scan Temperature Linear/List 参数切换、单行语法往返和错误列表拒绝。
-- 温度 List 的非单调顺序、重复点执行，以及首次移动前整表上下限预检。
-- SEQ Set/Scan Temperature 与 Set/Scan Field 参数窗口读取当前设备配置的目标/端点/速率范围，磁场 Oe/T 限制同步换算。
-- Scan Temperature List 在弹窗确认阶段拒绝超出配置上下限的任意点，执行器继续整表复检。
-- 自定义 DAT 绝对路径的 `external` SEQ 往返、实际写入与 `DATAFILE_SELECTED` 记录。
-- 未标记的旧式外部路径仍重定向并产生 `DATAFILE_RELOCATED`。
-- 未知指令保留。
-- 不平衡 End Scan 检测。
-- T/Oe 换算。
-- 默认场设备以 Oe 配置，并保持与旧 ±9 T、1 T/min 安全边界等价。
-- 温度三位/Oe 两位精度覆盖状态卡、手动控制、SEQ 格式化和 DAT 控制列。
-- 磁场命令参数窗口切换 Oe/T 时同步换算目标、Scan 端点和速率；旧 T SEQ 保持六位精度。
-- 并发轮询完成时不得用旧快照覆盖刚写入的新目标；接近零的读数不得显示为负零。
-- 仿真插件加载、轮询和测量。
-- 安全上下限与速率拒绝。
-- 误差、斜率、持续时间判稳。
-- 判稳超时。
-- Warning 锁存、去重、解除和再次发生。
-- Error 中止并 Hold。
-- 嵌套扫温—扫场—测量。
-- DAT Header、稀疏通道和事件解除记录。
-- 原始 DAT 的 `[Data]`、2,458 行、数值列和稀疏通道解析。
-- 重复列名、短行补齐、无 `[Data]` 文件拒绝及数值点到源行映射。
-- Data Browser 拖入加载、默认轴、点命中、文件追加自动刷新及缩放范围保持。
-- 多 Y Overlay 共享范围、Stacked 共享 X/独立 Y，以及框选目标子图行为。
-- Y 多选窗口连续勾选及至少一个 Y 约束。
-- X/Y Log10 变换、非正值排除、等对数间距、状态显示和新窗口恢复。
-- `.plt` v2 尺度往返、v1 Linear 兼容、规范路径、格式校验、兼容文件名和自动保存。
-- SEQ Ctrl/Shift 多行选择、右键菜单、批量 Ctrl+D/Ctrl+E/Delete/Ctrl+C/Ctrl+V、Scan 深复制、父子去重和运行期编辑锁。
-- 执行器跳过禁用普通命令和禁用 Scan 子树，并记录跳过事件。
-- `2nd Stage` Monitor 能连接、轮询和显示，但没有目标、稳定性或控制双击信号；核心拒绝对它设置目标。
-- SEQ 在窄窗口和长命令下产生水平滚动范围后，重建仍回到最左侧并显示命令前缀。
-- 主窗口缩小到 1180×720 后，SEQ 和 Data Browser 浮动窗口仍完整位于中央工作区内。
-- 关闭 SEQ 浮动窗口后点击 New，窗口外框、文本列表和 `End Sequence` 行全部恢复并成为活动窗口。
-- 超长 DAT 路径和 SEQ 名称采用中间省略、Tooltip 保留全文，且左侧 Dock 最小宽度不增加。
-- 分辨率算法对 1366×768、1080p、2K 和 4K 分别返回 1.00×、1.00×、1.15× 和 1.40×。
-- `ui_scale = "auto"`、合法手动倍率及越界配置分别被正确解析、应用或拒绝。
+| 文件 | 重点 |
+|---|---|
+| `test_sequence_parser.py` | 单行语法、任意嵌套、List、T/F、旧 Initialize/Measure 参数拒绝 |
+| `test_sequence_editor.py` | 多行右键/键盘、父子去重、运行锁定 |
+| `test_engine.py` | Scan、Hold、Warning/Error、模块进程 Measure、运行目录 |
+| `test_measurement_modules.py` | 清单、依赖冲突、Settings、完整生命周期、无模块、不可关闭窗口 |
+| `test_datafile.py` | 模块前缀列、Monitor、Settings/Status 快照、事件 Resolve |
+| `test_devices_and_units.py` | 控制/Monitor 插件、锁、限制与 Oe/T |
+| `test_events_and_stability.py` | 活动事件去重、数值判稳与超时 |
+| `test_main_window.py` | MDI、SEQ 重开、长路径、配置限制 |
+| `test_data_browser.py` | 多 Y、Overlay/Stacked、Log、刷新、最近点 |
+| `test_plot_format.py` | `.plt` 保存、恢复和回退 |
+| `test_status_tile.py` | Monitor 只读、格式精度、参数弹窗 |
+| `test_ui_scaling.py` | 1080p/2K/4K 自动和手动缩放 |
 
-## 无界面系统测试
+任何发布版本必须 100% 通过。失败不得通过删除测试或扩大安全容差掩盖。
 
-```powershell
-.\.venv\Scripts\python.exe run.py --headless-demo --timeout 120
+## 源码冒烟
+
+### GUI
+
+```text
+.venv\Scripts\python.exe run.py --gui-smoke --screenshot source-gui-smoke.png
 ```
 
-通过条件：
+验收：退出码 0；截图非空；主窗口只有温度、磁场和 Monitor 状态块；工具栏有 Modules；SEQ 与右栏可读。
 
-- 退出码为 0。
-- 最终状态为 Completed。
-- `runs/` 新增唯一运行目录。
-- 运行目录包含四个标准文件。
-- DAT 有测量数据且所有行列数一致。
-- 事件文件包含 RUN_STARTED 和 RUN_COMPLETED。
+### 无界面
 
-## GUI 冒烟测试
+```text
+.venv\Scripts\python.exe run.py --headless-demo --sequence examples\module_measurement.seq --timeout 30
+```
 
-- 主窗口在 10 秒内启动。
-- 左、中、右和底部区域均可见。
-- 四个仿真设备进入已连接状态。
-- `2nd Stage` 显示 `Monitoring` 和只读说明；双击不弹出控制窗口。
-- 工具栏显示 New/Open/Save/Run/Pause/Stop/Live Trend/Data Browser 矢量图标。
-- 菜单、SEQ 和命令栏不因字体过大而截断；设备数值与运行状态仍有明确视觉强调。
-- 强制 1.40× 时，主窗口、四个状态卡片、工具栏、Data Browser 坐标标签和底部说明完整可读。
-- 双击温度块出现控制窗口。
-- 双击磁场块出现控制窗口。
-- 温度卡和手动窗口显示三位小数；磁场卡和手动窗口显示 Oe 与两位小数。
-- 双击测量块出现通道窗口。
-- 右侧双击命令出现参数弹窗。
-- 双击四类温度/磁场 Set/Scan，确认底部 Configured limits 与配置一致，目标/端点/速率无法越过范围；磁场切换 T 后限制按 10000 倍换算。
-- Scan Temperature List 输入一个越界点，确认 OK 不关闭窗口并显示具体点号和配置范围。
-- 参数确认后增加一行。
-- Scan 中插入命令后缩进正确。
-- 保存再加载结构不变。
-- 关闭 SEQ 子窗口后分别用 New 和左侧 Edit 恢复，确认不是灰色空窗口。
-- Run 后编辑器和命令栏禁用。
-- Pause/Resume 按钮文字和状态正确。
-- Stop 后控制设备保持。
-- Graph 窗口能显示趋势。
-- View Log 能显示事件。
+由于每次启动模块默认 Disabled，预期 Measure 报一个 `NO_ENABLED_MODULES` Warning、写系统状态行并 Completed。
 
-## SEQ 编辑器验收
+再验证独立模块进程：
 
-1. 在普通命令上右击，确认依次出现 Disable、Enable、Delete、Copy、Paste。
-2. 点击 Disable，确认该行显示 `[Disabled]`、灰色删除线；保存后对应行首为 `F`。
-3. 重新打开文件，确认禁用状态保留；点击 Enable 后保存为 `T`。
-4. 分别使用 `Ctrl+D`、`Ctrl+E` 和 `Delete`，确认与右键操作一致。
-5. 选中包含多层子命令的 Scan，按 `Ctrl+C`，在另一位置按 `Ctrl+V`，确认完整层级复制且可独立编辑。
-6. 在 `End Scan` 上执行 Disable/Copy/Delete，确认作用于对应完整 Scan 块。
-7. 在 `End Sequence` 上 Paste，确认副本追加到顶层末尾。
-8. 运行含禁用普通命令和禁用 Scan 的 SEQ，确认这些设备动作和测量均未执行，事件日志出现 `STEP_SKIPPED_DISABLED`。
-9. Sequence 运行期间确认 Disable、Enable、Delete、Paste 被禁用，Copy 可用。
-10. 按住 `Ctrl` 选择不连续的多行，再按 `Shift` 扩展连续范围，确认全部目标行同时保持选中。
-11. 对多行分别执行 Disable、Enable 和 Delete，确认每次操作只产生一次文档变更且覆盖全部选中命令。
-12. 以反向点击顺序选择多行后 Copy/Paste，确认粘贴内容仍按原 SEQ 从上到下排列，且全部新顶层副本保持选中。
-13. 同时选择父 Scan、其子命令和对应 End Scan 后 Copy/Paste，确认只生成一份完整 Scan 树，没有重复子项。
-14. 多选后右击其中已选行，确认保留整组；右击未选行，确认切换为只选该行。
+```text
+.venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
+```
+
+预期 Completed；3 次 Measure 各流式写入 R1–R4，共 12 行模块数据。`--enable-module` 只用于无界面验收，不改变 GUI 每次启动全部 Disabled 的规则。
+
+### 模块视觉预览
+
+```text
+.venv\Scripts\python.exe tools\capture_module_preview.py
+```
+
+验收：生成 `module-manager-preview.png` 与 `module-window-preview.png`；Manager 只有三列；模块默认页是 Settings；Apply 按钮存在。
+
+## SEQ 验收
+
+1. 新建 SEQ，逐一双击右栏命令并插入。
+2. 双击已有命令，确认参数回填。
+3. 嵌套 Temperature → Field → Time → Measure，保存、重开，层级不变。
+4. Linear/List 切换正确；List 保留重复和回扫。
+5. 输入越界 List，确认在移动前拒绝。
+6. 多选父 Scan 和子行，Delete/Copy 只处理最外层。
+7. Disable Scan 后子 Measure 不执行；Enable 后恢复。
+8. 手工写 `Measure devices=...`，Run 被 Validation Error 阻止。
+9. 手工写 Initialize，Run 被 Validation Error 阻止。
+10. Running 时编辑/模块变更锁定，Copy 可用。
+
+## Modules Manager 验收
+
+1. 重新启动，确认所有模块 Disabled。
+2. Enable 示例模块；初始化期间行不可操作，成功后才勾选。
+3. 双击 Enabled 行，窗口置前。
+4. 尝试关闭/Alt+F4，窗口仍存在。
+5. 最小化主窗口，模块窗口一起最小化；恢复后恢复。
+6. Disable 成功，窗口隐藏。
+7. SEQ 运行中 Enable/Disable/Refresh/Install 均不可用。
+8. 所有模块 Disabled 时 Refresh 生效。
+9. 任一模块 Enabled 时 Install Dependencies 被阻止。
+10. 制造无效 manifest，程序仍启动，该模块禁止 Enable并显示原因。
+
+## Settings/Status 验收
+
+1. 修改 Settings 后关闭应用，确认 `module_data/<id>/settings.toml` 保存。
+2. 重启 Enable，值自动载入，但 Status 显示未 Apply。
+3. Apply 取消时不发送；确认时发送并更新状态。
+4. 未 Apply 修改后 Run，逐一验证三个选项。
+5. Run Without Applying 后检查运行快照：settings 是界面值，status JSON 是实际值。
+6. Running 时 Settings 灰化，Status 可继续显示。
+7. 手动 Measure Now 只更新 Status/Run Log，不增加 experiment.dat 行。
+
+## 生命周期故障注入
+
+为测试模块分别让以下函数抛异常：
+
+| 阶段 | 预期 |
+|---|---|
+| initialize | Disabled、Error、无窗口或窗口不显示、工作进程退出 |
+| apply_settings | 保持 Enabled、未标 Applied、Error |
+| begin_sequence | Run Faulted、调用 end_sequence(error)、不 abort |
+| measure Warning | 继续、有效行保留、一次活动弹窗 |
+| measure Error | Run Faulted、其他已到达行保留、end(error)、不 abort |
+| end_sequence(completed) | 原完成改为 Faulted、模块 Enabled、Status 可见、不 abort |
+| abort on Disable | 仍 Enabled、窗口打开/Faulted、Error |
+
+记录每个阶段的调用顺序，确保不会把 Stop/Error 误当 Disable。
+
+## 并行与流式数据验收
+
+1. Enable 两个仿真模块，让延时不同。
+2. 一条 Measure 同时启动两者。
+3. 各模块内部行顺序保持。
+4. 模块间行按实际到达顺序混排。
+5. 中央等待两者完成后才执行下一条 Remark/Set。
+6. 每行温度/场/Monitor 可不同且采样时间合理。
+7. 每个模块列有 ID 前缀，无碰撞。
+8. 发未声明列，确认 Error/Faulted。
+9. 发复杂对象值，确认类型 Error。
+10. 无模块 Measure 写恰好一行系统状态并继续。
+
+## Warning/Error 去重验收
+
+1. 同一 module/code/context 连续 10 次 Warning。
+2. 只出现一个弹窗；events.dat Raised 一次，Count 在活动对象累加。
+3. Resolve 后再次触发，允许新弹窗。
+4. context 改为另一通道，允许独立弹窗。
+5. Error 在 Idle 只报警；在 Running/Paused 中止 SEQ。
+6. Error 后确认模块只 end(error)，未 abort。
 
 ## Data Browser 验收
 
-1. 通过 `Graph → Data Browser` 打开窗口，确认它是与 SEQ 同属中央 MDI 区域的可移动子窗口。
-2. 拖入 `examples/template_original.dat`，确认标题和顶部路径显示该文件。
-3. 确认状态显示 2,458 行；若同目录有示例 PLT，应恢复 X 为 `Time(s)` 及其 Y 列和布局。
-4. 图内右键选择 `Select Y Series...`；连续勾选 `Temp(K)`、`R1(Ohm)`、`R2(Ohm)`，确认窗口不会因单次勾选关闭，按 OK 后三条曲线一次更新。
-5. 选择 `Overlay`，确认三条曲线位于同一坐标区并共用 Y 范围。
-6. 选择 `Stacked / Shared X`，确认三幅图纵向排列、X 刻度对齐且各自 Y 范围独立。
-7. 在第二幅子图左键框选，确认所有子图 X 同时放大，只有第二幅图 Y 范围改变；点击 `Reset Zoom` 恢复。
-8. 右键把 X 改为 `Row Number`，确认全部子图横轴一起改为数据行序号。
-9. 双击任一曲线附近的数据点，确认详情窗口显示命中的 Y 名称、行号和该行全部列值。
-10. 确认 DAT 旁生成同主文件名 `.plt`；关闭窗口后重新打开 DAT，布局、X/Y 和缩放恢复。
-11. 保持窗口打开，向被浏览文件追加合法数据行，确认不超过约 1.5 秒出现新点。
-12. 人工放大后再次追加，确认数据刷新但当前缩放范围保持。
-13. 开始新的 Sequence，确认浏览器仍显示原先拖入的文件，不自动切换到新实验 DAT。
-14. 故意写入错误版本或不存在列的 PLT，确认 DAT 仍能打开、错误设置不被部分套用且 DAT 内容不变。
-15. 分别把 `X Scale`、`Y Scale` 设为 `Logarithmic`，确认两轴按 Log10 等间距显示并在状态栏标为 Log。
-16. 使用包含负值、零和正值的数据，确认对数模式只画正值、在非正值处断线且双击不会命中非正值。
-17. 在 Log10 模式框选放大，确认范围严格为正；关闭后重新打开 DAT，X/Y 尺度和缩放从版本 2 PLT 恢复。
-18. 加载不含 `x_scale`/`y_scale` 的版本 1 PLT，确认两轴以 Linear 恢复；切换尺度时确认原人工缩放被清除。
+1. 打开非当前 Run 的任意 DAT。
+2. 外部追加行，图自动刷新且保持 `.plt` 格式。
+3. 一次勾选多个 Y 后对话框才关闭。
+4. Overlay 与 Stacked 共享 X 正确。
+5. X/Y Log 独立；非正点不绘制且不崩溃。
+6. 框选放大、Reset Zoom。
+7. 双击数据点显示完整源行。
+8. 关闭重开，`.plt` 恢复；DAT 列变化时安全回退。
 
-## Warning 验收
+## Windows 发布包验证
 
-1. 启动含两个相同 Inject Warning 的 SEQ。
-2. 确认第一次出现弹窗。
-3. 关闭弹窗。
-4. 确认第二次没有再次弹窗。
-5. 确认 Measure 仍执行。
-6. 检查事件活动计数为 2 或解除记录中 Count 为 2。
-7. 解除事件后再次触发，确认重新弹窗。
+```text
+build.bat
+```
 
-## Error 验收
+检查：
 
-1. 先让仿真磁场处于变化中。
-2. 触发 Error。
-3. 确认后续 Measure 未执行。
-4. 确认状态为 Faulted。
-5. 确认 Field Target 等于中止后的 Current（允许一个轮询周期误差）。
-6. 确认弹窗只出现一次。
-7. 确认 events.dat 有 Error 和运行中止记录。
+- `dist/OpenLabControl/OpenLabControl.exe`；
+- `configs/`、`examples/`、`docs/`、`modules/`、`plugin_templates/`；
+- 可写 `runs/`、`module_data/`、`module_runtime/site-packages/`、`wheels/`；
+- EXE GUI smoke；
+- EXE headless demo（无模块和 `--enable-module simulated_transport` 两种）；
+- 在没有开发仓库/PYTHONPATH 的干净目录仍能发现 `simulated_transport`。
 
-## 真实设备上线前检查
+## 真实设备上线前
 
-### 文件和配置
+### 文档与接线
 
-- [ ] 配置文件单独版本控制。
-- [ ] 地址、串口、GPIB 和终止符双人核对。
-- [ ] 单位双人核对。
-- [ ] 上下限和最大速率符合设备与实验室规定。
-- [ ] 中止策略明确。
-- [ ] 数据保存磁盘空间充足。
+- [ ] 型号、序列号、固件、接口、地址记录。
+- [ ] 线缆、接地、屏蔽、急停、互锁和最大允许输出记录。
+- [ ] 厂商手册中的通信/状态/错误码映射完成。
+- [ ] 每个通信操作有限超时。
+- [ ] 人工恢复/断电流程可在 UI 不工作时执行。
 
-### 只读连接
+### Device Plugin
 
-- [ ] 设备身份与预期型号一致。
-- [ ] 固件版本在支持列表。
-- [ ] 连续轮询至少 30 分钟无泄漏和锁死。
-- [ ] 当前值与设备前面板一致。
-- [ ] 时间戳、单位和通道映射正确。
-- [ ] 断线产生一次正确告警。
-- [ ] 恢复连接后告警解除。
+- [ ] 只读 connect/poll 连续运行至少 1 小时。
+- [ ] 温场单位、符号和速率换算与独立仪表核对。
+- [ ] 最小风险 Target；Stable 判定与人工判断对比。
+- [ ] Stop/Error Hold 行为实测。
+- [ ] 断线/重连不会重复下发危险目标。
 
-### 控制验证
+### Measurement Module
 
-- [ ] 在安全区域执行最小目标变化。
-- [ ] 正向和反向速率正确。
-- [ ] 超过目标上限被软件拒绝。
-- [ ] 超过速率上限被软件拒绝。
-- [ ] 判稳与独立观察一致。
-- [ ] 判稳超时按配置处理。
-- [ ] Hold 不归零、不继续 Ramp。
-- [ ] Stop 后设备真实状态符合预期。
+- [ ] Enable 只初始化，不改变源输出/范围。
+- [ ] Settings 与实际 Status 逐项核对。
+- [ ] Apply 顺序、范围、互锁经过低风险测试。
+- [ ] begin/measure/end/abort 每条命令有仪表侧证据。
+- [ ] completed/stopped/error 后输出状态符合设计。
+- [ ] Disable abort 真实关闭/退出所需输出状态。
+- [ ] R1–R4 数据、单位、极性、时间戳与独立读数一致。
+- [ ] 超量程为 Warning；硬件报警/互锁/关键温度为 Error。
+- [ ] 多模块不会争用同一物理接口/仪表。
 
-### 故障验证
+### 长时与恢复
 
-- [ ] 查询超时。
-- [ ] 设置超时。
-- [ ] 格式错误响应。
-- [ ] 设备 Error 队列。
-- [ ] 通信线断开。
-- [ ] 程序关闭。
-- [ ] 计算机重启后的人工恢复流程。
+- [ ] 典型完整 SEQ 小范围运行成功。
+- [ ] 8–24 小时长时运行无句柄/内存/文件增长异常。
+- [ ] 拔线、仪表关机、网络中断、磁盘不可写、应用关闭均演练。
+- [ ] 运行目录能用 SEQ+配置+Settings+Status+events 完整复盘。
 
-### 实验序列
-
-- [ ] Wait。
-- [ ] Set Temperature Settle/Sweep。
-- [ ] Set Field Settle/Sweep。
-- [ ] Scan Time。
-- [ ] Scan Temperature Linear（Settle/Sweep）。
-- [ ] Scan Temperature List（Settle/Sweep、非单调点、重复点）。
-- [ ] Scan Temperature List 中间或末尾越界时，在第一点移动前拒绝整表。
-- [ ] Scan Field。
-- [ ] 两层嵌套。
-- [ ] 三层嵌套。
-- [ ] Call Sequence。
-- [ ] Warning 后继续。
-- [ ] Error 后停止。
-
-只有所有相关项目完成并签字记录后，才能把插件配置用于无人值守实验。
+未完成以上真实硬件清单前，不得把仿真通过等同于设备安全认证。

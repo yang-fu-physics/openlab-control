@@ -29,10 +29,6 @@ class TrendCanvas(QWidget):
                 DeviceKind.MONITOR,
             ) and snapshot.current is not None:
                 self.history[snapshot.display_name].append((now, snapshot.current))
-            elif snapshot.kind is DeviceKind.MEASUREMENT:
-                for channel, value in snapshot.channels.items():
-                    if value is not None:
-                        self.history[f"{snapshot.display_name}.{channel}"].append((now, value))
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802

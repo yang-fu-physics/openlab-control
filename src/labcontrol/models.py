@@ -15,7 +15,6 @@ class Severity(str, Enum):
 class DeviceKind(str, Enum):
     TEMPERATURE = "temperature"
     FIELD = "field"
-    MEASUREMENT = "measurement"
     MONITOR = "monitor"
 
 
@@ -24,7 +23,6 @@ class DeviceActivity(str, Enum):
     IDLE = "idle"
     MOVING = "moving"
     HOLDING = "holding"
-    MEASURING = "measuring"
     FAULT = "fault"
 
 
@@ -60,7 +58,6 @@ class DeviceSnapshot:
     rate_per_minute: float | None = None
     activity: DeviceActivity = DeviceActivity.IDLE
     stability: StabilityState = StabilityState.NOT_APPLICABLE
-    channels: dict[str, float | None] = field(default_factory=dict)
     message: str = ""
 
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.0 - 2026-07-23
+
+- 将测量仪表从温度/磁场/监视设备体系中完全拆分，移除旧 `measurement` 设备、Transport 状态块和旧 Measure 参数。
+- 新增可配置 `modules/` 源码发现、`module.toml` 清单、API 版本检查、依赖检查与共享依赖目录。
+- 每个已启用模块使用独立工作进程持有仪表通信；自定义 PySide6 前端留在主界面进程，二者通过受控 IPC 通信。
+- 新增 Modules 工具栏按钮和管理器；每次启动全部 Disabled，Enable 成功后才勾选并打开模块窗口。
+- 模块窗口为主窗口拥有的独立浮动窗口，固定 Settings/Status 两页、默认 Settings，用户不能直接关闭。
+- 实现 `initialize / apply_settings / begin_sequence / measure / end_sequence / abort` 生命周期及失败语义。
+- SEQ `Measure` 改为无参数单行，所有 Enabled 模块并行测量，中央程序等待全部完成后继续。
+- 模块可流式返回多行结果；中央程序在每次结果到达时采集最新温度、磁场和 Monitor 快照并立即写 DAT。
+- DAT 列由运行开始时的模块清单固定并自动加模块 ID 前缀；模块不能直接写实验 DAT。
+- Run 前自动保存启用模块的设置，并在运行目录保存设置、实际状态、SEQ 与主配置快照。
+- 新增设置未 Apply 时的 `Apply and Run / Run Without Applying / Cancel` 选择。
+- 新增共享离线 wheels、显式在线安装确认和依赖冲突禁用规则。
+- 修改共享依赖前必须 Disable 全部模块，避免运行中的模块进程加载到被替换文件。
+- 新增完整 `simulated_transport` 示例模块：自定义界面、R1–R4 顺序流式四行、手动操作、状态/Warning 列和结束清理。
+- 新增测量模块模板、专项自动测试、界面预览及模块开发/依赖/上线工作流文档。
+
 ## 0.9.2 - 2026-07-23
 
 - SEQ 的 Set/Scan Temperature 与 Set/Scan Field 参数弹窗现在按 `device_id` 读取配置文件中的 `min_value`、`max_value` 和 `max_rate_per_minute`。

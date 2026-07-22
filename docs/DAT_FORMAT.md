@@ -1,92 +1,118 @@
 # DAT 与事件格式
 
-`examples/template_original.dat` 是本项目收到的原始 DAT 模板的逐字节副本；`examples/template_excerpt.dat` 是便于阅读的小型摘录。实现以原始模板中的 `[Header]`、`[Data]`、LabVIEW 1904 时间戳和稀疏通道行结构为兼容基线。
+OpenLab Control 使用带 `[Header]` / `[Data]` 段的逗号分隔 DAT。中央框架是实验 DAT 的唯一写入者；Measurement Module 只能声明列并发出行数据。
 
-## 测量数据文件
+## 运行目录
 
-默认文件：`experiment.dat`
+默认结构：
 
-结构：
+```text
+runs/20260723_120000_nested_scan/
+├─ sequence.seq
+├─ configuration.toml
+├─ module_settings/
+│  ├─ simulated_transport.settings.toml
+│  └─ simulated_transport.status-at-start.json
+├─ experiment.dat
+└─ events.dat
+```
+
+- `sequence.seq`：实际执行文档快照，包括 T/F 状态。
+- `configuration.toml`：主配置完整副本。
+- `*.settings.toml`：本次 Run 时模块 Settings 页的期望值。
+- `*.status-at-start.json`：Run 开始前从模块后台读取的实际状态。
+- 只为 Enabled 模块生成设置/状态快照。
+
+若 SEQ 使用 external `Set Datafile`，实验 DAT 可在自定义目录，但其他文件仍在自动运行目录。
+
+## 实验 DAT
+
+最小结构：
 
 ```text
 [Header]
-; comments
-BYAPP,OpenLab Control,0.9.2
+; OpenLab Control Data File (default extension .dat)
+BYAPP,OpenLab Control,0.10.0
 INFO,...
 
 [Data]
-Timestamp(s),Time(s),SequenceStep,...
-<rows>
+Timestamp(s),Time(s),SequenceStep,Temp(K),TempTarget(K),Field(Oe),FieldTarget(Oe),second_stage(K),simulated_transport.R1(Ohm),...,simulated_transport.Status,simulated_transport.Warning
+...
 ```
 
-文件是 UTF-8 文本，数据区域使用标准 CSV 转义规则。虽然扩展名为 `.dat`，字段由逗号分隔。
+### 时间列
 
-默认 `2nd Stage` 使用 `kind = "monitor"`，本阶段是界面只读值，因此只在 Header 的设备配置说明中出现，不增加 `[Data]` 列，也不作为测量或判稳标准。若后续需要把辅助温度作为正式数据通道记录，应按设备插件工作流明确列名和记录语义后再启用，而不是把它伪装成主 `temperature`。
+- `Timestamp(s)`：默认是从 1904-01-01 UTC 起的秒数，与用户模板/LabVIEW 习惯兼容；`timestamp_epoch = "unix"` 时改为 Unix 秒。
+- `Time(s)`：从本次 Run 创建开始的单调经过时间，不受系统时钟校准影响。
+- `SequenceStep`：完整嵌套路径，例如 `1:Scan Temperature ... / point 2/3=... / 1:Measure`。
 
-## 时间戳
+### 系统状态列
 
-为兼容用户模板，默认 `Timestamp(s)` 是从 1904-01-01 00:00:00 UTC 起的秒数：
+默认单温控/单磁体时：
+
+- `Temp(K)`、`TempTarget(K)`：三位小数；
+- `Field(Oe)`、`FieldTarget(Oe)`：Oe 两位小数；
+- `<monitor_id>(<unit>)`：例如 `second_stage(K)`，默认三位小数。
+
+若配置多个 temperature 或 field，为保持列唯一，会使用：
 
 ```text
-labview_timestamp = unix_timestamp + 2082844800
+sample_temp.Temp(K)
+sample_temp.TempTarget(K)
+main_magnet.Field(Oe)
+main_magnet.FieldTarget(Oe)
 ```
 
-`Time(s)` 是本次运行开始后的单调时钟秒数，不受系统时间调整影响。
+每一行模块结果到达时，中央立即复制当时最新的系统快照。R1–R4 顺序测量因此可以拥有不同的温度、磁场和二级冷头温度。
 
-将配置中的 `timestamp_epoch` 改为 `unix` 可输出 Unix 时间戳，但这可能破坏现有分析脚本兼容性。
+### 模块列
 
-## 列
-
-固定列：
-
-- `Timestamp(s)`
-- `Time(s)`
-- `SequenceStep`
-
-每个控制设备增加：
-
-- 当前值，例如 `Temp(K)`、`Field(Oe)`。
-- 目标值，例如 `TempTarget(K)`、`FieldTarget(Oe)`。
-
-框架生成的数据行把 K 温度写为三位小数，把默认 Oe 磁场写为两位小数。测量插件通道不受该显示规则限制，仍以最多九位有效数字保存。若自定义磁场设备原生单位为 T，则磁场列使用六位小数以避免丢失旧 SEQ 的分辨率。
-
-每个测量设备按配置顺序增加通道，例如：
-
-- `R1(Ohm)`
-- `R2(Ohm)`
-- `R3(Ohm)`
-- `R4(Ohm)`
-
-## 稀疏通道行
-
-模板一次只填充一个电阻通道，其他列为空。本框架默认保持这一行为：
-
-```text
-...,300.002,300.000,0.00,0.00,0.92318,,,
-...,300.002,300.000,0.00,0.00,,0.55070,,
-```
-
-设置：
+模块在 `module.toml` 中声明固定列：
 
 ```toml
-sparse_channel_rows = false
+[[columns]]
+name = "R1"
+unit = "Ohm"
+
+[[columns]]
+name = "Status"
 ```
 
-后，每次 Measure 将所有通道写入同一行。
+运行时自动生成：
 
-## 数据文件路径
+```text
+simulated_transport.R1(Ohm)
+simulated_transport.Status
+```
 
-每次运行先建立唯一运行目录。Set Datafile 可修改文件名：
+前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `Status` 也不会冲突。Run 开始后 Schema 固定，直到该 Run 结束。
 
-- 相对路径在运行目录内解析。
-- 未标记的绝对路径默认不允许写到运行目录外。
-- 左侧 `Change` 或 `Set Datafile ... external <absolute-path>` 明确授权该条命令写入用户选择的文件夹。
-- `allow_external_paths = true` 可全局允许旧式绝对路径，但比逐条 `external` 授权范围更宽。
-- 被重定向的路径产生 `DATAFILE_RELOCATED` Warning。
+模块每次 `emit_row()` 只需提供本行有效值。其他已声明列以及其他模块的全部列留空。例如示例模块一次 Measure 依次写：
 
-## 事件文件
+```text
+... R1=<value>, R2=,       R3=,       R4=,       Status=OK, Warning=
+... R1=,       R2=<value>, R3=,       R4=,       Status=OK, Warning=
+... R1=,       R2=,       R3=<value>, R4=,       Status=OK, Warning=
+... R1=,       R2=,       R3=,       R4=<value>, Status=OK, Warning=
+```
 
-默认文件：`events.dat`
+模块应自行声明业务状态和告警列。框架不会再添加通用 `Module Status` 或 `Warning Code` 列。
+
+### 空模块与失败行
+
+- Measure 时没有 Enabled 模块：写一行只有系统状态的行，模块列不存在，并产生 Warning。
+- 所有模块都未发出有效行：中央补一行系统状态，避免该 Measure 在 DAT 中完全消失。
+- 某模块 Warning：已经发出的有效值照常写；无效测量值可留空；详细告警写 events.dat。
+- 某模块 Error：其他并发模块在 Error 收束前已发出的行保留；若没有任何行则仍保留系统状态行，然后 SEQ Faulted。
+
+### 值格式
+
+- 温度固定三位；Oe 固定两位；T 固定六位。
+- 模块 float 使用最多 9 位有效数字。
+- 模块可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。
+- CSV 会自动引用含逗号或引号的文本。
+
+## `events.dat`
 
 结构：
 
@@ -98,101 +124,57 @@ sparse_channel_rows = false
 Timestamp(s),ISO8601,Severity,Source,Code,State,Count,Context,Message
 ```
 
-字段：
-
-| 字段 | 说明 |
+| 列 | 含义 |
 |---|---|
-| `Timestamp(s)` | 与数据文件相同的绝对时间基准 |
-| `ISO8601` | UTC 可读时间 |
-| `Severity` | info、warning、error |
-| `Source` | sequence、logging、runtime 或设备 ID |
-| `Code` | 稳定的机器可读事件代码 |
-| `State` | RAISED 或 RESOLVED |
-| `Count` | 该活动周期内重复报告次数 |
-| `Context` | 通道、设备、路径或 SEQ 步骤 |
-| `Message` | 人类可读信息 |
+| `Severity` | `info`、`warning`、`error` |
+| `Source` | `sequence`、设备 ID、`module:<id>`、`logging` 等 |
+| `Code` | 稳定机器可读代码 |
+| `State` | `RAISED` 或 `RESOLVED` |
+| `Count` | 同一活动事件重复报告次数 |
+| `Context` | 通道/地址/操作等去重上下文 |
+| `Message` | 英文用户可读说明 |
+
+活动事件键为 Source+Code+Context。重复报告只增加 Count，不重复弹窗；恢复时写 RESOLVED。Info 不锁存。模块手动动作成功也写 Info，但不会写实验 DAT。
 
 ## 写入保证
 
-- 默认每个数据行后刷新。
-- 每个事件立即刷新。
-- CSV writer 负责包含逗号和引号的字段转义。
-- 程序正常关闭时显式刷新并关闭。
-- 操作系统或电源突然故障仍可能造成最后一个文件系统缓存块丢失；关键实验应使用可靠电源和存储。
+- 默认每行 Flush。
+- 同一模块的行顺序保持。
+- 多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。
+- Error/Stop/完成都会在 `end_sequence()` 结束后关闭文件。
+- 异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。
+
+## Data Browser 读取规则
+
+Data Browser 与当前 Run 不绑定：
+
+- 打开或拖入哪个 DAT 就显示哪个；
+- 文件大小/修改时间改变时自动重读；
+- 短行补空，重复列名在读取层安全重命名；
+- 右键一次勾选多个 Y 后统一确认；
+- Overlay 可在同图显示多个 Y，Stacked 可让多图共享 X；
+- X/Y 可独立启用 Log；非正数据在 Log 模式不绘制；
+- 框选放大，双击最近数据点查看原始行全部字段。
+
+## `.plt` 显示伴随文件
+
+对 `sample.dat` 的显示设置保存在同目录 `sample.plt`。它与实验数据分离，只记录：
+
+- X 列；
+- 多个 Y 列及 Overlay/Stacked 布局；
+- X/Y Linear/Log；
+- 缩放范围和标记显示。
+
+如果原 DAT 更新，图会更新但继续使用 `.plt` 中可用的列配置；列不存在时安全回退，不修改 DAT。
 
 ## Python 读取示例
 
 ```python
-import csv
 from pathlib import Path
+from labcontrol.dat_reader import read_dat
 
-path = Path("experiment.dat")
-lines = path.read_text(encoding="utf-8").splitlines()
-start = lines.index("[Data]") + 1
-rows = list(csv.DictReader(lines[start:]))
+table = read_dat(Path("runs/.../experiment.dat"))
+print(table.columns)
+for point in table.numeric_points("Time(s)", "simulated_transport.R1(Ohm)"):
+    print(point.x, point.y, point.source_row)
 ```
-
-不要直接把整个文件交给普通 CSV 读取器；先定位 `[Data]`。
-
-## Data Browser 读取规则
-
-独立 Data Browser 使用 `src/labcontrol/dat_reader.py`，不依赖当前 Sequence、运行目录或测量设备：
-
-- 定位第一个大小写不敏感的 `[Data]` 行。
-- 下一条非空、非注释 CSV 记录作为列名。
-- 支持 UTF-8 BOM、UTF-16 和 GB18030。
-- 短行自动补空单元格，额外字段生成 `Extra N` 列，重复列名增加 `#2` 等后缀。
-- 只有至少包含一个可解析有限数值的列才出现在坐标轴菜单中。
-- 空字符串和非数值字段不作为数据点，也不会被替换成零。
-- 横轴可使用任意数值列或从 1 开始的 `Row Number`。
-
-浏览器只读文件，不会修改、锁定或重命名被浏览的 DAT。自动刷新检查修改时间和文件大小；若文件在读取期间继续追加，实际已读取字节数会使下一轮再次刷新，避免漏掉文件尾部。
-
-## PLT 显示格式伴随文件
-
-Data Browser 把显示设置写在 DAT 同目录、同主文件名的 `.plt` 文件中：
-
-```text
-C:\data\sample.dat  ->  C:\data\sample.plt
-```
-
-规范文件是 UTF-8 JSON：
-
-```json
-{
-  "format": "OpenLab Control Plot Format",
-  "version": 2,
-  "data_file": "sample.dat",
-  "layout": "stacked",
-  "x_axis": "Time(s)",
-  "y_axes": ["Temp(K)", "R1(Ohm)", "R2(Ohm)"],
-  "x_scale": "linear",
-  "y_scale": "log",
-  "zoom": {
-    "x_range": [0.0, 3600.0],
-    "overlay_y_range": null,
-    "stacked_y_ranges": {
-      "Temp(K)": [1.8, 4.2],
-      "R1(Ohm)": [100.0, 900.0]
-    }
-  }
-}
-```
-
-字段语义：
-
-| 字段 | 说明 |
-|---|---|
-| `format` | 固定标识，避免把其他软件的 PLT 当作本格式 |
-| `version` | 当前为 2；版本 1 兼容读取，其他版本不会静默套用 |
-| `data_file` | 记录原 DAT 文件名，移动 DAT/PLT 文件对时不作为硬拒绝条件 |
-| `layout` | `overlay` 或 `stacked` |
-| `x_axis` | 数值列名；`null` 表示 Row Number |
-| `y_axes` | 按绘制顺序排列的一个或多个数值列名 |
-| `x_scale` | `linear` 或以 10 为底的 `log`；版本 1 缺省时为 `linear` |
-| `y_scale` | `linear` 或以 10 为底的 `log`；统一应用于已选 Y，版本 1 缺省时为 `linear` |
-| `x_range` | 所有曲线/子图共用的人工 X 视野；`null` 表示自动范围 |
-| `overlay_y_range` | Overlay 共用的人工 Y 视野 |
-| `stacked_y_ranges` | Stacked 中各 Y 子图独立的人工 Y 视野 |
-
-更改布局、轴选择、坐标尺度或框选范围后会自动保存；写入先生成临时文件再替换目标，降低中途失败留下半个 JSON 的风险。浏览器优先读取 `sample.plt`，也兼容读取 `sample.dat.plt`。Log10 的人工范围必须严格大于零。PLT 无效、版本未知、对数范围非法或引用不存在的列时，不改变 DAT 内容，也不套用部分设置。

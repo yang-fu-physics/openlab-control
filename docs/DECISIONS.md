@@ -146,3 +146,51 @@ Scan Temperature 的 List 是用户声明的实验路径，不是待排序的数
 运行器原本会在设备动作前检查 `min_value`、`max_value` 和 `max_rate_per_minute`，但 SEQ 参数弹窗使用通用大范围，用户只能在运行时才发现越界。手动控制与 SEQ 因此出现两套不一致的输入边界。
 
 现在主窗口把当前 `DeviceConfig` 集合传入 SEQ 参数窗口，窗口按 `device_id` 和设备类型选取限制。Set/Linear Scan 使用数值控件范围，Temperature List 在确认时逐点检查；磁场范围随 Oe/T 选择转换。界面校验只用于尽早反馈，不能取代执行器复检，这样手写 SEQ、旧文件和绕过 GUI 的调用仍受到同一安全边界保护。
+
+## ADR-020：测量方案与控制设备彻底分离
+
+状态：Accepted
+
+删除 `measurement` DeviceKind、旧 Transport 状态块和 DevicePlugin.measure。温度、磁场、Monitor 继续使用设备插件；任何测量仪表组合都使用 Measurement Module。完整测量方案往往同时拥有源表、表桥、切换器及内部时序，无法自然映射为底部单设备状态块。旧 `[[devices]] kind="measurement"` 不兼容，模块也不能通过 API 控制温场。
+
+## ADR-021：Frontend 主进程、Backend 每模块独立进程
+
+状态：Accepted
+
+模块自定义 PySide6 UI 在 GUI 线程运行；每个 Enabled backend 使用独立 spawn 进程，仪表 I/O 只在该进程发生，通过串行 IPC 通信。这样满足 Qt 线程规则，并隔离阻塞通信、仪表状态和部分崩溃影响。模块返回值必须可序列化；进程不是恶意源码安全沙箱。
+
+## ADR-022：模块生命周期区分 End 与 Abort
+
+状态：Accepted
+
+每次 Run 调用 begin_sequence 和 end_sequence(completed|stopped|error)；abort 只用于 Disable 和应用退出。SEQ Error 不调用 abort，因为模块仍应保持连接供用户检查。end 失败使运行 Faulted 但模块保持 Enabled；abort 失败使 Disable 失败，不能隐藏窗口或伪造 Disabled。
+
+## ADR-023：无参数 Measure 与 Run 级模块锁定
+
+状态：Accepted
+
+SEQ 只接受 `T Measure`。模块选择在 Run 前通过 Enabled 状态完成，一条 Measure 并行调用全部锁定模块并等待全部完成。嵌套 Scan 已能表达循环与间隔；Run 级锁定保证 Schema 和生命周期一致。旧 Measure 参数产生 Error；无模块时 Warning + 系统快照而不是中止。
+
+## ADR-024：模块流式多行、中央唯一写 DAT
+
+状态：Accepted
+
+模块声明固定列并通过 emit_row 流式发值。中央为每行捕获最新系统快照、自动加模块 ID 前缀并立即 Flush；模块不能直接写实验 DAT。这样 R1–R4 顺序测量可拥有不同温场，并避免多个进程并发写同一文件。未声明列/复杂值为 Error，模块自行声明 Status/Warning 列。
+
+## ADR-025：Settings desired 与实际 Status 分开保存
+
+状态：Accepted
+
+Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 `<id>.settings.toml` 和 `<id>.status-at-start.json`，因为界面期望值不等于仪表当前状态。未 Apply 修改在 Run 前必须选择 Apply and Run、Run Without Applying 或 Cancel。
+
+## ADR-026：所有模块共享依赖目录
+
+状态：Accepted
+
+模块依赖统一安装到 `module_runtime/site-packages`；离线 wheels 优先，在线安装二次确认；版本范围冲突禁止 Enable。逐模块 venv 会增加包体和启动开销，实验室应协调少量仪表库版本。发布 EXE 安装新依赖时需配置便携 Python，但运行时仍从共享 target 目录加载。
+
+## ADR-027：模块窗口不可由用户直接关闭
+
+状态：Accepted
+
+模块窗口是主窗口拥有的独立 modeless 窗口，可移动/最小化但移除关闭能力；只有 Disable 成功才隐藏。窗口可见性因此准确反映 Enabled 会话，关闭窗口不会被误解为输出已停止。主窗口最小化会联动最小化当前可见模块窗口。

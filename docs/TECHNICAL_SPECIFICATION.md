@@ -1,228 +1,233 @@
-# OpenLab Control 技术规格
+# OpenLab Control 0.10.0 技术规格
 
-- 文档版本：1.13
-- 软件版本：0.9.2
-- 状态：仿真框架基线
+状态：Implemented Baseline
+日期：2026-07-23
+作者：yang-fu-physics `<yfu.physics@gmail.com>`
 
 ## 1. 目的
 
-OpenLab Control 是一个控制外部温控、磁场及测量设备的 Windows 桌面程序。界面和 SEQ 工作流参考 MultiVu，但系统不读取、控制或替代 PPMS。设备通过插件加入，SEQ 和界面不依赖具体厂商型号。
+构建一个 MultiVu 风格、面向外部低温与磁场实验设备的可扩展桌面框架。系统不控制 PPMS 本体；它统一控制温控仪、磁体电源、Monitor，并通过独立 Measurement Module 编排一台或多台测量仪表。
 
 ## 2. 范围
 
-本版本负责：
+### 2.1 包含
 
-- 加载设备插件和配置。
-- 显示设备当前值、目标值、速率、连接及稳定状态。
-- 通过双击状态块打开手动控制窗口。
-- 显示独立只读 Monitor；Monitor 不提供控制入口，也不成为主温度或判稳标准。
-- 编辑、保存、加载及执行单行 `.seq`。
-- 通过 Windows 标准多行选择、右键菜单和键盘完成命令的批量启用、禁用、删除、复制与粘贴。
-- 支持任意层级的时间、温度和磁场 Scan，以及显式温度列表点位。
-- 根据当前值和目标值进行数值判稳。
-- 执行安全上下限、最大速率及中止策略。
-- 生成数据、事件、SEQ 快照和配置快照。
-- 对 Warning 和 Error 进行锁存、去重、显示和记录。
-- 在独立 MDI 窗口浏览任意兼容 DAT，并监视其文件更新。
-- 提供一次确认式多 Y 选择、X/Y 独立 Log10、同图多 Y、纵向多图共享 X、框选缩放和数据点完整行详情。
-- 以 DAT 为单位保存并恢复 `.plt` 显示格式。
+- Python 3.11+ / PySide6 Windows 桌面 UI；
+- 配置驱动的温度、磁场、只读 Monitor 插件；
+- 中央数值判稳、目标/速率限制、Hold；
+- 单行 `.seq` 编辑、任意 Scan 嵌套和执行状态机；
+- 源码 Measurement Module 发现、依赖、独立进程和生命周期；
+- 并行模块测量与多行流式中央 DAT；
+- Warning/Error 锁存、去重弹窗、事件日志；
+- 独立 DAT Browser 和 `.plt` 显示配置；
+- 仿真设备与 `simulated_transport` 示例模块；
+- 源码与 Windows 文件夹式发布包。
 
-本版本不负责：
+### 2.2 不包含
 
-- PPMS 或 MultiVu 通信。
-- 磁体失超保护、低温机保护或急停等硬件安全功能。
-- 严格实时控制。
-- 原厂 MultiVu 所有命令的二进制或语义兼容。
-- 对真实设备给出安全认证。
+- PPMS/MultiVu 本体控制；
+- 未经验证的真实仪表驱动；
+- 云端账户、远程多用户权限；
+- 运行中模块热加载；
+- 模块间隐式共享同一物理仪表；
+- 0.10.0 中的 executable backend 实现；
+- 对不受信任模块源码的安全沙箱。
 
 ## 3. 功能需求
 
-| 编号 | 需求 | 验收条件 |
-|---|---|---|
-| FR-001 | 设备插件化 | 仅修改配置即可装载新的 `DevicePlugin` 类 |
-| FR-002 | 状态显示 | 主窗口持续显示每台设备状态；界面线程不执行仪表 I/O |
-| FR-003 | 显示即控制入口 | 双击可控或测量设备状态块弹出对应窗口；只读 Monitor 不响应双击控制 |
-| FR-004 | 单行 SEQ | 编辑器每行显示一条指令，Scan 用缩进和 End Scan 表达嵌套 |
-| FR-005 | 参数弹窗 | 双击可编辑指令或命令栏项目时打开结构化参数窗口 |
-| FR-006 | 多层嵌套 | Temperature Scan、Field Scan、Time Scan 可相互任意嵌套 |
-| FR-007 | 暂停/继续/中止 | Pause 保留执行位置；Stop 取消后续步骤并执行配置的保持策略 |
-| FR-008 | 数值判稳 | 同时满足误差、斜率和持续时间后才判定 Stable |
-| FR-009 | 安全限制 | 发出目标前检查最小值、最大值和最大速率 |
-| FR-010 | Warning | 继续执行、记录并弹窗；同一活动事件只弹出一次 |
-| FR-011 | Error | 立即中止活动 SEQ、记录并弹窗，然后保持温度和磁场 |
-| FR-012 | DAT 输出 | 生成带 `[Header]`、`[Data]` 的逗号分隔 `.dat` |
-| FR-013 | 运行追溯 | 每次运行保存配置和 SEQ 快照以及独立事件文件 |
-| FR-014 | 仿真 | 不连接真实设备也能演示所有核心流程和故障路径 |
-| FR-015 | 独立 DAT 浏览 | 浏览器只跟踪用户显式打开或拖入的路径，不随测量输出自动切换 |
-| FR-016 | DAT 自动刷新 | 被浏览文件的修改时间或大小变化后，曲线在下一次 0.75 秒检查中刷新 |
-| FR-017 | 坐标轴选择 | 右键可把任意数值列或 Row Number 设为 X 轴，并同时选择一个或多个数值 Y 列 |
-| FR-018 | 图形缩放 | 左键框选矩形后更新共享 X 和对应 Y 可视范围，Reset Zoom 恢复全范围 |
-| FR-019 | 数据点详情 | 双击曲线附近的点显示其源数据行全部字段及行号 |
-| FR-020 | 多 Y 布局 | Overlay 在一个坐标区绘制多 Y；Stacked 纵向排列独立 Y 子图并严格共享 X |
-| FR-021 | PLT 持久化 | 轴、Y 顺序、布局和缩放自动保存为 DAT 同目录同名 `.plt`，重新打开时恢复 |
-| FR-022 | SEQ 上下文编辑 | 命令行右键提供 Disable、Enable、Delete、Copy、Paste，Scan 操作覆盖完整子树 |
-| FR-023 | SEQ 禁用语义 | `F` 行和禁用 Scan 子树不执行；保存、重新加载、复制粘贴及运行快照保留状态 |
-| FR-024 | SEQ 多行选择 | Ctrl 增减选择、Shift 连选；批量操作按文档顺序执行，结构性操作消除重复父子选择 |
-| FR-025 | Y 批量选择 | 右键 `Select Y Series...` 打开持续显示的勾选窗口，至少选择一列后一次应用全部 Y |
-| FR-026 | 对数坐标 | X、Y 可独立选择 Linear/Logarithmic；Log10 仅绘制正值并支持缩放、点命中及 PLT 恢复 |
-| FR-027 | 辅助只读监视 | `monitor` 只轮询和显示当前值；不得接收 Target、参与主温度判稳或被温度 SEQ 自动选择 |
-| FR-028 | 前端可读性 | 矢量图标和浅色视觉层级必须在 1180×720 最小窗口可用；浮动窗口和长 SEQ 命令不得使行首滚出视野 |
-| FR-029 | 分辨率缩放 | 自动模式按原生屏幕像素在 1.00× 到 1.40× 间缩放字体和布局；配置可用 0.75× 到 2.00× 手动覆盖 |
-| FR-030 | 控制量单位与精度 | 默认磁场以 Oe 显示/记录两位小数，温度以 K 显示/记录三位小数；T/Oe 切换必须同时换算数值 |
-| FR-031 | SEQ 窗口恢复 | 关闭浮动 SEQ 后，New/Open/Edit 必须恢复子窗口和文本编辑器，不得只显示灰色 MDI 背景 |
-| FR-032 | 温度列表扫描 | Scan Temperature 可在 Linear/List 间切换；List 保留顺序与重复点，并在首个设备动作前完成整表安全预检 |
-| FR-033 | 自定义 DAT 文件夹 | 用户明确选择的绝对路径可逐命令持久化和写入；旧式未标记路径仍受全局安全策略限制 |
-| FR-034 | 文件名自适应显示 | 左侧 DAT/SEQ 长文本必须中间省略并提供完整 Tooltip，不得扩大 Dock 最小宽度 |
-| FR-035 | SEQ 配置限制联动 | 温度/磁场 Set/Scan 参数窗口必须按 `device_id` 应用配置上下限和最大速率；单位切换同步换算限制，List 越界点在确认时拒绝 |
+### 3.1 主界面
+
+- UI-001：主界面 SHALL 以英文为主。
+- UI-002：SEQ 与 Data Browser SHALL 是 MDI 内浮动窗口。
+- UI-003：温度/磁场状态块 SHALL 双击打开手动弹窗；正常不显示。
+- UI-004：Monitor SHALL 只显示，不提供设置。
+- UI-005：温度 SHALL 显示三位小数；Oe SHALL 显示两位小数。
+- UI-006：界面 SHALL 支持自动及 0.75–2.0 手动缩放。
+- UI-007：长 SEQ/DAT 路径 SHALL 省略显示且不能撑大左 Dock。
+
+### 3.2 SEQ 编辑与执行
+
+- SEQ-001：每个指令 SHALL 占一行，并以 T/F 保存启用状态。
+- SEQ-002：命令列表 SHALL 位于右侧；双击 SHALL 打开参数弹窗并插入。
+- SEQ-003：已有行双击 SHALL 打开参数弹窗。
+- SEQ-004：编辑器 SHALL 支持多行 Disable/Enable/Delete/Copy/Paste 及键盘操作。
+- SEQ-005：Scan Temperature、Scan Field、Scan Time SHALL 任意多层嵌套。
+- SEQ-006：Scan Temperature SHALL 支持 Linear 与保序/保重复 List。
+- SEQ-007：List SHALL 在第一次移动前整表验证。
+- SEQ-008：Measure SHALL 只有无参数单行 `T Measure`。
+- SEQ-009：旧 Initialize 和带参数 Measure SHALL 产生解析 Error 并阻止 Run。
+- SEQ-010：Running/Paused/Stopping SHALL 锁定 SEQ 与模块配置变更。
+- SEQ-011：Stop/Error 后温度与磁场 SHALL 按配置保持当前或目标；默认 Hold Current。
+
+### 3.3 设备控制
+
+- DEV-001：Device kind SHALL 仅为 temperature、field、monitor。
+- DEV-002：每个设备的 Poll/Set/Hold SHALL 由同一异步锁串行化。
+- DEV-003：不同设备 MAY 并发轮询。
+- DEV-004：Target 与 Rate SHALL 同时在 UI 和运行时由同一配置限制。
+- DEV-005：中央 SHALL 使用偏差、窗口斜率、Dwell、Timeout 判稳。
+- DEV-006：模块 SHALL 只能获得设备只读快照，不得获得控制引用。
+
+### 3.4 Measurement Module 发现与依赖
+
+- MOD-001：模块根目录 SHALL 可配置，默认 `modules/`。
+- MOD-002：启动和合法 Refresh SHALL 扫描一级子目录 `module.toml`。
+- MOD-003：每次应用启动所有模块 SHALL 为 Disabled。
+- MOD-004：Manager SHALL 只显示 Enabled、Name、Version 三列。
+- MOD-005：Refresh SHALL 仅在 SEQ Idle 且所有模块 Disabled 时允许。
+- MOD-006：清单 SHALL 验证唯一 ID、API、入口、backend type、固定列和依赖。
+- MOD-007：缺失依赖或冲突依赖 SHALL 禁止 Enable。
+- MOD-008：依赖 SHALL 默认共享同一 `module_runtime/site-packages`，不得自动创建逐模块环境。
+- MOD-009：Install Dependencies SHALL 显式触发；Enable 不得自动安装。
+- MOD-010：修改共享依赖前 SHALL 要求全部模块 Disabled。
+- MOD-010：离线 wheels SHALL 优先；在线 pip SHALL 再次取得用户确认。
+
+### 3.5 模块进程和界面
+
+- PROC-001：每个 Enabled 模块 backend SHALL 在独立 spawn 工作进程运行。
+- PROC-002：frontend SHALL 在 GUI 进程/线程运行。
+- PROC-003：frontend SHALL 不得直接执行 VISA/Serial/SDK I/O。
+- PROC-004：同一模块 IPC 操作 SHALL 串行。
+- PROC-005：真实驱动 SHALL 自行配置有限通信超时；框架不添加统一生命周期超时。
+- WIN-001：模块窗口 SHALL 是主窗口拥有的独立 modeless Windows 窗口。
+- WIN-002：窗口 SHALL 保持在主窗口之前但不得全局 Always-on-top。
+- WIN-003：窗口 SHALL 可移动/最小化，用户不得关闭。
+- WIN-004：主窗口最小化 SHALL 最小化当前可见模块窗口。
+- WIN-005：窗口 SHALL 固定 Settings/Status 两页，默认 Settings；页面内容由模块完全自定义。
+- WIN-006：SEQ 期间 Settings SHALL 只读，Apply/手动动作 SHALL 禁用。
+
+### 3.6 模块生命周期
+
+- LIFE-001：Enable SHALL 调用 initialize；成功后才勾选/显示窗口。
+- LIFE-002：initialize SHALL 加载保存 Settings 但不得自动应用到仪表。
+- LIFE-003：Apply SHALL 明确确认，并调用 apply_settings。
+- LIFE-004：Run SHALL 在第一条指令前调用 begin_sequence。
+- LIFE-005：每条 Measure SHALL 调用本次锁定模块的 measure。
+- LIFE-006：最终 SHALL 调用 end_sequence，reason=`completed|stopped|error`。
+- LIFE-007：abort SHALL 只在 Disable 和应用退出调用。
+- LIFE-008：Error 停止 SEQ时不得调用 abort。
+- LIFE-009：end_sequence 失败 SHALL 使最终状态 Faulted，模块保持 Enabled/可见，不自动 abort。
+- LIFE-010：Disable abort 失败 SHALL 保持 Enabled/可见并报告 Error。
+
+### 3.7 Settings
+
+- SET-001：Settings SHALL 保存于 `module_data/<id>/settings.toml`，与源码分离。
+- SET-002：SHALL 在 Apply、Disable、应用关闭和 Run 前保存。
+- SET-003：应用关闭 SHALL 先保存，再 abort。
+- SET-004：Run 前有未 Apply 修改时 SHALL 提供 Apply and Run、Run Without Applying、Cancel。
+- SET-005：Run SHALL 分别保存 desired Settings 和实际 Status。
+
+### 3.8 并行测量与数据
+
+- MEAS-001：一条 Measure SHALL 并行调用所有 Enabled 模块。
+- MEAS-002：中央 SHALL 等全部模块完成后才继续 SEQ。
+- MEAS-003：模块 MAY 在一次 Measure 中按顺序发出多行。
+- MEAS-004：每行到达时 SHALL 捕获最新控制/Monitor 快照并立即写入。
+- MEAS-005：同一模块行顺序 SHALL 保持；模块间 SHALL 按中央到达顺序串行写盘。
+- MEAS-006：无 Enabled 模块 SHALL Warning、写一行系统快照并继续。
+- DATA-001：模块 SHALL 在清单声明固定列/单位。
+- DATA-002：列 SHALL 自动加 `<module_id>.` 前缀。
+- DATA-003：模块不得直接写实验 DAT。
+- DATA-004：未声明列/不支持值类型 SHALL Error。
+- DATA-005：模块 SHALL 自行声明业务 Status/Warning 列；框架不加通用列。
+- DATA-006：Warning/Error 时可用温场/Monitor 数据 SHALL 保留。
+
+### 3.9 Data Browser
+
+- GRAPH-001：Browser SHALL 不与当前 Run DAT 自动绑定。
+- GRAPH-002：拖入/打开的 DAT 更新时 SHALL 自动刷新。
+- GRAPH-003：Y 选择 SHALL 支持一次多选确认。
+- GRAPH-004：SHALL 支持多 Y Overlay 或多图共享 X。
+- GRAPH-005：X/Y SHALL 可独立切换 Log。
+- GRAPH-006：SHALL 支持框选放大、双击最近点详情。
+- GRAPH-007：显示配置 SHALL 保存为 DAT 同目录同 stem `.plt`。
+
+### 3.10 事件
+
+- EVT-001：事件键 SHALL 为 Source+Code+Context。
+- EVT-002：同一活动 Warning/Error SHALL 只弹一次并累加 Count。
+- EVT-003：Resolve 后再次发生 SHALL 可重新弹窗。
+- EVT-004：Warning SHALL 继续 SEQ。
+- EVT-005：Error SHALL 使 Running/Paused SEQ Faulted。
+- EVT-006：所有 Raised/Resolved SHALL 写 events.dat。
 
 ## 4. 非功能需求
 
-- Python 3.11 或更高版本。
-- GUI 使用 PySide6；控制核心不依赖 GUI。
-- 工具栏图标使用 QtAwesome；不得保留未实际启用的主题运行时依赖。
-- 自动缩放必须使用 Qt 逻辑尺寸与设备像素比，不得假定 Windows DPI 缩放恒为 100%。
-- 所有真实仪表 I/O 必须在后台运行时线程中完成。
-- 同一设备的 Poll、Set、Hold 和 Measure 必须通过同一个异步锁串行化。
-- 运行数据默认逐行刷新，异常退出时尽量减少未落盘数据。
-- 未识别的 SEQ 指令必须保留原文并给出 Warning，不得静默删除。
-- SEQ `T/F` 行首必须分别映射启用/禁用；结构行保存为 `T`。
-- SEQ 批量 Copy/Delete 必须把父 Scan 覆盖的已选后代归并到父节点；同一 Scan 的开始行和 End Scan 不得重复处理。
-- 配置和 SEQ 在启动运行后视为该次运行的不可变输入。
-- 默认磁场配置的范围、速率、判稳阈值和噪声必须全部使用 Oe；从 T 迁移时按 10000 倍等比例换算，不能只更换单位标签。
-- 文件采用 UTF-8；SEQ 加载兼容 UTF-8 BOM、UTF-16 和 GB18030。
-- DAT 浏览兼容 UTF-8 BOM、UTF-16 和 GB18030，空值不得自动替换为零。
-- 数据浏览不得修改 DAT 或改变 Runtime、SEQ 和日志目标；只允许写入独立 `.plt` 显示伴随文件。
-- PLT 必须带格式标识和版本；引用的轴列必须全部通过当前 DAT 数值列校验后才能应用。
-- PLT 版本 2 保存 `x_scale`、`y_scale`；版本 1 继续按 Linear 读取。
-- Log10 轴不得绘制或命中零和负值，曲线跨越无效点时必须断开；对数人工范围必须严格大于零。
+- NFR-001：核心 SHALL 运行于 Python 3.11+。
+- NFR-002：不得要求 C#；真实驱动可使用 Python 包装的厂商 SDK。
+- NFR-003：GUI 线程不得执行阻塞仪表 I/O。
+- NFR-004：默认仿真 SHALL 不控制真实仪器。
+- NFR-005：逐行 Flush SHALL 默认启用。
+- NFR-006：源码、示例、配置、模块和文档 SHALL 随发布包提供。
+- NFR-007：模块源码视为受信任；文档 SHALL 明确非安全沙箱。
+- NFR-008：关键生命周期、解析、数据、事件和 UI SHALL 有自动测试。
 
-## 5. 设备能力模型
+## 5. 状态机
 
-每个插件继承 `DevicePlugin` 并实现：
-
-- `connect()`：建立连接并完成安全的最小初始化。
-- `disconnect()`：释放通信资源。
-- `poll()`：返回一份不可依赖设备原生判稳的原始状态快照。
-- `set_target()`：控制型设备设置目标和速率。
-- `hold()`：控制型设备保持当前值。
-- `measure()`：测量型设备返回通道字典。
-
-设备类型：
-
-- `temperature`
-- `field`
-- `measurement`
-- `monitor`：只读数值；无 Target、Rate、Hold、Measure 和 Stability。
-
-插件只能抛出框架定义的 `DeviceWarning`、`DeviceError` 或其子类。协议、厂商状态码和重试细节必须封装在插件内部。
-
-## 6. 稳定性算法
-
-对每个控制型设备维护滑动时间窗口。设当前值为 `x`、目标为 `x_target`，稳定要求：
-
-1. `abs(x - x_target) <= tolerance`。
-2. 窗口内最小二乘斜率的绝对值不超过 `max_slope_per_minute`。
-3. 以上条件连续满足 `dwell_seconds`。
-4. 样本数量和时间跨度足够。
-5. 数据时间未超过 `stale_after_seconds`。
-
-目标变化时清空历史窗口并重新开始计时。超过 `timeout_seconds` 后按配置生成 Warning 或 Error。
-
-状态转换：
+### 5.1 SEQ
 
 ```text
-MOVING -> SETTLING -> STABLE
-   |          |
-   +----------+----> TIMED_OUT
-任何状态 + 数据过期 -> STALE
-目标变化 -> MOVING
+Idle/Stopped/Completed/Faulted
+             │ Run
+             ▼
+          Running ↔ Paused
+             │ Stop/Error
+             ▼
+          Stopping
+             ├─ stopped
+             └─ faulted
 ```
 
-## 7. SEQ 执行语义
+结束清理失败可把原 Completed/Stopped/Faulted 最终统一提升为 Faulted。
 
-- `Settle`：设置目标后等待中央数值判稳，再执行下一条或 Scan 子指令。
-- `Sweep`：设置目标并等待进入目标容差，不要求持续稳定时间。
-- `Scan Temperature Linear/Scan Field`：生成包含起止点的等距点列，对每一点执行内部指令。
-- `Scan Temperature List`：按显式 K 点列的原顺序逐点执行，允许重复点且不插值；首个设备动作前校验全部点与速率。
-- `Scan Time`：按总时间生成等距时刻，在每一时刻执行内部指令。
-- `Measure`：调用指定或全部测量插件，并把快照与通道值写入 DAT。
-- `Call Sequence`：加载子 SEQ；检测路径循环调用。
-- `Unknown`：报告 Warning 后跳过，源文字保持可重新保存。
-- `Disabled`：在 STEP_STARTED 和设备调用之前跳过；禁用容器不进入其子树，并记录 `STEP_SKIPPED_DISABLED` Info。
-
-首版的 Sweep 是设备无关的点位逼近语义。接入支持硬件连续 Ramp/触发的设备后，可在插件能力扩展中实现真正连续扫动，但不得改变现有 SEQ 的安全检查。
-
-## 8. 运行状态机
+### 5.2 Module
 
 ```text
-IDLE -> RUNNING -> PAUSED -> RUNNING
-          |           |
-          +-----------+-> STOPPING -> STOPPED
-          |
-          +-> COMPLETED
-          |
-          +-> ERROR -> STOPPING -> FAULTED
+Disabled → Initializing → Enabled ↔ Measuring
+    ▲                        │
+    │        Disable         ▼
+    └──────── Disabling ←────┘
+
+任一运行阶段可进入 Faulted，但 Enabled 标志是否保留由操作决定：
+- initialize 失败：Disabled
+- end/abort 失败：Enabled + Faulted
 ```
 
-`STOPPED` 和 `FAULTED` 都执行中止策略。默认策略为 `hold_current`：插件将目标设置为中止瞬间的当前值；不会主动归零。
+## 6. 数据契约
 
-## 9. 告警生命周期
-
-事件去重键为：
+Run 目录 SHALL 包含：
 
 ```text
-source | code | context
+sequence.seq
+configuration.toml
+module_settings/<id>.settings.toml
+module_settings/<id>.status-at-start.json
+experiment.dat
+events.dat
 ```
 
-生命周期：
+具体列和事件格式见 [DAT_FORMAT.md](DAT_FORMAT.md)，模块 API 见 [PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md)。
 
-```text
-首次报告 -> Active，写日志，按级别弹窗
-重复报告 -> count + 1，不再次弹窗
-条件消失 -> Resolved，写解除记录
-再次发生 -> 新生命周期，可再次弹窗
-```
+## 7. 安全约束
 
-Info 不锁存，每次均写事件日志。Warning 锁存但不停止序列。Error 锁存并请求活动执行器中止。
+- SAF-001：真实温场上下限和最大速率必须由主配置提供。
+- SAF-002：Stop/Error 默认 Hold Current，不自动归零或断电。
+- SAF-003：模块启用不得自动 Apply 保存设置。
+- SAF-004：模块关闭不得绕过 abort 成功状态。
+- SAF-005：设备/模块通信必须配置有限超时。
+- SAF-006：禁止在模块/设备源码中提交秘密。
+- SAF-007：接入真实硬件必须按测试计划分阶段完成。
 
-## 10. 安全约束
+## 8. 验收基线
 
-- 设置命令必须先进行值域和速率检查。
-- 设备通信错误默认上升为 Error。
-- 中止操作不得自动执行归零、升温、降温或其他未配置动作。
-- 插件不得在导入或构造时向仪表发送命令。
-- 真实磁体插件必须尊重厂商硬件联锁，不得提供绕过路径。
-- 真实设备上线必须完成 `TEST_PLAN.md` 中的逐项验证。
+版本可发布必须同时满足：
 
-## 11. 验收基线
-
-版本 0.9.2 的发布条件：
-
-- 全部自动测试通过。
-- 用户模板 `.seq` 解析无错误且往返文字一致。
-- 仿真嵌套扫温—扫场—测量正常结束。
-- Scan Temperature 参数窗口可切换 Linear/List；List 单行 SEQ 往返一致，非单调和重复点严格按声明顺序执行。
-- 无效列表在编辑/解析时被拒绝；任一温度越界时整份列表在首次移动前以 Error 拒绝。
-- 四类温度/磁场 Set/Scan 弹窗使用当前设备配置的目标范围和最大速率；磁场 Oe/T 限制物理等价，温度 List 越界点无法确认。
-- 左侧 Change 选择的自定义 DAT 目录被实际使用并通过 SEQ `external` 标记往返保存；未标记旧路径继续重定向。
-- 超长 DAT 路径和 SEQ 文件名不增加左侧 Dock 最小宽度，悬停仍能取得完整文本。
-- Warning 重复报告仅产生一个弹窗通知。
-- Error 使序列进入 Faulted 且控制设备进入保持。
-- DAT 包含模板兼容的分段、LabVIEW 时间戳及稀疏通道行。
-- GUI 能启动、显示四个仿真设备并正常关闭。
-- `2nd Stage` 显示只读温度，双击不产生控制请求，目标设置由核心拒绝且主温度仍为 `temperature`。
-- 主工具栏图标、状态徽章和设备读数可见；1180×720 下浮动窗口保持在中央工作区内，长命令产生水平滚动范围时 SEQ 重建后仍从行首显示。
-- 自动倍率对 1080p、2K、4K 分别为 1.00×、约 1.15×、1.40×；4K 字体、状态卡片、浮动窗口和图表标签无裁切。
-- 默认磁场设备、状态卡、手动控制、SEQ 新命令和 DAT 列均使用 Oe；Oe 为两位小数，K 温度为三位小数。
-- 旧 T 单位 SEQ 继续解析；参数弹窗切换 T/Oe 后目标、端点和速率保持相同物理量。
-- 关闭 SEQ 子窗口后执行 New，窗口、编辑器和 `End Sequence` 行重新可见且成为活动子窗口。
-- 用户原始 DAT 的 2,458 行和稀疏通道可正确解析。
-- Data Browser 能独立打开文件、选择数值轴、自动读取新增行并将绘图点映射回完整源行。
-- Overlay 能绘制多个 Y；Stacked 子图共享 X、独立缩放 Y。
-- `.plt` 能保存及恢复布局、X/Y 选择和人工缩放，不修改对应 DAT。
-- SEQ 支持 Ctrl/Shift 多行选择；右键菜单与 Ctrl+D、Ctrl+E、Delete、Ctrl+C、Ctrl+V 均可批量操作选中节点。
-- 多行复制粘贴保持文档顺序；同时选择父 Scan 与后代时不产生重复副本。
-- Y 选择窗口允许连续勾选多列并一次确认，取消时不改变当前曲线。
-- X/Y Linear 与 Log10 可独立切换；非正值不绘制，对数框选和点详情正确映射回原始数据。
-- `.plt` 版本 2 保存两轴尺度，版本 1 文件仍能恢复为 Linear。
-- 禁用行以 `F` 往返保存，执行器不执行禁用命令或禁用 Scan 的后代。
+1. 自动测试全部通过。
+2. Source GUI offscreen smoke 通过且截图可读。
+3. 示例模块完成 Enable/Apply/Manual/Measure/End/Disable 独立进程测试。
+4. 一次 Measure 产生 R1–R4 四个顺序行和每行系统快照。
+5. 无模块 Measure 产生 Warning + 一行系统状态并完成。
+6. 旧 Measure 参数和 Initialize 被解析 Error 拒绝。
+7. Windows 文件夹发布包构建成功，包含 modules/templates/docs。
+8. 发布 EXE GUI smoke 与 headless demo 通过。
+9. Git 作者唯一为 `yang-fu-physics <yfu.physics@gmail.com>`。

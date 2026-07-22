@@ -1,78 +1,56 @@
 # SEQ 格式参考
 
+OpenLab Control 的 `.seq` 是可直接阅读和编辑的单行指令文件。右侧 Sequence Command Bar 双击命令后弹出参数窗口并插入；SEQ 编辑器双击已有行可再次修改。
+
 ## 基本规则
 
-- 文件扩展名为 `.seq`。
-- 每条指令单独一行。
-- 启用指令行以 `T ` 开头；禁用指令行以 `F ` 开头。
-- Scan 子指令缩进四个空格。
-- 每个 Scan 以同级 `End Scan` 结束。
-- 文件以 `End Sequence` 结束。
-- 内存中使用树结构，因此嵌套层数没有人为限制。
-- 保存编码为 UTF-8；加载还兼容 UTF-8 BOM、UTF-16 和 GB18030。
-
-示例：
+每行格式：
 
 ```text
-T Scan Temperature 10.000 K to 30.000 K in 3 steps at 5.000 K/min, Settle
-T     Scan Field -10000.00 Oe to 10000.00 Oe in 5 steps at 5000.00 Oe/min, Settle
-T         Measure devices=transport
+<T|F> <command>
+```
+
+- `T`：该命令启用。
+- `F`：该命令禁用；若是 Scan，整个子树都跳过，但子命令自己的 T/F 状态保留。
+- 每个命令占一行。
+- Scan 以 `End Scan` 结束，文件以 `End Sequence` 结束。
+- 缩进只用于显示；真正层级由 Scan/End Scan 决定。
+- 解析器保留未知厂商行并给 Warning；结构错误、旧 Initialize、带参数 Measure 给 Error，Run 会被阻止。
+
+多层嵌套示例：
+
+```text
+T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
+T     Scan Field -10000.00 Oe to 10000.00 Oe in 21 steps at 5000.00 Oe/min, Settle
+T         Measure
 T     End Scan
 T End Scan
 T End Sequence
 ```
 
-禁用示例：
-
-```text
-F Set Temperature 10.000 K at 2.000 K/min in Settle mode
-F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
-T     Measure devices=transport
-T End Scan
-T End Sequence
-```
-
-第二个例子中 Scan 行为 `F`，因此整个 Scan 及其 Measure 子命令都不执行。Measure 自身仍保留 `T`；以后重新启用 Scan 时，原有子命令状态会恢复生效。
-
 ## 指令
-
-### Initialize
-
-```text
-T Initialize <model> model <config-path>
-```
-
-示例模板：
-
-```text
-T Initialize Lakeshore372AC model \configs\lakeshore372ac\20260625161624.ini
-```
-
-仿真版只记录该指令。真实插件可在未来通过初始化命令路由加载设备特定配置。
 
 ### Set Datafile
 
-```text
-T Set Datafile <mode> <path>
-```
-
-模式：
-
-- `create`：新建或覆盖。
-- `open`：只打开已有文件，不存在则 Error。
-- `open|create`：存在则追加，不存在则创建。
-
-默认的 Run folder 形式会把外部绝对路径重定向到本次运行目录，兼容来自其他电脑的旧 SEQ，且不会意外写入任意位置。
-
-用户从左侧 `Change` 明确选择自定义文件夹，或在参数窗口把 `Location` 设为 `Custom folder` 时，规范语法增加 `external`：
+运行目录内文件：
 
 ```text
-T Set Datafile open|create external D:\Experiment Data\sample.dat
+T Set Datafile open|create experiment.dat
 ```
 
-`external` 是对该条命令目标路径的显式授权，会随 SEQ 保存和重新加载；路径应为绝对路径。它不会改变全局配置，也不会让其他未标记的旧命令绕过路径保护。
+用户明确选择的自定义目录：
 
-Set/Scan Temperature 和 Set/Scan Field 的参数弹窗按命令中的 `device_id` 读取设备配置。数值框直接采用 `min_value`、`max_value` 和 `max_rate_per_minute`；磁场选择 Oe 或 T 时配置范围同步换算。弹窗限制用于提前阻止误输入，执行器仍会在设备动作前独立复检，不能把界面校验当作唯一安全层。
+```text
+T Set Datafile create external C:\Experiment Data\sample.dat
+```
+
+Mode：
+
+- `create`：覆盖/新建目标 DAT；
+- `open`：目标必须已存在并追加；
+- `open|create`：存在则追加，否则创建。
+
+`external` 是该命令对自定义路径的明确授权。运行目录中的 SEQ、配置、模块设置和 Status 快照不会随 DAT 移走。
 
 ### Wait
 
@@ -80,15 +58,19 @@ Set/Scan Temperature 和 Set/Scan Field 的参数弹窗按命令中的 `device_i
 T Wait For 10.0 secs
 ```
 
-等待可被 Pause 和 Stop 中断。
+Pause 会冻结等待进度；Stop/Error 可在最多约一个运行时检查周期内打断。
 
 ### Set Temperature
 
 ```text
-T Set Temperature 10.000 K at 5.000 K/min in Settle mode
+T Set Temperature 20.000 K at 5.000 K/min in Settle mode
+T Set Temperature 300.000 K at 10.000 K/min in Sweep mode
 ```
 
-Settle 等待中央数值判稳。名称中包含 `settle` 的模式，例如 `Fast Settle`，也按等待稳定处理。Sweep 只发出目标，不等待持续稳定时间。
+- `Settle`：发送目标后等待中央数值判稳。
+- `Sweep`：发送目标后立即进入下一条顶层指令。
+
+Target 与 Rate 在弹窗和执行前都使用配置文件的 `min/max/max_rate` 检查。温度显示三位小数。
 
 ### Set Field
 
@@ -97,157 +79,130 @@ T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
 T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 ```
 
-新命令默认使用 Oe 并写两位小数。旧 T 命令仍可读取和编辑，写出时使用六位小数。参数窗口切换单位时会同时换算目标和速率；框架随后统一转换到设备配置单位并执行安全检查。
+设备默认原生单位为 Oe；SEQ 可选 Oe 或 T，但 Target 与 Rate 必须同单位。中央换算到设备单位后再做限制检查。Oe 显示两位，T 显示六位。
 
-### Scan Temperature
-
-Linear 模式：
+### Scan Temperature — Linear
 
 ```text
-T Scan Temperature 10.000 K to 30.000 K in 3 steps at 5.000 K/min, Settle
-T     <child commands>
-T End Scan
-```
-
-点数包含起点和终点。点数为 1 时只使用起点。
-
-List 模式：
-
-```text
-T Scan Temperature List 300.000, 250.000, 100.000, 20.000 K at 5.000 K/min, Settle
-T     <child commands>
-T End Scan
-```
-
-- 温度点用英文逗号分隔，至少一个、最多 100,000 个；保存时统一写为三位小数。
-- 执行顺序与列表完全一致，不排序、不去重、不在相邻点之间插值。`300, 299, 300` 会先降温再回到 300 K。
-- 每个点按同一 `Settle` 或 `Sweep` 语义到达后执行全部子命令，因此 List 仍可嵌套 Scan Field、Scan Time、Measure 或另一个 Scan Temperature。
-- 参数弹窗确认时先逐点检查当前 `device_id` 的配置上下限；开始移动前执行器再按温度上下限和最大速率预检整份列表。任一项越界时列表中的早期合法点也不会先执行。
-- 空项、非数字、`NaN`、无穷值和错误的单行结构均作为 SEQ 解析 Error，不会当作未知命令静默跳过。
-
-### Scan Field
-
-```text
-T Scan Field -10000.00 Oe to 10000.00 Oe in 5 steps at 5000.00 Oe/min, Settle
-T     <child commands>
-T End Scan
-```
-
-默认使用 Oe 和两位小数，同时支持旧 T 格式。
-
-### Scan Time
-
-```text
-T Scan Time 60.0 secs in 60 steps
+T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
 T     Measure
 T End Scan
 ```
 
-点数包含 `0 s` 和总时间。如果只有一个点，在 `0 s` 执行一次子指令。
+`steps` 是包含起点和终点的点数。每个点到达后执行全部子命令。
+
+- `Settle`：每点等待中央 Stable。
+- `Sweep`：每点等待进入目标容差，不要求斜率/驻留判稳，再执行子命令。
+
+### Scan Temperature — List
+
+```text
+T Scan Temperature List 300.000, 100.000, 20.000, 20.000, 4.200 K at 5.000 K/min, Settle
+T     Measure
+T End Scan
+```
+
+- 保留原顺序和重复点，不排序、不去重。
+- 最多 100000 点。
+- Run 前整表转换并验证；任一点越过温度上下限则在移动第一点前 Error。
+- 仍可嵌套 Field/Time/Temperature Scan 和 Measure。
+
+### Scan Field
+
+```text
+T Scan Field -90000.00 Oe to 90000.00 Oe in 181 steps at 5000.00 Oe/min, Settle
+T     Measure
+T End Scan
+```
+
+起点、终点和速率必须使用同一单位。所有点在移动前整体验证。
+
+### Scan Time
+
+```text
+T Scan Time 60.0 secs in 61 steps
+T     Measure
+T End Scan
+```
+
+第一个点位于 `t=0`，最后一个点位于指定 duration。调度使用单调时钟，避免系统日期变化影响间隔。
 
 ### Measure
 
-最简格式：
+唯一有效格式：
 
 ```text
 T Measure
 ```
 
-测量全部启用插件。扩展参数：
+Measure 无参数。旧格式例如：
 
 ```text
-T Measure devices=transport,bridge repeats=3 interval=1s
+T Measure devices=transport repeats=3 interval=1s
 ```
 
-- `devices`：逗号分隔的设备 ID，或 `all`。
-- `repeats`：重复次数。
-- `interval`：重复之间的秒数。
+会产生 Error 并阻止 Run，不做兼容转换。重复测量用 Scan Time 或重复插入 Measure；选择测量方案则在运行前通过 Modules Manager Enable/Disable。
+
+执行语义：
+
+1. 锁定本次 Run 开始时所有 Enabled 模块。
+2. 同时调用它们的 `measure()`。
+3. 每个模块可立即发出一行或多行；中央在每行到达时记录最新温度、磁场和 Monitor。
+4. 等所有模块结束后才继续下一条 SEQ。
+5. 没有 Enabled 模块时弹一个锁存 Warning，写一行系统状态，继续 SEQ。
+6. 模块 Warning 继续；模块 Error 使运行进入 Faulted，但不调用模块 `abort()`。
 
 ### Remark
 
 ```text
-T Remark Cooling branch
+T Remark Cooldown complete; begin transport scan
 ```
 
-写入事件日志，不改变设备状态。
+写入事件日志，不改变设备。
 
 ### Call Sequence
 
 ```text
-T Call Sequence examples/subsequence.seq
+T Call Sequence subsequences\field_loop.seq
 ```
 
-相对路径首先相对于调用它的 SEQ 所在目录解析。执行器检测递归循环；文件缺失、解析错误或循环调用均为 Error。
+相对路径以调用者 SEQ 所在目录解析。循环调用、文件不存在或子 SEQ 解析 Error 都会使主运行 Faulted。子 SEQ 中的 Measure 使用主运行锁定的同一模块集合和 DAT Schema。
 
 ### 仿真故障指令
 
 ```text
-T Inject Warning SIM_WARNING Example warning
-T Inject Error SIM_ERROR Example fatal error
+T Inject Warning SIM_WARNING simulated warning
+T Inject Error SIM_ERROR simulated fatal error
 ```
 
-仅用于框架测试，不应出现在真实实验序列中。
+仅用于验证事件与 Stop 路径；真实实验 SEQ 通常不需要。
 
-## 未知指令
+## 已删除的 Initialize
 
-解析器不会删除未知指令：
-
-- 编辑器以黄色显示。
-- 保存时保留原文字。
-- 运行时产生一次 Warning 并跳过。
-
-当新增命令插件或解析支持后，旧文件仍可再次打开。
-
-## 插入规则
-
-- 选中普通指令：新命令插入到它之后并保持同级。
-- 选中 Scan 开始行：新命令追加为其子指令。
-- 选中 End Scan：新命令追加为该 Scan 的子指令。
-- 选中 End Sequence：新命令追加到序列末尾。
-
-## 编辑、启用与禁用
-
-选择规则：
-
-- 单击选择一行。
-- `Ctrl+Click` 增加或移除单行选择；`Shift+Click` 选择连续范围。
-- 右键已选中的一行会保留整组选择；右键未选中的行会先切换为只选择该行。
-- Scan 开始行与对应 `End Scan` 指向同一个命令节点；两者同时选中时只处理一次。
-
-SEQ 窗口右键菜单：
-
-| 操作 | 快捷键 | 语义 |
-|---|---|---|
-| `Disable` | `Ctrl+D` | 把全部选中命令标为禁用，保存时行首写为 `F` |
-| `Enable` | `Ctrl+E` | 把全部选中命令恢复启用，保存时行首写为 `T` |
-| `Delete` | `Delete` | 删除全部选中命令节点；Scan 会连同全部子命令删除 |
-| `Copy` | `Ctrl+C` | 按文档顺序复制全部选中命令；Scan 会递归复制全部嵌套层级 |
-| `Paste` | `Ctrl+V` | 在当前焦点行按插入规则依次插入副本，内部节点 ID 全部重新生成 |
-
-结构性批量操作遵循“最外层节点优先”：若一个 Scan 和它的任意后代同时被选择，Copy/Delete 只处理该 Scan 一次，因为副本或删除范围已经包含后代。多行 Copy 不依赖点击顺序，始终按 SEQ 中从上到下的顺序进入剪贴板；Paste 保持该顺序，并选中全部新建的顶层副本。
-
-右键 Scan 的 `End Scan` 行时，上述操作作用于对应 Scan 块。`End Sequence` 不是命令，只允许把已复制命令粘贴到序列末尾。Disable/Enable 直接修改每个被选命令自身的 `T/F`，因此父 Scan 和子项都被选择时，两者自身标志都会改变。
-
-禁用规则：
-
-- 普通 `F` 指令在运行时完全跳过，不执行设备操作或测量。
-- `F` Scan 的整个子树跳过；子命令自身的 `T/F` 标记不被递归改写。
-- 禁用命令显示为灰色删除线；因父 Scan 禁用而暂时不活动的子命令也显示为灰色。
-- 执行日志产生 `STEP_SKIPPED_DISABLED` Info，便于追溯为什么某一步没有执行。
-- `End Scan` 和 `End Sequence` 是结构行，规范保存时始终使用 `T`。
-- 运行期间 Disable、Enable、Delete 和 Paste 被锁定；Copy 仍可使用。
-
-## 兼容性说明
-
-用户提供的模板：
+0.10.0 不再接受：
 
 ```text
-T Initialize Lakeshore372AC model \configs\lakeshore372ac\20260625161624.ini
-T Set Datafile open|create C:\Users\liuju\Desktop\data\20260625-k12601.dat
-T Scan Time 60.0 secs in 60 steps
-T     Measure
-T End Scan
-T End Sequence
+T Initialize Lakeshore372AC model ...
 ```
 
-在本版本中能够无警告解析，并在未编辑的情况下逐行原样保存。尚未收到的厂商命令格式需通过额外样例补充解析测试。
+模块初始化由 Modules Manager 的 Enable 自动调用。仓库保留 `examples/template_original.seq` 作为用户提供原文件和解析回归材料，但它是明确的旧格式示例，不能直接 Run。新示例是 `examples/module_measurement.seq`。
+
+## 编辑操作
+
+SEQ 支持单行或多行选择：
+
+- 右键：Disable、Enable、Delete、Copy、Paste；
+- 键盘：Delete、Ctrl+C、Ctrl+V，以及相应启用/禁用快捷键；
+- 选择父 Scan 与其子行时，结构操作只作用于最外层选中节点，避免重复删除/复制；
+- 复制完整 Scan 会包含其全部子树；
+- SEQ Running/Paused/Stopping 时所有修改操作禁用，Copy 仍可使用。
+
+Disable 的序列化示例：
+
+```text
+F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
+T     Measure
+T End Scan
+```
+
+此时 Scan 及 Measure 都不执行；重新 Enable Scan 后，Measure 原有 `T` 状态恢复生效。

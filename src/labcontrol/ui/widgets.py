@@ -113,18 +113,6 @@ class StatusTile(QFrame):
             self.detail_label.setText("Display only · not used for control")
             self.state_label.setText("Monitoring")
             self._set_state_style("stable")
-        else:
-            available = [(key, value) for key, value in snapshot.channels.items() if value is not None]
-            if available:
-                first_key, first_value = available[0]
-                self.value_label.setText(f"{first_key}  {first_value:.6g} {snapshot.unit}")
-                remaining = "  ·  ".join(f"{key} {value:.4g}" for key, value in available[1:3])
-                self.detail_label.setText(remaining or "Double-click to measure")
-            else:
-                self.value_label.setText("Awaiting measurement")
-                self.detail_label.setText("Double-click to measure")
-            self.state_label.setText("Ready")
-            self._set_state_style("stable")
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self.kind is not DeviceKind.MONITOR:

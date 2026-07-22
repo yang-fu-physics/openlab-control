@@ -18,6 +18,7 @@ a = Analysis(
         ("examples", "examples"),
         ("docs", "docs"),
         ("plugin_templates", "plugin_templates"),
+        ("modules", "modules"),
         ("README.md", "."),
         ("CHANGELOG.md", "."),
         ("SECURITY.md", "."),

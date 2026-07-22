@@ -19,16 +19,19 @@ from labcontrol.sequence.parser import (  # noqa: E402
 
 
 class SequenceParserTests(unittest.TestCase):
-    def test_supplied_template_parses_without_issues(self) -> None:
+    def test_original_legacy_template_is_preserved_but_rejected(self) -> None:
         result = load_sequence(ROOT / "examples" / "template_original.seq")
-        self.assertFalse(result.has_errors)
-        self.assertEqual(result.issues, ())
-        self.assertEqual(
-            [command.type for command in result.document.commands],
-            [CommandType.INITIALIZE, CommandType.SET_DATAFILE, CommandType.SCAN_TIME],
-        )
+        self.assertTrue(result.has_errors)
+        self.assertIn("Initialize is no longer", result.issues[0].message)
+        self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
         self.assertEqual(result.document.commands[2].children[0].type, CommandType.MEASURE)
         self.assertEqual(result.document.count_commands(), 4)
+
+    def test_new_module_measurement_example_parses_without_issues(self) -> None:
+        result = load_sequence(ROOT / "examples" / "module_measurement.seq")
+        self.assertFalse(result.has_errors)
+        self.assertEqual(result.issues, ())
+        self.assertEqual(result.document.commands[2].children[0].params, {})
 
     def test_template_round_trip_preserves_lines(self) -> None:
         source = (ROOT / "examples" / "template_original.seq").read_text(encoding="utf-8")
@@ -100,7 +103,7 @@ class SequenceParserTests(unittest.TestCase):
     def test_temperature_list_scan_parses_and_round_trips(self) -> None:
         source = (
             "T Scan Temperature List 300.000, 250.500, 250.500, 20.000 K at 5.000 K/min, Settle\n"
-            "T     Measure devices=transport\n"
+            "T     Measure\n"
             "T End Scan\n"
             "T End Sequence\n"
         )
@@ -115,6 +118,12 @@ class SequenceParserTests(unittest.TestCase):
         )
         self.assertEqual(command.children[0].type, CommandType.MEASURE)
         self.assertEqual(serialize_sequence(result.document), source)
+
+    def test_measure_parameters_are_rejected(self) -> None:
+        result = parse_sequence("T Measure devices=transport\nT End Sequence\n")
+        self.assertTrue(result.has_errors)
+        self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
+        self.assertIn("has no parameters", result.issues[0].message)
 
     def test_temperature_list_command_is_canonicalized_when_edited(self) -> None:
         command = Command(

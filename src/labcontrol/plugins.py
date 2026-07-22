@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import time
-from collections.abc import Iterable
 from copy import deepcopy
 from typing import TypeVar
 
@@ -35,7 +34,6 @@ class DeviceManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._stability: dict[str, StabilityEvaluator] = {}
         self._poll_issues: dict[str, set[tuple[str, str]]] = {}
-        self._measurement_issues: dict[str, set[tuple[str, str]]] = {}
         self.latest: dict[str, DeviceSnapshot] = {}
         self._load_plugins()
 
@@ -49,7 +47,6 @@ class DeviceManager:
             )
             self._locks[device_config.id] = asyncio.Lock()
             self._poll_issues[device_config.id] = set()
-            self._measurement_issues[device_config.id] = set()
             if device_config.stability is not None:
                 self._stability[device_config.id] = StabilityEvaluator(device_config.stability)
 
@@ -180,39 +177,6 @@ class DeviceManager:
         selected = device_id or self.first_device_id(kind)
         await self.set_target(selected, value, rate_per_minute, mode)
         return selected
-
-    async def measure(self, device_ids: Iterable[str] | None = None) -> dict[str, float | None]:
-        selected = list(device_ids or [
-            item.id for item in self.config.devices if item.kind is DeviceKind.MEASUREMENT
-        ])
-        context = deepcopy(self.latest)
-        combined: dict[str, float | None] = {}
-        used: set[str] = set()
-        for device_id in selected:
-            config = self.device_configs.get(device_id)
-            if config is None or config.kind is not DeviceKind.MEASUREMENT:
-                raise DeviceError(f"Unknown measurement device: {device_id}", "UNKNOWN_MEASUREMENT_DEVICE", device_id)
-            try:
-                async with self._locks[device_id]:
-                    values = await self.devices[device_id].measure(context)
-            except DeviceWarning as exc:
-                self._measurement_issues[device_id].add((exc.code, exc.context))
-                self.events.report(Severity.WARNING, device_id, exc.code, str(exc), exc.context)
-                continue
-            except DeviceError as exc:
-                self._measurement_issues[device_id].add((exc.code, exc.context))
-                self.events.report(Severity.ERROR, device_id, exc.code, str(exc), exc.context)
-                raise
-            for code, context_key in self._measurement_issues[device_id]:
-                self.events.resolve(device_id, code, context_key)
-            self._measurement_issues[device_id].clear()
-            snapshot = await self._poll_one(device_id)
-            self.latest[device_id] = snapshot
-            for channel, value in values.items():
-                key = channel if channel not in used else f"{device_id}.{channel}"
-                used.add(key)
-                combined[key] = value
-        return combined
 
     async def hold_all(self) -> None:
         for device_id, device in self.devices.items():

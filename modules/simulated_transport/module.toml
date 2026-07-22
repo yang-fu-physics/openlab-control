@@ -1,0 +1,30 @@
+id = "simulated_transport"
+name = "Simulated Transport"
+version = "1.0.0"
+api_version = "1.0"
+frontend = "frontend:SimulatedTransportFrontend"
+backend = "backend:SimulatedTransportBackend"
+backend_type = "python"
+dependencies = []
+
+[[columns]]
+name = "R1"
+unit = "Ohm"
+
+[[columns]]
+name = "R2"
+unit = "Ohm"
+
+[[columns]]
+name = "R3"
+unit = "Ohm"
+
+[[columns]]
+name = "R4"
+unit = "Ohm"
+
+[[columns]]
+name = "Status"
+
+[[columns]]
+name = "Warning"

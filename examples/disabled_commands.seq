@@ -1,7 +1,7 @@
 T Remark Enabled and disabled command example
 F Set Temperature 10.000 K at 2.000 K/min in Settle mode
 F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
-T     Measure devices=transport
+T     Measure
 T End Scan
 T Wait For 1.0 secs
 T End Sequence

@@ -14,3 +14,9 @@ runs/*
 /gui_smoke.png
 /source-gui-smoke.png
 /docs/source-gui-smoke.png
+/module_data/*
+!/module_data/.gitkeep
+/wheels/*
+!/wheels/.gitkeep
+/module_runtime/site-packages/*
+!/module_runtime/site-packages/.gitkeep

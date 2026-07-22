@@ -38,7 +38,7 @@ class SequenceEditorTests(unittest.TestCase):
         scan = Command(
             CommandType.SCAN_TIME,
             {"duration_seconds": 1.0, "steps": 2},
-            [Command(CommandType.MEASURE, {"devices": "all", "repeats": 1, "interval_seconds": 0.0})],
+            [Command(CommandType.MEASURE)],
         )
         document = SequenceDocument(
             [Command(CommandType.WAIT, {"seconds": 1.0}), scan],
@@ -109,7 +109,7 @@ class SequenceEditorTests(unittest.TestCase):
         scan = Command(
             CommandType.SCAN_TIME,
             {"duration_seconds": 1.0, "steps": 2},
-            [Command(CommandType.MEASURE, {"devices": "all", "repeats": 1, "interval_seconds": 0.0})],
+            [Command(CommandType.MEASURE)],
         )
         document = SequenceDocument([
             Command(CommandType.WAIT, {"seconds": 1.0}),

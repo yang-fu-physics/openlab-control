@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.sequence.model import CommandType  # noqa: E402
+from labcontrol.sequence.parser import parse_sequence  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -126,6 +127,49 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(observed["maximum"], 400.0)
             self.assertEqual(observed["max_rate"], 30.0)
             self.assertIn("Configured limits (temperature)", observed["summary"])
+        finally:
+            window.close()
+
+    def test_modules_manager_has_only_requested_columns_and_no_measurement_tile(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            manager = window.module_manager
+            self.assertEqual(manager.table.columnCount(), 3)
+            self.assertEqual(
+                [manager.table.horizontalHeaderItem(index).text() for index in range(3)],
+                ["Enabled", "Name", "Version"],
+            )
+            self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
+            self.assertEqual([item.id for item in window.module_descriptors], ["simulated_transport"])
+        finally:
+            window.close()
+
+    def test_dependency_install_requires_every_module_to_be_disabled(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.enabled_modules.add("simulated_transport")
+            with patch("labcontrol.ui.main_window.QMessageBox.warning") as warning:
+                window._install_module_dependencies("simulated_transport")
+            warning.assert_called_once()
+            self.assertIn("Disable every measurement module", warning.call_args.args[2])
+        finally:
+            window.close()
+
+    def test_legacy_measure_parameters_block_run(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            document = parse_sequence(
+                "T Measure devices=transport\nT End Sequence\n", "legacy.seq"
+            ).document
+            window._set_document(document)
+            with (
+                patch.object(window.runtime, "run_sequence") as run_sequence,
+                patch("labcontrol.ui.main_window.QMessageBox.critical") as critical,
+            ):
+                window._run_sequence()
+            run_sequence.assert_not_called()
+            critical.assert_called_once()
+            self.assertIn("Measure has no parameters", critical.call_args.args[2])
         finally:
             window.close()
 

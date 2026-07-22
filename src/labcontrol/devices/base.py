@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-
 from ..config import DeviceConfig
 from ..models import DeviceSnapshot
 
@@ -60,8 +58,3 @@ class DevicePlugin(ABC):
     async def hold(self) -> None:
         """Stop changing the controlled quantity and maintain the present value."""
         raise DeviceError(f"Device {self.config.id} does not support hold", "UNSUPPORTED_HOLD")
-
-    async def measure(
-        self, context: Mapping[str, DeviceSnapshot]
-    ) -> dict[str, float | None]:
-        raise DeviceError(f"Device {self.config.id} does not support measurement", "UNSUPPORTED_MEASURE")
