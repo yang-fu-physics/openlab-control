@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from ..config import DeviceConfig
 from ..models import DeviceKind, DeviceSnapshot, LabEvent, Severity
 from ..sequence.model import Command, CommandSpec
+from .scaling import scaled
 
 
 class CommandDialog(QDialog):
@@ -33,7 +34,7 @@ class CommandDialog(QDialog):
         self.inputs: dict[str, QWidget] = {}
         self.setWindowTitle(f"Command Parameters - {spec.label}")
         self.setModal(True)
-        self.setMinimumWidth(430)
+        self.setMinimumWidth(scaled(430))
         layout = QVBoxLayout(self)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
@@ -94,7 +95,7 @@ class ManualControlDialog(QDialog):
         self.config = config
         self.setWindowTitle(f"{config.display_name} - Manual Control")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.setMinimumWidth(390)
+        self.setMinimumWidth(scaled(390))
         layout = QVBoxLayout(self)
         self.current_label = QLabel("Current: —")
         self.current_label.setObjectName("manualCurrent")
@@ -177,11 +178,12 @@ class AlertDialog(QDialog):
         is_error = event.severity is Severity.ERROR
         self.setWindowTitle("Error" if is_error else "Warning")
         self.setModal(False)
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(scaled(460))
         layout = QVBoxLayout(self)
         title = QLabel("Measurement Aborted" if is_error else "Measurement Continues")
         title.setStyleSheet(
-            f"font-size: 18px; font-weight: 600; color: {'#b42318' if is_error else '#a15c00'};"
+            f"font-size: {scaled(18)}px; font-weight: 600; "
+            f"color: {'#b42318' if is_error else '#a15c00'};"
         )
         layout.addWidget(title)
         message = QLabel(event.message)
@@ -192,7 +194,9 @@ class AlertDialog(QDialog):
             + (f"\nContext: {event.context}" if event.context else "")
         )
         details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        details.setStyleSheet("color: #555; background: #f2f2f2; padding: 8px;")
+        details.setStyleSheet(
+            f"color: #555; background: #f2f2f2; padding: {scaled(8)}px;"
+        )
         layout.addWidget(details)
         button = QPushButton("Acknowledge")
         button.clicked.connect(self.accept)

@@ -13,7 +13,7 @@ from .runtime import RuntimeService
 from .sequence.parser import load_sequence
 
 
-def configure_qt_font(application) -> None:
+def configure_qt_font(application, point_size: float = 10.0) -> None:
     """Load a Windows CJK font explicitly; offscreen and packaged Qt need it."""
     from PySide6.QtGui import QFont, QFontDatabase
 
@@ -25,13 +25,23 @@ def configure_qt_font(application) -> None:
         font_id = QFontDatabase.addApplicationFont(str(candidate))
         families = QFontDatabase.applicationFontFamilies(font_id)
         if families:
-            application.setFont(QFont(families[-1], 10))
+            font = QFont(families[-1])
+            font.setPointSizeF(point_size)
+            application.setFont(font)
             return
+    font = application.font()
+    font.setPointSizeF(point_size)
+    application.setFont(font)
 
 
-def configure_qt_appearance(application) -> None:
+def configure_qt_appearance(application, requested_scale: float | None = None) -> float:
     """Apply the same desktop appearance in production and visual QA tools."""
     from PySide6.QtGui import QColor, QPalette
+    from .ui.scaling import screen_ui_scale
+
+    scale = requested_scale if requested_scale is not None else screen_ui_scale(application.primaryScreen())
+    application.setProperty("openlabUiScale", scale)
+    application.setProperty("openlabUiScaleMode", "manual" if requested_scale is not None else "auto")
 
     application.setStyle("Fusion")
     palette = application.palette()
@@ -39,7 +49,8 @@ def configure_qt_appearance(application) -> None:
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
     palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f7f9fa"))
     application.setPalette(palette)
-    configure_qt_font(application)
+    configure_qt_font(application, 10.0 * scale)
+    return scale
 
 
 def _arguments(argv: list[str] | None) -> argparse.Namespace:
@@ -147,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     application = QApplication(sys.argv[:1])
     application.setApplicationName("OpenLab Control")
     application.setOrganizationName("OpenLab")
-    configure_qt_appearance(application)
+    configure_qt_appearance(application, config.ui_scale)
     try:
         window = MainWindow(config)
     except Exception as exc:

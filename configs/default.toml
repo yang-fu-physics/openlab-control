@@ -1,5 +1,6 @@
 [application]
 title = "OpenLab Control"
+ui_scale = "auto"
 ui_refresh_ms = 200
 poll_interval_seconds = 0.20
 simulation_speed = 120.0

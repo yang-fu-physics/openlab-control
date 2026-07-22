@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import qtawesome as qta
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QSize, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -38,6 +38,7 @@ from ..sequence.model import COMMAND_SPECS, SPECS_BY_TYPE, Command, CommandType,
 from ..sequence.parser import load_sequence, save_sequence
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
+from .scaling import current_ui_scale, scaled
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
 from .widgets import StatusTile
@@ -60,10 +61,14 @@ class MainWindow(QMainWindow):
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
         self._dirty = False
+        self.ui_scale = current_ui_scale()
+        application = QApplication.instance()
+        scale_mode = application.property("openlabUiScaleMode") if application is not None else None
+        self.ui_scale_mode = str(scale_mode or "auto").title()
 
         self.setWindowTitle(f"{config.title} - Simulating")
-        self.resize(1480, 900)
-        self.setMinimumSize(1180, 720)
+        self.resize(scaled(1480), scaled(900))
+        self.setMinimumSize(scaled(1180), scaled(720))
         self.setAcceptDrops(True)
         self._build_ui()
         self._apply_style()
@@ -86,7 +91,7 @@ class MainWindow(QMainWindow):
         self.sequence_window.setWindowTitle(self.document.name)
         self.sequence_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.mdi.addSubWindow(self.sequence_window)
-        self.sequence_window.resize(780, 560)
+        self.sequence_window.resize(scaled(780), scaled(560))
         self.sequence_window.show()
 
         self.data_browser = DatBrowserWidget(self.config.project_root)
@@ -96,7 +101,7 @@ class MainWindow(QMainWindow):
         self.data_window.setWindowTitle("Data Browser")
         self.data_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.mdi.addSubWindow(self.data_window)
-        self.data_window.resize(900, 620)
+        self.data_window.resize(scaled(900), scaled(620))
         self.data_window.hide()
 
         self._build_left_dock()
@@ -104,14 +109,16 @@ class MainWindow(QMainWindow):
         self._build_status_dock()
         self._build_log_dock()
         self._build_actions()
-        self.statusBar().showMessage("Starting simulation framework")
+        self.statusBar().showMessage(
+            f"Starting simulation framework · UI scale {self.ui_scale:.2f}x ({self.ui_scale_mode})"
+        )
         QTimer.singleShot(0, self._fit_mdi_windows)
 
     def _build_left_dock(self) -> None:
         dock = QDockWidget("Sequence Control", self)
         dock.setObjectName("sequenceControlDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
-        dock.setMinimumWidth(225)
+        dock.setMinimumWidth(scaled(225))
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
@@ -192,7 +199,7 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Sequence Command Bar", self)
         dock.setObjectName("commandDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
-        dock.setMinimumWidth(285)
+        dock.setMinimumWidth(scaled(285))
         panel = QWidget()
         layout = QVBoxLayout(panel)
         hint = QLabel("Double-click a command to configure and insert it")
@@ -322,6 +329,7 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main", self)
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(scaled(20), scaled(20)))
         toolbar.addActions([self.new_action, self.open_action, self.save_action])
         toolbar.addSeparator()
         toolbar.addActions([self.run_action, self.pause_action, self.stop_action])
@@ -330,13 +338,21 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
     def _apply_style(self) -> None:
+        status_size = scaled(21)
+        status_padding = scaled(6)
+        status_radius = scaled(6)
+        tile_title_size = scaled(18)
+        tile_value_size = scaled(27)
+        tile_detail_size = scaled(16)
+        manual_size = scaled(30)
+        manual_padding = scaled(15)
         self.setStyleSheet(
             "QLabel#mutedLabel { color: #888888; }"
-            "QLabel#statusBadge { font-size: 21px; font-weight: bold; padding: 6px; border-radius: 6px; background: rgba(92, 107, 121, 0.15); color: #435260; }"
-            "QLabel#tileTitle { font-weight: bold; font-size: 18px; }"
-            "QLabel#tileValue { font-size: 27px; font-weight: bold; }"
-            "QLabel#tileDetail { color: #888888; font-size: 16px; }"
-            "QLabel#manualCurrent { font-size: 30px; font-weight: bold; padding: 15px; }"
+            f"QLabel#statusBadge {{ font-size: {status_size}px; font-weight: bold; padding: {status_padding}px; border-radius: {status_radius}px; background: rgba(92, 107, 121, 0.15); color: #435260; }}"
+            f"QLabel#tileTitle {{ font-weight: bold; font-size: {tile_title_size}px; }}"
+            f"QLabel#tileValue {{ font-size: {tile_value_size}px; font-weight: bold; }}"
+            f"QLabel#tileDetail {{ color: #888888; font-size: {tile_detail_size}px; }}"
+            f"QLabel#manualCurrent {{ font-size: {manual_size}px; font-weight: bold; padding: {manual_padding}px; }}"
             "QGroupBox { font-weight: bold; }"
             "QListView::item:selected, QTreeView::item:selected { background: #cce5ff; color: #000000; }"
         )
@@ -649,7 +665,8 @@ class MainWindow(QMainWindow):
             "About OpenLab Control",
             f"OpenLab Control {__version__}\n\n"
             "Plugin-oriented control framework for external temperature, magnetic-field, and measurement devices.\n"
-            "Current mode: Simulating (does not control PPMS or real instruments).",
+            "Current mode: Simulating (does not control PPMS or real instruments).\n"
+            f"UI scale: {self.ui_scale:.2f}x ({self.ui_scale_mode}).",
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802

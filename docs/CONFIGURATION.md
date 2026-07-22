@@ -9,11 +9,29 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `title` | string | 主窗口标题 |
+| `ui_scale` | `"auto"` 或 float | 自动按屏幕原生分辨率缩放，或用 `0.75` 到 `2.0` 手动覆盖 |
 | `ui_refresh_ms` | integer | GUI 清空后台消息队列的周期 |
 | `poll_interval_seconds` | float | 设备轮询周期 |
 | `simulation_speed` | float | 仅仿真 Ramp 的时间倍率；真实插件必须忽略 |
 | `default_sequence` | string | 相对项目根目录的启动 SEQ |
 | `language` | string | 界面语言标识；当前默认 `en_US`，界面以英文为主 |
+
+默认 `ui_scale = "auto"`。程序把 Qt 报告的逻辑尺寸乘以设备像素比得到原生像素尺寸，再计算保守倍率，因此 Windows DPI 缩放和界面倍率可以共同工作。典型结果为：
+
+| 原生分辨率 | 自动倍率 | 全局基准字号 |
+|---|---:|---:|
+| 1366×768 / 1920×1080 | 1.00× | 10 pt |
+| 2560×1440 | 1.15× | 11.5 pt |
+| 3840×2160 | 1.40× | 14 pt |
+
+如果自动结果不符合屏幕尺寸或观看距离，可直接写入固定值，例如：
+
+```toml
+[application]
+ui_scale = 1.4
+```
+
+修改后重新启动程序。状态栏和 About 窗口会显示实际倍率与 Auto/Manual 模式。
 
 ## `[logging]`
 

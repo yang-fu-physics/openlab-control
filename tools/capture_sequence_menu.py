@@ -22,8 +22,9 @@ from labcontrol.ui.main_window import MainWindow  # noqa: E402
 def main() -> int:
     output = ROOT / "docs" / "sequence-context-menu-preview.png"
     application = QApplication([])
-    configure_qt_appearance(application)
-    window = MainWindow(load_config(ROOT / "configs" / "default.toml"))
+    config = load_config(ROOT / "configs" / "default.toml")
+    configure_qt_appearance(application, config.ui_scale)
+    window = MainWindow(config)
     document = load_sequence(ROOT / "examples" / "disabled_commands.seq").document
     window._set_document(document)
     window.editor.list.clearSelection()

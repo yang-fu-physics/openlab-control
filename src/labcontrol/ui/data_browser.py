@@ -35,6 +35,7 @@ from .dat_plot import (
     DatPlotCanvas,
     PlotHit,
 )
+from .scaling import scaled
 
 
 class PointDetailsDialog(QDialog):
@@ -48,7 +49,7 @@ class PointDetailsDialog(QDialog):
         super().__init__(parent)
         point = hit.point
         self.setWindowTitle(f"Data Point Details - Row {point.row_index + 1}")
-        self.resize(620, 470)
+        self.resize(scaled(620), scaled(470))
         layout = QVBoxLayout(self)
         summary = QLabel(
             f"File: {document.path}\n"

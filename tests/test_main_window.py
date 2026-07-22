@@ -21,10 +21,11 @@ class MainWindowLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
-        configure_qt_appearance(cls.application)
+        cls.config = load_config(ROOT / "configs" / "default.toml")
+        configure_qt_appearance(cls.application, cls.config.ui_scale)
 
     def test_floating_windows_stay_inside_minimum_viewport(self) -> None:
-        window = MainWindow(load_config(ROOT / "configs" / "default.toml"))
+        window = MainWindow(self.config)
         try:
             window.resize(1180, 720)
             window.show()

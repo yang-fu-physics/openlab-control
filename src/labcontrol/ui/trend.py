@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 from ..models import DeviceKind, DeviceSnapshot
+from .scaling import scaled
 
 
 class TrendCanvas(QWidget):
@@ -15,7 +16,7 @@ class TrendCanvas(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(760, 430)
+        self.setMinimumSize(scaled(760), scaled(430))
         self.history: dict[str, deque[tuple[float, float]]] = defaultdict(lambda: deque(maxlen=900))
         self.setAutoFillBackground(True)
 
@@ -38,7 +39,7 @@ class TrendCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#fbfbfc"))
-        plot = self.rect().adjusted(55, 25, -20, -45)
+        plot = self.rect().adjusted(scaled(55), scaled(25), -scaled(20), -scaled(45))
         painter.setPen(QPen(QColor("#c9cdd3"), 1))
         painter.drawRect(plot)
         for fraction in (0.25, 0.5, 0.75):
@@ -71,17 +72,26 @@ class TrendCanvas(QWidget):
                     path.lineTo(QPointF(x, y))
             painter.setPen(QPen(color, 1.7))
             painter.drawPath(path)
-            painter.fillRect(legend_x, plot.bottom() + 16, 12, 3, color)
+            painter.fillRect(
+                legend_x,
+                plot.bottom() + scaled(16),
+                scaled(12),
+                scaled(3),
+                color,
+            )
             painter.setPen(QColor("#333"))
-            painter.drawText(legend_x + 16, plot.bottom() + 22, name)
-            legend_x += max(120, painter.fontMetrics().horizontalAdvance(name) + 35)
+            painter.drawText(legend_x + scaled(16), plot.bottom() + scaled(22), name)
+            legend_x += max(
+                scaled(120),
+                painter.fontMetrics().horizontalAdvance(name) + scaled(35),
+            )
 
 
 class TrendDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Live Trend")
-        self.resize(900, 540)
+        self.resize(scaled(900), scaled(540))
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Each trace uses its own scale. For monitoring only; the DAT file remains authoritative."))
         self.canvas = TrendCanvas()

@@ -43,9 +43,12 @@ flowchart TD
 | `src/labcontrol/runtime.py` | 后台事件循环及 GUI 消息队列 |
 | `src/labcontrol/ui/dat_plot.py` | 一次确认式 Y 多选、Linear/Log10、多 Y 绘图、叠加/纵向布局、共享 X、缩放和点命中 |
 | `src/labcontrol/ui/data_browser.py` | DAT 浮动窗口、自动刷新、PLT 生命周期和点详情 |
+| `src/labcontrol/ui/scaling.py` | 屏幕原生分辨率换算、当前界面倍率与像素缩放工具 |
 | `src/labcontrol/ui/` | 主窗口、状态块、弹窗、编辑器和趋势图 |
 
-主界面采用 PySide6 Fusion 样式和小范围自定义 Palette/QSS。QtAwesome 仅负责工具栏矢量图标，不参与设备逻辑；全局正文使用 10pt，设备数值和运行状态通过局部 QSS 放大。未启用独立暗色主题库，以避免无效果依赖和打包体积增加。SEQ 列表重建后显式把水平滚动条归零，保证长命令不会把后续行的命令前缀留在视野外。
+主界面采用 PySide6 Fusion 样式和小范围自定义 Palette/QSS。QtAwesome 仅负责工具栏矢量图标，不参与设备逻辑；全局正文以 10pt 为缩放基准，设备数值和运行状态通过局部 QSS 放大。未启用独立暗色主题库，以避免无效果依赖和打包体积增加。SEQ 列表重建后显式把水平滚动条归零，保证长命令不会把后续行的命令前缀留在视野外。
+
+`ui.scaling` 以 `availableGeometry × devicePixelRatio` 取得屏幕原生像素尺寸。自动倍率对分辨率比取平方根并限制在 1.00× 到 1.40×，以避免 4K 直接按 2 倍放大；固定控件尺寸、QSS 字号、工具栏图标及绘图边距使用同一倍率。`AppConfig.ui_scale` 为 `None` 时表示 Auto，数值则表示用户手动覆盖。
 
 ## 线程模型
 

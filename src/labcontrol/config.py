@@ -62,6 +62,7 @@ class AlarmConfig:
 class AppConfig:
     source_path: Path
     title: str
+    ui_scale: float | None
     ui_refresh_ms: int
     poll_interval_seconds: float
     simulation_speed: float
@@ -95,6 +96,18 @@ def _severity(value: str, key: str) -> Severity:
         return Severity(value.lower())
     except ValueError as exc:
         raise ConfigurationError(f"{key} must be info, warning, or error") from exc
+
+
+def _ui_scale(value: object) -> float | None:
+    if value is None or (isinstance(value, str) and value.strip().casefold() == "auto"):
+        return None
+    try:
+        scale = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError("ui_scale must be 'auto' or a number from 0.75 to 2.0") from exc
+    if not 0.75 <= scale <= 2.0:
+        raise ConfigurationError("ui_scale must be from 0.75 to 2.0")
+    return scale
 
 
 def _device_config(raw: dict[str, Any]) -> DeviceConfig:
@@ -167,6 +180,7 @@ def load_config(path: str | Path) -> AppConfig:
     return AppConfig(
         source_path=source,
         title=str(application.get("title", "OpenLab Control")),
+        ui_scale=_ui_scale(application.get("ui_scale", "auto")),
         ui_refresh_ms=int(application.get("ui_refresh_ms", 200)),
         poll_interval_seconds=float(application.get("poll_interval_seconds", 0.2)),
         simulation_speed=float(application.get("simulation_speed", 1.0)),

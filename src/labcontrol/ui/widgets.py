@@ -5,6 +5,7 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ..models import DeviceKind, DeviceSnapshot, StabilityState
+from .scaling import scaled
 
 
 class StatusTile(QFrame):
@@ -16,8 +17,8 @@ class StatusTile(QFrame):
         self.kind = kind
         self.setObjectName("statusTile")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setMinimumWidth(205)
-        self.setMaximumHeight(105)
+        self.setMinimumWidth(scaled(205))
+        self.setMaximumHeight(scaled(105))
         self.setCursor(
             Qt.CursorShape.ArrowCursor
             if kind is DeviceKind.MONITOR
@@ -25,8 +26,8 @@ class StatusTile(QFrame):
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(2)
+        layout.setContentsMargins(scaled(10), scaled(6), scaled(10), scaled(6))
+        layout.setSpacing(scaled(2))
         header = QHBoxLayout()
         self.title_label = QLabel(title)
         self.title_label.setObjectName("tileTitle")

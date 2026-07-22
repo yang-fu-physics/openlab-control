@@ -34,6 +34,7 @@ from ..plot_format import (
     PlotFormat,
     PlotFormatError,
 )
+from .scaling import scaled, scaled_float
 
 
 ROW_NUMBER_AXIS = "Row Number"
@@ -88,7 +89,7 @@ class YSeriesSelectionDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Select Y Series")
-        self.resize(430, 470)
+        self.resize(scaled(430), scaled(470))
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Select one or more numeric columns, then choose OK."))
         self.series_list = QListWidget()
@@ -140,7 +141,7 @@ class DatPlotCanvas(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(640, 390)
+        self.setMinimumSize(scaled(640), scaled(390))
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
         self.document: DatDocument | None = None
@@ -455,12 +456,19 @@ class DatPlotCanvas(QWidget):
         return x_range[0], x_range[1], y_range[0], y_range[1]
 
     def _plot_rects(self) -> list[tuple[str | None, QRectF]]:
-        frame = QRectF(self.rect().adjusted(84, 38, -24, -66))
+        frame = QRectF(
+            self.rect().adjusted(
+                scaled(84),
+                scaled(38),
+                -scaled(24),
+                -scaled(66),
+            )
+        )
         if self.layout_mode == OVERLAY_LAYOUT or len(self.y_columns) <= 1:
             series = None if self.layout_mode == OVERLAY_LAYOUT else self.y_column
             return [(series, frame)]
         count = len(self.y_columns)
-        gap = 14.0
+        gap = scaled_float(14.0)
         height = max(1.0, (frame.height() - gap * (count - 1)) / count)
         return [
             (
@@ -587,7 +595,12 @@ class DatPlotCanvas(QWidget):
         footer = panels[-1][1] if panels else self._plot_rect()
         painter.setPen(QColor("#5e6875"))
         painter.drawText(
-            QRectF(footer.left(), footer.bottom() + 48, footer.width(), 18),
+            QRectF(
+                footer.left(),
+                footer.bottom() + scaled_float(48),
+                footer.width(),
+                scaled_float(18),
+            ),
             Qt.AlignmentFlag.AlignRight,
             f"{total:,} plotted points | drag to zoom | double-click a point for details",
         )
@@ -633,7 +646,12 @@ class DatPlotCanvas(QWidget):
                     else x_min + (x_max - x_min) * fraction
                 )
                 painter.drawText(
-                    QRectF(x - 55, plot.bottom() + 4, 110, 20),
+                    QRectF(
+                        x - scaled_float(55),
+                        plot.bottom() + scaled_float(4),
+                        scaled_float(110),
+                        scaled_float(20),
+                    ),
                     Qt.AlignmentFlag.AlignHCenter,
                     f"{x_value:.6g}",
                 )
@@ -647,7 +665,12 @@ class DatPlotCanvas(QWidget):
                 else y_min + (y_max - y_min) * fraction
             )
             painter.drawText(
-                QRectF(2, y - 10, 76, 20),
+                QRectF(
+                    scaled_float(2),
+                    y - scaled_float(10),
+                    scaled_float(76),
+                    scaled_float(20),
+                ),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 f"{y_value:.6g}",
             )
@@ -655,7 +678,12 @@ class DatPlotCanvas(QWidget):
         if show_x_labels:
             painter.setPen(QColor("#26313f"))
             painter.drawText(
-                QRectF(plot.left(), plot.bottom() + 27, plot.width(), 20),
+                QRectF(
+                    plot.left(),
+                    plot.bottom() + scaled_float(27),
+                    plot.width(),
+                    scaled_float(20),
+                ),
                 Qt.AlignmentFlag.AlignCenter,
                 self.x_label + (" [Log]" if self.x_scale == LOG_SCALE else ""),
             )
@@ -663,7 +691,12 @@ class DatPlotCanvas(QWidget):
             color = QColor(PLOT_COLORS[self.y_columns.index(series) % len(PLOT_COLORS)])
             painter.setPen(QPen(color, 1.5))
             painter.drawText(
-                QRectF(plot.left() + 7, plot.top() + 4, plot.width() - 14, 20),
+                QRectF(
+                    plot.left() + scaled_float(7),
+                    plot.top() + scaled_float(4),
+                    plot.width() - scaled_float(14),
+                    scaled_float(20),
+                ),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                 series + (" [Log]" if self.y_scale == LOG_SCALE else ""),
             )
@@ -714,21 +747,36 @@ class DatPlotCanvas(QWidget):
             for point in points:
                 screen = self._screen_point(point.x, point.y, plot, ranges)
                 if screen is not None:
-                    painter.drawEllipse(screen, 2.1, 2.1)
+                    painter.drawEllipse(screen, scaled_float(2.1), scaled_float(2.1))
         painter.restore()
 
     def _draw_legend(self, painter: QPainter, plot: QRectF) -> None:
-        cursor_x = plot.left() + 8
-        y = max(3.0, plot.top() - 27)
+        cursor_x = plot.left() + scaled_float(8)
+        y = max(scaled_float(3.0), plot.top() - scaled_float(27))
         for index, name in enumerate(self.y_columns):
-            width = max(82.0, painter.fontMetrics().horizontalAdvance(name) + 34.0)
+            width = max(
+                scaled_float(82.0),
+                painter.fontMetrics().horizontalAdvance(name) + scaled_float(34.0),
+            )
             if cursor_x + width > plot.right():
                 break
             color = QColor(PLOT_COLORS[index % len(PLOT_COLORS)])
             painter.setPen(QPen(color, 2.5))
-            painter.drawLine(QPointF(cursor_x, y + 9), QPointF(cursor_x + 18, y + 9))
+            painter.drawLine(
+                QPointF(cursor_x, y + scaled_float(9)),
+                QPointF(cursor_x + scaled_float(18), y + scaled_float(9)),
+            )
             painter.setPen(QColor("#26313f"))
-            painter.drawText(QRectF(cursor_x + 23, y, width - 23, 20), Qt.AlignmentFlag.AlignLeft, name)
+            painter.drawText(
+                QRectF(
+                    cursor_x + scaled_float(23),
+                    y,
+                    width - scaled_float(23),
+                    scaled_float(20),
+                ),
+                Qt.AlignmentFlag.AlignLeft,
+                name,
+            )
             cursor_x += width
 
     def _panel_for_series(self, series: str | None) -> QRectF | None:
@@ -775,7 +823,12 @@ class DatPlotCanvas(QWidget):
             self._drag_origin = None
             self._drag_current = None
             self._drag_series = None
-            if ranges is not None and plot is not None and selection.width() >= 10 and selection.height() >= 10:
+            if (
+                ranges is not None
+                and plot is not None
+                and selection.width() >= scaled_float(10)
+                and selection.height() >= scaled_float(10)
+            ):
                 self._x_view = (
                     self._data_x(selection.left(), plot, ranges),
                     self._data_x(selection.right(), plot, ranges),
@@ -811,7 +864,7 @@ class DatPlotCanvas(QWidget):
         panel_series, plot = panel
         names = self.y_columns if self.layout_mode == OVERLAY_LAYOUT else (panel_series,)
         nearest: PlotHit | None = None
-        nearest_distance = 12.0**2
+        nearest_distance = scaled_float(12.0) ** 2
         for name in names:
             if name is None:
                 continue
