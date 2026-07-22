@@ -186,7 +186,18 @@ class SequenceEngine:
             )
             return
         if command.type is CommandType.SET_DATAFILE:
-            self.logger.set_datafile(str(p.get("path", "experiment.dat")), str(p.get("mode", "open|create")))
+            destination = self.logger.set_datafile(
+                str(p.get("path", "experiment.dat")),
+                str(p.get("mode", "open|create")),
+                allow_external=str(p.get("path_scope", "Run folder")) == "Custom folder",
+            )
+            self.events.report(
+                Severity.INFO,
+                "logging",
+                "DATAFILE_SELECTED",
+                str(destination),
+                self._current_path,
+            )
             return
         if command.type is CommandType.WAIT:
             await self._interruptible_sleep(float(p.get("seconds", 0.0)))

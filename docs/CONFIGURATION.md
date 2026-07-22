@@ -43,7 +43,7 @@ ui_scale = 1.4
 | `timestamp_epoch` | string | `labview_1904` 或 `unix` |
 | `sparse_channel_rows` | bool | true 时每个通道单独一行，其他通道留空 |
 | `flush_every_row` | bool | 每行写入后刷新文件 |
-| `allow_external_paths` | bool | 是否允许 SEQ 写项目运行目录以外的绝对路径 |
+| `allow_external_paths` | bool | 是否全局允许所有 SEQ 外部绝对路径；默认 false。带 `external` 标记的用户明确选择路径不依赖此全局开关 |
 
 为兼容用户模板，默认采用 LabVIEW 1904 时间基准和稀疏通道行。
 

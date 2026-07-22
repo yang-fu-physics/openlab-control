@@ -68,11 +68,18 @@ class DatRunLogger:
         self._pending_events.clear()
         return self.paths
 
-    def set_datafile(self, requested: str, mode: str = "open|create") -> Path:
+    def set_datafile(
+        self,
+        requested: str,
+        mode: str = "open|create",
+        *,
+        allow_external: bool = False,
+    ) -> Path:
         if self.paths is None:
             raise RuntimeError("Run directory has not been created")
         path = Path(requested)
-        if path.is_absolute() and not self.config.logging.allow_external_paths:
+        external_allowed = allow_external or self.config.logging.allow_external_paths
+        if path.is_absolute() and not external_allowed:
             destination = self.paths.directory / path.name
             self.events.report(
                 Severity.WARNING,

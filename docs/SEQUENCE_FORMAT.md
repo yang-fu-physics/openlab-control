@@ -62,7 +62,15 @@ T Set Datafile <mode> <path>
 - `open`：只打开已有文件，不存在则 Error。
 - `open|create`：存在则追加，不存在则创建。
 
-默认安全配置会把外部绝对路径重定向到本次运行目录。
+默认的 Run folder 形式会把外部绝对路径重定向到本次运行目录，兼容来自其他电脑的旧 SEQ，且不会意外写入任意位置。
+
+用户从左侧 `Change` 明确选择自定义文件夹，或在参数窗口把 `Location` 设为 `Custom folder` 时，规范语法增加 `external`：
+
+```text
+T Set Datafile open|create external D:\Experiment Data\sample.dat
+```
+
+`external` 是对该条命令目标路径的显式授权，会随 SEQ 保存和重新加载；路径应为绝对路径。它不会改变全局配置，也不会让其他未标记的旧命令绕过路径保护。
 
 ### Wait
 

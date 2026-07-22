@@ -209,6 +209,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     )),
     CommandSpec(CommandType.SET_DATAFILE, "Set Datafile", "System Commands", (
         FieldSpec("mode", "Mode", "choice", "open|create", choices=("open|create", "create", "open")),
+        FieldSpec("path_scope", "Location", "choice", "Run folder", choices=("Run folder", "Custom folder")),
         FieldSpec("path", "Data file", "text", "experiment.dat"),
     )),
     CommandSpec(CommandType.CALL_SEQUENCE, "Call Sequence", "System Commands", (

@@ -4,13 +4,14 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
@@ -62,6 +63,42 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(window.document.name, "Untitled.seq")
             self.assertEqual(window.editor.list.count(), 1)
             self.assertEqual(window.editor.list.item(0).text(), "End Sequence")
+        finally:
+            window.close()
+
+    def test_custom_file_paths_do_not_force_the_left_dock_wider(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1180, 720)
+            window.show()
+            self.application.processEvents()
+            baseline_minimum = window.left_dock.minimumSizeHint().width()
+            custom_path = ROOT / "a very long custom output directory" / (
+                "a_very_long_measurement_file_name_that_must_not_expand_the_sidebar.dat"
+            )
+            with patch(
+                "labcontrol.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(custom_path), "Data (*.dat)"),
+            ):
+                window._change_datafile()
+            window.sequence_label.setFullText("a_very_long_sequence_name_" * 8 + ".seq")
+            self.application.processEvents()
+
+            command = next(
+                item for item in window.document.commands if item.type.value == "set_datafile"
+            )
+            expected_path = str(custom_path.resolve())
+            self.assertEqual(command.type.value, "set_datafile")
+            self.assertEqual(command.params["path_scope"], "Custom folder")
+            self.assertEqual(command.params["path"], expected_path)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+            self.assertEqual(window.data_file_label.toolTip(), expected_path)
+            self.assertEqual(
+                window.data_file_label.sizePolicy().horizontalPolicy(),
+                QSizePolicy.Policy.Ignored,
+            )
+            self.assertIn("…", window.data_file_label.text())
+            self.assertLessEqual(window.left_dock.minimumSizeHint().width(), baseline_minimum)
         finally:
             window.close()
 

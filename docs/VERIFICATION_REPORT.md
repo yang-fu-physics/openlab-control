@@ -1,4 +1,4 @@
-# OpenLab Control 0.9.0 验证报告
+# OpenLab Control 0.9.1 验证报告
 
 - 验证日期：2026-07-22
 - 验证平台：Windows 11 x64（build 26200）
@@ -7,7 +7,7 @@
 
 ## 结论
 
-0.9.0 仿真框架达到本阶段交付条件：Scan Temperature 已支持 Linear/List 点位，显式列表的输入、单行 SEQ、嵌套、执行顺序、重复点和整表安全预检均完成验证；此前的 Oe 磁场、温度/磁场精度、英文界面、分辨率缩放、`2nd Stage`、SEQ 多行编辑与窗口恢复、Data Browser、日志、Warning/Error、判稳和中止保持继续通过回归测试。
+0.9.1 仿真框架达到本阶段交付条件：数据文件可以由用户选择任意文件夹，且只有带 `external` 标记的 `Set Datafile` 命令获得单次外部路径授权；左侧 Sequence Control 的长文件名采用中间省略并通过悬停显示完整路径，不再撑大或锁死侧栏宽度。Scan Temperature Linear/List、Oe 磁场、温度/磁场精度、英文界面、分辨率缩放、`2nd Stage`、SEQ 多行编辑与窗口恢复、Data Browser、日志、Warning/Error、判稳和中止保持继续通过回归测试。
 
 本结论只适用于仿真设备。由于尚未接入真实仪表，它不构成温控仪、磁体电源或测量仪器的硬件验收。
 
@@ -19,11 +19,15 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-结果：51 项通过，0 项失败。
+结果：55 项通过，0 项失败。
 
 覆盖内容：
 
 - 用户 SEQ 模板解析和文字往返保留。
+- `Set Datafile ... external <path>` 的解析、格式化和往返保留；未标记的旧绝对路径继续安全重定向到运行目录。
+- 显式授权的自定义数据目录由执行引擎直接写入，且 `DATAFILE_SELECTED` 事件返回实际目标路径。
+- 左侧 Sequence/Data File 长路径保持单行中间省略、完整路径 Tooltip，并且不抬高 Dock 的最小宽度。
+- Data File Change 生成带单次外部路径授权的 SEQ 命令，文件选择器记住本次会话目录并补全 `.dat` 后缀。
 - 禁用 `F` 行及禁用嵌套 Scan 的解析、序列化与执行跳过。
 - SEQ Ctrl/Shift 多行选择、批量 Ctrl+D/Ctrl+E/Delete/Ctrl+C/Ctrl+V、稳定文档顺序和完整 Scan 深复制。
 - 父 Scan、后代和 End Scan 同时选择时的结构去重，以及批量粘贴后的多项选择恢复。
@@ -68,12 +72,16 @@
 
 此外，用户提供的原始 `template_original.seq` 已按原文运行完成：接受仿真 Initialize、将另一台电脑上的绝对数据路径安全重定向至本次运行目录，并在 60 秒内完成 60 个测量点，最终进入 `Completed`。四通道稀疏写入共得到 240 行数据，与预期一致。
 
-源码和 Windows 发布 EXE 还分别运行 `examples/temperature_list.seq`，两次均进入 `Completed`。生成 DAT 的 SequenceStep 依次记录 `300.000 → 299.900 → 299.500 → 299.900 K`，证明非单调顺序和重复点在打包边界后仍被保留；DAT Header 的 BYAPP 版本为 0.9.0。
+源码和 Windows 发布 EXE 还分别运行 `examples/temperature_list.seq`，两次均进入 `Completed`。生成 DAT 的 SequenceStep 依次记录 `300.000 → 299.900 → 299.500 → 299.900 K`，证明非单调顺序和重复点在打包边界后仍被保留。
+
+Windows 发布 EXE 另运行一份临时的自定义目录序列。序列中的 `Set Datafile create external <absolute-path>` 将数据直接写入指定目录，日志记录 `DATAFILE_SELECTED`，生成 DAT Header 的 BYAPP 版本为 0.9.1；验证后临时序列、数据目录和运行记录均已清理。
 
 ## GUI 与发布包验证
 
 - 源码 GUI 在 Qt 离屏平台完成启动、四个设备轮询、窗口渲染、截图和正常关闭；`2nd Stage` 显示 `Monitoring` 与只读说明。
 - Windows 发布 EXE 独立完成同一流程，退出码为 0；QtAwesome 字体和图标资源已由 PyInstaller hook 收集。
+- Windows 发布 EXE 完成自定义 DAT 文件夹写入，退出码为 0；未使用全局外部路径开关。
+- 自动化 GUI 测试验证超长 SEQ/DAT 路径不会扩大左侧 Dock 的最小宽度，标签悬停仍可查看完整路径。
 - 人工检查发布 EXE 截图：英文菜单、矢量工具栏、左侧 Sequence Control、中间单行 SEQ、右侧命令栏以及底部温度/磁场/测量卡片均正常显示。
 - 主界面磁场状态卡显示 Oe 与两位小数，温度状态卡显示三位小数；默认嵌套 SEQ 使用 Oe。
 - 人工检查 1180×720 截图：SEQ 子窗口行首完整，四个状态卡片无裁切；自动布局测试同时验证 SEQ 与 Data Browser 的窗口边界。
@@ -94,6 +102,7 @@ PyInstaller 重新生成 `dist/OpenLabControl` 后完成以下独立验证：
 
 - Windows EXE 运行完整无界面嵌套序列，退出码 0。
 - Windows EXE 运行显式温度 List 序列，退出码 0，DAT 版本与点位顺序正确。
+- Windows EXE 运行显式授权的自定义 DAT 目录序列，退出码 0，目标文件位于所选文件夹且 DAT 版本为 0.9.1。
 - EXE 运行带普通禁用行和禁用 Scan 子树的示例，退出码 0。
 - EXE 完成离屏 GUI 冒烟并显示全部 QtAwesome 工具栏图标，退出码 0。
 - EXE 打开 2,458 行示例 DAT 及同名 `.plt`，三幅共享 X 子图正常渲染，退出码 0。

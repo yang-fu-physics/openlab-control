@@ -42,7 +42,7 @@ from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
 from .scaling import current_ui_scale, scaled
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
-from .widgets import StatusTile
+from .widgets import ElidedLabel, StatusTile
 
 
 class MainWindow(QMainWindow):
@@ -54,6 +54,8 @@ class MainWindow(QMainWindow):
         self.runtime = RuntimeService(config)
         self.document = SequenceDocument()
         self.sequence_path: Path | None = None
+        self._last_sequence_directory = self.config.project_root
+        self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_snapshots: dict[str, DeviceSnapshot] = {}
         self.current_run_state = RunState.IDLE
         self.status_tiles: dict[str, StatusTile] = {}
@@ -119,7 +121,7 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Sequence Control", self)
         dock.setObjectName("sequenceControlDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
-        dock.setMinimumWidth(scaled(225))
+        dock.setMinimumWidth(scaled(205))
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
@@ -133,8 +135,7 @@ class MainWindow(QMainWindow):
 
         data_group = QGroupBox("Data File Name")
         data_layout = QVBoxLayout(data_group)
-        self.data_file_label = QLabel("<created automatically>")
-        self.data_file_label.setWordWrap(True)
+        self.data_file_label = ElidedLabel("<created automatically>")
         data_layout.addWidget(self.data_file_label)
         data_buttons = QHBoxLayout()
         self.view_data_button = QPushButton("View")
@@ -148,8 +149,7 @@ class MainWindow(QMainWindow):
 
         sequence_group = QGroupBox("Selected Sequence")
         sequence_layout = QVBoxLayout(sequence_group)
-        self.sequence_label = QLabel("Untitled.seq")
-        self.sequence_label.setWordWrap(True)
+        self.sequence_label = ElidedLabel("Untitled.seq")
         sequence_layout.addWidget(self.sequence_label)
         sequence_buttons = QHBoxLayout()
         self.edit_sequence_button = QPushButton("Edit")
@@ -374,8 +374,10 @@ class MainWindow(QMainWindow):
     def _set_document(self, document: SequenceDocument) -> None:
         self.document = document
         self.sequence_path = document.path
+        if document.path is not None:
+            self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
-        self.sequence_label.setText(document.name)
+        self.sequence_label.setFullText(document.name)
         self.sequence_window.setWindowTitle(document.name)
         self._dirty = False
         self._sync_datafile_label()
@@ -386,9 +388,13 @@ class MainWindow(QMainWindow):
     def _sync_datafile_label(self) -> None:
         for command in self.document.commands:
             if command.type is CommandType.SET_DATAFILE:
-                self.data_file_label.setText(str(command.params.get("path", "experiment.dat")))
+                path_text = str(command.params.get("path", "experiment.dat"))
+                self.data_file_label.setFullText(path_text)
+                path = Path(path_text)
+                if path.is_absolute():
+                    self._last_data_directory = path.parent
                 return
-        self.data_file_label.setText("<create experiment.dat automatically>")
+        self.data_file_label.setFullText("<create experiment.dat automatically>")
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -404,9 +410,15 @@ class MainWindow(QMainWindow):
     def _open_sequence(self) -> None:
         if not self._confirm_discard():
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Open SEQ", str(self.config.project_root), "Sequence (*.seq);;All files (*)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open SEQ",
+            str(self._last_sequence_directory),
+            "Sequence (*.seq);;All files (*)",
+        )
         if not path:
             return
+        self._last_sequence_directory = Path(path).resolve().parent
         result = load_sequence(path)
         self._set_document(result.document)
         if result.issues:
@@ -417,16 +429,20 @@ class MainWindow(QMainWindow):
         path = self.sequence_path
         if save_as or path is None:
             selected, _ = QFileDialog.getSaveFileName(
-                self, "Save SEQ", str(self.config.project_root / "examples" / self.document.name), "Sequence (*.seq)"
+                self,
+                "Save SEQ",
+                str(self._last_sequence_directory / self.document.name),
+                "Sequence (*.seq)",
             )
             if not selected:
                 return False
             path = Path(selected)
             if path.suffix.lower() != ".seq":
                 path = path.with_suffix(".seq")
+            self._last_sequence_directory = path.resolve().parent
         save_sequence(self.document, path)
         self.sequence_path = path
-        self.sequence_label.setText(path.name)
+        self.sequence_label.setFullText(path.name)
         self.sequence_window.setWindowTitle(path.name)
         self._dirty = False
         return True
@@ -466,15 +482,33 @@ class MainWindow(QMainWindow):
             self._mark_dirty()
 
     def _change_datafile(self) -> None:
-        selected, _ = QFileDialog.getSaveFileName(self, "Select DAT File", str(self.config.project_root / "runs" / "experiment.dat"), "Data (*.dat)")
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select DAT File",
+            str(self._last_data_directory / "experiment.dat"),
+            "Data (*.dat)",
+        )
         if not selected:
             return
+        selected_path = Path(selected)
+        if selected_path.suffix.lower() != ".dat":
+            selected_path = selected_path.with_suffix(".dat")
+        selected = str(selected_path.resolve())
+        self._last_data_directory = selected_path.resolve().parent
         command = next((item for item in self.document.commands if item.type is CommandType.SET_DATAFILE), None)
         if command is None:
-            command = Command(CommandType.SET_DATAFILE, {"mode": "open|create", "path": selected})
+            command = Command(CommandType.SET_DATAFILE, {
+                "mode": "open|create",
+                "path_scope": "Custom folder",
+                "path": selected,
+            })
             self.document.commands.insert(0, command)
         else:
-            command.update_params({"mode": "open|create", "path": selected})
+            command.update_params({
+                "mode": "open|create",
+                "path_scope": "Custom folder",
+                "path": selected,
+            })
         self.editor.rebuild(command.id)
         self._mark_dirty()
 
@@ -546,7 +580,9 @@ class MainWindow(QMainWindow):
         event = notice.event
         if event.code == "RUN_DIRECTORY" and not notice.is_resolution:
             self.run_directory = Path(event.message)
-            self.data_file_label.setText(str(event.context or event.message))
+            self.data_file_label.setFullText(str(event.context or event.message))
+        elif event.code == "DATAFILE_SELECTED" and not notice.is_resolution:
+            self.data_file_label.setFullText(event.message)
         state = "RESOLVED" if notice.is_resolution else event.severity.value.upper()
         self._append_log(state, event.source, event.code, event.message)
         if notice.is_resolution:

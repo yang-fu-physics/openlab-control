@@ -1,12 +1,45 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtGui import QMouseEvent, QResizeEvent
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, StabilityState
 from .scaling import scaled
+
+
+class ElidedLabel(QLabel):
+    """A one-line label whose full value never controls the layout width."""
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__("", parent)
+        self._full_text = ""
+        self.setWordWrap(False)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setFullText(text)
+
+    def setFullText(self, text: str) -> None:  # noqa: N802
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self._refresh_elision()
+
+    def fullText(self) -> str:  # noqa: N802
+        return self._full_text
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh_elision()
+
+    def _refresh_elision(self) -> None:
+        available = max(0, self.contentsRect().width())
+        displayed = self.fontMetrics().elidedText(
+            self._full_text,
+            Qt.TextElideMode.ElideMiddle,
+            available,
+        )
+        super().setText(displayed)
 
 
 class StatusTile(QFrame):

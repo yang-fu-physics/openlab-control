@@ -49,6 +49,8 @@ flowchart TD
 
 主界面采用 PySide6 Fusion 样式和小范围自定义 Palette/QSS。QtAwesome 仅负责工具栏矢量图标，不参与设备逻辑；全局正文以 10pt 为缩放基准，设备数值和运行状态通过局部 QSS 放大。未启用独立暗色主题库，以避免无效果依赖和打包体积增加。SEQ 列表重建后显式把水平滚动条归零，保证长命令不会把后续行的命令前缀留在视野外。
 
+左侧文件标签使用水平 `Ignored` 尺寸策略和中间省略绘制：完整字符串只进入 Tooltip，不进入布局最小宽度。这样超长 Windows 路径既可追溯，也不会迫使 QDockWidget 扩张或阻止用户缩回基础宽度。
+
 SEQ 的 `QMdiSubWindow` 使用 `WA_DeleteOnClose = false` 保留文档与编辑器对象。Qt 关闭 MDI 子窗口时会分别隐藏外框及其 child widget，因此 New/Open/Edit 的统一聚焦路径必须同时 `show()` 子窗口和 `SequenceEditorWidget`，再恢复活动窗口；只显示外框会留下灰色空白区域。
 
 `ui.scaling` 以 `availableGeometry × devicePixelRatio` 取得屏幕原生像素尺寸。自动倍率对分辨率比取平方根并限制在 1.00× 到 1.40×，以避免 4K 直接按 2 倍放大；固定控件尺寸、QSS 字号、工具栏图标及绘图边距使用同一倍率。`AppConfig.ui_scale` 为 `None` 时表示 Auto，数值则表示用户手动覆盖。
@@ -89,6 +91,8 @@ X/Y 尺度各自保存为 `linear` 或 `log`。Log10 在数据空间保存范围
 Poll 的稳定性计算与 `latest` 快照发布也在同一设备锁内完成。这样某次 Poll 即使先于 Set Target 开始，也只能在 Set 取得锁之前发布；已完成但仍等待其他设备的批量轮询结果不会在稍后覆盖新目标。
 
 默认 `field` 设备以 Oe 作为框架原生单位。配置限值、速率、中央判稳和插件快照始终在同一原生单位中计算；SEQ 执行入口负责把兼容的 T 命令换算成 Oe。格式化属于边界层：K 温度使用三位小数，Oe 使用两位小数，兼容 T 使用六位小数。参数窗口改变 T/Oe 选择时同时换算目标、Scan 端点和速率，从而保持物理量不变。
+
+Set Datafile 使用逐命令 `path_scope`：普通命令遵循全局外部路径策略，`Custom folder` 序列化为 `external` 并只授权该目标。数据记录器把逐命令授权与配置的 `allow_external_paths` 合并判断，因此 UI 自选目录可用，同时用户提供的旧模板仍默认重定向到本次运行目录。
 
 ## SEQ 内部表示
 

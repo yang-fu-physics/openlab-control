@@ -11,7 +11,7 @@
 ```text
 [Header]
 ; comments
-BYAPP,OpenLab Control,0.9.0
+BYAPP,OpenLab Control,0.9.1
 INFO,...
 
 [Data]
@@ -79,7 +79,9 @@ sparse_channel_rows = false
 每次运行先建立唯一运行目录。Set Datafile 可修改文件名：
 
 - 相对路径在运行目录内解析。
-- 默认不允许向运行目录外写绝对路径。
+- 未标记的绝对路径默认不允许写到运行目录外。
+- 左侧 `Change` 或 `Set Datafile ... external <absolute-path>` 明确授权该条命令写入用户选择的文件夹。
+- `allow_external_paths = true` 可全局允许旧式绝对路径，但比逐条 `external` 授权范围更宽。
 - 被重定向的路径产生 `DATAFILE_RELOCATED` Warning。
 
 ## 事件文件

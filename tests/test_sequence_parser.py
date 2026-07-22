@@ -140,6 +140,24 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
         self.assertIn("point 2 is empty", result.issues[0].message)
 
+    def test_custom_datafile_folder_marker_round_trips(self) -> None:
+        source = (
+            "T Set Datafile open|create external C:\\Experiment Data\\sample.dat\n"
+            "T End Sequence\n"
+        )
+        result = parse_sequence(source, "custom-data.seq")
+        self.assertEqual(result.issues, ())
+        command = result.document.commands[0]
+        self.assertEqual(command.params["path_scope"], "Custom folder")
+        self.assertEqual(command.params["path"], "C:\\Experiment Data\\sample.dat")
+        self.assertEqual(serialize_sequence(result.document), source)
+
+        command.update_params(command.params)
+        self.assertEqual(
+            format_command(command),
+            "Set Datafile open|create external C:\\Experiment Data\\sample.dat",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

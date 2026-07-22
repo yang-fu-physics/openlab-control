@@ -253,9 +253,13 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
         parts = payload.split(maxsplit=1)
         mode = parts[0] if parts else "open|create"
         path = parts[1] if len(parts) > 1 else "experiment.dat"
+        path_scope = "Run folder"
+        if path.lower().startswith("external "):
+            path_scope = "Custom folder"
+            path = path[len("external "):].strip()
         return Command(
             CommandType.SET_DATAFILE,
-            {"mode": mode, "path": path},
+            {"mode": mode, "path_scope": path_scope, "path": path},
             raw_text=text,
             source_line=line_number,
         ), None
@@ -389,7 +393,11 @@ def format_command(command: Command) -> str:
         suffix = f" model {p.get('config_path', '')}" if p.get("config_path") else ""
         return f"Initialize {p.get('model', 'device')}{suffix}"
     if command.type is CommandType.SET_DATAFILE:
-        return f"Set Datafile {p.get('mode', 'open|create')} {p.get('path', 'experiment.dat')}"
+        scope = "external " if str(p.get("path_scope", "Run folder")) == "Custom folder" else ""
+        return (
+            f"Set Datafile {p.get('mode', 'open|create')} "
+            f"{scope}{p.get('path', 'experiment.dat')}"
+        )
     if command.type is CommandType.WAIT:
         return f"Wait For {_format_number(p.get('seconds', 0.0), 1)} secs"
     if command.type is CommandType.SET_TEMPERATURE:

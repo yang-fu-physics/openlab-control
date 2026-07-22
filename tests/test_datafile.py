@@ -51,6 +51,46 @@ class DatafileTests(unittest.TestCase):
             self.assertIn("RESOLVED", event_data)
             self.assertIn(",2,", event_data)
 
+    def test_explicit_custom_folder_is_allowed_without_weakening_legacy_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            (temp_root / "configs").mkdir()
+            config_path = temp_root / "configs" / "default.toml"
+            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config = load_config(config_path)
+
+            custom_events = EventManager()
+            custom_notices = []
+            custom_events.subscribe(custom_notices.append)
+            custom_logger = DatRunLogger(config, custom_events)
+            custom_logger.open_run("custom.seq", "T End Sequence\n")
+            custom_path = temp_root / "chosen folder" / "custom.dat"
+            destination = custom_logger.set_datafile(
+                str(custom_path),
+                "create",
+                allow_external=True,
+            )
+            custom_logger.close()
+            self.assertEqual(destination, custom_path)
+            self.assertTrue(custom_path.exists())
+            self.assertNotIn(
+                "DATAFILE_RELOCATED",
+                [notice.event.code for notice in custom_notices if not notice.is_resolution],
+            )
+
+            safe_events = EventManager()
+            safe_notices = []
+            safe_events.subscribe(safe_notices.append)
+            safe_logger = DatRunLogger(config, safe_events)
+            safe_paths = safe_logger.open_run("legacy.seq", "T End Sequence\n")
+            redirected = safe_logger.set_datafile(str(temp_root / "legacy.dat"), "create")
+            safe_logger.close()
+            self.assertEqual(redirected, safe_paths.directory / "legacy.dat")
+            self.assertIn(
+                "DATAFILE_RELOCATED",
+                [notice.event.code for notice in safe_notices if not notice.is_resolution],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

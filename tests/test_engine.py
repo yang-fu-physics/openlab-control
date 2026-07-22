@@ -214,6 +214,32 @@ class SequenceEngineTests(unittest.TestCase):
                 [notice.event.code for notice in notices if not notice.is_resolution],
             )
 
+    def test_custom_datafile_command_writes_to_selected_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = self._fast_config(temp_root)
+            custom_path = temp_root / "selected output" / "measurement.dat"
+            document = SequenceDocument([
+                Command(CommandType.SET_DATAFILE, {
+                    "mode": "create",
+                    "path_scope": "Custom folder",
+                    "path": str(custom_path),
+                }),
+                Command(
+                    CommandType.MEASURE,
+                    {"devices": "transport", "repeats": 1, "interval_seconds": 0.0},
+                ),
+            ], "custom-output.seq")
+            notices = []
+            state, _, paths = asyncio.run(self._run(config, document, notices))
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertEqual(paths.data_file, custom_path)
+            self.assertTrue(custom_path.exists())
+            self.assertIn(
+                "DATAFILE_SELECTED",
+                [notice.event.code for notice in notices if not notice.is_resolution],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
