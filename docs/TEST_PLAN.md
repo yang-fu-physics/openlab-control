@@ -14,6 +14,8 @@
 - 模板加载—保存逐行往返。
 - `F` 禁用行、嵌套禁用块和 T/F 往返保存。
 - 多层 Scan AST。
+- Scan Temperature Linear/List 参数切换、单行语法往返和错误列表拒绝。
+- 温度 List 的非单调顺序、重复点执行，以及首次移动前整表上下限预检。
 - 未知指令保留。
 - 不平衡 End Scan 检测。
 - T/Oe 换算。
@@ -190,7 +192,9 @@
 - [ ] Set Temperature Settle/Sweep。
 - [ ] Set Field Settle/Sweep。
 - [ ] Scan Time。
-- [ ] Scan Temperature。
+- [ ] Scan Temperature Linear（Settle/Sweep）。
+- [ ] Scan Temperature List（Settle/Sweep、非单调点、重复点）。
+- [ ] Scan Temperature List 中间或末尾越界时，在第一点移动前拒绝整表。
 - [ ] Scan Field。
 - [ ] 两层嵌套。
 - [ ] 三层嵌套。

@@ -1,4 +1,4 @@
-# OpenLab Control 0.8.3 验证报告
+# OpenLab Control 0.9.0 验证报告
 
 - 验证日期：2026-07-22
 - 验证平台：Windows 11 x64（build 26200）
@@ -7,7 +7,7 @@
 
 ## 结论
 
-0.8.3 仿真框架达到本阶段交付条件：关闭浮动 SEQ 后，New/Open/Edit 能同时恢复窗口外框与内部文本编辑器；默认 Oe 磁场、温度/磁场精度、T/Oe 兼容、英文界面、分辨率缩放、`2nd Stage`、SEQ 多行编辑、Data Browser、多层执行、日志、Warning/Error、判稳、安全限制和中止保持均有自动测试覆盖。
+0.9.0 仿真框架达到本阶段交付条件：Scan Temperature 已支持 Linear/List 点位，显式列表的输入、单行 SEQ、嵌套、执行顺序、重复点和整表安全预检均完成验证；此前的 Oe 磁场、温度/磁场精度、英文界面、分辨率缩放、`2nd Stage`、SEQ 多行编辑与窗口恢复、Data Browser、日志、Warning/Error、判稳和中止保持继续通过回归测试。
 
 本结论只适用于仿真设备。由于尚未接入真实仪表，它不构成温控仪、磁体电源或测量仪器的硬件验收。
 
@@ -19,7 +19,7 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-结果：45 项通过，0 项失败。
+结果：51 项通过，0 项失败。
 
 覆盖内容：
 
@@ -29,6 +29,9 @@
 - 父 Scan、后代和 End Scan 同时选择时的结构去重，以及批量粘贴后的多项选择恢复。
 - 运行期编辑锁禁止变更操作，同时允许 Copy。
 - 任意层级 Scan 的抽象语法树结构。
+- Scan Temperature 参数窗口在 Linear/List 间切换，并只显示对应的点位字段。
+- 温度 List 单行语法解析、原文往返、三位小数规范化及空项错误拒绝。
+- 非单调温度 List 和重复点严格按声明顺序执行；后部目标越界时在首次移动前拒绝整份列表。
 - 温度扫描、磁场扫描和测量的嵌套执行。
 - 设备插件加载、单位换算和安全限值拒绝。
 - 默认 Oe 场配置与原物理边界等价；温度三位、Oe 两位精度覆盖状态卡、参数窗口、SEQ 与 DAT。
@@ -65,6 +68,8 @@
 
 此外，用户提供的原始 `template_original.seq` 已按原文运行完成：接受仿真 Initialize、将另一台电脑上的绝对数据路径安全重定向至本次运行目录，并在 60 秒内完成 60 个测量点，最终进入 `Completed`。四通道稀疏写入共得到 240 行数据，与预期一致。
 
+源码和 Windows 发布 EXE 还分别运行 `examples/temperature_list.seq`，两次均进入 `Completed`。生成 DAT 的 SequenceStep 依次记录 `300.000 → 299.900 → 299.500 → 299.900 K`，证明非单调顺序和重复点在打包边界后仍被保留；DAT Header 的 BYAPP 版本为 0.9.0。
+
 ## GUI 与发布包验证
 
 - 源码 GUI 在 Qt 离屏平台完成启动、四个设备轮询、窗口渲染、截图和正常关闭；`2nd Stage` 显示 `Monitoring` 与只读说明。
@@ -76,6 +81,7 @@
 - 人工检查 SEQ 编辑截图：两行可同时保持选择；禁用命令和受禁用 Scan 影响的子命令均为灰色删除线；右键菜单显示 Disable、Enable、Delete、Copy、Paste 及对应快捷键。
 - Data Browser 在源码和发布 EXE 中均成功加载用户模板的 2,458 行，自动套用示例 `.plt`，显示三幅共享 X 的纵向子图和 0.75 秒刷新状态；Y 多选窗口保持打开供连续勾选，X/Y Linear/Logarithmic 菜单可独立切换。
 - 发布 EXE 运行 `disabled_commands.seq` 退出码为 0，日志包含两条 `STEP_SKIPPED_DISABLED`，未执行被禁用的 Set Temperature 和 Scan Field。
+- 发布 EXE 运行 `temperature_list.seq` 退出码为 0，四个列表点和四轮子 Measure 顺序正确。
 - 发布 EXE 的无界面完整序列验证退出码为 0。
 
 主窗口验收图：`docs/main-window-preview.png`。  
@@ -87,6 +93,7 @@ SEQ 编辑验收图：`docs/sequence-context-menu-preview.png`。
 PyInstaller 重新生成 `dist/OpenLabControl` 后完成以下独立验证：
 
 - Windows EXE 运行完整无界面嵌套序列，退出码 0。
+- Windows EXE 运行显式温度 List 序列，退出码 0，DAT 版本与点位顺序正确。
 - EXE 运行带普通禁用行和禁用 Scan 子树的示例，退出码 0。
 - EXE 完成离屏 GUI 冒烟并显示全部 QtAwesome 工具栏图标，退出码 0。
 - EXE 打开 2,458 行示例 DAT 及同名 `.plt`，三幅共享 X 子图正常渲染，退出码 0。

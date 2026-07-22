@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,7 @@ from .model import Command, CommandType, SequenceDocument
 
 
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?"
+MAX_TEMPERATURE_LIST_POINTS = 100000
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +47,11 @@ _SCAN_TEMPERATURE = re.compile(
     rf"(?P<rate>{NUMBER})\s*K/min\s*,?\s*(?P<mode>Settle|Sweep)$",
     re.IGNORECASE,
 )
+_SCAN_TEMPERATURE_LIST = re.compile(
+    rf"^Scan\s+Temperature\s+List\s+(?P<points>.+?)\s*K\s+at\s+"
+    rf"(?P<rate>{NUMBER})\s*K/min\s*,?\s*(?P<mode>Settle|Sweep)$",
+    re.IGNORECASE,
+)
 _SCAN_FIELD = re.compile(
     rf"^Scan\s+Field\s+(?:from\s+)?(?P<start>{NUMBER})\s*(?P<unit>T|Oe)\s+(?:to|through)\s+"
     rf"(?P<stop>{NUMBER})\s*(?P<stop_unit>T|Oe)\s+in\s+(?P<steps>\d+)\s+steps\s+at\s+"
@@ -60,6 +67,42 @@ _WAIT = re.compile(
     rf"^Wait(?:\s+For)?\s+(?P<seconds>{NUMBER})\s*(?:secs?|seconds?)$",
     re.IGNORECASE,
 )
+
+
+def parse_temperature_points(value: object) -> tuple[float, ...]:
+    """Parse a comma-separated temperature list while preserving order and duplicates."""
+    if isinstance(value, (list, tuple)):
+        raw_points = list(value)
+    else:
+        text = str(value).strip()
+        if not text:
+            raise ValueError("Enter at least one temperature point")
+        raw_points = [item.strip() for item in text.split(",")]
+
+    if len(raw_points) > MAX_TEMPERATURE_LIST_POINTS:
+        raise ValueError(
+            f"Temperature lists are limited to {MAX_TEMPERATURE_LIST_POINTS} points"
+        )
+
+    points: list[float] = []
+    for index, raw_point in enumerate(raw_points, start=1):
+        if isinstance(raw_point, str) and not raw_point:
+            raise ValueError(f"Temperature point {index} is empty")
+        try:
+            point = float(raw_point)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Temperature point {index} is not a number: {raw_point!s}") from exc
+        if not math.isfinite(point):
+            raise ValueError(f"Temperature point {index} must be finite")
+        points.append(point)
+
+    if not points:
+        raise ValueError("Enter at least one temperature point")
+    return tuple(points)
+
+
+def format_temperature_points(value: object) -> str:
+    return ", ".join(fixed_number(point, 3) for point in parse_temperature_points(value))
 
 
 def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
@@ -98,12 +141,37 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
             source_line=line_number,
         ), None
 
+    match = _SCAN_TEMPERATURE_LIST.match(text)
+    if match:
+        try:
+            points = format_temperature_points(match.group("points"))
+        except ValueError as exc:
+            return Command(
+                CommandType.UNKNOWN,
+                {"text": text},
+                raw_text=text,
+                source_line=line_number,
+            ), SequenceIssue(line_number, "error", f"Invalid temperature list: {exc}", text)
+        return Command(
+            CommandType.SCAN_TEMPERATURE,
+            {
+                "device_id": "temperature",
+                "point_mode": "List",
+                "points": points,
+                "rate": float(match.group("rate")),
+                "mode": match.group("mode").title(),
+            },
+            raw_text=text,
+            source_line=line_number,
+        ), None
+
     match = _SCAN_TEMPERATURE.match(text)
     if match:
         return Command(
             CommandType.SCAN_TEMPERATURE,
             {
                 "device_id": "temperature",
+                "point_mode": "Linear",
                 "start": float(match.group("start")),
                 "stop": float(match.group("stop")),
                 "steps": int(match.group("steps")),
@@ -113,6 +181,19 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
             raw_text=text,
             source_line=line_number,
         ), None
+
+    if lowered.startswith("scan temperature list"):
+        return Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        ), SequenceIssue(
+            line_number,
+            "error",
+            "Invalid temperature list scan; expected comma-separated points followed by K at rate K/min, Settle or Sweep",
+            text,
+        )
 
     match = _SCAN_FIELD.match(text)
     if match:
@@ -324,6 +405,15 @@ def format_command(command: Command) -> str:
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min in {p.get('mode', 'Settle')} mode"
         )
     if command.type is CommandType.SCAN_TEMPERATURE:
+        if str(p.get("point_mode", "Linear")).casefold() == "list":
+            try:
+                points = format_temperature_points(p.get("points", ""))
+            except ValueError:
+                points = str(p.get("points", "")).strip()
+            return (
+                f"Scan Temperature List {points} K at "
+                f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
+            )
         return (
             f"Scan Temperature {_format_number(p.get('start', 300.0))} K to "
             f"{_format_number(p.get('stop', 10.0))} K in {int(p.get('steps', 10))} steps at "

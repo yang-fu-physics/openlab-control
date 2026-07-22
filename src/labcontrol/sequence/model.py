@@ -228,9 +228,11 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     )),
     CommandSpec(CommandType.SCAN_TEMPERATURE, "Scan Temperature", "System Commands", (
         FieldSpec("device_id", "Temperature device", "text", "temperature"),
+        FieldSpec("point_mode", "Point definition", "choice", "Linear", choices=("Linear", "List")),
         FieldSpec("start", "Start (K)", "float", 300.0),
         FieldSpec("stop", "Stop (K)", "float", 10.0),
         FieldSpec("steps", "Points", "int", 10, 1, 100000),
+        FieldSpec("points", "Temperature list (K, comma-separated)", "text", "300, 100, 20"),
         FieldSpec("rate", "Rate (K/min)", "float", 5.0, 0.000001),
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),

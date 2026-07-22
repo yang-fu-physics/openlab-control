@@ -1,0 +1,5 @@
+T Remark Explicit temperature list with a repeated point
+T Scan Temperature List 300.000, 299.900, 299.500, 299.900 K at 10.000 K/min, Settle
+T     Measure devices=transport
+T End Scan
+T End Sequence

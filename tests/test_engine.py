@@ -158,6 +158,62 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertNotIn("NESTED_FATAL", codes)
             self.assertEqual(codes.count("STEP_SKIPPED_DISABLED"), 2)
 
+    def test_temperature_list_executes_in_declared_order_with_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._fast_config(Path(temp))
+            measure = Command(
+                CommandType.MEASURE,
+                {"devices": "transport", "repeats": 1, "interval_seconds": 0.0},
+            )
+            temperature_scan = Command(
+                CommandType.SCAN_TEMPERATURE,
+                {
+                    "device_id": "temperature",
+                    "point_mode": "List",
+                    "points": "300, 299.9, 300",
+                    "rate": 10.0,
+                    "mode": "Settle",
+                },
+                [measure],
+            )
+            notices = []
+            state, _, paths = asyncio.run(
+                self._run(config, SequenceDocument([temperature_scan], "temperature-list.seq"), notices)
+            )
+            self.assertEqual(state, RunState.COMPLETED)
+            data = paths.data_file.read_text(encoding="utf-8")
+            first = data.index("point 1/3=300.000 K")
+            second = data.index("point 2/3=299.900 K", first)
+            third = data.index("point 3/3=300.000 K", second)
+            self.assertLess(first, second)
+            self.assertLess(second, third)
+
+    def test_temperature_list_is_fully_validated_before_first_move(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._fast_config(Path(temp))
+            temperature_scan = Command(
+                CommandType.SCAN_TEMPERATURE,
+                {
+                    "device_id": "temperature",
+                    "point_mode": "List",
+                    "points": "299.9, 500",
+                    "rate": 10.0,
+                    "mode": "Settle",
+                },
+            )
+            notices = []
+            state, snapshots, _ = asyncio.run(
+                self._run(config, SequenceDocument([temperature_scan], "unsafe-list.seq"), notices)
+            )
+            self.assertEqual(state, RunState.FAULTED)
+            temperature = snapshots["temperature"]
+            self.assertAlmostEqual(temperature.current or 0.0, 300.0, places=3)
+            self.assertAlmostEqual(temperature.target or 0.0, 300.0, places=3)
+            self.assertIn(
+                "TARGET_OUT_OF_RANGE",
+                [notice.event.code for notice in notices if not notice.is_resolution],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

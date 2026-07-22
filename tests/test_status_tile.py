@@ -107,6 +107,26 @@ class StatusTileTests(unittest.TestCase):
         command_dialog.close()
         scan_dialog.close()
 
+    def test_temperature_scan_dialog_switches_between_linear_and_list_points(self) -> None:
+        spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
+        dialog = CommandDialog(spec.create(), spec)
+        self.assertFalse(dialog.inputs["start"].isHidden())
+        self.assertFalse(dialog.inputs["stop"].isHidden())
+        self.assertFalse(dialog.inputs["steps"].isHidden())
+        self.assertTrue(dialog.inputs["points"].isHidden())
+
+        dialog.inputs["point_mode"].setCurrentText("List")
+        self.assertTrue(dialog.inputs["start"].isHidden())
+        self.assertTrue(dialog.inputs["stop"].isHidden())
+        self.assertTrue(dialog.inputs["steps"].isHidden())
+        self.assertFalse(dialog.inputs["points"].isHidden())
+        dialog.inputs["points"].setText("300, 299.9, 300")
+        dialog.accept()
+        values = dialog.values()
+        self.assertEqual(values["point_mode"], "List")
+        self.assertEqual(values["points"], "300.000, 299.900, 300.000")
+        dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

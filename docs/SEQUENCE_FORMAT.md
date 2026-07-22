@@ -91,6 +91,8 @@ T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 
 ### Scan Temperature
 
+Linear 模式：
+
 ```text
 T Scan Temperature 10.000 K to 30.000 K in 3 steps at 5.000 K/min, Settle
 T     <child commands>
@@ -98,6 +100,20 @@ T End Scan
 ```
 
 点数包含起点和终点。点数为 1 时只使用起点。
+
+List 模式：
+
+```text
+T Scan Temperature List 300.000, 250.000, 100.000, 20.000 K at 5.000 K/min, Settle
+T     <child commands>
+T End Scan
+```
+
+- 温度点用英文逗号分隔，至少一个、最多 100,000 个；保存时统一写为三位小数。
+- 执行顺序与列表完全一致，不排序、不去重、不在相邻点之间插值。`300, 299, 300` 会先降温再回到 300 K。
+- 每个点按同一 `Settle` 或 `Sweep` 语义到达后执行全部子命令，因此 List 仍可嵌套 Scan Field、Scan Time、Measure 或另一个 Scan Temperature。
+- 开始移动前会按配置的温度上下限和最大速率预检整份列表。任一项越界时产生 Error，列表中的早期合法点也不会先执行。
+- 空项、非数字、`NaN`、无穷值和错误的单行结构均作为 SEQ 解析 Error，不会当作未知命令静默跳过。
 
 ### Scan Field
 

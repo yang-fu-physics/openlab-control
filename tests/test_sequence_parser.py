@@ -12,6 +12,7 @@ from labcontrol.sequence.model import SPECS_BY_TYPE, Command, CommandType  # noq
 from labcontrol.sequence.parser import (  # noqa: E402
     format_command,
     load_sequence,
+    parse_temperature_points,
     parse_sequence,
     serialize_sequence,
 )
@@ -95,6 +96,49 @@ class SequenceParserTests(unittest.TestCase):
             format_command(legacy_t),
             "Set Field 0.001234 T at 0.000567 T/min in Sweep mode",
         )
+
+    def test_temperature_list_scan_parses_and_round_trips(self) -> None:
+        source = (
+            "T Scan Temperature List 300.000, 250.500, 250.500, 20.000 K at 5.000 K/min, Settle\n"
+            "T     Measure devices=transport\n"
+            "T End Scan\n"
+            "T End Sequence\n"
+        )
+        result = parse_sequence(source, "temperature-list.seq")
+        self.assertEqual(result.issues, ())
+        command = result.document.commands[0]
+        self.assertEqual(command.type, CommandType.SCAN_TEMPERATURE)
+        self.assertEqual(command.params["point_mode"], "List")
+        self.assertEqual(
+            parse_temperature_points(command.params["points"]),
+            (300.0, 250.5, 250.5, 20.0),
+        )
+        self.assertEqual(command.children[0].type, CommandType.MEASURE)
+        self.assertEqual(serialize_sequence(result.document), source)
+
+    def test_temperature_list_command_is_canonicalized_when_edited(self) -> None:
+        command = Command(
+            CommandType.SCAN_TEMPERATURE,
+            {
+                "device_id": "temperature",
+                "point_mode": "List",
+                "points": "300, 299.9, 300",
+                "rate": 10.0,
+                "mode": "Sweep",
+            },
+        )
+        self.assertEqual(
+            format_command(command),
+            "Scan Temperature List 300.000, 299.900, 300.000 K at 10.000 K/min, Sweep",
+        )
+
+    def test_invalid_temperature_list_is_a_parse_error(self) -> None:
+        result = parse_sequence(
+            "T Scan Temperature List 300,,20 K at 5 K/min, Settle\nT End Sequence\n"
+        )
+        self.assertTrue(result.has_errors)
+        self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
+        self.assertIn("point 2 is empty", result.issues[0].message)
 
 
 if __name__ == "__main__":

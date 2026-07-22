@@ -14,7 +14,7 @@ from ..models import DeviceKind, EventNotice, RunProgress, RunState, Severity, S
 from ..plugins import DeviceManager
 from ..units import convert_value
 from .model import Command, CommandType, SequenceDocument
-from .parser import format_command, load_sequence, serialize_sequence
+from .parser import format_command, load_sequence, parse_temperature_points, serialize_sequence
 
 
 class SequenceAbort(RuntimeError):
@@ -274,12 +274,29 @@ class SequenceEngine:
         device_id = str(p.get("device_id", kind.value))
         config = self.devices.device_configs[device_id]
         source_unit = "K" if kind is DeviceKind.TEMPERATURE else str(p.get("unit", config.unit))
-        start = convert_value(float(p.get("start", 0.0)), source_unit, config.unit)
-        stop = convert_value(float(p.get("stop", 0.0)), source_unit, config.unit)
         rate = convert_value(float(p.get("rate", config.default_rate_per_minute)), source_unit, config.unit)
-        steps = max(1, int(p.get("steps", 1)))
         mode = str(p.get("mode", "Settle"))
-        points = self._linspace(start, stop, steps)
+        if kind is DeviceKind.TEMPERATURE and str(p.get("point_mode", "Linear")).casefold() == "list":
+            try:
+                source_points = parse_temperature_points(p.get("points", ""))
+            except ValueError as exc:
+                raise DeviceError(
+                    f"Invalid Scan Temperature list: {exc}",
+                    "INVALID_TEMPERATURE_LIST",
+                    device_id,
+                ) from exc
+            points = [convert_value(point, source_unit, config.unit) for point in source_points]
+            steps = len(points)
+        else:
+            start = convert_value(float(p.get("start", 0.0)), source_unit, config.unit)
+            stop = convert_value(float(p.get("stop", 0.0)), source_unit, config.unit)
+            steps = max(1, int(p.get("steps", 1)))
+            points = self._linspace(start, stop, steps)
+
+        # Validate the complete path before moving the first device. A bad later
+        # list entry must not leave an experiment half-executed.
+        for point in points:
+            self.devices.validate_target(device_id, point, rate)
         for point_index, point in enumerate(points, start=1):
             await self._checkpoint()
             await self.devices.set_target(device_id, point, rate, mode)

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -24,6 +25,7 @@ from ..config import DeviceConfig
 from ..formatting import control_decimals, field_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, LabEvent, Severity
 from ..sequence.model import Command, CommandSpec, CommandType
+from ..sequence.parser import format_temperature_points, parse_temperature_points
 from ..units import convert_value
 from .scaling import scaled
 
@@ -50,8 +52,8 @@ class CommandDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(scaled(430))
         layout = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self.form = QFormLayout()
+        self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         for field in spec.fields:
             value = command.params.get(field.name, field.default)
             if field.field_type == "choice":
@@ -79,20 +81,59 @@ class CommandDialog(QDialog):
             else:
                 widget = QLineEdit(str(value))
             self.inputs[field.name] = widget
-            form.addRow(field.label, widget)
+            self.form.addRow(field.label, widget)
         self._field_unit = ""
         if command.type in FIELD_COMMANDS:
             unit_input = self.inputs.get("unit")
             if isinstance(unit_input, QComboBox):
                 self._field_unit = unit_input.currentText()
                 unit_input.currentTextChanged.connect(self._change_field_unit)
-        layout.addLayout(form)
+        if command.type is CommandType.SCAN_TEMPERATURE:
+            point_mode = self.inputs.get("point_mode")
+            if isinstance(point_mode, QComboBox):
+                point_mode.currentTextChanged.connect(self._update_temperature_point_mode)
+                self._update_temperature_point_mode(point_mode.currentText())
+        layout.addLayout(self.form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _set_field_visible(self, field_name: str, visible: bool) -> None:
+        widget = self.inputs.get(field_name)
+        if widget is None:
+            return
+        widget.setVisible(visible)
+        label = self.form.labelForField(widget)
+        if label is not None:
+            label.setVisible(visible)
+
+    def _update_temperature_point_mode(self, point_mode: str) -> None:
+        is_list = point_mode.casefold() == "list"
+        for name in ("start", "stop", "steps"):
+            self._set_field_visible(name, not is_list)
+        self._set_field_visible("points", is_list)
+
+    def accept(self) -> None:
+        if self.command.type is CommandType.SCAN_TEMPERATURE:
+            point_mode = self.inputs.get("point_mode")
+            points_input = self.inputs.get("points")
+            if (
+                isinstance(point_mode, QComboBox)
+                and point_mode.currentText().casefold() == "list"
+                and isinstance(points_input, QLineEdit)
+            ):
+                try:
+                    parse_temperature_points(points_input.text())
+                    points_input.setText(format_temperature_points(points_input.text()))
+                except ValueError as exc:
+                    QMessageBox.warning(self, "Invalid Temperature List", str(exc))
+                    points_input.setFocus()
+                    points_input.selectAll()
+                    return
+        super().accept()
 
     def _change_field_unit(self, new_unit: str) -> None:
         old_unit = self._field_unit
