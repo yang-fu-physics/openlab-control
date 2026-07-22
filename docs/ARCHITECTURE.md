@@ -49,6 +49,8 @@ flowchart TD
 
 主界面采用 PySide6 Fusion 样式和小范围自定义 Palette/QSS。QtAwesome 仅负责工具栏矢量图标，不参与设备逻辑；全局正文以 10pt 为缩放基准，设备数值和运行状态通过局部 QSS 放大。未启用独立暗色主题库，以避免无效果依赖和打包体积增加。SEQ 列表重建后显式把水平滚动条归零，保证长命令不会把后续行的命令前缀留在视野外。
 
+SEQ 的 `QMdiSubWindow` 使用 `WA_DeleteOnClose = false` 保留文档与编辑器对象。Qt 关闭 MDI 子窗口时会分别隐藏外框及其 child widget，因此 New/Open/Edit 的统一聚焦路径必须同时 `show()` 子窗口和 `SequenceEditorWidget`，再恢复活动窗口；只显示外框会留下灰色空白区域。
+
 `ui.scaling` 以 `availableGeometry × devicePixelRatio` 取得屏幕原生像素尺寸。自动倍率对分辨率比取平方根并限制在 1.00× 到 1.40×，以避免 4K 直接按 2 倍放大；固定控件尺寸、QSS 字号、工具栏图标及绘图边距使用同一倍率。`AppConfig.ui_scale` 为 `None` 时表示 Auto，数值则表示用户手动覆盖。
 
 ## 线程模型

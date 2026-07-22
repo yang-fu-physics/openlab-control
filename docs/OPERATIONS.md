@@ -52,6 +52,8 @@ python -m venv .venv
 - 右侧：分组命令栏，双击命令插入。
 - 底部：由配置中的设备动态生成状态块。
 - 默认的 `2nd Stage` 是只读辅助温度：显示当前值和 `Monitoring`，不显示目标/速率，双击不会打开控制窗口，也不参与主温度判稳。
+
+SEQ 是可关闭的浮动子窗口。关闭后可点击工具栏 `New`、`Open`，或左侧 Selected Sequence 下的 `Edit` 重新显示；外框和内部文本编辑器会一起恢复。
 - 菜单 `View → Run Log`：显示命令、Warning 和 Error。
 - 菜单 `Graph → Live Trend`：打开本次运行的临时监视曲线。
 - 菜单 `Graph → Data Browser`：打开独立浮动 DAT 数据浏览器。

@@ -44,6 +44,27 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_new_sequence_reopens_a_closed_sequence_window(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.show()
+            self.application.processEvents()
+            window.sequence_window.close()
+            self.application.processEvents()
+            self.assertFalse(window.sequence_window.isVisible())
+
+            window.new_action.trigger()
+            self.application.processEvents()
+
+            self.assertTrue(window.sequence_window.isVisible())
+            self.assertTrue(window.editor.isVisible())
+            self.assertIs(window.mdi.activeSubWindow(), window.sequence_window)
+            self.assertEqual(window.document.name, "Untitled.seq")
+            self.assertEqual(window.editor.list.count(), 1)
+            self.assertEqual(window.editor.list.item(0).text(), "End Sequence")
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()

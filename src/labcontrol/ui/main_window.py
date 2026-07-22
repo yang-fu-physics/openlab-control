@@ -379,6 +379,9 @@ class MainWindow(QMainWindow):
         self.sequence_window.setWindowTitle(document.name)
         self._dirty = False
         self._sync_datafile_label()
+        # Closing an MDI subwindow hides it because WA_DeleteOnClose is false.
+        # Loading or creating a document must reopen that existing editor.
+        self._focus_sequence()
 
     def _sync_datafile_label(self) -> None:
         for command in self.document.commands:
@@ -481,9 +484,15 @@ class MainWindow(QMainWindow):
         self._show_data_browser()
 
     def _focus_sequence(self) -> None:
+        self.sequence_window.showNormal()
+        # QMdiSubWindow.close() also hides its child widget even when the
+        # subwindow itself is retained, so both layers must be restored.
+        self.editor.show()
         self.sequence_window.show()
         self.sequence_window.setFocus()
         self.mdi.setActiveSubWindow(self.sequence_window)
+        self.sequence_window.raise_()
+        QTimer.singleShot(0, self._fit_mdi_windows)
 
     def _run_sequence(self) -> None:
         if self.current_run_state not in self.TERMINAL_STATES:
