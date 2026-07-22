@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -23,6 +23,10 @@ from PySide6.QtWidgets import (
 from ..measurement.frontend_api import ModuleFrontend, ModuleFrontendContext
 from ..measurement.manifest import ModuleDescriptor, load_source_object
 from .scaling import scaled
+
+
+MODULE_WINDOW_MIN_WIDTH = 560
+MODULE_WINDOW_MIN_HEIGHT = 460
 
 
 class ModuleWindow(QDialog):
@@ -49,7 +53,6 @@ class ModuleWindow(QDialog):
         flags |= Qt.WindowType.WindowMinimizeButtonHint
         self.setWindowFlags(flags)
         self.setWindowTitle(f"{descriptor.name} {descriptor.version}")
-        self.setMinimumSize(scaled(520), scaled(430))
 
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
@@ -62,19 +65,31 @@ class ModuleWindow(QDialog):
         layout.addLayout(header)
 
         self.tabs = QTabWidget()
-        self.settings_page = self.frontend.create_settings_page(self.tabs)
-        self.status_page = self.frontend.create_status_page(self.tabs)
-        self.tabs.addTab(self.settings_page, "Settings")
-        self.tabs.addTab(self.status_page, "Status")
-        self.tabs.setCurrentIndex(0)
-        layout.addWidget(self.tabs, 1)
+        self.settings_page = QWidget(self.tabs)
+        settings_layout = QVBoxLayout(self.settings_page)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_content = self.frontend.create_settings_page(self.settings_page)
+        settings_layout.addWidget(self.settings_content, 1)
 
         footer = QHBoxLayout()
         self.apply_button = QPushButton("Apply Settings")
         self.apply_button.clicked.connect(lambda: self.applyRequested.emit(descriptor.id))
         footer.addStretch(1)
         footer.addWidget(self.apply_button)
-        layout.addLayout(footer)
+        settings_layout.addLayout(footer)
+
+        self.status_page = self.frontend.create_status_page(self.tabs)
+        self.tabs.addTab(self.settings_page, "Settings")
+        self.tabs.addTab(self.status_page, "Status")
+        self.tabs.setCurrentIndex(0)
+        layout.addWidget(self.tabs, 1)
+
+        layout.activate()
+        minimum = self.sizeHint().expandedTo(
+            QSize(scaled(MODULE_WINDOW_MIN_WIDTH), scaled(MODULE_WINDOW_MIN_HEIGHT))
+        )
+        self.setMinimumSize(minimum)
+        self.resize(minimum)
 
         self.frontend.settingsChanged.connect(self._mark_dirty)
         self.context.manualActionRequested.connect(

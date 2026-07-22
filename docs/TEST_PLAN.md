@@ -59,7 +59,7 @@
 .venv\Scripts\python.exe tools\capture_module_preview.py
 ```
 
-验收：生成 `module-manager-preview.png` 与 `module-window-preview.png`；Manager 只有三列；模块默认页是 Settings；Apply 按钮存在。
+验收：生成 Manager、Settings、Status 三张预览；Manager 只有三列；模块默认页是 Settings；Apply 按钮只在 Settings 预览中存在。
 
 ## SEQ 验收
 
@@ -81,11 +81,13 @@
 3. 双击 Enabled 行，窗口置前。
 4. 尝试关闭/Alt+F4，窗口仍存在。
 5. 最小化主窗口，模块窗口一起最小化；恢复后恢复。
-6. Disable 成功，窗口隐藏。
-7. SEQ 运行中 Enable/Disable/Refresh/Install 均不可用。
-8. 所有模块 Disabled 时 Refresh 生效。
-9. 任一模块 Enabled 时 Install Dependencies 被阻止。
-10. 制造无效 manifest，程序仍启动，该模块禁止 Enable并显示原因。
+6. Settings 页显示 Apply Settings；切换到 Status 后按钮完全隐藏。
+7. 将模块窗口缩到内容安全边界，确认不能继续缩小且内容无裁切。
+8. Disable 成功，窗口隐藏。
+9. SEQ 运行中 Enable/Disable/Refresh/Install 均不可用。
+10. 所有模块 Disabled 时 Refresh 生效。
+11. 任一模块 Enabled 时 Install Dependencies 被阻止。
+12. 制造无效 manifest，程序仍启动，该模块禁止 Enable并显示原因。
 
 ## Settings/Status 验收
 

@@ -26,7 +26,12 @@ from labcontrol.measurement.service import MeasurementModuleService  # noqa: E40
 from labcontrol.measurement.settings import load_settings, save_settings  # noqa: E402
 from labcontrol.measurement.worker import WorkerRequestError  # noqa: E402
 from labcontrol.plugins import DeviceManager  # noqa: E402
-from labcontrol.ui.measurement_modules import ModuleWindow  # noqa: E402
+from labcontrol.ui.measurement_modules import (  # noqa: E402
+    MODULE_WINDOW_MIN_HEIGHT,
+    MODULE_WINDOW_MIN_WIDTH,
+    ModuleWindow,
+)
+from labcontrol.ui.scaling import scaled  # noqa: E402
 
 
 def copied_project(temp_root: Path):
@@ -309,6 +314,15 @@ class ModuleWindowTests(unittest.TestCase):
         self.assertTrue(window.has_unapplied_edits())
         window.show()
         self.application.processEvents()
+        self.assertTrue(window.apply_button.isVisible())
+        window.tabs.setCurrentIndex(1)
+        self.application.processEvents()
+        self.assertFalse(window.apply_button.isVisible())
+        self.assertGreaterEqual(window.minimumWidth(), scaled(MODULE_WINDOW_MIN_WIDTH))
+        self.assertGreaterEqual(window.minimumHeight(), scaled(MODULE_WINDOW_MIN_HEIGHT))
+        window.resize(1, 1)
+        self.assertGreaterEqual(window.width(), window.minimumWidth())
+        self.assertGreaterEqual(window.height(), window.minimumHeight())
         window.close()
         self.application.processEvents()
         self.assertTrue(window.isVisible())

@@ -72,9 +72,12 @@ run.bat
 
 - 默认打开 `Settings` 页。
 - Enable 会加载上次保存参数，但不会把这些值发送给仪表。
+- `Apply Settings` 只显示在 `Settings` 页；切换到 `Status` 后不会显示。
 - 检查参数后点击 `Apply Settings`，再次确认后才发送。
 - `Status` 页显示连接、实际状态、输出状态、读数等，布局由模块自己定义。
 - 模块可以提供 `Test Connection`、`Read Now`、`Measure Now`；仅 SEQ Idle 可用，结果不写实验 DAT。
+
+模块窗口设置了按 UI Scale 缩放的最小尺寸；缩小到完整显示页签、参数区和操作区的边界后不能继续缩小。
 
 Settings 在 Apply、Disable、关闭程序和 Run 前自动保存。设置保存在 `module_data/<id>/settings.toml`，不修改模块源码。
 

@@ -1,4 +1,4 @@
-# OpenLab Control 0.10.0 技术规格
+# OpenLab Control 0.10.1 技术规格
 
 状态：Implemented Baseline
 日期：2026-07-23
@@ -93,8 +93,10 @@
 - WIN-002：窗口 SHALL 保持在主窗口之前但不得全局 Always-on-top。
 - WIN-003：窗口 SHALL 可移动/最小化，用户不得关闭。
 - WIN-004：主窗口最小化 SHALL 最小化当前可见模块窗口。
-- WIN-005：窗口 SHALL 固定 Settings/Status 两页，默认 Settings；页面内容由模块完全自定义。
-- WIN-006：SEQ 期间 Settings SHALL 只读，Apply/手动动作 SHALL 禁用。
+- WIN-005：Apply Settings SHALL 只属于 Settings 页，Status 页不得显示该按钮。
+- WIN-006：模块窗口 SHALL 设置随 UI Scale 缩放的内容安全最小尺寸。
+- WIN-007：窗口 SHALL 固定 Settings/Status 两页，默认 Settings；页面内容由模块完全自定义。
+- WIN-008：SEQ 期间 Settings SHALL 只读，Apply/手动动作 SHALL 禁用。
 
 ### 3.6 模块生命周期
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 - 2026-07-23
+
+- `Apply Settings` 现在只位于模块的 Settings 页，切换到 Status 后不再显示。
+- 模块窗口增加随 UI Scale 缩放的内容安全最小尺寸，达到完整布局边界后不能继续缩小。
+
 ## 0.10.0 - 2026-07-23
 
 - 将测量仪表从温度/磁场/监视设备体系中完全拆分，移除旧 `measurement` 设备、Transport 状态块和旧 Measure 参数。

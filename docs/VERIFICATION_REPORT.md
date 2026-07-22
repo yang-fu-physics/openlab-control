@@ -1,4 +1,4 @@
-# OpenLab Control 0.10.0 验证报告
+# OpenLab Control 0.10.1 验证报告
 
 - 验证日期：2026-07-23
 - 验证平台：Windows 11 x64（build 26200）
@@ -8,7 +8,7 @@
 
 ## 结论
 
-0.10.0 的仿真框架和 Windows 发布包达到本阶段交付条件。测量方案已与温度、磁场和只读 Monitor 设备体系分离；模块可从配置目录发现，在独立进程内运行仪表后端，并由主界面提供自定义 Settings/Status 窗口。无参数 SEQ `Measure` 可并行等待所有 Enabled 模块，并把模块流式多行结果与中央温度、磁场、Monitor 快照统一写入 DAT。
+0.10.1 的仿真框架和 Windows 发布包达到本阶段交付条件。测量方案已与温度、磁场和只读 Monitor 设备体系分离；模块可从配置目录发现，在独立进程内运行仪表后端，并由主界面提供自定义 Settings/Status 窗口。无参数 SEQ `Measure` 可并行等待所有 Enabled 模块，并把模块流式多行结果与中央温度、磁场、Monitor 快照统一写入 DAT。
 
 默认配置和示例模块均为仿真。本报告不代表任何真实温控仪、磁体电源、Keithley、Lakeshore 372 或其他硬件通过安全认证。
 
@@ -27,7 +27,7 @@
 - 多个模块同时开始测量、单模块多行流式结果、中央等待全部完成。
 - 无 Enabled 模块时 Warning 去重、系统状态行和继续执行。
 - measure/end/abort 失败语义；Error 调用 end(error) 而不自动 abort。
-- 模块窗口 Settings/Status、默认页、未应用编辑检测和禁止用户关闭。
+- 模块窗口 Settings/Status、Settings 专属 Apply、内容安全最小尺寸、未应用编辑检测和禁止用户关闭。
 - 运行目录的 SEQ、主配置、desired settings、实际 Status、实验 DAT 和事件 DAT 快照。
 - 旧 Initialize 与带参数 Measure 的解析 Error 及 GUI Run 阻止。
 - 温度/磁场扫描、Temperature List、任意嵌套、Hold、Warning/Error 和数值判稳。
@@ -48,7 +48,7 @@
 - 工具栏和菜单均有 Modules；
 - SEQ 编辑器、右侧命令栏、英文主界面和精度显示正常；
 - Modules Manager 只有 `Enabled / Name / Version` 三列；
-- 示例模块窗口默认显示 Settings，并包含独立 Status 页和 Apply Settings。
+- 示例模块窗口默认显示 Settings；Apply Settings 只在该页出现，Status 页不显示；窗口到内容安全边界后不能继续缩小。
 
 ### 无模块运行
 
@@ -86,13 +86,14 @@
 | 所有模块 Disabled 的 headless demo | 退出码 0，Completed |
 | 启用 `simulated_transport` 的 headless demo | 退出码 0，Completed |
 
-打包后的模块验证得到 12 行数据、14 列固定 Schema；`BYAPP` 版本为 `0.10.0`。这同时验证了 EXE 边界后的模块源码发现、独立工作进程、IPC、流式行写入和生命周期收尾。
+打包后的模块验证得到 12 行数据、14 列固定 Schema；`BYAPP` 版本为 `0.10.1`。这同时验证了 EXE 边界后的模块源码发现、独立工作进程、IPC、流式行写入和生命周期收尾。
 
 ## 界面验收图
 
 - 主窗口：`docs/main-window-preview.png`
 - 模块管理器：`docs/module-manager-preview.png`
 - 模块窗口：`docs/module-window-preview.png`
+- 模块 Status 页：`docs/module-status-preview.png`
 - SEQ 多行菜单：`docs/sequence-context-menu-preview.png`
 - Data Browser：`docs/data-browser-preview.png`
 

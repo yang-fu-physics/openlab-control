@@ -21,6 +21,7 @@ from labcontrol.ui.main_window import MainWindow  # noqa: E402
 def main() -> int:
     manager_output = ROOT / "docs" / "module-manager-preview.png"
     module_output = ROOT / "docs" / "module-window-preview.png"
+    status_output = ROOT / "docs" / "module-status-preview.png"
     application = QApplication([])
     config = load_config(ROOT / "configs" / "default.toml")
     activate_shared_dependencies(config)
@@ -44,15 +45,19 @@ def main() -> int:
             application.processEvents()
             window.module_manager.grab().save(str(manager_output), "PNG")
             module_window.grab().save(str(module_output), "PNG")
+            module_window.tabs.setCurrentIndex(1)
+            application.processEvents()
+            module_window.grab().save(str(status_output), "PNG")
         window.close()
         application.quit()
 
     QTimer.singleShot(100, capture_when_ready)
     application.exec()
-    if not manager_output.exists() or not module_output.exists():
+    if not manager_output.exists() or not module_output.exists() or not status_output.exists():
         return 1
     print(manager_output)
     print(module_output)
+    print(status_output)
     return 0
 
 
