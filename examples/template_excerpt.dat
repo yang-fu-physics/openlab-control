@@ -1,0 +1,13 @@
+[Header]
+; Displex Transport Data File (default extension .dat)
+; Template excerpt supplied for OpenLab Control format compatibility.
+BYAPP, Displex, 2.0
+INFO, Displex AC Transport Measurement Program, Release 2.0.
+INFO, Channel 1, Temperature Sensor
+
+[Data]
+Timestamp(s),Time(s),Temp(K),R1(Ohm),R2(Ohm),R3(Ohm),R4(Ohm)
+3867290820.73,0,300.001600,0.923180000,,,
+3867290833.96,13.23,300.001700,,0.550700000,,
+3867290847.17,26.44,299.999700,,,0.061633000,
+3867290860.40,39.67,299.999900,,,,0.084472000

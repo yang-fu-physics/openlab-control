@@ -1,0 +1,81 @@
+[application]
+title = "OpenLab Control"
+ui_refresh_ms = 200
+poll_interval_seconds = 0.20
+simulation_speed = 120.0
+default_sequence = "examples/nested_scan.seq"
+language = "en_US"
+
+[logging]
+directory = "runs"
+data_file_name = "experiment.dat"
+event_file_name = "events.dat"
+timestamp_epoch = "labview_1904"
+sparse_channel_rows = true
+flush_every_row = true
+allow_external_paths = false
+
+[abort]
+temperature = "hold_current"
+field = "hold_current"
+
+[alarms]
+stability_timeout = "error"
+stale_reading = "warning"
+popup_warnings = true
+popup_errors = true
+
+[[devices]]
+id = "temperature"
+display_name = "Temperature"
+kind = "temperature"
+plugin = "labcontrol.devices.simulated:SimulatedTemperatureController"
+unit = "K"
+initial_value = 300.0
+default_rate_per_minute = 10.0
+min_value = 1.8
+max_value = 400.0
+max_rate_per_minute = 30.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 1.5
+stability_timeout_seconds = 120.0
+stability_window_seconds = 1.0
+noise = 0.00005
+
+[[devices]]
+id = "field"
+display_name = "Magnetic Field"
+kind = "field"
+plugin = "labcontrol.devices.simulated:SimulatedFieldController"
+unit = "T"
+initial_value = 0.0
+default_rate_per_minute = 0.5
+min_value = -9.0
+max_value = 9.0
+max_rate_per_minute = 1.0
+stability_tolerance = 0.002
+stability_max_slope_per_minute = 0.001
+stability_dwell_seconds = 1.0
+stability_timeout_seconds = 120.0
+stability_window_seconds = 0.8
+noise = 0.000001
+
+[[devices]]
+id = "second_stage"
+display_name = "2nd Stage"
+kind = "monitor"
+plugin = "labcontrol.devices.simulated:SimulatedReadOnlyMonitor"
+unit = "K"
+initial_value = 4.2
+noise = 0.002
+
+[[devices]]
+id = "transport"
+display_name = "Transport Measurement"
+kind = "measurement"
+plugin = "labcontrol.devices.simulated:SimulatedResistanceMeter"
+unit = "Ohm"
+channels = ["R1", "R2", "R3", "R4"]
+measurement_delay_seconds = 0.02
+noise = 0.0005

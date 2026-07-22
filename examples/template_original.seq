@@ -1,0 +1,6 @@
+T Initialize Lakeshore372AC model \configs\lakeshore372ac\20260625161624.ini
+T Set Datafile open|create C:\Users\liuju\Desktop\data\20260625-k12601.dat
+T Scan Time 60.0 secs in 60 steps
+T     Measure
+T End Scan
+T End Sequence

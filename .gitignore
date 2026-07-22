@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+build/
+dist/
+*.spec
+!OpenLabControl.spec
+runs/*
+!runs/.gitkeep
+/work/
+/headless_demo.log
+/source-gui-smoke.png
+/docs/source-gui-smoke.png
