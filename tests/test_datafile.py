@@ -31,8 +31,8 @@ class DatafileTests(unittest.TestCase):
             self.assertFalse(any("2nd Stage" in column for column in logger._columns))
             now = time.monotonic()
             snapshots = {
-                "temperature": DeviceSnapshot("temperature", "温度", DeviceKind.TEMPERATURE, now, True, "K", 3.0, 3.0, 1.0, DeviceActivity.HOLDING),
-                "field": DeviceSnapshot("field", "磁场", DeviceKind.FIELD, now, True, "T", 0.1, 0.1, 0.1, DeviceActivity.HOLDING),
+                "temperature": DeviceSnapshot("temperature", "温度", DeviceKind.TEMPERATURE, now, True, "K", 3.1236, 3.0, 1.0, DeviceActivity.HOLDING),
+                "field": DeviceSnapshot("field", "磁场", DeviceKind.FIELD, now, True, "Oe", 123.456, 100.0, 10.0, DeviceActivity.HOLDING),
             }
             logger.write_measurement(snapshots, {"R1": 1.2, "R2": 2.3}, "Measure")
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
@@ -44,6 +44,8 @@ class DatafileTests(unittest.TestCase):
             self.assertIn("[Header]", data)
             self.assertIn("[Data]", data)
             self.assertIn("R1(Ohm)", data)
+            self.assertIn("Field(Oe)", data)
+            self.assertIn(",3.124,3.000,123.46,100.00,", data)
             self.assertEqual(sum(1 for line in data.splitlines() if ",Measure," in line), 2)
             self.assertIn("RAISED", event_data)
             self.assertIn("RESOLVED", event_data)

@@ -8,8 +8,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.sequence.model import CommandType  # noqa: E402
-from labcontrol.sequence.parser import load_sequence, parse_sequence, serialize_sequence  # noqa: E402
+from labcontrol.sequence.model import SPECS_BY_TYPE, Command, CommandType  # noqa: E402
+from labcontrol.sequence.parser import (  # noqa: E402
+    format_command,
+    load_sequence,
+    parse_sequence,
+    serialize_sequence,
+)
 
 
 class SequenceParserTests(unittest.TestCase):
@@ -67,6 +72,29 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(result.document.count_commands(), 4)
         self.assertEqual(result.document.count_commands(enabled_only=True), 1)
         self.assertEqual(serialize_sequence(result.document), source)
+
+    def test_new_field_commands_default_to_oe_with_two_decimals(self) -> None:
+        command = SPECS_BY_TYPE[CommandType.SCAN_FIELD].create()
+        self.assertEqual(command.params["unit"], "Oe")
+        self.assertEqual(
+            format_command(command),
+            "Scan Field 0.00 Oe to 10000.00 Oe in 11 steps at 5000.00 Oe/min, Settle",
+        )
+
+    def test_temperature_and_legacy_t_command_precision(self) -> None:
+        temperature = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE].create()
+        self.assertEqual(
+            format_command(temperature),
+            "Set Temperature 300.000 K at 5.000 K/min in Settle mode",
+        )
+        legacy_t = Command(
+            CommandType.SET_FIELD,
+            {"target": 0.001234, "unit": "T", "rate": 0.000567, "mode": "Sweep"},
+        )
+        self.assertEqual(
+            format_command(legacy_t),
+            "Set Field 0.001234 T at 0.000567 T/min in Sweep mode",
+        )
 
 
 if __name__ == "__main__":

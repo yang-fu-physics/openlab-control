@@ -15,7 +15,7 @@
 
 ```text
 T Scan Temperature 10.000 K to 30.000 K in 3 steps at 5.000 K/min, Settle
-T     Scan Field -1.000000 T to 1.000000 T in 5 steps at 0.500000 T/min, Settle
+T     Scan Field -10000.00 Oe to 10000.00 Oe in 5 steps at 5000.00 Oe/min, Settle
 T         Measure devices=transport
 T     End Scan
 T End Scan
@@ -26,7 +26,7 @@ T End Sequence
 
 ```text
 F Set Temperature 10.000 K at 2.000 K/min in Settle mode
-F Scan Field -0.100000 T to 0.100000 T in 3 steps at 0.050000 T/min, Settle
+F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
 T     Measure devices=transport
 T End Scan
 T End Sequence
@@ -83,11 +83,11 @@ Settle 等待中央数值判稳。名称中包含 `settle` 的模式，例如 `F
 ### Set Field
 
 ```text
-T Set Field 1.000000 T at 0.500000 T/min in Settle mode
-T Set Field 10000.000000 Oe at 5000.000000 Oe/min in Sweep mode
+T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
+T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 ```
 
-框架会转换 T/Oe 到设备配置单位，然后执行安全检查。
+新命令默认使用 Oe 并写两位小数。旧 T 命令仍可读取和编辑，写出时使用六位小数。参数窗口切换单位时会同时换算目标和速率；框架随后统一转换到设备配置单位并执行安全检查。
 
 ### Scan Temperature
 
@@ -102,12 +102,12 @@ T End Scan
 ### Scan Field
 
 ```text
-T Scan Field -1.000000 T to 1.000000 T in 5 steps at 0.500000 T/min, Settle
+T Scan Field -10000.00 Oe to 10000.00 Oe in 5 steps at 5000.00 Oe/min, Settle
 T     <child commands>
 T End Scan
 ```
 
-支持 T 和 Oe。
+默认使用 Oe 和两位小数，同时支持旧 T 格式。
 
 ### Scan Time
 

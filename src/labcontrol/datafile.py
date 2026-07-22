@@ -11,6 +11,7 @@ from typing import TextIO
 from . import __version__
 from .config import AppConfig
 from .events import EventManager
+from .formatting import control_decimals, fixed_number
 from .models import DeviceKind, DeviceSnapshot, EventNotice, Severity
 
 
@@ -185,9 +186,10 @@ class DatRunLogger:
         for device in self.config.devices:
             snapshot = snapshots.get(device.id)
             if device.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+                decimals = control_decimals(device.kind, device.unit)
                 row.extend([
-                    "" if snapshot is None or snapshot.current is None else f"{snapshot.current:.9g}",
-                    "" if snapshot is None or snapshot.target is None else f"{snapshot.target:.9g}",
+                    "" if snapshot is None or snapshot.current is None else fixed_number(snapshot.current, decimals),
+                    "" if snapshot is None or snapshot.target is None else fixed_number(snapshot.target, decimals),
                 ])
             else:
                 for channel in device.channels:

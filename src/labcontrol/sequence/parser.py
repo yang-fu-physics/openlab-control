@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..formatting import field_decimals, fixed_number
 from .model import Command, CommandType, SequenceDocument
 
 
@@ -296,8 +297,7 @@ def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = No
 
 
 def _format_number(value: object, decimals: int = 3) -> str:
-    number = float(value)
-    return f"{number:.{decimals}f}"
+    return fixed_number(value, decimals)
 
 
 def format_command(command: Command) -> str:
@@ -317,10 +317,11 @@ def format_command(command: Command) -> str:
             f"{_format_number(p.get('rate', 5.0))} K/min in {p.get('mode', 'Settle')} mode"
         )
     if command.type is CommandType.SET_FIELD:
-        unit = p.get("unit", "T")
+        unit = p.get("unit", "Oe")
+        decimals = field_decimals(unit)
         return (
-            f"Set Field {_format_number(p.get('target', 0.0), 6)} {unit} at "
-            f"{_format_number(p.get('rate', 0.5), 6)} {unit}/min in {p.get('mode', 'Settle')} mode"
+            f"Set Field {_format_number(p.get('target', 0.0), decimals)} {unit} at "
+            f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min in {p.get('mode', 'Settle')} mode"
         )
     if command.type is CommandType.SCAN_TEMPERATURE:
         return (
@@ -329,11 +330,12 @@ def format_command(command: Command) -> str:
             f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
         )
     if command.type is CommandType.SCAN_FIELD:
-        unit = p.get("unit", "T")
+        unit = p.get("unit", "Oe")
+        decimals = field_decimals(unit)
         return (
-            f"Scan Field {_format_number(p.get('start', 0.0), 6)} {unit} to "
-            f"{_format_number(p.get('stop', 1.0), 6)} {unit} in {int(p.get('steps', 11))} steps at "
-            f"{_format_number(p.get('rate', 0.5), 6)} {unit}/min, {p.get('mode', 'Settle')}"
+            f"Scan Field {_format_number(p.get('start', 0.0), decimals)} {unit} to "
+            f"{_format_number(p.get('stop', 10000.0), decimals)} {unit} in {int(p.get('steps', 11))} steps at "
+            f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min, {p.get('mode', 'Settle')}"
         )
     if command.type is CommandType.SCAN_TIME:
         return (

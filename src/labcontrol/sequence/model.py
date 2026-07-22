@@ -220,10 +220,10 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     CommandSpec(CommandType.SCAN_FIELD, "Scan Field", "System Commands", (
         FieldSpec("device_id", "Field device", "text", "field"),
         FieldSpec("start", "Start", "float", 0.0),
-        FieldSpec("stop", "Stop", "float", 1.0),
-        FieldSpec("unit", "Unit", "choice", "T", choices=("T", "Oe")),
+        FieldSpec("stop", "Stop", "float", 10000.0),
+        FieldSpec("unit", "Unit", "choice", "Oe", choices=("Oe", "T")),
         FieldSpec("steps", "Points", "int", 11, 1, 100000),
-        FieldSpec("rate", "Rate per minute", "float", 0.5, 0.000001),
+        FieldSpec("rate", "Rate per minute", "float", 5000.0, 0.000001),
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.SCAN_TEMPERATURE, "Scan Temperature", "System Commands", (
@@ -241,8 +241,8 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
     CommandSpec(CommandType.SET_FIELD, "Set Field", "System Commands", (
         FieldSpec("device_id", "Field device", "text", "field"),
         FieldSpec("target", "Target", "float", 0.0),
-        FieldSpec("unit", "Unit", "choice", "T", choices=("T", "Oe")),
-        FieldSpec("rate", "Rate per minute", "float", 0.5, 0.000001),
+        FieldSpec("unit", "Unit", "choice", "Oe", choices=("Oe", "T")),
+        FieldSpec("rate", "Rate per minute", "float", 5000.0, 0.000001),
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.SET_TEMPERATURE, "Set Temperature", "System Commands", (

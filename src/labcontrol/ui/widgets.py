@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, StabilityState
 from .scaling import scaled
 
@@ -58,10 +59,10 @@ class StatusTile(QFrame):
             self._set_state_style("disconnected")
             return
         if snapshot.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
-            precision = 4 if snapshot.kind is DeviceKind.FIELD else 3
-            current = "—" if snapshot.current is None else f"{snapshot.current:.{precision}f} {snapshot.unit}"
-            target = "—" if snapshot.target is None else f"{snapshot.target:.{precision}f} {snapshot.unit}"
-            rate = "—" if snapshot.rate_per_minute is None else f"{snapshot.rate_per_minute:g} {snapshot.unit}/min"
+            precision = control_decimals(snapshot.kind, snapshot.unit)
+            current = "—" if snapshot.current is None else f"{fixed_number(snapshot.current, precision)} {snapshot.unit}"
+            target = "—" if snapshot.target is None else f"{fixed_number(snapshot.target, precision)} {snapshot.unit}"
+            rate = "—" if snapshot.rate_per_minute is None else f"{fixed_number(snapshot.rate_per_minute, precision)} {snapshot.unit}/min"
             self.value_label.setText(current)
             self.detail_label.setText(f"Target {target}  ·  {rate}")
             state_text = {

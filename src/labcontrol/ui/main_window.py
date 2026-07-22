@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..config import AppConfig
+from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, EventNotice, RunProgress, RunState, Severity
 from ..runtime import RuntimeService
 from ..sequence.model import COMMAND_SPECS, SPECS_BY_TYPE, Command, CommandType, SequenceDocument
@@ -596,7 +597,11 @@ class MainWindow(QMainWindow):
 
     def _manual_set_target(self, device_id: str, value: float, rate: float, mode: str) -> None:
         self.runtime.set_target(device_id, value, rate, mode)
-        self.statusBar().showMessage(f"Sent target {value:g} to {device_id}", 3000)
+        snapshot = self.current_snapshots.get(device_id)
+        precision = control_decimals(snapshot.kind, snapshot.unit) if snapshot is not None else 3
+        self.statusBar().showMessage(
+            f"Sent target {fixed_number(value, precision)} to {device_id}", 3000
+        )
 
     def _show_graph(self) -> None:
         self.trend_dialog.show()

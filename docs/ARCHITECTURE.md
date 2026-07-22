@@ -30,6 +30,7 @@ flowchart TD
 | `src/labcontrol/config.py` | TOML 加载、类型化配置、基础校验 |
 | `src/labcontrol/models.py` | 状态、事件、运行进度等公共模型 |
 | `src/labcontrol/events.py` | Warning/Error 锁存、去重和解除 |
+| `src/labcontrol/formatting.py` | 温度/磁场统一精度和负零抑制 |
 | `src/labcontrol/stability.py` | 与设备无关的数值判稳 |
 | `src/labcontrol/devices/base.py` | 插件公共接口和异常类型 |
 | `src/labcontrol/devices/simulated.py` | 温度、磁场、测量和只读 Monitor 四种仿真设备 |
@@ -82,6 +83,10 @@ X/Y 尺度各自保存为 `linear` 或 `log`。Log10 在数据空间保存范围
 - `measure`
 
 因此不同设备可以并行，同一设备不会在读取过程中同时被设置。真实插件若内部还启动工作线程，必须在插件层再次保证协议会话单写者。
+
+Poll 的稳定性计算与 `latest` 快照发布也在同一设备锁内完成。这样某次 Poll 即使先于 Set Target 开始，也只能在 Set 取得锁之前发布；已完成但仍等待其他设备的批量轮询结果不会在稍后覆盖新目标。
+
+默认 `field` 设备以 Oe 作为框架原生单位。配置限值、速率、中央判稳和插件快照始终在同一原生单位中计算；SEQ 执行入口负责把兼容的 T 命令换算成 Oe。格式化属于边界层：K 温度使用三位小数，Oe 使用两位小数，兼容 T 使用六位小数。参数窗口改变 T/Oe 选择时同时换算目标、Scan 端点和速率，从而保持物理量不变。
 
 ## SEQ 内部表示
 

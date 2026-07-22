@@ -9,6 +9,7 @@ from ..config import AppConfig
 from ..datafile import DatRunLogger
 from ..devices.base import DeviceError
 from ..events import EventManager
+from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, EventNotice, RunProgress, RunState, Severity, StabilityState
 from ..plugins import DeviceManager
 from ..units import convert_value
@@ -286,7 +287,10 @@ class SequenceEngine:
                 await self._wait_for_stability(device_id)
             else:
                 await self._wait_for_target(device_id)
-            point_path = path + [f"point {point_index}/{steps}={point:g} {config.unit}"]
+            decimals = control_decimals(kind, config.unit)
+            point_path = path + [
+                f"point {point_index}/{steps}={fixed_number(point, decimals)} {config.unit}"
+            ]
             await self._execute_commands(command.children, point_path)
 
     async def _scan_time(self, command: Command, path: list[str]) -> None:

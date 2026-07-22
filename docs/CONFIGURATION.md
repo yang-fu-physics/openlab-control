@@ -143,9 +143,25 @@ timeout_ms = int(self.config.extras.get("timeout_ms", 5000))
 ## 单位
 
 - 温度基础支持 K。
-- 磁场基础支持 T 和 Oe，换算关系为 `1 T = 10000 Oe`。
+- 默认磁场设备原生单位为 Oe，基础层仍支持 T 和 Oe，换算关系为 `1 T = 10000 Oe`。
 - 速率单位与对应控制量单位每分钟一致。
 - 测量通道单位来自设备的 `unit`。
+
+默认磁场配置如下。范围、速率、误差和斜率阈值全部以设备原生 Oe 表示；它们与旧版 ±9 T、1 T/min、0.002 T 和 0.001 T/min 的物理含义相同：
+
+```toml
+[[devices]]
+id = "field"
+unit = "Oe"
+default_rate_per_minute = 5000.0
+min_value = -90000.0
+max_value = 90000.0
+max_rate_per_minute = 10000.0
+stability_tolerance = 20.0
+stability_max_slope_per_minute = 10.0
+```
+
+界面、SEQ 新命令和框架生成的 DAT 对 Oe 使用两位小数，对 K 温度使用三位小数。若硬件插件的厂商协议使用 T，优先在插件内部换算；也可把设备原生单位配置为 T，此时兼容显示使用六位小数。
 
 真实插件应以配置声明的单位与框架交换数值。厂商协议使用其他单位时，在插件内部转换。
 

@@ -21,9 +21,23 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import DeviceConfig
+from ..formatting import control_decimals, field_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, LabEvent, Severity
-from ..sequence.model import Command, CommandSpec
+from ..sequence.model import Command, CommandSpec, CommandType
+from ..units import convert_value
 from .scaling import scaled
+
+
+TEMPERATURE_COMMANDS = {CommandType.SET_TEMPERATURE, CommandType.SCAN_TEMPERATURE}
+FIELD_COMMANDS = {CommandType.SET_FIELD, CommandType.SCAN_FIELD}
+
+
+def _command_decimals(command: Command, field_name: str) -> int:
+    if command.type in TEMPERATURE_COMMANDS and field_name in {"target", "start", "stop", "rate"}:
+        return 3
+    if command.type in FIELD_COMMANDS and field_name in {"target", "start", "stop", "rate"}:
+        return field_decimals(command.params.get("unit", "Oe"))
+    return 9
 
 
 class CommandDialog(QDialog):
@@ -51,9 +65,13 @@ class CommandDialog(QDialog):
                 widget.setValue(int(value))
             elif field.field_type == "float":
                 widget = QDoubleSpinBox()
-                widget.setDecimals(9)
+                decimals = _command_decimals(command, field.name)
+                widget.setDecimals(decimals)
+                minimum = field.minimum if field.minimum is not None else -1e12
+                if field.name == "rate" and command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS:
+                    minimum = max(minimum, 10 ** -decimals)
                 widget.setRange(
-                    field.minimum if field.minimum is not None else -1e12,
+                    minimum,
                     field.maximum if field.maximum is not None else 1e12,
                 )
                 widget.setValue(float(value))
@@ -62,6 +80,12 @@ class CommandDialog(QDialog):
                 widget = QLineEdit(str(value))
             self.inputs[field.name] = widget
             form.addRow(field.label, widget)
+        self._field_unit = ""
+        if command.type in FIELD_COMMANDS:
+            unit_input = self.inputs.get("unit")
+            if isinstance(unit_input, QComboBox):
+                self._field_unit = unit_input.currentText()
+                unit_input.currentTextChanged.connect(self._change_field_unit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -69,6 +93,22 @@ class CommandDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _change_field_unit(self, new_unit: str) -> None:
+        old_unit = self._field_unit
+        if not old_unit or old_unit == new_unit:
+            return
+        decimals = field_decimals(new_unit)
+        for name in ("target", "start", "stop", "rate"):
+            widget = self.inputs.get(name)
+            if not isinstance(widget, QDoubleSpinBox):
+                continue
+            value = convert_value(widget.value(), old_unit, new_unit)
+            widget.setDecimals(decimals)
+            if name == "rate":
+                widget.setMinimum(10 ** -decimals)
+            widget.setValue(value)
+        self._field_unit = new_unit
 
     def values(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -102,15 +142,16 @@ class ManualControlDialog(QDialog):
         layout.addWidget(self.current_label)
 
         if config.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+            self._precision = control_decimals(config.kind, config.unit)
             form = QFormLayout()
             self.target_input = QDoubleSpinBox()
-            self.target_input.setDecimals(9)
+            self.target_input.setDecimals(self._precision)
             self.target_input.setRange(config.min_value, config.max_value)
             self.target_input.setSuffix(f" {config.unit}")
             self.target_input.setValue(config.initial_value)
             self.rate_input = QDoubleSpinBox()
-            self.rate_input.setDecimals(9)
-            self.rate_input.setRange(0.000001, config.max_rate_per_minute)
+            self.rate_input.setDecimals(self._precision)
+            self.rate_input.setRange(10 ** -self._precision, config.max_rate_per_minute)
             self.rate_input.setSuffix(f" {config.unit}/min")
             self.rate_input.setValue(config.default_rate_per_minute)
             self.mode_input = QComboBox()
@@ -157,7 +198,12 @@ class ManualControlDialog(QDialog):
 
     def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
         if snapshot.current is not None:
-            self.current_label.setText(f"Current: {snapshot.current:.9g} {snapshot.unit}")
+            if snapshot.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+                precision = control_decimals(snapshot.kind, snapshot.unit)
+                value = fixed_number(snapshot.current, precision)
+            else:
+                value = f"{snapshot.current:.9g}"
+            self.current_label.setText(f"Current: {value} {snapshot.unit}")
         elif snapshot.channels:
             self.current_label.setText("Current: Connected")
         if self.config.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):

@@ -84,7 +84,6 @@ class DeviceManager:
                 self._poll_issues[device_id].add((code, context))
                 self.events.report(severity, device_id, code, str(result), context)
             else:
-                self.latest[device_id] = result
                 self.events.resolve(device_id, "POLL_FAILED")
                 for code, context in self._poll_issues[device_id]:
                     self.events.resolve(device_id, code, context)
@@ -95,20 +94,23 @@ class DeviceManager:
         device = self.devices[device_id]
         async with self._locks[device_id]:
             snapshot = await device.poll()
-        evaluator = self._stability.get(device_id)
-        if evaluator is not None and snapshot.current is not None and snapshot.target is not None:
-            result = evaluator.update(snapshot.current, snapshot.target, snapshot.timestamp)
-            snapshot.stability = result.state
-            timeout_code = "STABILITY_TIMEOUT"
-            if result.state is StabilityState.TIMED_OUT:
-                self.events.report(
-                    self.config.alarms.stability_timeout,
-                    device_id,
-                    timeout_code,
-                    f"{snapshot.display_name} did not stabilize within {result.elapsed_seconds:.1f} seconds",
-                )
-            else:
-                self.events.resolve(device_id, timeout_code)
+            evaluator = self._stability.get(device_id)
+            if evaluator is not None and snapshot.current is not None and snapshot.target is not None:
+                result = evaluator.update(snapshot.current, snapshot.target, snapshot.timestamp)
+                snapshot.stability = result.state
+                timeout_code = "STABILITY_TIMEOUT"
+                if result.state is StabilityState.TIMED_OUT:
+                    self.events.report(
+                        self.config.alarms.stability_timeout,
+                        device_id,
+                        timeout_code,
+                        f"{snapshot.display_name} did not stabilize within {result.elapsed_seconds:.1f} seconds",
+                    )
+                else:
+                    self.events.resolve(device_id, timeout_code)
+            # Publish while the device lock is still held. Otherwise an older
+            # concurrent poll can overwrite the target just written by set_target().
+            self.latest[device_id] = snapshot
         return snapshot
 
     def first_device_id(self, kind: DeviceKind) -> str:

@@ -49,18 +49,18 @@ id = "field"
 display_name = "Magnetic Field"
 kind = "field"
 plugin = "labcontrol.devices.simulated:SimulatedFieldController"
-unit = "T"
+unit = "Oe"
 initial_value = 0.0
-default_rate_per_minute = 0.5
-min_value = -9.0
-max_value = 9.0
-max_rate_per_minute = 1.0
-stability_tolerance = 0.002
-stability_max_slope_per_minute = 0.001
+default_rate_per_minute = 5000.0
+min_value = -90000.0
+max_value = 90000.0
+max_rate_per_minute = 10000.0
+stability_tolerance = 20.0
+stability_max_slope_per_minute = 10.0
 stability_dwell_seconds = 1.0
 stability_timeout_seconds = 120.0
 stability_window_seconds = 0.8
-noise = 0.000001
+noise = 0.01
 
 [[devices]]
 id = "second_stage"
