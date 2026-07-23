@@ -2,7 +2,7 @@
 
 OpenLab Control 是一个以 Quantum Design MultiVu 操作方式为参考、用于外部实验设备的 Python/PySide6 控制框架。它不控制 PPMS 本体；温控仪、磁体电源和只读监视设备由设备插件提供，吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的 Measurement Module 提供。
 
-当前版本：`0.10.1`。界面以英文为主，技术与操作文档以中文为主。
+当前版本：`0.10.2`。界面以英文为主，技术与操作文档以中文为主。
 
 ![主窗口](docs/main-window-preview.png)
 

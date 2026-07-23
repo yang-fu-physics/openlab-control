@@ -330,6 +330,23 @@ class ModuleWindowTests(unittest.TestCase):
         window.close()
         owner.close()
 
+    def test_window_uses_compact_content_minimum_at_4k_scale(self) -> None:
+        previous_scale = self.application.property("openlabUiScale")
+        self.application.setProperty("openlabUiScale", 1.4)
+        owner = QWidget()
+        window: ModuleWindow | None = None
+        try:
+            config = load_config(ROOT / "configs" / "default.toml")
+            window = ModuleWindow(discover_modules(config)[0], owner)
+            self.assertLess(window.minimumWidth(), scaled(560))
+            self.assertLess(window.minimumHeight(), scaled(460))
+        finally:
+            if window is not None:
+                window.allow_application_close()
+                window.close()
+            owner.close()
+            self.application.setProperty("openlabUiScale", previous_scale)
+
 
 if __name__ == "__main__":
     unittest.main()

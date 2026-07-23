@@ -1,4 +1,4 @@
-# OpenLab Control 0.10.1 技术规格
+# OpenLab Control 0.10.2 技术规格
 
 状态：Implemented Baseline
 日期：2026-07-23

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -18,14 +19,28 @@ from labcontrol.measurement.manifest import activate_shared_dependencies  # noqa
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
 
+def arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Capture module UI previews.")
+    parser.add_argument("--scale", type=float, help="Override the configured UI scale.")
+    parser.add_argument("--output-directory", type=Path)
+    return parser.parse_args()
+
+
 def main() -> int:
-    manager_output = ROOT / "docs" / "module-manager-preview.png"
-    module_output = ROOT / "docs" / "module-window-preview.png"
-    status_output = ROOT / "docs" / "module-status-preview.png"
+    options = arguments()
+    output_directory = (options.output_directory or ROOT / "docs").resolve()
+    output_directory.mkdir(parents=True, exist_ok=True)
+    suffix = "" if options.scale is None else f"-{options.scale:.2f}x"
+    manager_output = output_directory / f"module-manager-preview{suffix}.png"
+    module_output = output_directory / f"module-window-preview{suffix}.png"
+    status_output = output_directory / f"module-status-preview{suffix}.png"
     application = QApplication([])
     config = load_config(ROOT / "configs" / "default.toml")
     activate_shared_dependencies(config)
-    configure_qt_appearance(application, config.ui_scale)
+    configure_qt_appearance(
+        application,
+        config.ui_scale if options.scale is None else options.scale,
+    )
     window = MainWindow(config)
     window.resize(1480, 900)
     window.show()

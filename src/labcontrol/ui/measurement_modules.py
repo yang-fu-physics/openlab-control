@@ -25,8 +25,8 @@ from ..measurement.manifest import ModuleDescriptor, load_source_object
 from .scaling import scaled
 
 
-MODULE_WINDOW_MIN_WIDTH = 560
-MODULE_WINDOW_MIN_HEIGHT = 460
+MODULE_WINDOW_MIN_WIDTH = 360
+MODULE_WINDOW_MIN_HEIGHT = 260
 
 
 class ModuleWindow(QDialog):
@@ -85,11 +85,11 @@ class ModuleWindow(QDialog):
         layout.addWidget(self.tabs, 1)
 
         layout.activate()
-        minimum = self.sizeHint().expandedTo(
+        minimum = self.minimumSizeHint().expandedTo(
             QSize(scaled(MODULE_WINDOW_MIN_WIDTH), scaled(MODULE_WINDOW_MIN_HEIGHT))
         )
         self.setMinimumSize(minimum)
-        self.resize(minimum)
+        self.resize(self.sizeHint().expandedTo(minimum))
 
         self.frontend.settingsChanged.connect(self._mark_dirty)
         self.context.manualActionRequested.connect(

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openlab-control"
-version = "0.10.1"
+version = "0.10.2"
 description = "Plugin-oriented low-temperature, magnetic-field and measurement control framework"
 readme = "README.md"
 requires-python = ">=3.11"
