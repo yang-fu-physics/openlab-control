@@ -24,6 +24,7 @@
 | `test_plot_format.py` | `.plt` 保存、恢复和回退 |
 | `test_status_tile.py` | Monitor 只读、格式精度、参数弹窗 |
 | `test_ui_scaling.py` | 1080p/2K/4K 自动和手动缩放 |
+| `test_release_contract.py` | 版本同步、依赖锁定、源码入口与发布资源布局 |
 
 任何发布版本必须 100% 通过。失败不得通过删除测试或扩大安全容差掩盖。
 

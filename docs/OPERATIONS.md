@@ -19,6 +19,8 @@ setup.bat
 run.bat
 ```
 
+`setup.bat` 默认安装 `requirements-lock.txt` 中经过发布验证的精确版本。需要评估依赖升级时，先修改 `requirements.txt` 的直接依赖范围，在隔离环境解析并更新锁定文件，再完成全部测试和打包验收；不要在发布环境中临时升级单个包。
+
 或：
 
 ```text

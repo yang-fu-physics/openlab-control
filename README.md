@@ -26,7 +26,7 @@ setup.bat
 run.bat
 ```
 
-`run.bat` 始终启动当前源码，不会因为 `dist/` 中残留旧构建而改为运行旧 EXE。
+`setup.bat` 使用 `requirements-lock.txt` 安装发布时验证过的精确依赖版本；`requirements.txt` 只记录允许升级的直接依赖范围。`run.bat` 始终启动当前源码，不会因为 `dist/` 中残留旧构建而改为运行旧 EXE。
 
 已有环境可直接运行：
 

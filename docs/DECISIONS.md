@@ -202,3 +202,9 @@ Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 
 配置、模块、示例、模板和文档必须位于 EXE 同级目录，既便于实验室审查和维护，也与冻结运行时的项目根目录解析一致。PyInstaller 不再把这些目录同时复制到 `_internal/`；`build.bat` 是发布目录的唯一资源装配步骤。Windows 版本资源直接读取核心包版本，避免 EXE 属性与应用版本漂移。
 
 源码入口 `run.bat` 只启动当前源码环境。发布包由 `dist/OpenLabControl/OpenLabControl.exe` 显式启动，避免开发目录存在旧构建时静默运行旧版本。
+
+## ADR-029：发布依赖使用独立精确锁定
+
+状态：Accepted
+
+`pyproject.toml` 和 `requirements.txt` 保留兼容范围，供库元数据和受控升级使用；`requirements-lock.txt` 固定经过 Windows 发布验证的直接与传递依赖，`setup.bat` 只安装该锁定集合且不隐式升级 pip。这样日常升级意图与可复现发布环境分离。锁定文件只有在隔离环境完成完整测试、源码冒烟和打包验收后才能更新。
