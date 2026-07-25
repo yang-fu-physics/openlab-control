@@ -263,8 +263,11 @@ class DatPlotCanvas(QWidget):
             self.y_columns,
             self,
         )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.set_y_columns(dialog.selected_columns())
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.set_y_columns(dialog.selected_columns())
+        finally:
+            dialog.deleteLater()
 
     def set_x_scale(self, scale: str, *, notify: bool = True) -> bool:
         return self._set_scale("x", scale, notify=notify)

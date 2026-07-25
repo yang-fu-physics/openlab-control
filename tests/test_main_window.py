@@ -11,12 +11,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.sequence.model import CommandType  # noqa: E402
 from labcontrol.sequence.parser import parse_sequence  # noqa: E402
+from labcontrol.ui.dialogs import CommandDialog  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -127,6 +129,11 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(observed["maximum"], 400.0)
             self.assertEqual(observed["max_rate"], 30.0)
             self.assertIn("Configured limits (temperature)", observed["summary"])
+            QCoreApplication.sendPostedEvents(
+                None,
+                QEvent.Type.DeferredDelete,
+            )
+            self.assertEqual(window.findChildren(CommandDialog), [])
         finally:
             window.close()
 
@@ -141,6 +148,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             )
             self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
             self.assertEqual([item.id for item in window.module_descriptors], ["simulated_transport"])
+            self.assertEqual(window.windowTitle(), self.config.title)
         finally:
             window.close()
 

@@ -300,7 +300,16 @@ class DatBrowserWidget(QWidget):
     def _show_point_details(self, hit: PlotHit) -> None:
         if self.document is None:
             return
-        PointDetailsDialog(self.document, hit, self.canvas.x_label, self).exec()
+        dialog = PointDetailsDialog(
+            self.document,
+            hit,
+            self.canvas.x_label,
+            self,
+        )
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     @staticmethod
     def _first_dat_path(event: QDragEnterEvent | QDropEvent) -> Path | None:

@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         scale_mode = application.property("openlabUiScaleMode") if application is not None else None
         self.ui_scale_mode = str(scale_mode or "auto").title()
 
-        self.setWindowTitle(f"{config.title} - Simulating")
+        self.setWindowTitle(config.title)
         self.resize(scaled(1480), scaled(900))
         self.setMinimumSize(scaled(1180), scaled(720))
         self.setAcceptDrops(True)
@@ -501,19 +501,25 @@ class MainWindow(QMainWindow):
         spec = SPECS_BY_TYPE[command_type]
         command = spec.create()
         dialog = CommandDialog(command, spec, self, device_configs=self.config.devices)
-        if dialog.exec() == CommandDialog.DialogCode.Accepted:
-            command.update_params(dialog.values())
-            self.editor.insert_command(command)
+        try:
+            if dialog.exec() == CommandDialog.DialogCode.Accepted:
+                command.update_params(dialog.values())
+                self.editor.insert_command(command)
+        finally:
+            dialog.deleteLater()
 
     def _edit_command(self, command: Command) -> None:
         spec = SPECS_BY_TYPE.get(command.type)
         if spec is None:
             return
         dialog = CommandDialog(command, spec, self, device_configs=self.config.devices)
-        if dialog.exec() == CommandDialog.DialogCode.Accepted:
-            command.update_params(dialog.values())
-            self.editor.rebuild(command.id)
-            self._mark_dirty()
+        try:
+            if dialog.exec() == CommandDialog.DialogCode.Accepted:
+                command.update_params(dialog.values())
+                self.editor.rebuild(command.id)
+                self._mark_dirty()
+        finally:
+            dialog.deleteLater()
 
     def _change_datafile(self) -> None:
         selected, _ = QFileDialog.getSaveFileName(
@@ -1137,7 +1143,8 @@ class MainWindow(QMainWindow):
             f"OpenLab Control {__version__}\n\n"
             "Control framework for external temperature and magnetic-field devices, "
             "with process-isolated measurement modules.\n"
-            "Current mode: Simulating (does not control PPMS or real instruments).\n"
+            "Configured plugins may communicate with external instruments. "
+            "This application does not control PPMS.\n"
             f"UI scale: {self.ui_scale:.2f}x ({self.ui_scale_mode}).",
         )
 

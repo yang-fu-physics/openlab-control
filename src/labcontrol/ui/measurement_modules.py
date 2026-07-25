@@ -36,6 +36,7 @@ class ModuleWindow(QDialog):
 
     def __init__(self, descriptor: ModuleDescriptor, parent: QWidget) -> None:
         super().__init__(parent, Qt.WindowType.Window)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.descriptor = descriptor
         self._allow_close = False
         self._dirty = False

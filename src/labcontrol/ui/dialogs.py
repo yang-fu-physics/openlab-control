@@ -399,6 +399,7 @@ class ManualControlDialog(QDialog):
 class AlertDialog(QDialog):
     def __init__(self, event: LabEvent, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.event_key = event.key
         is_error = event.severity is Severity.ERROR
         self.setWindowTitle("Error" if is_error else "Warning")

@@ -18,9 +18,19 @@ from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from labcontrol.config import load_config  # noqa: E402
-from labcontrol.models import DeviceActivity, DeviceKind, DeviceSnapshot  # noqa: E402
+from labcontrol.models import (  # noqa: E402
+    DeviceActivity,
+    DeviceKind,
+    DeviceSnapshot,
+    LabEvent,
+    Severity,
+)
 from labcontrol.sequence.model import SPECS_BY_TYPE, CommandType  # noqa: E402
-from labcontrol.ui.dialogs import CommandDialog, ManualControlDialog  # noqa: E402
+from labcontrol.ui.dialogs import (  # noqa: E402
+    AlertDialog,
+    CommandDialog,
+    ManualControlDialog,
+)
 from labcontrol.ui.trend import TrendCanvas  # noqa: E402
 from labcontrol.ui.widgets import StatusTile  # noqa: E402
 
@@ -57,6 +67,21 @@ class StatusTileTests(unittest.TestCase):
         self.assertEqual(len(trend.history["2nd Stage"]), 1)
         trend.close()
         tile.close()
+
+    def test_alert_dialog_is_deleted_after_close(self) -> None:
+        dialog = AlertDialog(
+            LabEvent(
+                key="device|FAULT|",
+                severity=Severity.ERROR,
+                source="device",
+                code="FAULT",
+                message="fault",
+            )
+        )
+        self.assertTrue(
+            dialog.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        )
+        dialog.close()
 
     def test_temperature_and_oe_field_use_requested_precision(self) -> None:
         now = time.monotonic()
