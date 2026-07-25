@@ -12,13 +12,13 @@
 
 | 文件 | 重点 |
 |---|---|
-| `test_sequence_parser.py` | 单行语法、任意嵌套、List、T/F、旧 Initialize/Measure 参数拒绝 |
+| `test_sequence_parser.py` | 单行语法、任意嵌套、List、T/F、旧命令与越界/非有限参数拒绝 |
 | `test_sequence_editor.py` | 多行右键/键盘、父子去重、运行锁定 |
-| `test_engine.py` | Scan、Hold、Warning/Error、模块进程 Measure、运行目录 |
-| `test_measurement_modules.py` | 清单、依赖冲突、Settings、完整生命周期、无模块、不可关闭窗口 |
-| `test_datafile.py` | 模块前缀列、Monitor、Settings/Status 快照、事件 Resolve |
-| `test_devices_and_units.py` | 控制/Monitor 插件、锁、限制与 Oe/T |
-| `test_events_and_stability.py` | 活动事件去重、数值判稳与超时 |
+| `test_engine.py` | 嵌套 Scan、Pause 时钟、Hold、控制等待上限、运行时参数防绕过与展开进度 |
+| `test_measurement_modules.py` | 清单、依赖冲突、Settings、并行多行测量、IPC/退出超时、完整生命周期 |
+| `test_datafile.py` | 动态列、多行结果、追加 Schema、路径限制、原子运行目录与快照 |
+| `test_devices_and_units.py` | 控制/Monitor 插件、竞态、限制、非有限值、设备超时隔离、Hold 与 Oe/T |
+| `test_events_and_stability.py` | 活动事件去重、重复 Error 仍中止、数值判稳与超时 |
 | `test_main_window.py` | MDI、SEQ 重开、长路径、配置限制 |
 | `test_data_browser.py` | 多 Y、Overlay/Stacked、Log、刷新、最近点 |
 | `test_plot_format.py` | `.plt` 保存、恢复和回退 |
@@ -162,6 +162,7 @@ build.bat
 - 可写 `runs/`、`module_data/`、`module_runtime/site-packages/`、`wheels/`；
 - `_internal/` 不重复包含上述外置资源；
 - EXE 文件版本和产品版本与应用版本一致；
+- 记录 Authenticode 签名状态；未签名包必须在发布说明中明确标注；
 - EXE GUI smoke；
 - EXE headless demo（无模块和 `--enable-module simulated_transport` 两种）；
 - 在没有开发仓库/PYTHONPATH 的干净目录仍能发现 `simulated_transport`。

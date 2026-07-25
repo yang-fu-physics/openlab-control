@@ -23,6 +23,7 @@ class ReleaseContractTests(unittest.TestCase):
             "docs/ARCHITECTURE.md",
             "docs/DAT_FORMAT.md",
             "docs/TECHNICAL_SPECIFICATION.md",
+            "docs/VERIFICATION_REPORT.md",
         ):
             with self.subTest(path=relative_path):
                 self.assertIn(
