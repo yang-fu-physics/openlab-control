@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..config import AppConfig
+from ..devices.manifest import DevicePluginDescriptor
 from ..formatting import control_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, EventNotice, RunProgress, RunState, Severity
 from ..measurement.manifest import (
@@ -56,11 +57,19 @@ from .widgets import ElidedLabel, StatusTile
 class MainWindow(QMainWindow):
     TERMINAL_STATES = {RunState.IDLE, RunState.STOPPED, RunState.COMPLETED, RunState.FAULTED}
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        device_descriptors: tuple[DevicePluginDescriptor, ...] = (),
+    ) -> None:
         super().__init__()
         self.config = config
         self.module_descriptors = self._discover_module_descriptors()
-        self.runtime = RuntimeService(config, self.module_descriptors)
+        self.runtime = RuntimeService(
+            config,
+            self.module_descriptors,
+            device_descriptors,
+        )
         self.document = SequenceDocument()
         self.sequence_path: Path | None = None
         self._last_sequence_directory = self.config.project_root

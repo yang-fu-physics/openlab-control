@@ -8,6 +8,12 @@ import time
 from pathlib import Path
 
 from .config import ConfigurationError, load_config
+from .devices.manifest import (
+    DevicePluginDescriptor,
+    configured_device_plugins,
+    discover_device_plugins,
+)
+from .extensions.trust import ExtensionTrustError, PluginTrustStore
 from .models import RunProgress, RunState
 from .measurement.manifest import activate_shared_dependencies
 from .measurement.settings import load_settings
@@ -84,6 +90,7 @@ def _headless_demo(
     sequence_path: Path,
     timeout: float,
     module_ids: list[str] | None = None,
+    device_descriptors: tuple[DevicePluginDescriptor, ...] = (),
 ) -> int:
     diagnostic_path = config.project_root / "headless_demo.log"
     diagnostic = diagnostic_path.open("w", encoding="utf-8")
@@ -99,7 +106,7 @@ def _headless_demo(
             emit(f"{issue.level}: line {issue.line_number}: {issue.message}")
         diagnostic.close()
         return 2
-    runtime = RuntimeService(config)
+    runtime = RuntimeService(config, device_descriptors=device_descriptors)
     runtime.start()
     try:
         for module_id in module_ids or []:
@@ -164,6 +171,19 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ConfigurationError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
+    try:
+        device_descriptors = discover_device_plugins(config)
+        selected_device_plugins = configured_device_plugins(
+            config,
+            device_descriptors,
+        )
+        trust_store = PluginTrustStore(
+            config.resolve_project_path(config.plugins.state_directory)
+            / "trusted_plugins.json"
+        )
+    except (OSError, ValueError, ExtensionTrustError) as exc:
+        print(f"Device plugin error: {exc}", file=sys.stderr)
+        return 2
     activate_shared_dependencies(config)
 
     sequence_path = args.sequence or (
@@ -172,8 +192,24 @@ def main(argv: list[str] | None = None) -> int:
         else config.project_root / "examples" / "nested_scan.seq"
     )
     if args.headless_demo:
+        untrusted = [
+            descriptor.id
+            for descriptor in selected_device_plugins
+            if not trust_store.is_trusted("device", descriptor)
+        ]
+        if untrusted:
+            print(
+                "Device plugin error: untrusted plugins cannot run headlessly: "
+                + ", ".join(untrusted),
+                file=sys.stderr,
+            )
+            return 2
         return _headless_demo(
-            config, sequence_path, args.timeout, list(args.enable_module)
+            config,
+            sequence_path,
+            args.timeout,
+            list(args.enable_module),
+            device_descriptors,
         )
 
     if args.gui_smoke:
@@ -184,6 +220,7 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication, QMessageBox
         from .ui.main_window import MainWindow
+        from .ui.plugin_trust import confirm_device_plugin_trust
     except ImportError as exc:
         print(f"Missing GUI dependency: {exc}. Run setup.bat first.", file=sys.stderr)
         return 2
@@ -192,8 +229,21 @@ def main(argv: list[str] | None = None) -> int:
     application.setApplicationName("OpenLab Control")
     application.setOrganizationName("OpenLab")
     configure_qt_appearance(application, config.ui_scale)
+    for descriptor in selected_device_plugins:
+        try:
+            trusted = confirm_device_plugin_trust(None, trust_store, descriptor)
+        except ExtensionTrustError as exc:
+            QMessageBox.critical(None, "Plugin Trust Failed", str(exc))
+            return 1
+        if not trusted:
+            QMessageBox.warning(
+                None,
+                "Device Plugin Not Trusted",
+                f"OpenLab Control will not load {descriptor.name}.",
+            )
+            return 1
     try:
-        window = MainWindow(config)
+        window = MainWindow(config, device_descriptors)
     except Exception as exc:
         QMessageBox.critical(None, "OpenLab Control - Startup Failed", str(exc))
         return 1

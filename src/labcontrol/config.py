@@ -87,6 +87,18 @@ class ModuleConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PluginConfig:
+    device_directory: str = "device_plugins"
+    state_directory: str = "plugin_state"
+    runtime_directory: str = "plugin_runtime"
+    shared_wheels_directory: str = "wheels"
+    python_executable: str = ""
+    device_startup_timeout_seconds: float = 10.0
+    device_reconnect_timeout_seconds: float = 60.0
+    device_reconnect_interval_seconds: float = 2.0
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     source_path: Path
     title: str
@@ -99,6 +111,7 @@ class AppConfig:
     logging: LoggingConfig
     alarms: AlarmConfig
     modules: ModuleConfig
+    plugins: PluginConfig
     abort_temperature: str
     abort_field: str
     devices: tuple[DeviceConfig, ...]
@@ -334,6 +347,7 @@ def load_config(path: str | Path) -> AppConfig:
     alarm_raw = raw.get("alarms", {})
     abort_raw = raw.get("abort", {})
     module_raw = raw.get("modules", {})
+    plugin_raw = raw.get("plugins", {})
     devices = tuple(_device_config(item) for item in raw.get("devices", []))
     if not devices:
         raise ConfigurationError("Configuration must contain at least one [[devices]] entry")
@@ -425,6 +439,33 @@ def load_config(path: str | Path) -> AppConfig:
             shutdown_timeout_seconds=_positive_float(
                 module_raw.get("shutdown_timeout_seconds", 3.0),
                 "modules.shutdown_timeout_seconds",
+            ),
+        ),
+        plugins=PluginConfig(
+            device_directory=str(
+                plugin_raw.get("device_directory", "device_plugins")
+            ),
+            state_directory=str(
+                plugin_raw.get("state_directory", "plugin_state")
+            ),
+            runtime_directory=str(
+                plugin_raw.get("runtime_directory", "plugin_runtime")
+            ),
+            shared_wheels_directory=str(
+                plugin_raw.get("shared_wheels_directory", "wheels")
+            ),
+            python_executable=str(plugin_raw.get("python_executable", "")),
+            device_startup_timeout_seconds=_positive_float(
+                plugin_raw.get("device_startup_timeout_seconds", 10.0),
+                "plugins.device_startup_timeout_seconds",
+            ),
+            device_reconnect_timeout_seconds=_positive_float(
+                plugin_raw.get("device_reconnect_timeout_seconds", 60.0),
+                "plugins.device_reconnect_timeout_seconds",
+            ),
+            device_reconnect_interval_seconds=_positive_float(
+                plugin_raw.get("device_reconnect_interval_seconds", 2.0),
+                "plugins.device_reconnect_interval_seconds",
             ),
         ),
         abort_temperature=abort_temperature,

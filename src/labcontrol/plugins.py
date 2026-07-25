@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import math
 import time
 from collections.abc import Awaitable, Callable
@@ -10,7 +9,10 @@ from typing import TypeVar
 
 from .config import AppConfig, DeviceConfig
 from .devices.base import DeviceError, DevicePlugin, DeviceWarning, SafetyViolation
+from .devices.manifest import DevicePluginDescriptor
 from .events import EventManager
+from .extensions.loading import load_import_object, load_source_object
+from .extensions.trust import PluginTrustStore, extension_tree_digest
 from .models import DeviceKind, DeviceSnapshot, Severity, StabilityState
 from .stability import StabilityEvaluator
 
@@ -18,19 +20,16 @@ from .stability import StabilityEvaluator
 T = TypeVar("T")
 
 
-def load_object(specification: str) -> object:
-    try:
-        module_name, object_name = specification.split(":", 1)
-    except ValueError as exc:
-        raise ValueError("Plugin path must use package.module:ClassName format") from exc
-    module = importlib.import_module(module_name)
-    return getattr(module, object_name)
-
-
 class DeviceManager:
-    def __init__(self, config: AppConfig, events: EventManager) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        events: EventManager,
+        descriptors: tuple[DevicePluginDescriptor, ...] = (),
+    ) -> None:
         self.config = config
         self.events = events
+        self.descriptors = {descriptor.id: descriptor for descriptor in descriptors}
         self.devices: dict[str, DevicePlugin] = {}
         self.device_configs: dict[str, DeviceConfig] = {item.id: item for item in config.devices}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -42,10 +41,59 @@ class DeviceManager:
         self._load_plugins()
 
     def _load_plugins(self) -> None:
+        trust_store: PluginTrustStore | None = None
         for device_config in self.config.devices:
-            plugin_class = load_object(device_config.plugin)
+            if ":" in device_config.plugin:
+                module_name = device_config.plugin.split(":", 1)[0]
+                if not module_name.startswith("labcontrol.devices."):
+                    raise PermissionError(
+                        "Unmanifested third-party device imports are disabled; "
+                        f"copy {device_config.plugin!r} into device_plugins with device.toml"
+                    )
+                plugin_class = load_import_object(device_config.plugin)
+            else:
+                descriptor = self.descriptors.get(device_config.plugin)
+                if descriptor is None:
+                    raise ValueError(
+                        f"Unknown external device plugin {device_config.plugin!r}"
+                    )
+                if not descriptor.can_load:
+                    raise ValueError(
+                        f"Device plugin {descriptor.id} is invalid: {descriptor.error}"
+                    )
+                if device_config.kind not in descriptor.kinds:
+                    raise TypeError(
+                        f"Device plugin {descriptor.id} does not support "
+                        f"{device_config.kind.value}"
+                    )
+                current_fingerprint = extension_tree_digest(descriptor.path)
+                if current_fingerprint != descriptor.fingerprint:
+                    raise PermissionError(
+                        f"Device plugin {descriptor.id} changed after discovery"
+                    )
+                if trust_store is None:
+                    trust_store = PluginTrustStore(
+                        self.config.resolve_project_path(
+                            self.config.plugins.state_directory
+                        )
+                        / "trusted_plugins.json"
+                    )
+                if not trust_store.is_trusted("device", descriptor):
+                    raise PermissionError(
+                        f"Device plugin {descriptor.id} has not been trusted"
+                    )
+                plugin_class = load_source_object(
+                    descriptor.path,
+                    descriptor.backend,
+                    f"device_{descriptor.id}",
+                )
             if not isinstance(plugin_class, type) or not issubclass(plugin_class, DevicePlugin):
                 raise TypeError(f"{device_config.plugin} is not a DevicePlugin")
+            if str(getattr(plugin_class, "api_version", "")) != DevicePlugin.api_version:
+                raise TypeError(
+                    f"{device_config.plugin} uses incompatible device API "
+                    f"{getattr(plugin_class, 'api_version', '')!r}"
+                )
             self.devices[device_config.id] = plugin_class(
                 device_config, simulation_speed=self.config.simulation_speed
             )

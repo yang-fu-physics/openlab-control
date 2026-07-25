@@ -35,6 +35,16 @@ startup_timeout_seconds = 10.0
 operation_timeout_seconds = 120.0
 shutdown_timeout_seconds = 3.0
 
+[plugins]
+device_directory = "device_plugins"
+state_directory = "plugin_state"
+runtime_directory = "plugin_runtime"
+shared_wheels_directory = "wheels"
+python_executable = ""
+device_startup_timeout_seconds = 10.0
+device_reconnect_timeout_seconds = 60.0
+device_reconnect_interval_seconds = 2.0
+
 [[devices]]
 id = "temperature"
 display_name = "Temperature"

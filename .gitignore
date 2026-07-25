@@ -20,3 +20,9 @@ runs/*
 !/wheels/.gitkeep
 /module_runtime/site-packages/*
 !/module_runtime/site-packages/.gitkeep
+/device_plugins/*
+!/device_plugins/.gitkeep
+/plugin_state/*
+!/plugin_state/.gitkeep
+/plugin_runtime/*
+!/plugin_runtime/.gitkeep

@@ -13,6 +13,7 @@ from .events import EventManager
 from .models import EventNotice, RunProgress, RuntimeMessage, Severity
 from .measurement.manifest import ModuleDescriptor, discover_modules
 from .measurement.service import MeasurementModuleService
+from .devices.manifest import DevicePluginDescriptor, discover_device_plugins
 from .plugins import DeviceManager
 from .sequence.engine import SequenceEngine
 from .sequence.model import SequenceDocument
@@ -25,6 +26,7 @@ class RuntimeService:
         self,
         config: AppConfig,
         module_descriptors: tuple[ModuleDescriptor, ...] | None = None,
+        device_descriptors: tuple[DevicePluginDescriptor, ...] | None = None,
     ) -> None:
         self.config = config
         self.messages: queue.Queue[RuntimeMessage] = queue.Queue()
@@ -40,6 +42,11 @@ class RuntimeService:
         self.modules: MeasurementModuleService | None = None
         self.module_descriptors = (
             discover_modules(config) if module_descriptors is None else module_descriptors
+        )
+        self.device_descriptors = (
+            discover_device_plugins(config)
+            if device_descriptors is None
+            else device_descriptors
         )
 
     def start(self, timeout: float = 10.0) -> None:
@@ -60,7 +67,11 @@ class RuntimeService:
         )
         self.events.subscribe(self._on_event)
         try:
-            self.devices = DeviceManager(self.config, self.events)
+            self.devices = DeviceManager(
+                self.config,
+                self.events,
+                self.device_descriptors,
+            )
             self.logger = DatRunLogger(self.config, self.events)
             self.modules = MeasurementModuleService(
                 self.module_descriptors,
