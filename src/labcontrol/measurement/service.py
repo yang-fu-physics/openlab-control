@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -410,6 +411,12 @@ class MeasurementModuleService:
                 raise DeviceError(
                     f"Column {key} has unsupported value type {type(value).__name__}",
                     "MODULE_ROW_TYPE_ERROR",
+                    descriptor.id,
+                )
+            if isinstance(value, float) and not math.isfinite(value):
+                raise DeviceError(
+                    f"Column {key} contains NaN or infinity",
+                    "MODULE_ROW_VALUE_ERROR",
                     descriptor.id,
                 )
             result[key] = value

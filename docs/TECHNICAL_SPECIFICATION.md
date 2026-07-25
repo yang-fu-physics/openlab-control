@@ -136,7 +136,7 @@
 - DATA-001：模块 SHALL 在清单声明固定列/单位。
 - DATA-002：列 SHALL 自动加 `<module_id>.` 前缀。
 - DATA-003：模块不得直接写实验 DAT。
-- DATA-004：未声明列/不支持值类型 SHALL Error。
+- DATA-004：未声明列、不支持值类型、NaN 或 Infinity SHALL Error。
 - DATA-005：模块 SHALL 自行声明业务 Status/Warning 列；框架不加通用列。
 - DATA-006：Warning/Error 时可用温场/Monitor 数据 SHALL 保留。
 

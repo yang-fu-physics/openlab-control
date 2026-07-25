@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import math
 import multiprocessing
 import os
 import shutil
@@ -181,6 +182,38 @@ class ModuleServiceTests(unittest.TestCase):
             del timeout_seconds
             self.actions.append("close")
             self.close_barrier.wait(timeout=2.0)
+
+    def test_measurement_rows_reject_nan_and_infinity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = copied_project(Path(temp))
+            events = EventManager()
+            devices = DeviceManager(config, events)
+            descriptor = ModuleDescriptor(
+                id="finite_values",
+                name="Finite Values",
+                version="1.0.0",
+                path=Path(temp),
+                api_version="1.0",
+                frontend="frontend:Frontend",
+                backend="backend:Backend",
+                columns=(ModuleColumn("Value", "V"),),
+            )
+            modules = MeasurementModuleService((descriptor,), events, devices)
+            for invalid in (math.nan, math.inf, -math.inf):
+                with self.subTest(value=invalid):
+                    with self.assertRaises(DeviceError) as captured:
+                        modules._validated_row(
+                            descriptor,
+                            {"Value": invalid},
+                        )
+                    self.assertEqual(
+                        captured.exception.code,
+                        "MODULE_ROW_VALUE_ERROR",
+                    )
+            self.assertEqual(
+                modules._validated_row(descriptor, {"Value": 1.25}),
+                {"Value": 1.25},
+            )
 
     def test_full_lifecycle_streams_four_ordered_rows_and_disables_cleanly(self) -> None:
         async def scenario(temp_root: Path) -> None:

@@ -136,7 +136,7 @@ Run 开始时固定：
 - 各模块本次保存的 desired Settings；
 - 模块实际 Status 快照。
 
-列名自动变为 `<module_id>.<column>(<unit>)`。模块发出未声明列或不可序列化值时产生 Error，并中止 SEQ。SEQ 运行期间禁止 Enable、Disable、Refresh、Apply 和手动动作，因此本次 DAT 的列不会改变。
+列名自动变为 `<module_id>.<column>(<unit>)`。模块发出未声明列、不可序列化值、NaN 或 Infinity 时产生 Error，并中止 SEQ。SEQ 运行期间禁止 Enable、Disable、Refresh、Apply 和手动动作，因此本次 DAT 的列不会改变。
 
 ## 生命周期失败语义
 
