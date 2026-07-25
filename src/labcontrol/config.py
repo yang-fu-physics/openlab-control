@@ -186,6 +186,19 @@ def _windows_file_name(value: object, key: str) -> str:
     return result
 
 
+def _device_identifier(value: object) -> str:
+    result = str(value)
+    if (
+        not result
+        or result != result.strip()
+        or any(not character.isprintable() for character in result)
+    ):
+        raise ConfigurationError(
+            "Device id must be non-empty printable text without surrounding whitespace"
+        )
+    return result
+
+
 def _device_config(raw: dict[str, Any]) -> DeviceConfig:
     required = ("id", "display_name", "kind", "plugin")
     missing = [key for key in required if key not in raw]
@@ -196,7 +209,7 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
     except ValueError as exc:
         raise ConfigurationError(f"Unknown device kind: {raw['kind']}") from exc
 
-    device_id = str(raw["id"])
+    device_id = _device_identifier(raw["id"])
     prefix = f"Device {device_id}"
     initial_value = _finite_float(
         raw.get("initial_value", 0.0),

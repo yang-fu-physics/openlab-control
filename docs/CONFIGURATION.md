@@ -91,7 +91,7 @@ shutdown_timeout_seconds = 3.0
 
 | 键 | 必需 | 说明 |
 |---|---|---|
-| `id` | 是 | 全局唯一 ID，SEQ 通过它选择设备 |
+| `id` | 是 | 全局唯一 ID，SEQ 通过它选择设备；必须是非空可打印文本且不得有首尾空白，内部空格允许 |
 | `display_name` | 是 | 英文 UI 名称 |
 | `kind` | 是 | `temperature`、`field` 或 `monitor` |
 | `plugin` | 是 | `package.module:ClassName` |
@@ -170,7 +170,7 @@ Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 
 
 启动会拒绝：
 
-- 无设备条目或重复设备 ID；
+- 无设备条目、重复设备 ID，或空白/控制字符导致无法寻址的设备 ID；
 - 未知设备 kind；
 - `min_value >= max_value`；
 - 非正默认/最大速率；

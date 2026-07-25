@@ -76,6 +76,7 @@
 - DEV-010：SEQ 参数窗口 SHALL 按类型列出配置设备 ID，使用对应设备的 Target/Rate 限制。
 - DEV-011：显式 SEQ 设备 ID SHALL 可保存/重载；省略 ID 或旧角色名 SHALL 解析到该类型第一个配置设备。
 - DEV-012：Settle 判稳与 Sweep 到达目标 SHALL 均有最终等待上限；无新读数时不得无限等待。
+- DEV-013：设备 ID SHALL 是非空可打印文本且无首尾空白，并与 UI、SEQ 解析和运行时使用同一精确值。
 
 ### 3.4 Measurement Module 发现与依赖
 

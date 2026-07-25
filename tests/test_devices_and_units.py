@@ -131,6 +131,44 @@ class DeviceManagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
                 load_config(invalid_timeout)
 
+    def test_configuration_rejects_unaddressable_device_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            source = (ROOT / "configs" / "default.toml").read_text(
+                encoding="utf-8"
+            )
+            invalid_ids = ("", " temperature ", "temperature\\nprimary")
+            for index, invalid_id in enumerate(invalid_ids):
+                target = temp_root / f"invalid-device-id-{index}.toml"
+                target.write_text(
+                    source.replace(
+                        'id = "temperature"',
+                        f'id = "{invalid_id}"',
+                        1,
+                    ),
+                    encoding="utf-8",
+                )
+                with self.subTest(device_id=invalid_id):
+                    with self.assertRaisesRegex(
+                        ConfigurationError,
+                        "Device id must be",
+                    ):
+                        load_config(target)
+
+            internal_space = temp_root / "internal-space.toml"
+            internal_space.write_text(
+                source.replace(
+                    'id = "temperature"',
+                    'id = "cryostat primary"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                load_config(internal_space).devices[0].id,
+                "cryostat primary",
+            )
+
     def test_configuration_confines_and_separates_run_log_file_names(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
