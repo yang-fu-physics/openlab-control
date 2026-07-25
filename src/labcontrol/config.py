@@ -36,6 +36,8 @@ class DeviceConfig:
     max_value: float = float("inf")
     max_rate_per_minute: float = float("inf")
     stale_after_seconds: float = 3.0
+    operation_timeout_seconds: float = 10.0
+    shutdown_timeout_seconds: float = 3.0
     stability: StabilityConfig | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -191,6 +193,14 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         raw.get("stale_after_seconds", 3.0),
         f"{prefix} stale_after_seconds",
     )
+    operation_timeout = _positive_float(
+        raw.get("operation_timeout_seconds", 10.0),
+        f"{prefix} operation_timeout_seconds",
+    )
+    shutdown_timeout = _positive_float(
+        raw.get("shutdown_timeout_seconds", 3.0),
+        f"{prefix} shutdown_timeout_seconds",
+    )
 
     stability = None
     if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
@@ -231,7 +241,8 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         "max_rate_per_minute", "stability_tolerance",
         "stability_max_slope_per_minute", "stability_dwell_seconds",
         "stability_timeout_seconds", "stability_window_seconds",
-        "stale_after_seconds",
+        "stale_after_seconds", "operation_timeout_seconds",
+        "shutdown_timeout_seconds",
     }
     device = DeviceConfig(
         id=device_id,
@@ -245,6 +256,8 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         max_value=max_value,
         max_rate_per_minute=max_rate,
         stale_after_seconds=stale_after,
+        operation_timeout_seconds=operation_timeout,
+        shutdown_timeout_seconds=shutdown_timeout,
         stability=stability,
         extras={key: value for key, value in raw.items() if key not in known},
     )

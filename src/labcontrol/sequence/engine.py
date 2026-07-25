@@ -123,7 +123,14 @@ class SequenceEngine:
             self._check_control()
         except SequenceAbort:
             self.state = RunState.FAULTED if self._fatal_abort else RunState.STOPPED
-            await self.devices.hold_all()
+            hold_succeeded = await self.devices.hold_all()
+            if not hold_succeeded:
+                self.state = RunState.FAULTED
+                self._fatal_abort = True
+                self._abort_message = (
+                    "Sequence stopped, but one or more control devices "
+                    "could not confirm Hold Current"
+                )
             code = "RUN_FAULTED" if self._fatal_abort else "RUN_STOPPED"
             self.events.report(
                 Severity.INFO,
@@ -251,13 +258,15 @@ class SequenceEngine:
             return
         if command.type is CommandType.SET_TEMPERATURE:
             device_id = str(p.get("device_id", "temperature"))
-            await self.devices.set_target_by_kind(
+            applied = await self.devices.set_target_by_kind(
                 DeviceKind.TEMPERATURE,
                 float(p.get("target", 300.0)),
                 float(p.get("rate", 5.0)),
                 str(p.get("mode", "Settle")),
                 device_id,
             )
+            if not applied:
+                return
             if "settle" in str(p.get("mode", "Settle")).lower():
                 await self._wait_for_stability(device_id)
             return
@@ -267,13 +276,15 @@ class SequenceEngine:
             source_unit = str(p.get("unit", device_unit))
             target = convert_value(float(p.get("target", 0.0)), source_unit, device_unit)
             rate = convert_value(float(p.get("rate", 0.5)), source_unit, device_unit)
-            await self.devices.set_target_by_kind(
+            applied = await self.devices.set_target_by_kind(
                 DeviceKind.FIELD,
                 target,
                 rate,
                 str(p.get("mode", "Settle")),
                 device_id,
             )
+            if not applied:
+                return
             if "settle" in str(p.get("mode", "Settle")).lower():
                 await self._wait_for_stability(device_id)
             return
@@ -357,7 +368,9 @@ class SequenceEngine:
             self.devices.validate_target(device_id, point, rate)
         for point_index, point in enumerate(points, start=1):
             await self._checkpoint()
-            await self.devices.set_target(device_id, point, rate, mode)
+            applied = await self.devices.set_target(device_id, point, rate, mode)
+            if not applied:
+                continue
             if "settle" in mode.lower():
                 await self._wait_for_stability(device_id)
             else:

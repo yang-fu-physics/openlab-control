@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import math
 import time
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from typing import TypeVar
 
@@ -36,6 +37,7 @@ class DeviceManager:
         self._stability: dict[str, StabilityEvaluator] = {}
         self._poll_issues: dict[str, set[tuple[str, str]]] = {}
         self._stale_devices: set[str] = set()
+        self._unavailable_after_timeout: dict[str, str] = {}
         self.latest: dict[str, DeviceSnapshot] = {}
         self._load_plugins()
 
@@ -52,23 +54,84 @@ class DeviceManager:
             if device_config.stability is not None:
                 self._stability[device_config.id] = StabilityEvaluator(device_config.stability)
 
+    async def _operate(
+        self,
+        device_id: str,
+        operation: str,
+        callback: Callable[[], Awaitable[T]],
+        *,
+        shutdown: bool = False,
+    ) -> T:
+        config = self.device_configs[device_id]
+        previous = self._unavailable_after_timeout.get(device_id)
+        if previous is not None:
+            raise DeviceError(
+                f"{config.display_name} is unavailable after timed-out "
+                f"{previous}; restart OpenLab Control before further I/O",
+                "DEVICE_UNAVAILABLE_AFTER_TIMEOUT",
+                operation,
+            )
+        timeout = (
+            config.shutdown_timeout_seconds
+            if shutdown
+            else config.operation_timeout_seconds
+        )
+
+        async def serialized() -> T:
+            async with self._locks[device_id]:
+                return await callback()
+
+        try:
+            return await asyncio.wait_for(serialized(), timeout=timeout)
+        except TimeoutError as exc:
+            self._unavailable_after_timeout[device_id] = operation
+            raise DeviceError(
+                f"{config.display_name} {operation} timed out after "
+                f"{timeout:g} seconds; further I/O is blocked until restart",
+                "DEVICE_OPERATION_TIMEOUT",
+                operation,
+            ) from exc
+
     async def connect_all(self) -> None:
-        for device_id, device in self.devices.items():
+        async def connect(device_id: str, device: DevicePlugin) -> None:
             try:
-                async with self._locks[device_id]:
-                    await device.connect()
+                await self._operate(device_id, "connect", device.connect)
                 self.events.resolve(device_id, "CONNECT_FAILED")
                 self.events.report(Severity.INFO, device_id, "CONNECTED", "Device connected")
             except Exception as exc:
-                self.events.report(Severity.ERROR, device_id, "CONNECT_FAILED", str(exc))
+                self.events.report(
+                    Severity.ERROR,
+                    device_id,
+                    getattr(exc, "code", "CONNECT_FAILED"),
+                    str(exc),
+                    getattr(exc, "context", ""),
+                )
+
+        await asyncio.gather(
+            *(connect(device_id, device) for device_id, device in self.devices.items())
+        )
 
     async def disconnect_all(self) -> None:
-        for device_id, device in self.devices.items():
+        async def disconnect(device_id: str, device: DevicePlugin) -> None:
             try:
-                async with self._locks[device_id]:
-                    await device.disconnect()
+                await self._operate(
+                    device_id,
+                    "disconnect",
+                    device.disconnect,
+                    shutdown=True,
+                )
             except Exception as exc:
-                self.events.report(Severity.WARNING, device_id, "DISCONNECT_FAILED", str(exc))
+                self.events.report(
+                    Severity.WARNING,
+                    device_id,
+                    getattr(exc, "code", "DISCONNECT_FAILED"),
+                    str(exc),
+                    getattr(exc, "context", ""),
+                )
+
+        await asyncio.gather(
+            *(disconnect(device_id, device) for device_id, device in self.devices.items())
+        )
 
     async def poll_all(self) -> dict[str, DeviceSnapshot]:
         results = await asyncio.gather(
@@ -97,7 +160,8 @@ class DeviceManager:
 
     async def _poll_one(self, device_id: str) -> DeviceSnapshot:
         device = self.devices[device_id]
-        async with self._locks[device_id]:
+
+        async def poll() -> DeviceSnapshot:
             snapshot = await device.poll()
             self._validate_snapshot(device_id, snapshot)
             evaluator = self._stability.get(device_id)
@@ -117,7 +181,9 @@ class DeviceManager:
             # Publish while the device lock is still held. Otherwise an older
             # concurrent poll can overwrite the target just written by set_target().
             self.latest[device_id] = snapshot
-        return snapshot
+            return snapshot
+
+        return await self._operate(device_id, "poll", poll)
 
     def _validate_snapshot(
         self,
@@ -233,13 +299,21 @@ class DeviceManager:
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
-    ) -> None:
+    ) -> bool:
         try:
             self.validate_target(device_id, value, rate_per_minute)
-            async with self._locks[device_id]:
-                await self.devices[device_id].set_target(value, rate_per_minute, mode)
+            await self._operate(
+                device_id,
+                "set_target",
+                lambda: self.devices[device_id].set_target(
+                    value,
+                    rate_per_minute,
+                    mode,
+                ),
+            )
         except DeviceWarning as exc:
             self.events.report(Severity.WARNING, device_id, exc.code, str(exc), exc.context)
+            return False
         except DeviceError as exc:
             self.events.report(Severity.ERROR, device_id, exc.code, str(exc), exc.context)
             raise
@@ -253,6 +327,7 @@ class DeviceManager:
             evaluator.reset(value, time.monotonic())
         self.events.resolve(device_id, "TARGET_OUT_OF_RANGE", device_id)
         self.events.resolve(device_id, "RATE_OUT_OF_RANGE", device_id)
+        return True
 
     async def set_target_by_kind(
         self,
@@ -261,22 +336,21 @@ class DeviceManager:
         rate_per_minute: float,
         mode: str = "Settle",
         device_id: str | None = None,
-    ) -> str:
+    ) -> bool:
         selected = device_id or self.first_device_id(kind)
-        await self.set_target(selected, value, rate_per_minute, mode)
-        return selected
+        return await self.set_target(selected, value, rate_per_minute, mode)
 
-    async def hold_all(self) -> None:
-        for device_id, device in self.devices.items():
+    async def hold_all(self) -> bool:
+        async def hold(device_id: str, device: DevicePlugin) -> bool:
             config = self.device_configs[device_id]
             if config.kind is DeviceKind.TEMPERATURE:
                 strategy = self.config.abort_temperature
             elif config.kind is DeviceKind.FIELD:
                 strategy = self.config.abort_field
             else:
-                continue
+                return True
             if strategy == "keep_target":
-                continue
+                return True
             if strategy != "hold_current":
                 self.events.report(
                     Severity.WARNING,
@@ -286,19 +360,35 @@ class DeviceManager:
                     device_id,
                 )
             try:
-                async with self._locks[device_id]:
-                    await device.hold()
-            except DeviceError as exc:
-                self.events.report(Severity.ERROR, device_id, exc.code, str(exc), exc.context)
+                await self._operate(device_id, "hold", device.hold)
+                return True
+            except Exception as exc:
+                self.events.report(
+                    Severity.ERROR,
+                    device_id,
+                    getattr(exc, "code", "HOLD_FAILED"),
+                    str(exc),
+                    getattr(exc, "context", ""),
+                )
+                return False
+
+        results = await asyncio.gather(
+            *(hold(device_id, device) for device_id, device in self.devices.items())
+        )
+        return all(results)
 
     async def hold_device(self, device_id: str) -> None:
         if device_id not in self.devices:
             raise DeviceError(f"Unknown device: {device_id}", "UNKNOWN_DEVICE", device_id)
         try:
-            async with self._locks[device_id]:
-                await self.devices[device_id].hold()
-        except DeviceError as exc:
-            self.events.report(Severity.ERROR, device_id, exc.code, str(exc), exc.context)
+            await self._operate(
+                device_id,
+                "hold",
+                self.devices[device_id].hold,
+            )
+        except (DeviceError, DeviceWarning) as exc:
+            severity = Severity.WARNING if isinstance(exc, DeviceWarning) else Severity.ERROR
+            self.events.report(severity, device_id, exc.code, str(exc), exc.context)
             raise
 
     def snapshots(self) -> dict[str, DeviceSnapshot]:

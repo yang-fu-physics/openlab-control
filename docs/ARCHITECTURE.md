@@ -61,7 +61,7 @@ PySide6 主进程 / GUI 线程
 
 旧 `measurement` 设备类型已删除。测量仪表必须放入 Measurement Module；因此底部只显示 Temperature、Magnetic Field 和 `2nd Stage` 等控制/Monitor 状态块，不显示 Transport 状态块。
 
-每个设备有独立 `asyncio.Lock`。同一设备的 Poll、Set 和 Hold 串行执行，不同设备可以并发轮询。数值判稳由中央 `StabilityEvaluator` 完成，不依赖厂商的文字状态。
+每个设备有独立 `asyncio.Lock`。同一设备的 Connect、Poll、Set、Hold 和 Disconnect 串行执行，不同设备可并发连接、轮询、Hold 和退出。框架为设备操作提供配置化最终超时；一旦超时即隔离该设备到应用重启，防止未确认结束的旧 I/O 与新命令并发。数值判稳由中央 `StabilityEvaluator` 完成，不依赖厂商的文字状态。
 
 ## 模块发现与信任边界
 

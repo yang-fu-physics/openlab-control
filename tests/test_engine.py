@@ -174,6 +174,46 @@ class SequenceEngineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_stop_becomes_faulted_when_hold_current_is_not_confirmed(self) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(config, events)
+            logger = DatRunLogger(config, events)
+            modules = MeasurementModuleService((), events, manager)
+            engine = SequenceEngine(config, manager, events, logger, modules)
+            await manager.connect_all()
+            await manager.poll_all()
+
+            async def failed_hold() -> bool:
+                return False
+
+            manager.hold_all = failed_hold  # type: ignore[method-assign]
+            run_task = asyncio.create_task(
+                engine.run(
+                    SequenceDocument(
+                        [Command(CommandType.WAIT, {"seconds": 5.0})],
+                        "hold-failed.seq",
+                    )
+                )
+            )
+            await asyncio.sleep(0.03)
+            engine.request_stop(False, "Stopped by test")
+            state = await asyncio.wait_for(run_task, timeout=1.0)
+            self.assertEqual(state, RunState.FAULTED)
+            self.assertIn("could not confirm Hold Current", engine._abort_message)
+            self.assertIn(
+                "RUN_FAULTED",
+                [notice.event.code for notice in notices],
+            )
+            await modules.shutdown()
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._fast_config(Path(temp))
+            asyncio.run(scenario(config))
+
     def test_disabled_command_and_scan_block_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))

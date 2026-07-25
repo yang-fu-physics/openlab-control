@@ -67,6 +67,9 @@
 - DEV-004：Target 与 Rate SHALL 同时在 UI 和运行时由同一配置限制。
 - DEV-005：中央 SHALL 使用偏差、窗口斜率、Dwell、Timeout 判稳。
 - DEV-006：模块 SHALL 只能获得设备只读快照，不得获得控制引用。
+- DEV-007：设备 Connect/Poll/Set/Hold/Disconnect SHALL 有配置化有限框架超时。
+- DEV-008：一次设备操作超时后，框架 SHALL 禁止该设备后续 I/O 直到重启，并报告 Error。
+- DEV-009：Stop 时任一控制设备未确认 Hold Current，最终运行状态 SHALL 为 Faulted。
 
 ### 3.4 Measurement Module 发现与依赖
 

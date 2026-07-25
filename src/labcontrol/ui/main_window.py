@@ -1048,7 +1048,7 @@ class MainWindow(QMainWindow):
         snapshot = self.current_snapshots.get(device_id)
         precision = control_decimals(snapshot.kind, snapshot.unit) if snapshot is not None else 3
         self.statusBar().showMessage(
-            f"Sent target {fixed_number(value, precision)} to {device_id}", 3000
+            f"Requested target {fixed_number(value, precision)} for {device_id}", 3000
         )
 
     def _show_graph(self) -> None:

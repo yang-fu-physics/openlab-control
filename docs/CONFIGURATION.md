@@ -96,8 +96,13 @@ shutdown_timeout_seconds = 3.0
 | `plugin` | 是 | `package.module:ClassName` |
 | `unit` | 否 | 原生单位 |
 | `initial_value` | 仿真 | 初始值 |
+| `stale_after_seconds` | 否 | 读数超过该时间未更新视为 Stale，默认 3 秒 |
+| `operation_timeout_seconds` | 否 | Connect/Poll/Set/Hold 的框架最终上限，默认 10 秒 |
+| `shutdown_timeout_seconds` | 否 | Disconnect 的框架最终上限，默认 3 秒 |
 
 旧 `kind = "measurement"` 不再支持。测量仪表应改写为 `modules/<id>/` 下的完整 Measurement Module。
+
+设备超时必须是大于零的有限秒数。一次框架操作超时后，该设备会被隔离并禁止后续 I/O，直到重启程序；这是为了避免仍在底层线程执行的旧调用与新的控制命令并发。真实驱动仍须设置更短的 VISA/串口/TCP/SDK 协议超时，框架最终上限不能替代设备端安全状态和硬件互锁。
 
 ### 温度/磁场专用键
 
@@ -111,7 +116,6 @@ shutdown_timeout_seconds = 3.0
 | `stability_dwell_seconds` | 同时满足偏差/斜率后需持续的时间 |
 | `stability_timeout_seconds` | 本次目标的判稳超时 |
 | `stability_window_seconds` | 计算斜率的窗口 |
-| `stale_after_seconds` | 读数超过该时间未更新视为 Stale |
 
 所有值使用设备原生单位。默认磁场原生单位为 Oe：
 

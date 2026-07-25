@@ -91,6 +91,8 @@ min_value = 1.8
 max_value = 400.0
 default_rate_per_minute = 5.0
 max_rate_per_minute = 30.0
+operation_timeout_seconds = 10.0
+shutdown_timeout_seconds = 3.0
 stability_tolerance = 0.05
 stability_max_slope_per_minute = 0.03
 stability_dwell_seconds = 30.0
@@ -99,7 +101,7 @@ stability_window_seconds = 20.0
 address = "GPIB0::12::INSTR"
 ```
 
-未知键进入 `config.extras`。安全上限必须写在主配置，不能只藏在驱动 UI。
+未知键进入 `config.extras`。安全上限必须写在主配置，不能只藏在驱动 UI。框架最终超时后会隔离该设备到应用重启；因此驱动的协议超时必须更短，并让取消/关闭尽量幂等。
 
 ## A5. 错误映射
 
@@ -112,6 +114,7 @@ raise SafetyViolation("Target exceeds local interlock", "LOCAL_LIMIT", device_id
 - Warning：可恢复，SEQ 继续。
 - DeviceError/SafetyViolation：运行中触发 fatal Stop。
 - code/context 必须稳定，才能让同一活动事件只弹一次。
+- `set_target` 抛出 Warning 表示目标未确认；框架不发布乐观 Target，单条 Set 会继续后续命令，Scan 会跳过该点的等待和子命令。
 
 ---
 

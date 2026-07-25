@@ -88,6 +88,18 @@ class DeviceManagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
                 load_config(invalid_poll)
 
+            invalid_timeout = temp_root / "invalid-timeout.toml"
+            invalid_timeout.write_text(
+                source.replace(
+                    "operation_timeout_seconds = 10.0",
+                    "operation_timeout_seconds = 0",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
+                load_config(invalid_timeout)
+
     def test_completed_poll_cannot_overwrite_a_new_target(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
@@ -112,6 +124,113 @@ class DeviceManagerTests(unittest.TestCase):
             release_monitor.set()
             await poll_task
             self.assertEqual(manager.latest["field"].target, 100.0)
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_poll_timeout_quarantines_device_until_restart(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            events = EventManager()
+            notices = []
+            events.subscribe_occurrences(notices.append)
+            manager = DeviceManager(config, events)
+            await manager.connect_all()
+            await manager.poll_all()
+            monitor = manager.devices["second_stage"]
+            original_poll = monitor.poll
+            manager.device_configs["second_stage"] = replace(
+                manager.device_configs["second_stage"],
+                operation_timeout_seconds=0.02,
+            )
+
+            async def hung_poll():
+                await asyncio.sleep(5.0)
+                return await original_poll()
+
+            monitor.poll = hung_poll  # type: ignore[method-assign]
+            started = asyncio.get_running_loop().time()
+            await manager.poll_all()
+            self.assertLess(asyncio.get_running_loop().time() - started, 0.5)
+            self.assertEqual(
+                manager._unavailable_after_timeout["second_stage"],
+                "poll",
+            )
+            await manager.poll_all()
+            codes = [notice.event.code for notice in notices]
+            self.assertIn("DEVICE_OPERATION_TIMEOUT", codes)
+            self.assertIn("DEVICE_UNAVAILABLE_AFTER_TIMEOUT", codes)
+
+            monitor.poll = original_poll  # type: ignore[method-assign]
+            manager._unavailable_after_timeout.clear()
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_set_target_warning_does_not_publish_unconfirmed_target(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(config, events)
+            await manager.connect_all()
+            await manager.poll_all()
+            temperature = manager.devices["temperature"]
+            original_set_target = temperature.set_target
+            original_target = manager.latest["temperature"].target
+            original_rate = manager.latest["temperature"].rate_per_minute
+
+            async def warned_set_target(value, rate_per_minute, mode="Settle"):
+                del value, rate_per_minute, mode
+                raise DeviceWarning(
+                    "controller did not confirm the target",
+                    "TARGET_NOT_CONFIRMED",
+                )
+
+            temperature.set_target = warned_set_target  # type: ignore[method-assign]
+            applied = await manager.set_target("temperature", 250.0, 5.0)
+            self.assertFalse(applied)
+            self.assertEqual(manager.latest["temperature"].target, original_target)
+            self.assertEqual(
+                manager.latest["temperature"].rate_per_minute,
+                original_rate,
+            )
+            self.assertIn(
+                "TARGET_NOT_CONFIRMED",
+                [notice.event.code for notice in notices],
+            )
+            temperature.set_target = original_set_target  # type: ignore[method-assign]
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_hold_timeout_is_reported_as_an_unconfirmed_safe_state(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(config, events)
+            await manager.connect_all()
+            field = manager.devices["field"]
+            original_hold = field.hold
+            manager.device_configs["field"] = replace(
+                manager.device_configs["field"],
+                operation_timeout_seconds=0.02,
+            )
+
+            async def hung_hold():
+                await asyncio.sleep(5.0)
+
+            field.hold = hung_hold  # type: ignore[method-assign]
+            self.assertFalse(await manager.hold_all())
+            self.assertIn(
+                "DEVICE_OPERATION_TIMEOUT",
+                [notice.event.code for notice in notices],
+            )
+            field.hold = original_hold  # type: ignore[method-assign]
+            manager._unavailable_after_timeout.clear()
             await manager.disconnect_all()
 
         asyncio.run(scenario())
