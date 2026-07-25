@@ -183,6 +183,30 @@ class SequenceParserTests(unittest.TestCase):
         self.assertTrue(result.has_errors)
         self.assertIn("non-finite", result.issues[0].message)
 
+    def test_out_of_range_numeric_parameters_are_parse_errors(self) -> None:
+        cases = (
+            ("T Wait For -1 secs\nT End Sequence\n", "at least 0"),
+            (
+                "T Scan Time -1 secs in 0 steps\nT End Scan\nT End Sequence\n",
+                "Duration (s) must be at least 0",
+            ),
+            (
+                "T Scan Field 0 Oe to 1 Oe in 100001 steps at 1 Oe/min, Settle\n"
+                "T End Scan\nT End Sequence\n",
+                "no more than 100000",
+            ),
+            (
+                "T Set Temperature 20 K at 0 K/min in Settle mode\n"
+                "T End Sequence\n",
+                "at least 1e-06",
+            ),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source.splitlines()[0]):
+                result = parse_sequence(source)
+                self.assertTrue(result.has_errors)
+                self.assertIn(expected, result.issues[0].message)
+
     def test_explicit_device_ids_round_trip_and_remark_text_is_unchanged(self) -> None:
         result = parse_sequence(
             'T Set Temperature 20.000 K at 5.000 K/min in Settle mode '

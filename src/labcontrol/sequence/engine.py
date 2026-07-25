@@ -14,7 +14,12 @@ from ..models import DeviceKind, EventNotice, RunProgress, RunState, Severity, S
 from ..measurement.service import MeasurementModuleService
 from ..plugins import DeviceManager
 from ..units import convert_value
-from .model import Command, CommandType, SequenceDocument
+from .model import (
+    Command,
+    CommandType,
+    SequenceDocument,
+    validate_command_parameters,
+)
 from .parser import format_command, load_sequence, parse_temperature_points, serialize_sequence
 
 
@@ -80,6 +85,23 @@ class SequenceEngine:
         self._call_stack.clear()
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
+        invalid_parameter = self._find_invalid_parameter(document.commands)
+        if invalid_parameter is not None:
+            command, parameter_issues = invalid_parameter
+            self.state = RunState.FAULTED
+            self._fatal_abort = True
+            self._abort_message = (
+                "Invalid sequence parameter: " + "; ".join(parameter_issues)
+            )
+            self.events.report(
+                Severity.ERROR,
+                "sequence",
+                "INVALID_SEQUENCE_PARAMETER",
+                self._abort_message,
+                command.raw_text or command.type.value,
+            )
+            self._publish(self._abort_message)
+            return self.state
         base_directory = (
             self._call_stack[-1].parent
             if self._call_stack
@@ -217,6 +239,16 @@ class SequenceEngine:
     async def _execute_commands(self, commands: list[Command], prefix: list[str]) -> None:
         for index, command in enumerate(commands, start=1):
             await self._checkpoint()
+            parameter_issues = validate_command_parameters(command)
+            if parameter_issues:
+                self._current_path = " / ".join(
+                    prefix + [f"{index}:{command.type.value}"]
+                )
+                raise DeviceError(
+                    "Invalid sequence parameter: " + "; ".join(parameter_issues),
+                    "INVALID_SEQUENCE_PARAMETER",
+                    self._current_path,
+                )
             label = format_command(command)
             path = prefix + [f"{index}:{label}"]
             self._current_path = " / ".join(path)
@@ -251,6 +283,13 @@ class SequenceEngine:
 
     async def _execute_command(self, command: Command, path: list[str]) -> None:
         p = command.params
+        parameter_issues = validate_command_parameters(command)
+        if parameter_issues:
+            raise DeviceError(
+                "Invalid sequence parameter: " + "; ".join(parameter_issues),
+                "INVALID_SEQUENCE_PARAMETER",
+                self._current_path,
+            )
         if command.type is CommandType.SET_DATAFILE:
             destination = self.logger.set_datafile(
                 str(p.get("path", "experiment.dat")),
@@ -377,7 +416,7 @@ class SequenceEngine:
         else:
             start = convert_value(float(p.get("start", 0.0)), source_unit, config.unit)
             stop = convert_value(float(p.get("stop", 0.0)), source_unit, config.unit)
-            steps = max(1, int(p.get("steps", 1)))
+            steps = int(p.get("steps", 1))
             points = self._linspace(start, stop, steps)
 
         # Validate the complete path before moving the first device. A bad later
@@ -400,8 +439,8 @@ class SequenceEngine:
             await self._execute_commands(command.children, point_path)
 
     async def _scan_time(self, command: Command, path: list[str]) -> None:
-        duration = max(0.0, float(command.params.get("duration_seconds", 0.0)))
-        steps = max(1, int(command.params.get("steps", 1)))
+        duration = float(command.params.get("duration_seconds", 0.0))
+        steps = int(command.params.get("steps", 1))
         offsets = self._linspace(0.0, duration, steps)
         started = self._active_time()
         for index, offset in enumerate(offsets, start=1):
@@ -488,6 +527,19 @@ class SequenceEngine:
                     call_stack | {source},
                 )
         return total
+
+    def _find_invalid_parameter(
+        self,
+        commands: list[Command],
+    ) -> tuple[Command, tuple[str, ...]] | None:
+        for command in commands:
+            issues = validate_command_parameters(command)
+            if issues:
+                return command, issues
+            invalid_child = self._find_invalid_parameter(command.children)
+            if invalid_child is not None:
+                return invalid_child
+        return None
 
     async def _wait_for_stability(self, device_id: str) -> None:
         started = time.monotonic()

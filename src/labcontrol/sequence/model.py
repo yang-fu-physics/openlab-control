@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
@@ -268,3 +269,49 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
 
 
 SPECS_BY_TYPE = {spec.command_type: spec for spec in COMMAND_SPECS}
+
+
+def validate_command_parameters(command: Command) -> tuple[str, ...]:
+    """Validate values shared by the editor, parser, and runtime."""
+    spec = SPECS_BY_TYPE.get(command.type)
+    if spec is None:
+        return ()
+
+    issues: list[str] = []
+    for field_spec in spec.fields:
+        if field_spec.name not in command.params:
+            continue
+        value = command.params[field_spec.name]
+        if field_spec.field_type in {"float", "int"}:
+            if isinstance(value, bool):
+                issues.append(f"{field_spec.label} must be a number")
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                issues.append(f"{field_spec.label} must be a number")
+                continue
+            if not math.isfinite(number):
+                issues.append(f"{field_spec.label} has a non-finite value")
+                continue
+            if field_spec.field_type == "int" and not number.is_integer():
+                issues.append(f"{field_spec.label} must be an integer")
+                continue
+            if field_spec.minimum is not None and number < field_spec.minimum:
+                issues.append(
+                    f"{field_spec.label} must be at least {field_spec.minimum:g}"
+                )
+            if field_spec.maximum is not None and number > field_spec.maximum:
+                issues.append(
+                    f"{field_spec.label} must be no more than {field_spec.maximum:g}"
+                )
+        elif field_spec.field_type == "choice" and field_spec.choices:
+            normalized = str(value).casefold()
+            if normalized not in {
+                choice.casefold() for choice in field_spec.choices
+            }:
+                issues.append(
+                    f"{field_spec.label} must be one of "
+                    + ", ".join(field_spec.choices)
+                )
+    return tuple(issues)

@@ -60,6 +60,7 @@
 - SEQ-010：Running/Paused/Stopping SHALL 锁定 SEQ 与模块配置变更。
 - SEQ-011：Stop/Error 后温度与磁场 SHALL Hold Current，不得继续追逐旧 Target。
 - SEQ-012：进度总数 SHALL 展开 Scan 重复次数和可解析的 Call Sequence，不得在完成前提前达到 100%。
+- SEQ-013：手写 SEQ 和运行时 SHALL 使用与参数窗口一致的数值边界；不得静默截断非法 Wait、Scan 点数、持续时间或速率。
 
 ### 3.3 设备控制
 

@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..formatting import field_decimals, fixed_number
-from .model import Command, CommandType, SequenceDocument
+from .model import (
+    Command,
+    CommandType,
+    SequenceDocument,
+    validate_command_parameters,
+)
 
 
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?"
@@ -467,17 +472,12 @@ def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = No
 
         command, issue = _parse_command(command_text, line_number)
         if issue is None:
-            non_finite = [
-                name
-                for name, value in command.params.items()
-                if isinstance(value, float) and not math.isfinite(value)
-            ]
-            if non_finite:
+            parameter_issues = validate_command_parameters(command)
+            if parameter_issues:
                 issue = SequenceIssue(
                     line_number,
                     "error",
-                    "Command contains a non-finite number: "
-                    + ", ".join(non_finite),
+                    "Invalid command parameter: " + "; ".join(parameter_issues),
                     raw_line,
                 )
         command.enabled = enabled

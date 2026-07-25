@@ -267,6 +267,52 @@ class SequenceEngineTests(unittest.TestCase):
             config = self._fast_config(Path(temp))
             asyncio.run(scenario(config))
 
+    def test_runtime_rejects_programmatic_parameter_limit_bypasses(self) -> None:
+        cases = (
+            Command(CommandType.WAIT, {"seconds": -1.0}),
+            Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 1.0, "steps": 1_000_001},
+            ),
+            Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 1.0, "steps": float("inf")},
+            ),
+            Command(
+                CommandType.SCAN_FIELD,
+                {
+                    "device_id": "field",
+                    "start": 0.0,
+                    "stop": 1.0,
+                    "unit": "Oe",
+                    "steps": 2,
+                    "rate": 0.0,
+                    "mode": "Settle",
+                },
+            ),
+        )
+        for command in cases:
+            with self.subTest(command=command.type.value):
+                with tempfile.TemporaryDirectory() as temp:
+                    config = self._fast_config(Path(temp))
+                    notices = []
+                    state, _, _ = asyncio.run(
+                        self._run(
+                            config,
+                            SequenceDocument([command], "invalid-parameter.seq"),
+                            notices,
+                        )
+                    )
+                    self.assertEqual(state, RunState.FAULTED)
+                    self.assertIn(
+                        "INVALID_SEQUENCE_PARAMETER",
+                        [
+                            notice.event.code
+                            for notice in notices
+                            if not notice.is_resolution
+                        ],
+                    )
+
     def test_stop_becomes_faulted_when_hold_current_is_not_confirmed(self) -> None:
         async def scenario(config) -> None:
             events = EventManager()
