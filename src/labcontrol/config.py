@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,7 @@ class DeviceConfig:
     min_value: float = float("-inf")
     max_value: float = float("inf")
     max_rate_per_minute: float = float("inf")
+    stale_after_seconds: float = 3.0
     stability: StabilityConfig | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -118,6 +120,33 @@ def _ui_scale(value: object) -> float | None:
     return scale
 
 
+def _finite_float(value: object, key: str) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{key} must be a finite number") from exc
+    if not math.isfinite(result):
+        raise ConfigurationError(f"{key} must be a finite number")
+    return result
+
+
+def _positive_float(value: object, key: str) -> float:
+    result = _finite_float(value, key)
+    if result <= 0:
+        raise ConfigurationError(f"{key} must be greater than zero")
+    return result
+
+
+def _positive_int(value: object, key: str) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{key} must be a positive integer") from exc
+    if result <= 0:
+        raise ConfigurationError(f"{key} must be a positive integer")
+    return result
+
+
 def _device_config(raw: dict[str, Any]) -> DeviceConfig:
     required = ("id", "display_name", "kind", "plugin")
     missing = [key for key in required if key not in raw]
@@ -128,15 +157,69 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
     except ValueError as exc:
         raise ConfigurationError(f"Unknown device kind: {raw['kind']}") from exc
 
+    device_id = str(raw["id"])
+    prefix = f"Device {device_id}"
+    initial_value = _finite_float(
+        raw.get("initial_value", 0.0),
+        f"{prefix} initial_value",
+    )
+    default_rate = _finite_float(
+        raw.get("default_rate_per_minute", 1.0),
+        f"{prefix} default_rate_per_minute",
+    )
+    if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        min_value = _finite_float(
+            raw.get("min_value", float("-inf")),
+            f"{prefix} min_value",
+        )
+        max_value = _finite_float(
+            raw.get("max_value", float("inf")),
+            f"{prefix} max_value",
+        )
+        max_rate = _finite_float(
+            raw.get("max_rate_per_minute", float("inf")),
+            f"{prefix} max_rate_per_minute",
+        )
+    else:
+        min_value = float(raw.get("min_value", float("-inf")))
+        max_value = float(raw.get("max_value", float("inf")))
+        max_rate = float(raw.get("max_rate_per_minute", float("inf")))
+    stale_after = _positive_float(
+        raw.get("stale_after_seconds", 3.0),
+        f"{prefix} stale_after_seconds",
+    )
+
     stability = None
     if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        tolerance = _finite_float(
+            raw.get("stability_tolerance", 0.01),
+            f"{prefix} stability_tolerance",
+        )
+        maximum_slope = _finite_float(
+            raw.get("stability_max_slope_per_minute", 0.01),
+            f"{prefix} stability_max_slope_per_minute",
+        )
+        dwell = _finite_float(
+            raw.get("stability_dwell_seconds", 5.0),
+            f"{prefix} stability_dwell_seconds",
+        )
+        if tolerance < 0 or maximum_slope < 0 or dwell < 0:
+            raise ConfigurationError(
+                f"{prefix} stability tolerance, slope, and dwell must not be negative"
+            )
         stability = StabilityConfig(
-            tolerance=float(raw.get("stability_tolerance", 0.01)),
-            max_slope_per_minute=float(raw.get("stability_max_slope_per_minute", 0.01)),
-            dwell_seconds=float(raw.get("stability_dwell_seconds", 5.0)),
-            timeout_seconds=float(raw.get("stability_timeout_seconds", 1800.0)),
-            window_seconds=float(raw.get("stability_window_seconds", 5.0)),
-            stale_after_seconds=float(raw.get("stale_after_seconds", 3.0)),
+            tolerance=tolerance,
+            max_slope_per_minute=maximum_slope,
+            dwell_seconds=dwell,
+            timeout_seconds=_positive_float(
+                raw.get("stability_timeout_seconds", 1800.0),
+                f"{prefix} stability_timeout_seconds",
+            ),
+            window_seconds=_positive_float(
+                raw.get("stability_window_seconds", 5.0),
+                f"{prefix} stability_window_seconds",
+            ),
+            stale_after_seconds=stale_after,
         )
 
     known = {
@@ -148,23 +231,33 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         "stale_after_seconds",
     }
     device = DeviceConfig(
-        id=str(raw["id"]),
+        id=device_id,
         display_name=str(raw["display_name"]),
         kind=kind,
         plugin=str(raw["plugin"]),
         unit=str(raw.get("unit", "")),
-        initial_value=float(raw.get("initial_value", 0.0)),
-        default_rate_per_minute=float(raw.get("default_rate_per_minute", 1.0)),
-        min_value=float(raw.get("min_value", float("-inf"))),
-        max_value=float(raw.get("max_value", float("inf"))),
-        max_rate_per_minute=float(raw.get("max_rate_per_minute", float("inf"))),
+        initial_value=initial_value,
+        default_rate_per_minute=default_rate,
+        min_value=min_value,
+        max_value=max_value,
+        max_rate_per_minute=max_rate,
+        stale_after_seconds=stale_after,
         stability=stability,
         extras={key: value for key, value in raw.items() if key not in known},
     )
-    if device.min_value >= device.max_value:
-        raise ConfigurationError(f"Device {device.id}: min_value must be less than max_value")
-    if device.default_rate_per_minute <= 0 or device.max_rate_per_minute <= 0:
-        raise ConfigurationError(f"Device {device.id}: rates must be greater than zero")
+    if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        if device.min_value >= device.max_value:
+            raise ConfigurationError(f"Device {device.id}: min_value must be less than max_value")
+        if device.default_rate_per_minute <= 0 or device.max_rate_per_minute <= 0:
+            raise ConfigurationError(f"Device {device.id}: rates must be greater than zero")
+        if device.default_rate_per_minute > device.max_rate_per_minute:
+            raise ConfigurationError(
+                f"Device {device.id}: default rate must not exceed max_rate_per_minute"
+            )
+        if not device.min_value <= device.initial_value <= device.max_value:
+            raise ConfigurationError(
+                f"Device {device.id}: initial_value must be within min_value and max_value"
+            )
     return device
 
 
@@ -185,20 +278,50 @@ def load_config(path: str | Path) -> AppConfig:
     if len(ids) != len(set(ids)):
         raise ConfigurationError("Device IDs must be unique")
 
+    ui_refresh_ms = _positive_int(
+        application.get("ui_refresh_ms", 200),
+        "application.ui_refresh_ms",
+    )
+    poll_interval_seconds = _positive_float(
+        application.get("poll_interval_seconds", 0.2),
+        "application.poll_interval_seconds",
+    )
+    simulation_speed = _positive_float(
+        application.get("simulation_speed", 1.0),
+        "application.simulation_speed",
+    )
+    timestamp_epoch = str(
+        logging_raw.get("timestamp_epoch", "labview_1904")
+    ).strip().casefold()
+    if timestamp_epoch not in {"labview_1904", "unix"}:
+        raise ConfigurationError(
+            "logging.timestamp_epoch must be labview_1904 or unix"
+        )
+    abort_temperature = str(
+        abort_raw.get("temperature", "hold_current")
+    ).strip().casefold()
+    abort_field = str(
+        abort_raw.get("field", "hold_current")
+    ).strip().casefold()
+    if abort_temperature != "hold_current" or abort_field != "hold_current":
+        raise ConfigurationError(
+            "abort.temperature and abort.field currently support only hold_current"
+        )
+
     return AppConfig(
         source_path=source,
         title=str(application.get("title", "OpenLab Control")),
         ui_scale=_ui_scale(application.get("ui_scale", "auto")),
-        ui_refresh_ms=int(application.get("ui_refresh_ms", 200)),
-        poll_interval_seconds=float(application.get("poll_interval_seconds", 0.2)),
-        simulation_speed=float(application.get("simulation_speed", 1.0)),
+        ui_refresh_ms=ui_refresh_ms,
+        poll_interval_seconds=poll_interval_seconds,
+        simulation_speed=simulation_speed,
         default_sequence=str(application.get("default_sequence", "")),
         language=str(application.get("language", "en_US")),
         logging=LoggingConfig(
             directory=str(logging_raw.get("directory", "runs")),
             data_file_name=str(logging_raw.get("data_file_name", "experiment.dat")),
             event_file_name=str(logging_raw.get("event_file_name", "events.dat")),
-            timestamp_epoch=str(logging_raw.get("timestamp_epoch", "labview_1904")),
+            timestamp_epoch=timestamp_epoch,
             flush_every_row=bool(logging_raw.get("flush_every_row", True)),
             allow_external_paths=bool(logging_raw.get("allow_external_paths", False)),
         ),
@@ -217,7 +340,7 @@ def load_config(path: str | Path) -> AppConfig:
                 module_raw.get("site_packages_directory", "module_runtime/site-packages")
             ),
         ),
-        abort_temperature=str(abort_raw.get("temperature", "hold_current")),
-        abort_field=str(abort_raw.get("field", "hold_current")),
+        abort_temperature=abort_temperature,
+        abort_field=abort_field,
         devices=devices,
     )

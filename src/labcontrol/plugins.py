@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import math
 import time
 from copy import deepcopy
 from typing import TypeVar
@@ -34,6 +35,7 @@ class DeviceManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._stability: dict[str, StabilityEvaluator] = {}
         self._poll_issues: dict[str, set[tuple[str, str]]] = {}
+        self._stale_devices: set[str] = set()
         self.latest: dict[str, DeviceSnapshot] = {}
         self._load_plugins()
 
@@ -73,6 +75,7 @@ class DeviceManager:
             *(self._poll_one(device_id) for device_id in self.devices),
             return_exceptions=True,
         )
+        now = time.monotonic()
         for device_id, result in zip(self.devices, results, strict=True):
             if isinstance(result, Exception):
                 severity = Severity.WARNING if isinstance(result, DeviceWarning) else Severity.ERROR
@@ -85,12 +88,18 @@ class DeviceManager:
                 for code, context in self._poll_issues[device_id]:
                     self.events.resolve(device_id, code, context)
                 self._poll_issues[device_id].clear()
+            self._update_stale_state(
+                device_id,
+                now,
+                poll_succeeded=not isinstance(result, Exception),
+            )
         return deepcopy(self.latest)
 
     async def _poll_one(self, device_id: str) -> DeviceSnapshot:
         device = self.devices[device_id]
         async with self._locks[device_id]:
             snapshot = await device.poll()
+            self._validate_snapshot(device_id, snapshot)
             evaluator = self._stability.get(device_id)
             if evaluator is not None and snapshot.current is not None and snapshot.target is not None:
                 result = evaluator.update(snapshot.current, snapshot.target, snapshot.timestamp)
@@ -110,6 +119,73 @@ class DeviceManager:
             self.latest[device_id] = snapshot
         return snapshot
 
+    def _validate_snapshot(
+        self,
+        device_id: str,
+        snapshot: DeviceSnapshot,
+    ) -> None:
+        config = self.device_configs[device_id]
+        if snapshot.device_id != device_id or snapshot.kind is not config.kind:
+            raise DeviceError(
+                f"{config.display_name} returned a snapshot for the wrong device or kind",
+                "INVALID_DEVICE_SNAPSHOT",
+                device_id,
+            )
+        numeric_values = {
+            "timestamp": snapshot.timestamp,
+            "current": snapshot.current,
+            "target": snapshot.target,
+            "rate_per_minute": snapshot.rate_per_minute,
+        }
+        invalid = [
+            name
+            for name, value in numeric_values.items()
+            if value is not None and not math.isfinite(value)
+        ]
+        if invalid:
+            raise DeviceError(
+                f"{config.display_name} returned non-finite {', '.join(invalid)}",
+                "NONFINITE_DEVICE_READING",
+                device_id,
+            )
+
+    def _update_stale_state(
+        self,
+        device_id: str,
+        now: float,
+        *,
+        poll_succeeded: bool,
+    ) -> None:
+        snapshot = self.latest.get(device_id)
+        if snapshot is None:
+            return
+        config = self.device_configs[device_id]
+        age = max(0.0, now - snapshot.timestamp)
+        stale = age > config.stale_after_seconds
+        if stale:
+            snapshot.stability = StabilityState.STALE
+            snapshot.message = (
+                f"Reading is stale ({age:.1f} s old; "
+                f"limit {config.stale_after_seconds:g} s)"
+            )
+            first_occurrence = device_id not in self._stale_devices
+            if first_occurrence:
+                self._stale_devices.add(device_id)
+            if (
+                first_occurrence
+                or self.config.alarms.stale_reading is not Severity.INFO
+            ):
+                self.events.report(
+                    self.config.alarms.stale_reading,
+                    device_id,
+                    "STALE_READING",
+                    snapshot.message,
+                    device_id,
+                )
+        elif poll_succeeded and device_id in self._stale_devices:
+            self._stale_devices.remove(device_id)
+            self.events.resolve(device_id, "STALE_READING", device_id)
+
     def first_device_id(self, kind: DeviceKind) -> str:
         for config in self.config.devices:
             if config.kind is kind:
@@ -122,6 +198,18 @@ class DeviceManager:
             raise DeviceError(
                 f"{config.display_name} is display-only and cannot accept a target",
                 "TARGET_NOT_CONTROLLABLE",
+                device_id,
+            )
+        if not math.isfinite(value):
+            raise SafetyViolation(
+                f"{config.display_name} target must be finite",
+                "TARGET_NOT_FINITE",
+                device_id,
+            )
+        if not math.isfinite(rate_per_minute):
+            raise SafetyViolation(
+                f"{config.display_name} rate must be finite",
+                "RATE_NOT_FINITE",
                 device_id,
             )
         if not config.min_value <= value <= config.max_value:

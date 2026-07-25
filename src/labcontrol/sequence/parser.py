@@ -383,6 +383,20 @@ def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = No
             continue
 
         command, issue = _parse_command(command_text, line_number)
+        if issue is None:
+            non_finite = [
+                name
+                for name, value in command.params.items()
+                if isinstance(value, float) and not math.isfinite(value)
+            ]
+            if non_finite:
+                issue = SequenceIssue(
+                    line_number,
+                    "error",
+                    "Command contains a non-finite number: "
+                    + ", ".join(non_finite),
+                    raw_line,
+                )
         command.enabled = enabled
         stack[-1].append(command)
         if issue is not None:

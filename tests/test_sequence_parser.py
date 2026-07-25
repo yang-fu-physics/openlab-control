@@ -175,6 +175,14 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
         self.assertIn("mode must be", result.issues[0].message)
 
+    def test_nonfinite_control_number_is_a_parse_error(self) -> None:
+        result = parse_sequence(
+            "T Set Temperature 1e999 K at 5 K/min in Settle mode\n"
+            "T End Sequence\n"
+        )
+        self.assertTrue(result.has_errors)
+        self.assertIn("non-finite", result.issues[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()

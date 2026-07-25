@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.config import load_config  # noqa: E402
-from labcontrol.devices.base import DeviceError, SafetyViolation  # noqa: E402
+from labcontrol.config import ConfigurationError, load_config  # noqa: E402
+from labcontrol.devices.base import DeviceError, DeviceWarning, SafetyViolation  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.formatting import fixed_number  # noqa: E402
-from labcontrol.models import DeviceKind  # noqa: E402
+from labcontrol.models import DeviceKind, StabilityState  # noqa: E402
 from labcontrol.plugins import DeviceManager  # noqa: E402
 from labcontrol.units import UnitConversionError, convert_value  # noqa: E402
 
@@ -52,6 +55,38 @@ class DeviceManagerTests(unittest.TestCase):
             manager.validate_target("field", 200000.0, 5000.0)
         with self.assertRaises(SafetyViolation):
             manager.validate_target("temperature", 300.0, 100.0)
+        with self.assertRaises(SafetyViolation):
+            manager.validate_target("temperature", 300.0, math.nan)
+        with self.assertRaises(SafetyViolation):
+            manager.validate_target("temperature", math.inf, 10.0)
+
+    def test_configuration_rejects_nonfinite_and_nonpositive_safety_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
+            invalid_rate = temp_root / "invalid-rate.toml"
+            invalid_rate.write_text(
+                source.replace(
+                    "max_rate_per_minute = 30.0",
+                    "max_rate_per_minute = nan",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "finite"):
+                load_config(invalid_rate)
+
+            invalid_poll = temp_root / "invalid-poll.toml"
+            invalid_poll.write_text(
+                source.replace(
+                    "poll_interval_seconds = 0.20",
+                    "poll_interval_seconds = 0",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
+                load_config(invalid_poll)
 
     def test_completed_poll_cannot_overwrite_a_new_target(self) -> None:
         async def scenario() -> None:
@@ -77,6 +112,83 @@ class DeviceManagerTests(unittest.TestCase):
             release_monitor.set()
             await poll_task
             self.assertEqual(manager.latest["field"].target, 100.0)
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_failed_poll_marks_old_snapshot_stale_and_recovery_resolves_it(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            config = replace(
+                config,
+                devices=tuple(
+                    replace(device, stale_after_seconds=0.01)
+                    for device in config.devices
+                ),
+            )
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(config, events)
+            await manager.connect_all()
+            await manager.poll_all()
+
+            temperature = manager.devices["temperature"]
+            original_poll = temperature.poll
+
+            async def failed_poll():
+                raise DeviceWarning("temporary read failure", "TEMP_READ")
+
+            temperature.poll = failed_poll  # type: ignore[method-assign]
+            await asyncio.sleep(0.02)
+            stale = await manager.poll_all()
+            self.assertEqual(
+                stale["temperature"].stability,
+                StabilityState.STALE,
+            )
+            self.assertIn("stale", stale["temperature"].message.lower())
+
+            temperature.poll = original_poll  # type: ignore[method-assign]
+            recovered = await manager.poll_all()
+            self.assertNotEqual(
+                recovered["temperature"].stability,
+                StabilityState.STALE,
+            )
+            stale_notices = [
+                notice
+                for notice in notices
+                if notice.event.code == "STALE_READING"
+            ]
+            self.assertEqual(len(stale_notices), 2)
+            self.assertFalse(stale_notices[0].is_resolution)
+            self.assertTrue(stale_notices[1].is_resolution)
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_nonfinite_device_snapshot_is_rejected(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(config, events)
+            await manager.connect_all()
+            await manager.poll_all()
+            monitor = manager.devices["second_stage"]
+            original_poll = monitor.poll
+
+            async def invalid_poll():
+                return replace(await original_poll(), current=math.nan)
+
+            monitor.poll = invalid_poll  # type: ignore[method-assign]
+            snapshots = await manager.poll_all()
+            self.assertTrue(math.isfinite(snapshots["second_stage"].current or math.nan))
+            self.assertIn(
+                "NONFINITE_DEVICE_READING",
+                [notice.event.code for notice in notices],
+            )
+            monitor.poll = original_poll  # type: ignore[method-assign]
             await manager.disconnect_all()
 
         asyncio.run(scenario())
