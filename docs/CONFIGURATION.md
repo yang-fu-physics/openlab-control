@@ -40,9 +40,8 @@ field = "hold_current"
 ```
 
 - `hold_current`：Stop/Error 后读取并保持当前值。
-- `keep_target`：保留原 Target。
 
-该配置只作用于温度和磁场。测量模块在 SEQ 完成、Stop、Error 时调用 `end_sequence(reason)`；只有 Disable 和应用退出调用 `abort()`。
+当前版本只接受 `hold_current`，并同时作用于温度和磁场；其他值会在启动时被拒绝。测量模块在 SEQ 完成、Stop、Error 时调用 `end_sequence(reason)`；只有 Disable 和应用退出调用 `abort()`。
 
 ## `[alarms]`
 

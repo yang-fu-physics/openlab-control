@@ -47,7 +47,7 @@ Warning/Error 使用 source、code、context 去重。重复轮询只累计次�
 
 状态：Accepted
 
-Stop 或 Error 不归零。默认调用插件 Hold，把目标锁定到中止瞬间当前值。可以通过配置改为 keep_target。
+Stop 或 Error 不归零。框架调用每个控制插件的 Hold，把目标锁定到中止瞬间当前值。当前版本不允许配置为保留旧 Target；即使调用方绕过配置加载器构造了未知策略，运行时也会告警并采用 Hold Current。
 
 ## ADR-008：数据浏览与测量输出解耦
 

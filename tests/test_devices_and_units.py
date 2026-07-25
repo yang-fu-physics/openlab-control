@@ -304,6 +304,27 @@ class DeviceManagerTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_programmatic_abort_policy_cannot_bypass_hold_current(self) -> None:
+        async def scenario() -> None:
+            config = replace(
+                load_config(ROOT / "configs" / "default.toml"),
+                abort_temperature="keep_target",
+                abort_field="keep_target",
+            )
+            manager = DeviceManager(config, EventManager())
+            called: list[str] = []
+
+            for device_id in ("temperature", "field"):
+                async def record_hold(selected=device_id):
+                    called.append(selected)
+
+                manager.devices[device_id].hold = record_hold  # type: ignore[method-assign]
+
+            self.assertTrue(await manager.hold_all())
+            self.assertCountEqual(called, ["temperature", "field"])
+
+        asyncio.run(scenario())
+
     def test_failed_poll_marks_old_snapshot_stale_and_recovery_resolves_it(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")

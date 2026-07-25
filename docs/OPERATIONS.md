@@ -180,7 +180,7 @@ Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也
 
 Stop 后：
 
-- 温度和磁场按配置默认 Hold Current；
+- 温度和磁场执行 Hold Current；
 - 模块执行 `end_sequence("stopped")`；
 - 不执行模块 abort，模块仍 Enabled，窗口保持可用。
 

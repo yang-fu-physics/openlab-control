@@ -374,8 +374,6 @@ class DeviceManager:
                 strategy = self.config.abort_field
             else:
                 return True
-            if strategy == "keep_target":
-                return True
             if strategy != "hold_current":
                 self.events.report(
                     Severity.WARNING,

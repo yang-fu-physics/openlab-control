@@ -58,7 +58,7 @@
 - SEQ-008：Measure SHALL 只有无参数单行 `T Measure`。
 - SEQ-009：旧 Initialize 和带参数 Measure SHALL 产生解析 Error 并阻止 Run。
 - SEQ-010：Running/Paused/Stopping SHALL 锁定 SEQ 与模块配置变更。
-- SEQ-011：Stop/Error 后温度与磁场 SHALL 按配置保持当前或目标；默认 Hold Current。
+- SEQ-011：Stop/Error 后温度与磁场 SHALL Hold Current，不得继续追逐旧 Target。
 - SEQ-012：进度总数 SHALL 展开 Scan 重复次数和可解析的 Call Sequence，不得在完成前提前达到 100%。
 
 ### 3.3 设备控制
@@ -224,7 +224,7 @@ events.dat
 ## 7. 安全约束
 
 - SAF-001：真实温场上下限和最大速率必须由主配置提供。
-- SAF-002：Stop/Error 默认 Hold Current，不自动归零或断电。
+- SAF-002：Stop/Error SHALL Hold Current，不自动归零或断电，也不保留旧 Target。
 - SAF-003：模块启用不得自动 Apply 保存设置。
 - SAF-004：模块关闭 SHALL 先尝试 abort；abort 失败仍 SHALL 保留 Error，并有界强制回收工作进程。
 - SAF-005：设备/模块通信必须配置有限超时。
