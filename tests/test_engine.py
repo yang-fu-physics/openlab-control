@@ -15,12 +15,19 @@ sys.path.insert(0, str(ROOT / "src"))
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.models import RunState, Severity  # noqa: E402
+from labcontrol.models import (  # noqa: E402
+    DeviceActivity,
+    DeviceKind,
+    DeviceSnapshot,
+    RunState,
+    Severity,
+    StabilityState,
+)
 from labcontrol.measurement.manifest import discover_modules  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.plugins import DeviceManager  # noqa: E402
 from labcontrol.devices.base import DeviceError  # noqa: E402
-from labcontrol.sequence.engine import SequenceEngine  # noqa: E402
+from labcontrol.sequence.engine import SequenceAbort, SequenceEngine  # noqa: E402
 from labcontrol.sequence.model import Command, CommandType, SequenceDocument  # noqa: E402
 
 
@@ -195,6 +202,70 @@ class SequenceEngineTests(unittest.TestCase):
             )
 
         asyncio.run(scenario())
+
+    def test_control_waits_timeout_without_new_device_readings(self) -> None:
+        async def scenario(config) -> None:
+            temperature = config.device("temperature")
+            temperature = replace(
+                temperature,
+                stability=replace(
+                    temperature.stability,
+                    timeout_seconds=0.05,
+                ),
+            )
+            config = replace(
+                config,
+                poll_interval_seconds=0.005,
+                devices=tuple(
+                    temperature if device.id == temperature.id else device
+                    for device in config.devices
+                ),
+            )
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(config, events)
+            now = asyncio.get_running_loop().time()
+            manager.latest["temperature"] = DeviceSnapshot(
+                device_id="temperature",
+                display_name=temperature.display_name,
+                kind=DeviceKind.TEMPERATURE,
+                timestamp=now,
+                connected=True,
+                unit=temperature.unit,
+                current=300.0,
+                target=299.0,
+                rate_per_minute=1.0,
+                activity=DeviceActivity.MOVING,
+                stability=StabilityState.MOVING,
+            )
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+            )
+
+            for wait in (engine._wait_for_stability, engine._wait_for_target):
+                engine.state = RunState.RUNNING
+                engine._abort_requested = False
+                engine._fatal_abort = False
+                events.resolve("temperature", "STABILITY_TIMEOUT")
+                with self.assertRaises(SequenceAbort):
+                    await asyncio.wait_for(wait("temperature"), timeout=0.25)
+
+            timeout_notices = [
+                notice
+                for notice in notices
+                if notice.event.code == "STABILITY_TIMEOUT"
+                and not notice.is_resolution
+            ]
+            self.assertEqual(len(timeout_notices), 2)
+
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._fast_config(Path(temp))
+            asyncio.run(scenario(config))
 
     def test_stop_becomes_faulted_when_hold_current_is_not_confirmed(self) -> None:
         async def scenario(config) -> None:

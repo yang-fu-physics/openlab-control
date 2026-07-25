@@ -118,6 +118,8 @@ shutdown_timeout_seconds = 3.0
 | `stability_timeout_seconds` | 本次目标的判稳超时 |
 | `stability_window_seconds` | 计算斜率的窗口 |
 
+`stability_timeout_seconds` 同时是 Settle 判稳和 Sweep 到达目标的最终等待上限；即使 Poll 持续只返回 Warning、没有新快照，SEQ 也会按 `alarms.stability_timeout` 结束等待，不会无限挂起。
+
 所有值使用设备原生单位。默认磁场原生单位为 Oe：
 
 ```toml

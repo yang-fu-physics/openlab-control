@@ -490,6 +490,7 @@ class SequenceEngine:
         return total
 
     async def _wait_for_stability(self, device_id: str) -> None:
+        started = time.monotonic()
         while True:
             await self._checkpoint()
             snapshot = self.devices.latest.get(device_id)
@@ -500,11 +501,18 @@ class SequenceEngine:
                     self._check_control()
                     if self.config.alarms.stability_timeout is not Severity.ERROR:
                         return
+            if self._control_wait_timed_out(
+                device_id,
+                started,
+                "stabilize",
+            ):
+                return
             await self._interruptible_sleep(self.config.poll_interval_seconds)
 
     async def _wait_for_target(self, device_id: str) -> None:
         config = self.devices.device_configs[device_id]
         tolerance = config.stability.tolerance if config.stability else 0.0
+        started = time.monotonic()
         while True:
             await self._checkpoint()
             snapshot = self.devices.latest.get(device_id)
@@ -515,7 +523,37 @@ class SequenceEngine:
                 and abs(snapshot.current - snapshot.target) <= tolerance
             ):
                 return
+            if self._control_wait_timed_out(
+                device_id,
+                started,
+                "reach its target",
+            ):
+                return
             await self._interruptible_sleep(self.config.poll_interval_seconds)
+
+    def _control_wait_timed_out(
+        self,
+        device_id: str,
+        started: float,
+        action: str,
+    ) -> bool:
+        config = self.devices.device_configs[device_id]
+        timeout = (
+            config.stability.timeout_seconds
+            if config.stability is not None
+            else config.operation_timeout_seconds
+        )
+        elapsed = time.monotonic() - started
+        if elapsed < timeout:
+            return False
+        self.events.report(
+            self.config.alarms.stability_timeout,
+            device_id,
+            "STABILITY_TIMEOUT",
+            f"{config.display_name} did not {action} within {elapsed:.1f} seconds",
+        )
+        self._check_control()
+        return True
 
     async def _checkpoint(self) -> None:
         self._check_control()
