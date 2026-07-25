@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -40,6 +41,7 @@ class MeasurementModuleService:
     ) -> None:
         self.events = events
         self.devices = devices
+        self.config = devices.config.modules
         self.message_callback = message_callback or (lambda _kind, _payload: None)
         self.records = {
             item.id: ModuleRuntimeRecord(item)
@@ -136,21 +138,40 @@ class MeasurementModuleService:
         record: ModuleRuntimeRecord,
         action: str,
         payload: Mapping[str, Any] | None = None,
+        *,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         if record.client is None:
             raise WorkerRequestError("Module worker is unavailable", "MODULE_WORKER_NOT_RUNNING")
         loop = asyncio.get_running_loop()
+        timeout = (
+            self.config.operation_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+        deadline = time.monotonic() + timeout
 
         def on_event(message: dict[str, Any]) -> None:
             future = asyncio.run_coroutine_threadsafe(
                 self._worker_event(record.descriptor.id, message), loop
             )
-            future.result()
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Module event processing timed out")
+                future.result(timeout=remaining)
+            except Exception:
+                future.cancel()
+                raise
 
         request_payload = dict(payload or {})
         request_payload["system"] = self._system_payload()
         result = await asyncio.to_thread(
-            record.client.request, action, request_payload, on_event
+            record.client.request,
+            action,
+            request_payload,
+            on_event,
+            timeout,
         )
         try:
             json.dumps(result, allow_nan=False)
@@ -168,6 +189,7 @@ class MeasurementModuleService:
         error: WorkerRequestError,
         *,
         warning_allowed: bool = False,
+        disable_failed_worker: bool = True,
     ) -> DeviceError | None:
         severity = Severity.WARNING if error.severity == "warning" else Severity.ERROR
         self.events.report(
@@ -177,6 +199,16 @@ class MeasurementModuleService:
             str(error),
             error.context,
         )
+        if disable_failed_worker and error.code in {
+            "MODULE_OPERATION_TIMEOUT",
+            "MODULE_WORKER_DISCONNECTED",
+            "MODULE_WORKER_EXITED",
+            "MODULE_WORKER_NOT_RUNNING",
+        }:
+            record.client = None
+            record.enabled = False
+            record.state = "faulted"
+            self._publish(record, str(error))
         if warning_allowed and severity is Severity.WARNING:
             return None
         return DeviceError(str(error), error.code, error.context)
@@ -204,15 +236,25 @@ class MeasurementModuleService:
         client = ModuleWorkerClient(record.descriptor)
         record.client = client
         try:
-            await asyncio.to_thread(client.start)
+            await asyncio.to_thread(
+                client.start,
+                self.config.startup_timeout_seconds,
+            )
             result = await self._request(record, "initialize", {"settings": dict(settings)})
         except WorkerRequestError as exc:
-            await asyncio.to_thread(client.close)
+            await asyncio.to_thread(
+                client.close,
+                self.config.shutdown_timeout_seconds,
+            )
             record.client = None
             record.enabled = False
             record.state = "disabled"
             self._publish(record, str(exc))
-            error = self._operation_error(record, exc)
+            error = self._operation_error(
+                record,
+                exc,
+                disable_failed_worker=False,
+            )
             assert error is not None
             raise error from exc
         record.status.update(result)
@@ -228,22 +270,32 @@ class MeasurementModuleService:
             return
         record.state = "disabling"
         self._publish(record, f"Stopping {record.descriptor.name}...")
+        client = record.client
+        failure: DeviceError | None = None
         try:
             result = await self._request(record, "abort")
         except WorkerRequestError as exc:
-            record.state = "faulted"
-            record.enabled = True
-            self._publish(record, str(exc))
-            error = self._operation_error(record, exc)
-            assert error is not None
-            raise error from exc
-        record.status.update(result)
-        await asyncio.to_thread(record.client.close)
+            failure = self._operation_error(
+                record,
+                exc,
+                disable_failed_worker=False,
+            )
+            assert failure is not None
+        else:
+            record.status.update(result)
+        await asyncio.to_thread(
+            client.close,
+            self.config.shutdown_timeout_seconds,
+        )
         record.client = None
         record.enabled = False
         record.state = "disabled"
-        self.events.resolve_source(f"module:{module_id}")
-        self._publish(record, f"{record.descriptor.name} disabled")
+        if failure is None:
+            self.events.resolve_source(f"module:{module_id}")
+            self._publish(record, f"{record.descriptor.name} disabled")
+        else:
+            self._publish(record, f"{record.descriptor.name} forced closed: {failure}")
+            raise failure
 
     async def apply_settings(self, module_id: str, settings: Mapping[str, Any]) -> None:
         self._ensure_sequence_idle()
@@ -452,16 +504,30 @@ class MeasurementModuleService:
             self._sequence_active = False
 
     async def shutdown(self) -> None:
-        for record in self.records.values():
+        async def stop(record: ModuleRuntimeRecord) -> None:
             if record.client is None:
-                continue
+                return
+            client = record.client
             if record.enabled:
                 try:
-                    await self._request(record, "abort")
+                    await self._request(
+                        record,
+                        "abort",
+                        timeout_seconds=self.config.shutdown_timeout_seconds,
+                    )
                 except WorkerRequestError as exc:
-                    self._operation_error(record, exc)
-            await asyncio.to_thread(record.client.close)
+                    self._operation_error(
+                        record,
+                        exc,
+                        disable_failed_worker=False,
+                    )
+            await asyncio.to_thread(
+                client.close,
+                self.config.shutdown_timeout_seconds,
+            )
             record.client = None
             record.enabled = False
             record.state = "disabled"
             self._publish(record, "Application closing")
+
+        await asyncio.gather(*(stop(record) for record in self.records.values()))

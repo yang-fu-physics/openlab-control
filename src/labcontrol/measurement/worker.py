@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 import multiprocessing
 import threading
+import time
 from collections.abc import Callable, Mapping
 from multiprocessing.connection import Connection
 from pathlib import Path
@@ -151,11 +153,78 @@ class ModuleWorkerClient:
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
         self._lock = threading.RLock()
+        self._state_lock = threading.Lock()
         self._request_number = 0
 
-    def start(self) -> None:
-        if self._process is not None:
-            return
+    @staticmethod
+    def _timeout(value: float, operation: str) -> float:
+        timeout = float(value)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(f"{operation} timeout must be a positive finite number")
+        return timeout
+
+    @staticmethod
+    def _stop_process(process: multiprocessing.Process, timeout_seconds: float) -> None:
+        timeout = max(0.0, timeout_seconds)
+        deadline = time.monotonic() + timeout
+        try:
+            try:
+                alive = process.is_alive()
+            except ValueError:
+                return
+            if alive:
+                process.terminate()
+                process.join(timeout / 2.0)
+            else:
+                process.join(timeout)
+            if process.is_alive():
+                process.kill()
+                process.join(max(0.0, deadline - time.monotonic()))
+        finally:
+            try:
+                if not process.is_alive():
+                    process.close()
+            except (AttributeError, OSError, ValueError):
+                pass
+
+    def _invalidate(
+        self,
+        connection: Connection | None,
+        process: multiprocessing.Process | None,
+        timeout_seconds: float,
+    ) -> None:
+        with self._state_lock:
+            owns_connection = self._connection is connection
+            owns_process = self._process is process
+            if owns_connection:
+                self._connection = None
+            if owns_process:
+                self._process = None
+        if connection is not None and owns_connection:
+            try:
+                connection.close()
+            except OSError:
+                pass
+        if process is not None and owns_process:
+            self._stop_process(process, timeout_seconds)
+
+    def _terminate_process_only(
+        self,
+        process: multiprocessing.Process,
+        timeout_seconds: float,
+    ) -> None:
+        with self._state_lock:
+            owns_process = self._process is process
+            if owns_process:
+                self._process = None
+        if owns_process:
+            self._stop_process(process, timeout_seconds)
+
+    def start(self, timeout_seconds: float = 10.0) -> None:
+        timeout = self._timeout(timeout_seconds, "Module startup")
+        with self._state_lock:
+            if self._process is not None:
+                return
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe(duplex=True)
         process = context.Process(
@@ -164,42 +233,100 @@ class ModuleWorkerClient:
             name=f"OpenLabModule-{self.descriptor.id}",
             daemon=True,
         )
-        process.start()
-        child.close()
-        hello = parent.recv()
-        if hello.get("type") != "ready":
+        try:
+            process.start()
+        except Exception:
             parent.close()
-            process.join()
+            child.close()
+            raise
+        child.close()
+        with self._state_lock:
+            self._connection = parent
+            self._process = process
+        try:
+            if not parent.poll(timeout):
+                self._invalidate(parent, process, min(timeout, 1.0))
+                raise WorkerRequestError(
+                    f"Module worker startup timed out after {timeout:g} seconds",
+                    "MODULE_WORKER_START_TIMEOUT",
+                    self.descriptor.id,
+                )
+            hello = parent.recv()
+        except (EOFError, OSError) as exc:
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise WorkerRequestError(
+                "Module worker exited during startup",
+                "MODULE_WORKER_START_FAILED",
+                self.descriptor.id,
+            ) from exc
+        if hello.get("type") != "ready":
+            self._invalidate(parent, process, min(timeout, 1.0))
             raise WorkerRequestError(
                 str(hello.get("message", "Module worker failed to start")),
                 "MODULE_WORKER_START_FAILED",
                 self.descriptor.id,
             )
-        self._connection = parent
-        self._process = process
 
     def request(
         self,
         action: str,
         payload: Mapping[str, Any] | None = None,
         event_handler: WorkerEventHandler | None = None,
+        timeout_seconds: float = 120.0,
     ) -> dict[str, Any]:
+        timeout = self._timeout(timeout_seconds, "Module operation")
         with self._lock:
-            if self._connection is None or self._process is None:
+            with self._state_lock:
+                connection = self._connection
+                process = self._process
+            if connection is None or process is None:
                 raise WorkerRequestError("Module worker is not running", "MODULE_WORKER_NOT_RUNNING")
-            if not self._process.is_alive():
+            if not process.is_alive():
+                self._invalidate(connection, process, min(timeout, 1.0))
                 raise WorkerRequestError("Module worker exited unexpectedly", "MODULE_WORKER_EXITED")
             self._request_number += 1
             request_id = str(self._request_number)
-            self._connection.send({"id": request_id, "action": action, "payload": dict(payload or {})})
+            try:
+                connection.send({
+                    "id": request_id,
+                    "action": action,
+                    "payload": dict(payload or {}),
+                })
+            except (EOFError, OSError) as exc:
+                self._invalidate(connection, process, min(timeout, 1.0))
+                raise WorkerRequestError(
+                    "Module worker connection closed unexpectedly",
+                    "MODULE_WORKER_DISCONNECTED",
+                    action,
+                ) from exc
+            deadline = time.monotonic() + timeout
             event_error: Exception | None = None
             while True:
+                remaining = deadline - time.monotonic()
                 try:
-                    message = self._connection.recv()
+                    ready = remaining > 0 and connection.poll(remaining)
                 except (EOFError, OSError) as exc:
+                    self._invalidate(connection, process, min(timeout, 1.0))
                     raise WorkerRequestError(
                         "Module worker connection closed unexpectedly",
                         "MODULE_WORKER_DISCONNECTED",
+                        action,
+                    ) from exc
+                if not ready:
+                    self._invalidate(connection, process, min(timeout, 1.0))
+                    raise WorkerRequestError(
+                        f"Module operation {action!r} timed out after {timeout:g} seconds",
+                        "MODULE_OPERATION_TIMEOUT",
+                        action,
+                    )
+                try:
+                    message = connection.recv()
+                except (EOFError, OSError) as exc:
+                    self._invalidate(connection, process, min(timeout, 1.0))
+                    raise WorkerRequestError(
+                        "Module worker connection closed unexpectedly",
+                        "MODULE_WORKER_DISCONNECTED",
+                        action,
                     ) from exc
                 if str(message.get("id", "")) != request_id:
                     continue
@@ -227,18 +354,34 @@ class ModuleWorkerClient:
                     ) from event_error
                 return dict(message.get("result", {}))
 
-    def close(self) -> None:
-        connection = self._connection
-        process = self._process
+    def close(self, timeout_seconds: float = 3.0) -> None:
+        timeout = self._timeout(timeout_seconds, "Module shutdown")
+        with self._state_lock:
+            connection = self._connection
+            process = self._process
         if connection is None or process is None:
+            return
+        deadline = time.monotonic() + timeout
+        acquired = self._lock.acquire(timeout=min(timeout / 2.0, 0.25))
+        if not acquired:
+            self._terminate_process_only(
+                process,
+                max(0.0, deadline - time.monotonic()),
+            )
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining > 0 and self._lock.acquire(timeout=remaining):
+                try:
+                    self._invalidate(connection, None, 0.0)
+                finally:
+                    self._lock.release()
             return
         try:
             if process.is_alive():
-                self.request("close")
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    self.request("close", timeout_seconds=remaining)
         except Exception:
             pass
         finally:
-            connection.close()
-            process.join()
-            self._connection = None
-            self._process = None
+            self._invalidate(connection, process, max(0.0, deadline - time.monotonic()))
+            self._lock.release()

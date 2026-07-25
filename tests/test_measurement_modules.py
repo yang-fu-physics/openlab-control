@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import multiprocessing
 import os
 import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -17,14 +19,14 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from labcontrol.config import load_config  # noqa: E402
+from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.devices.base import DeviceError  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.measurement.manifest import ModuleColumn, ModuleDescriptor, discover_modules  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.measurement.settings import load_settings, save_settings  # noqa: E402
-from labcontrol.measurement.worker import WorkerRequestError  # noqa: E402
+from labcontrol.measurement.worker import ModuleWorkerClient, WorkerRequestError  # noqa: E402
 from labcontrol.plugins import DeviceManager  # noqa: E402
 from labcontrol.ui.measurement_modules import (  # noqa: E402
     MODULE_WINDOW_MIN_HEIGHT,
@@ -42,6 +44,24 @@ def copied_project(temp_root: Path):
 
 
 class ManifestAndSettingsTests(unittest.TestCase):
+    def test_module_timeouts_are_loaded_and_must_be_positive(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        self.assertEqual(config.modules.startup_timeout_seconds, 10.0)
+        self.assertEqual(config.modules.operation_timeout_seconds, 120.0)
+        self.assertEqual(config.modules.shutdown_timeout_seconds, 3.0)
+        with tempfile.TemporaryDirectory() as temp:
+            invalid = Path(temp) / "invalid.toml"
+            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
+            invalid.write_text(
+                source.replace(
+                    "operation_timeout_seconds = 120.0",
+                    "operation_timeout_seconds = 0",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ConfigurationError):
+                load_config(invalid)
+
     def test_discovers_simulated_module_and_round_trips_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = copied_project(Path(temp))
@@ -92,8 +112,14 @@ class ModuleServiceTests(unittest.TestCase):
             self.failing_action = failing_action
             self.actions: list[str] = []
 
-        def request(self, action, payload=None, event_handler=None):
-            del payload, event_handler
+        def request(
+            self,
+            action,
+            payload=None,
+            event_handler=None,
+            timeout_seconds=120.0,
+        ):
+            del payload, event_handler, timeout_seconds
             self.actions.append(action)
             if action == self.failing_action:
                 raise WorkerRequestError(
@@ -101,7 +127,8 @@ class ModuleServiceTests(unittest.TestCase):
                 )
             return {}
 
-        def close(self) -> None:
+        def close(self, timeout_seconds=3.0) -> None:
+            del timeout_seconds
             self.actions.append("close")
 
     class _BarrierClient:
@@ -109,16 +136,51 @@ class ModuleServiceTests(unittest.TestCase):
             self.barrier = barrier
             self.value = value
 
-        def request(self, action, payload=None, event_handler=None):
-            del payload
+        def request(
+            self,
+            action,
+            payload=None,
+            event_handler=None,
+            timeout_seconds=120.0,
+        ):
+            del payload, timeout_seconds
             if action == "measure":
                 self.barrier.wait(timeout=2.0)
                 assert event_handler is not None
                 event_handler({"type": "row", "values": {"Value": self.value}})
             return {}
 
-        def close(self) -> None:
+        def close(self, timeout_seconds=3.0) -> None:
+            del timeout_seconds
             return None
+
+    class _ShutdownClient:
+        def __init__(
+            self,
+            abort_barrier: threading.Barrier,
+            close_barrier: threading.Barrier,
+        ) -> None:
+            self.abort_barrier = abort_barrier
+            self.close_barrier = close_barrier
+            self.actions: list[str] = []
+
+        def request(
+            self,
+            action,
+            payload=None,
+            event_handler=None,
+            timeout_seconds=120.0,
+        ):
+            del payload, event_handler, timeout_seconds
+            self.actions.append(action)
+            if action == "abort":
+                self.abort_barrier.wait(timeout=2.0)
+            return {}
+
+        def close(self, timeout_seconds=3.0) -> None:
+            del timeout_seconds
+            self.actions.append("close")
+            self.close_barrier.wait(timeout=2.0)
 
     def test_full_lifecycle_streams_four_ordered_rows_and_disables_cleanly(self) -> None:
         async def scenario(temp_root: Path) -> None:
@@ -214,7 +276,7 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
 
-    def test_end_and_abort_failures_keep_module_enabled_without_automatic_abort(self) -> None:
+    def test_end_failure_keeps_module_faulted_and_disable_failure_forces_cleanup(self) -> None:
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
@@ -241,10 +303,10 @@ class ModuleServiceTests(unittest.TestCase):
             abort_record.state = "enabled"
             with self.assertRaises(DeviceError):
                 await abort_service.disable("simulated_transport")
-            self.assertTrue(abort_record.enabled)
-            self.assertEqual(abort_record.state, "faulted")
-            self.assertIs(abort_record.client, abort_client)
-            self.assertEqual(abort_client.actions, ["abort"])
+            self.assertFalse(abort_record.enabled)
+            self.assertEqual(abort_record.state, "disabled")
+            self.assertIsNone(abort_record.client)
+            self.assertEqual(abort_client.actions, ["abort", "close"])
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
@@ -293,6 +355,150 @@ class ModuleServiceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
+
+    def test_shutdown_aborts_and_closes_module_workers_concurrently(self) -> None:
+        async def scenario(temp_root: Path) -> None:
+            config = copied_project(temp_root)
+            events = EventManager()
+            devices = DeviceManager(config, events)
+            descriptors = tuple(
+                ModuleDescriptor(
+                    id=module_id,
+                    name=module_id,
+                    version="1.0.0",
+                    path=temp_root,
+                    api_version="1.0",
+                    frontend="frontend:Frontend",
+                    backend="backend:Backend",
+                )
+                for module_id in ("module_a", "module_b")
+            )
+            modules = MeasurementModuleService(descriptors, events, devices)
+            abort_barrier = threading.Barrier(2)
+            close_barrier = threading.Barrier(2)
+            clients = []
+            for module_id in ("module_a", "module_b"):
+                record = modules.records[module_id]
+                client = self._ShutdownClient(abort_barrier, close_barrier)
+                clients.append(client)
+                record.client = client  # type: ignore[assignment]
+                record.enabled = True
+                record.state = "enabled"
+
+            await modules.shutdown()
+
+            self.assertEqual([client.actions for client in clients], [
+                ["abort", "close"],
+                ["abort", "close"],
+            ])
+            self.assertTrue(
+                all(
+                    not record.enabled
+                    and record.client is None
+                    and record.state == "disabled"
+                    for record in modules.records.values()
+                )
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(Path(temp)))
+
+
+class ModuleWorkerTimeoutTests(unittest.TestCase):
+    @staticmethod
+    def _descriptor(root: Path, startup_delay: float = 0.0) -> ModuleDescriptor:
+        (root / "backend.py").write_text(
+            "\n".join([
+                "import time",
+                "from labcontrol.measurement.api import ModuleBackend",
+                "",
+                "class Backend(ModuleBackend):",
+                "    def __init__(self):",
+                f"        time.sleep({startup_delay!r})",
+                "",
+                "    def initialize(self, settings, context):",
+                "        time.sleep(float(settings.get('delay_seconds', 0.0)))",
+                "        return {}",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        return ModuleDescriptor(
+            id="timeout_module",
+            name="Timeout Module",
+            version="1.0.0",
+            path=root,
+            api_version="1.0",
+            backend="backend:Backend",
+        )
+
+    def test_startup_timeout_terminates_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            client = ModuleWorkerClient(
+                self._descriptor(Path(temp), startup_delay=5.0)
+            )
+            with self.assertRaises(WorkerRequestError) as captured:
+                client.start(timeout_seconds=0.05)
+            self.assertEqual(
+                captured.exception.code,
+                "MODULE_WORKER_START_TIMEOUT",
+            )
+            self.assertIsNone(client._process)
+            self.assertIsNone(client._connection)
+            self.assertNotIn(
+                "OpenLabModule-timeout_module",
+                [child.name for child in multiprocessing.active_children()],
+            )
+
+    def test_request_timeout_terminates_worker_and_rejects_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            client = ModuleWorkerClient(self._descriptor(Path(temp)))
+            client.start(timeout_seconds=2.0)
+            with self.assertRaises(WorkerRequestError) as captured:
+                client.request(
+                    "initialize",
+                    {"settings": {"delay_seconds": 5.0}},
+                    timeout_seconds=0.05,
+                )
+            self.assertEqual(captured.exception.code, "MODULE_OPERATION_TIMEOUT")
+            self.assertIsNone(client._process)
+            self.assertIsNone(client._connection)
+            with self.assertRaises(WorkerRequestError) as reused:
+                client.request("read_status", timeout_seconds=0.05)
+            self.assertEqual(reused.exception.code, "MODULE_WORKER_NOT_RUNNING")
+            self.assertNotIn(
+                "OpenLabModule-timeout_module",
+                [child.name for child in multiprocessing.active_children()],
+            )
+
+    def test_close_preempts_an_inflight_worker_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            client = ModuleWorkerClient(self._descriptor(Path(temp)))
+            client.start(timeout_seconds=2.0)
+            failures: list[WorkerRequestError] = []
+
+            def request() -> None:
+                try:
+                    client.request(
+                        "initialize",
+                        {"settings": {"delay_seconds": 5.0}},
+                        timeout_seconds=5.0,
+                    )
+                except WorkerRequestError as exc:
+                    failures.append(exc)
+
+            thread = threading.Thread(target=request)
+            thread.start()
+            time.sleep(0.05)
+            started = time.monotonic()
+            client.close(timeout_seconds=0.3)
+            elapsed = time.monotonic() - started
+            thread.join(timeout=1.0)
+            self.assertFalse(thread.is_alive())
+            self.assertLess(elapsed, 1.0)
+            self.assertTrue(failures)
+            self.assertIsNone(client._process)
+            self.assertIsNone(client._connection)
 
 
 class ModuleWindowTests(unittest.TestCase):

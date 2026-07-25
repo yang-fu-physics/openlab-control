@@ -62,6 +62,9 @@ data_directory = "module_data"
 shared_wheels_directory = "wheels"
 python_executable = ""
 site_packages_directory = "module_runtime/site-packages"
+startup_timeout_seconds = 10.0
+operation_timeout_seconds = 120.0
+shutdown_timeout_seconds = 3.0
 ```
 
 | 键 | 说明 |
@@ -71,8 +74,13 @@ site_packages_directory = "module_runtime/site-packages"
 | `shared_wheels_directory` | 所有模块共用的离线 wheel 目录 |
 | `python_executable` | 安装依赖时使用的 Python；源码运行留空即使用当前 Python |
 | `site_packages_directory` | pip `--target` 的共享依赖目录，主进程和所有模块工作进程共用 |
+| `startup_timeout_seconds` | 模块工作进程启动并完成源码加载的上限 |
+| `operation_timeout_seconds` | initialize、Apply、Measure 等单次 IPC 操作的上限 |
+| `shutdown_timeout_seconds` | 应用退出/强制关闭时 abort 和工作进程清理各自的上限 |
 
 发布 EXE 不能把自身当作 pip。需要安装额外依赖时，可放置 `runtime/python/python.exe`，或把 `python_executable` 指向便携 Python。依赖始终安装到 `site_packages_directory`，不会为每个模块复制一套环境。
+
+三个超时必须是大于零的有限秒数。框架超时是防止工作进程永久挂起的最终上限；真实仪表驱动仍须为每次 VISA、串口、TCP 或 SDK 调用设置更短、符合设备特性的协议超时。
 
 如果不同模块对同一包声明不相容的版本范围，相关模块都禁止 Enable。若依赖缺失，先在 Modules Manager 选择模块并点击 `Install Dependencies`：程序先从共享 `wheels/` 和模块自己的 `wheels/` 离线安装；离线失败后，只有用户再次明确确认才允许在线 pip。
 

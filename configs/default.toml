@@ -31,6 +31,9 @@ data_directory = "module_data"
 shared_wheels_directory = "wheels"
 python_executable = ""
 site_packages_directory = "module_runtime/site-packages"
+startup_timeout_seconds = 10.0
+operation_timeout_seconds = 120.0
+shutdown_timeout_seconds = 3.0
 
 [[devices]]
 id = "temperature"

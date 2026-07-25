@@ -380,7 +380,7 @@ Enable 时读取保存值到 Settings 和 backend initialize，但不触发 Appl
 
 ## B10. 通信超时与恢复
 
-框架不包一层固定生命周期超时，因为不同仪表操作时长差异很大。模块必须：
+框架通过 `[modules]` 的 `startup_timeout_seconds`、`operation_timeout_seconds` 和 `shutdown_timeout_seconds` 设置工作进程最终上限。单次 IPC 超时会产生 Error，并强制回收已失去响应的工作进程。模块仍必须：
 
 - 给每次读写设置有限且合理的协议超时；
 - 把临时超量程/无效点映射为 Warning；
@@ -389,7 +389,7 @@ Enable 时读取保存值到 Settings 和 backend initialize，但不触发 Appl
 - 让 abort 和 end_sequence 尽量幂等；
 - 在 Status 中显示 Fault/Connection/Output 等实际状态。
 
-不要无限 `while True` 等待设备；这会同时阻塞 Measure、Disable 和应用退出。
+不要无限 `while True` 等待设备。框架超时只能停止失去响应的工作进程，不能保证外部仪表已经进入安全状态；协议超时、幂等恢复和硬件互锁仍由真实驱动负责。
 
 ## B11. 测试顺序
 
@@ -400,7 +400,7 @@ Enable 时读取保存值到 Settings 和 backend initialize，但不触发 Appl
 5. Schema 测试：未知列、复杂值、缺失值、多行顺序。
 6. Warning 测试：继续执行、只弹一次、events.dat 有 Count/Context。
 7. Error 测试：SEQ Faulted、执行 end_sequence(error)、不调用 abort。
-8. Disable abort 失败测试：仍 Enabled、窗口可见。
+8. Disable abort 失败测试：报告 Error，并在关闭上限内强制回收工作进程、转为 Disabled。
 9. 多模块并行：各模块内部顺序保持，中央 DAT 无并发写损坏。
 10. 真实硬件分阶段测试：只读 → 最小输出 → Stop/Error → 长时运行。
 

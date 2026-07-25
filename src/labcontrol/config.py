@@ -65,6 +65,9 @@ class ModuleConfig:
     shared_wheels_directory: str = "wheels"
     python_executable: str = ""
     site_packages_directory: str = "module_runtime/site-packages"
+    startup_timeout_seconds: float = 10.0
+    operation_timeout_seconds: float = 120.0
+    shutdown_timeout_seconds: float = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -338,6 +341,18 @@ def load_config(path: str | Path) -> AppConfig:
             python_executable=str(module_raw.get("python_executable", "")),
             site_packages_directory=str(
                 module_raw.get("site_packages_directory", "module_runtime/site-packages")
+            ),
+            startup_timeout_seconds=_positive_float(
+                module_raw.get("startup_timeout_seconds", 10.0),
+                "modules.startup_timeout_seconds",
+            ),
+            operation_timeout_seconds=_positive_float(
+                module_raw.get("operation_timeout_seconds", 120.0),
+                "modules.operation_timeout_seconds",
+            ),
+            shutdown_timeout_seconds=_positive_float(
+                module_raw.get("shutdown_timeout_seconds", 3.0),
+                "modules.shutdown_timeout_seconds",
             ),
         ),
         abort_temperature=abort_temperature,

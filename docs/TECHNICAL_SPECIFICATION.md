@@ -88,7 +88,8 @@
 - PROC-002：frontend SHALL 在 GUI 进程/线程运行。
 - PROC-003：frontend SHALL 不得直接执行 VISA/Serial/SDK I/O。
 - PROC-004：同一模块 IPC 操作 SHALL 串行。
-- PROC-005：真实驱动 SHALL 自行配置有限通信超时；框架不添加统一生命周期超时。
+- PROC-005：真实驱动 SHALL 自行配置有限协议超时；框架 SHALL 另行提供可配置的启动、IPC 操作和关闭最终超时。
+- PROC-006：模块工作进程超时 SHALL 报告 Error、使该进程失效并在有限时间内回收管道和进程。
 - WIN-001：模块窗口 SHALL 是主窗口拥有的独立 modeless Windows 窗口。
 - WIN-002：窗口 SHALL 保持在主窗口之前但不得全局 Always-on-top。
 - WIN-003：窗口 SHALL 可移动/最小化，用户不得关闭。
@@ -109,7 +110,7 @@
 - LIFE-007：abort SHALL 只在 Disable 和应用退出调用。
 - LIFE-008：Error 停止 SEQ时不得调用 abort。
 - LIFE-009：end_sequence 失败 SHALL 使最终状态 Faulted，模块保持 Enabled/可见，不自动 abort。
-- LIFE-010：Disable abort 失败 SHALL 保持 Enabled/可见并报告 Error。
+- LIFE-010：Disable abort 失败 SHALL 报告 Error，并在关闭上限内强制回收工作进程、转为 Disabled；不得把强制回收解释为仪表已安全。
 
 ### 3.7 Settings
 
@@ -215,7 +216,7 @@ events.dat
 - SAF-001：真实温场上下限和最大速率必须由主配置提供。
 - SAF-002：Stop/Error 默认 Hold Current，不自动归零或断电。
 - SAF-003：模块启用不得自动 Apply 保存设置。
-- SAF-004：模块关闭不得绕过 abort 成功状态。
+- SAF-004：模块关闭 SHALL 先尝试 abort；abort 失败仍 SHALL 保留 Error，并有界强制回收工作进程。
 - SAF-005：设备/模块通信必须配置有限超时。
 - SAF-006：禁止在模块/设备源码中提交秘密。
 - SAF-007：接入真实硬件必须按测试计划分阶段完成。
