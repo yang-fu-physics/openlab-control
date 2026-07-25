@@ -58,6 +58,7 @@
 - SEQ-009：旧 Initialize 和带参数 Measure SHALL 产生解析 Error 并阻止 Run。
 - SEQ-010：Running/Paused/Stopping SHALL 锁定 SEQ 与模块配置变更。
 - SEQ-011：Stop/Error 后温度与磁场 SHALL 按配置保持当前或目标；默认 Hold Current。
+- SEQ-012：进度总数 SHALL 展开 Scan 重复次数和可解析的 Call Sequence，不得在完成前提前达到 100%。
 
 ### 3.3 设备控制
 

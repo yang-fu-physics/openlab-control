@@ -77,10 +77,22 @@ class SequenceEngine:
         self._paused_at = None
         self._paused_total = 0.0
         self._completed_steps = 0
-        self._total_steps = max(document.count_commands(enabled_only=True), 1)
         self._call_stack.clear()
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
+        base_directory = (
+            self._call_stack[-1].parent
+            if self._call_stack
+            else self.config.project_root
+        )
+        self._total_steps = max(
+            self._estimate_execution_steps(
+                document.commands,
+                base_directory,
+                frozenset(self._call_stack),
+            ),
+            1,
+        )
         self.state = RunState.RUNNING
         try:
             descriptors, module_status = await self.modules.prepare_sequence(
@@ -419,6 +431,63 @@ class SequenceEngine:
             await self._execute_commands(result.document.commands, path + [f"call {source.name}"])
         finally:
             self._call_stack.pop()
+
+    def _estimate_execution_steps(
+        self,
+        commands: list[Command],
+        base_directory: Path,
+        call_stack: frozenset[Path],
+    ) -> int:
+        total = 0
+        for command in commands:
+            if not command.enabled:
+                continue
+            total += 1
+            if command.type.is_container:
+                try:
+                    if (
+                        command.type is CommandType.SCAN_TEMPERATURE
+                        and str(
+                            command.params.get("point_mode", "Linear")
+                        ).casefold()
+                        == "list"
+                    ):
+                        iterations = len(
+                            parse_temperature_points(
+                                command.params.get("points", "")
+                            )
+                        )
+                    else:
+                        iterations = max(
+                            1,
+                            int(command.params.get("steps", 1)),
+                        )
+                except (TypeError, ValueError):
+                    iterations = 0
+                child_steps = self._estimate_execution_steps(
+                    command.children,
+                    base_directory,
+                    call_stack,
+                )
+                total += iterations * child_steps
+            elif command.type is CommandType.CALL_SEQUENCE:
+                source = Path(str(command.params.get("path", "")))
+                if not source.is_absolute():
+                    source = (base_directory / source).resolve()
+                if source in call_stack or not source.exists():
+                    continue
+                try:
+                    result = load_sequence(source)
+                except OSError:
+                    continue
+                if result.has_errors:
+                    continue
+                total += self._estimate_execution_steps(
+                    result.document.commands,
+                    source.parent,
+                    call_stack | {source},
+                )
+        return total
 
     async def _wait_for_stability(self, device_id: str) -> None:
         while True:

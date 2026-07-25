@@ -53,13 +53,24 @@ class SequenceEngineTests(unittest.TestCase):
             devices=tuple(devices),
         )
 
-    async def _run(self, config, document, notices):
+    async def _run(self, config, document, notices, progresses=None):
         events = EventManager()
         events.subscribe(notices.append)
         manager = DeviceManager(config, events)
         logger = DatRunLogger(config, events)
         modules = MeasurementModuleService(discover_modules(config), events, manager)
-        engine = SequenceEngine(config, manager, events, logger, modules)
+        engine = SequenceEngine(
+            config,
+            manager,
+            events,
+            logger,
+            modules,
+            progress_callback=(
+                progresses.append
+                if progresses is not None
+                else None
+            ),
+        )
         await manager.connect_all()
         await manager.poll_all()
         await modules.enable("simulated_transport", {
@@ -98,11 +109,22 @@ class SequenceEngineTests(unittest.TestCase):
             }, [field_scan])
             document = SequenceDocument([temperature_scan], "nested.seq")
             notices = []
-            state, _, paths = asyncio.run(self._run(config, document, notices))
+            progresses = []
+            state, _, paths = asyncio.run(
+                self._run(config, document, notices, progresses)
+            )
             self.assertEqual(state, RunState.COMPLETED)
             self.assertIsNotNone(paths)
             data = paths.data_file.read_text(encoding="utf-8")
             self.assertGreaterEqual(data.count("Measure"), 16)
+            self.assertEqual(progresses[-1].completed_steps, 7)
+            self.assertEqual(progresses[-1].total_steps, 7)
+            self.assertTrue(
+                all(
+                    progress.completed_steps <= progress.total_steps
+                    for progress in progresses
+                )
+            )
 
     def test_duplicate_warning_continues_and_only_notifies_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -213,6 +235,33 @@ class SequenceEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
             asyncio.run(scenario(config))
+
+    def test_progress_expands_called_sequence_scans(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = self._fast_config(temp_root)
+            child = temp_root / "child.seq"
+            child.write_text(
+                "T Wait For 0.0 secs\n"
+                "T Scan Time 0.0 secs in 2 steps\n"
+                "T     Measure\n"
+                "T End Scan\n"
+                "T End Sequence\n",
+                encoding="utf-8",
+            )
+            document = SequenceDocument(
+                [Command(CommandType.CALL_SEQUENCE, {"path": "child.seq"})],
+                "main.seq",
+                temp_root / "main.seq",
+            )
+            notices = []
+            progresses = []
+            state, _, _ = asyncio.run(
+                self._run(config, document, notices, progresses)
+            )
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertEqual(progresses[-1].completed_steps, 5)
+            self.assertEqual(progresses[-1].total_steps, 5)
 
     def test_disabled_command_and_scan_block_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
