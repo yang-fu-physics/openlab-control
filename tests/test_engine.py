@@ -152,6 +152,28 @@ class SequenceEngineTests(unittest.TestCase):
         self.assertTrue(engine._abort_requested)
         self.assertTrue(engine._fatal_abort)
 
+    def test_pause_freezes_interruptible_wait_deadline(self) -> None:
+        async def scenario() -> None:
+            events = EventManager()
+            engine = SequenceEngine(
+                object(), object(), events, object(), object()  # type: ignore[arg-type]
+            )
+            engine.state = RunState.RUNNING
+            wait_task = asyncio.create_task(engine._interruptible_sleep(0.16))
+            await asyncio.sleep(0.03)
+            engine.pause()
+            await asyncio.sleep(0.20)
+            self.assertFalse(wait_task.done())
+            resumed_at = asyncio.get_running_loop().time()
+            engine.resume()
+            await asyncio.wait_for(wait_task, timeout=0.5)
+            self.assertGreaterEqual(
+                asyncio.get_running_loop().time() - resumed_at,
+                0.09,
+            )
+
+        asyncio.run(scenario())
+
     def test_disabled_command_and_scan_block_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))

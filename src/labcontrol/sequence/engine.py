@@ -44,6 +44,8 @@ class SequenceEngine:
         self.state = RunState.IDLE
         self._pause_gate = asyncio.Event()
         self._pause_gate.set()
+        self._paused_at: float | None = None
+        self._paused_total = 0.0
         self._abort_requested = False
         self._fatal_abort = False
         self._abort_message = ""
@@ -72,6 +74,8 @@ class SequenceEngine:
         self._fatal_abort = False
         self._abort_message = ""
         self._pause_gate.set()
+        self._paused_at = None
+        self._paused_total = 0.0
         self._completed_steps = 0
         self._total_steps = max(document.count_commands(enabled_only=True), 1)
         self._call_stack.clear()
@@ -167,6 +171,7 @@ class SequenceEngine:
     def pause(self) -> None:
         if self.state is RunState.RUNNING:
             self.state = RunState.PAUSED
+            self._paused_at = time.monotonic()
             self._pause_gate.clear()
             self.events.report(Severity.INFO, "sequence", "RUN_PAUSED", "Sequence paused")
             self._publish("Paused")
@@ -174,6 +179,7 @@ class SequenceEngine:
     def resume(self) -> None:
         if self.state is RunState.PAUSED:
             self.state = RunState.RUNNING
+            self._finish_pause()
             self._pause_gate.set()
             self.events.report(Severity.INFO, "sequence", "RUN_RESUMED", "Sequence resumed")
             self._publish("Resumed")
@@ -185,6 +191,7 @@ class SequenceEngine:
         self._fatal_abort = self._fatal_abort or fatal
         self._abort_message = message
         self.state = RunState.STOPPING
+        self._finish_pause()
         self._pause_gate.set()
         self._publish(message)
 
@@ -365,7 +372,7 @@ class SequenceEngine:
         duration = max(0.0, float(command.params.get("duration_seconds", 0.0)))
         steps = max(1, int(command.params.get("steps", 1)))
         offsets = self._linspace(0.0, duration, steps)
-        started = time.monotonic()
+        started = self._active_time()
         for index, offset in enumerate(offsets, start=1):
             await self._sleep_until(started + offset)
             point_path = path + [f"time {index}/{steps}={offset:g} s"]
@@ -432,16 +439,31 @@ class SequenceEngine:
             raise SequenceAbort(self._abort_message)
 
     async def _interruptible_sleep(self, seconds: float) -> None:
-        deadline = time.monotonic() + max(0.0, seconds)
+        deadline = self._active_time() + max(0.0, seconds)
         while True:
             await self._checkpoint()
-            remaining = deadline - time.monotonic()
+            remaining = deadline - self._active_time()
             if remaining <= 0:
                 return
             await asyncio.sleep(min(0.1, remaining))
 
     async def _sleep_until(self, deadline: float) -> None:
-        await self._interruptible_sleep(max(0.0, deadline - time.monotonic()))
+        await self._interruptible_sleep(max(0.0, deadline - self._active_time()))
+
+    def _active_time(self) -> float:
+        now = time.monotonic()
+        current_pause = (
+            max(0.0, now - self._paused_at)
+            if self._paused_at is not None
+            else 0.0
+        )
+        return now - self._paused_total - current_pause
+
+    def _finish_pause(self) -> None:
+        if self._paused_at is None:
+            return
+        self._paused_total += max(0.0, time.monotonic() - self._paused_at)
+        self._paused_at = None
 
     def _publish(self, message: str) -> None:
         self.progress_callback(RunProgress(
