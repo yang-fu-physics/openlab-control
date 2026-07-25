@@ -13,6 +13,20 @@ class ConfigurationError(ValueError):
     pass
 
 
+_WINDOWS_RESERVED_FILE_STEMS = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "CONIN$",
+        "CONOUT$",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class StabilityConfig:
     tolerance: float
@@ -149,6 +163,26 @@ def _positive_int(value: object, key: str) -> int:
         raise ConfigurationError(f"{key} must be a positive integer") from exc
     if result <= 0:
         raise ConfigurationError(f"{key} must be a positive integer")
+    return result
+
+
+def _windows_file_name(value: object, key: str) -> str:
+    result = str(value)
+    path = Path(result)
+    invalid_characters = '<>:"/\\|?*'
+    stem = result.split(".", 1)[0].upper()
+    if (
+        not result
+        or result != result.strip()
+        or result.rstrip(" .") != result
+        or path.is_absolute()
+        or path.name != result
+        or stem in _WINDOWS_RESERVED_FILE_STEMS
+        or any(character in invalid_characters or ord(character) < 32 for character in result)
+    ):
+        raise ConfigurationError(
+            f"{key} must be a plain Windows file name without a directory"
+        )
     return result
 
 
@@ -323,6 +357,18 @@ def load_config(path: str | Path) -> AppConfig:
         raise ConfigurationError(
             "abort.temperature and abort.field currently support only hold_current"
         )
+    data_file_name = _windows_file_name(
+        logging_raw.get("data_file_name", "experiment.dat"),
+        "logging.data_file_name",
+    )
+    event_file_name = _windows_file_name(
+        logging_raw.get("event_file_name", "events.dat"),
+        "logging.event_file_name",
+    )
+    if data_file_name.casefold() == event_file_name.casefold():
+        raise ConfigurationError(
+            "logging.data_file_name and logging.event_file_name must be different"
+        )
 
     return AppConfig(
         source_path=source,
@@ -335,8 +381,8 @@ def load_config(path: str | Path) -> AppConfig:
         language=str(application.get("language", "en_US")),
         logging=LoggingConfig(
             directory=str(logging_raw.get("directory", "runs")),
-            data_file_name=str(logging_raw.get("data_file_name", "experiment.dat")),
-            event_file_name=str(logging_raw.get("event_file_name", "events.dat")),
+            data_file_name=data_file_name,
+            event_file_name=event_file_name,
             timestamp_epoch=timestamp_epoch,
             flush_every_row=bool(logging_raw.get("flush_every_row", True)),
             allow_external_paths=bool(logging_raw.get("allow_external_paths", False)),

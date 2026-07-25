@@ -141,6 +141,7 @@
 - DATA-004：未声明列、不支持值类型、NaN 或 Infinity SHALL Error。
 - DATA-005：模块 SHALL 自行声明业务 Status/Warning 列；框架不加通用列。
 - DATA-006：Warning/Error 时可用温场/Monitor 数据 SHALL 保留。
+- DATA-007：默认数据/事件日志 SHALL 使用互不相同的单文件名并限制在原子分配的 Run 目录内。
 
 ### 3.9 Data Browser
 

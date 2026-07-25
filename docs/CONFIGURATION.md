@@ -27,6 +27,8 @@
 | `flush_every_row` | `true` | 每写一行立即 Flush，降低断电损失 |
 | `allow_external_paths` | `false` | 是否全局允许绝对/越界数据路径 |
 
+`data_file_name` 与 `event_file_name` 必须是两个不同的 Windows 单文件名，不得包含目录、盘符、保留名、控制字符或尾随空格/句点。该限制防止默认日志绕过自动运行目录，也避免数据与事件文件互相覆盖。
+
 推荐保持 `allow_external_paths = false`，由单条 `Set Datafile ... external ...` 明确授权自定义目录。无论实验 DAT 选到哪里，SEQ、配置和模块快照始终保留在自动运行目录。
 
 ## `[abort]`

@@ -62,12 +62,17 @@ class DatRunLogger:
         root.mkdir(parents=True, exist_ok=True)
         stem = Path(sequence_name).stem or "sequence"
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        directory = root / f"{stamp}_{self._safe_name(stem)}"
-        counter = 1
-        while directory.exists():
-            directory = root / f"{stamp}_{self._safe_name(stem)}_{counter:02d}"
-            counter += 1
-        directory.mkdir(parents=True)
+        safe_stem = self._safe_name(stem)
+        counter = 0
+        while True:
+            suffix = "" if counter == 0 else f"_{counter:02d}"
+            directory = root / f"{stamp}_{safe_stem}{suffix}"
+            try:
+                directory.mkdir()
+            except FileExistsError:
+                counter += 1
+                continue
+            break
         data_file = directory / self.config.logging.data_file_name
         event_file = directory / self.config.logging.event_file_name
         sequence_snapshot = directory / "sequence.seq"

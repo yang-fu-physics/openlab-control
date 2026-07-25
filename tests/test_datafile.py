@@ -7,6 +7,7 @@ import time
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -170,6 +171,38 @@ class DatafileTests(unittest.TestCase):
             empty.close()
             self.assertTrue(paths.data_file.exists())
             self.assertIn("[Data]", paths.data_file.read_text(encoding="utf-8"))
+
+    def test_run_directory_allocation_retries_an_atomic_creation_race(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            (temp_root / "configs").mkdir()
+            config_path = temp_root / "configs" / "default.toml"
+            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config = load_config(config_path)
+            runs_root = temp_root / "runs"
+            original_mkdir = Path.mkdir
+            injected_race = False
+
+            def racing_mkdir(path, *args, **kwargs):
+                nonlocal injected_race
+                if (
+                    not injected_race
+                    and path.parent == runs_root
+                    and path.name.endswith("_race")
+                ):
+                    injected_race = True
+                    original_mkdir(path, *args, **kwargs)
+                    raise FileExistsError(path)
+                return original_mkdir(path, *args, **kwargs)
+
+            logger = DatRunLogger(config, EventManager())
+            with patch.object(Path, "mkdir", racing_mkdir):
+                paths = logger.open_run("race.seq", "T End Sequence\n")
+            logger.close()
+
+            self.assertTrue(injected_race)
+            self.assertTrue(paths.directory.name.endswith("_race_01"))
+            self.assertTrue(paths.data_file.exists())
 
 
 if __name__ == "__main__":

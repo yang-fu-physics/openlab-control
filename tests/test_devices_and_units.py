@@ -131,6 +131,44 @@ class DeviceManagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
                 load_config(invalid_timeout)
 
+    def test_configuration_confines_and_separates_run_log_file_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
+
+            escaped = temp_root / "escaped.toml"
+            escaped.write_text(
+                source.replace(
+                    'data_file_name = "experiment.dat"',
+                    'data_file_name = "../outside.dat"',
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "plain Windows file name"):
+                load_config(escaped)
+
+            reserved = temp_root / "reserved.toml"
+            reserved.write_text(
+                source.replace(
+                    'data_file_name = "experiment.dat"',
+                    'data_file_name = "CON.dat"',
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "plain Windows file name"):
+                load_config(reserved)
+
+            overlapping = temp_root / "overlapping.toml"
+            overlapping.write_text(
+                source.replace(
+                    'event_file_name = "events.dat"',
+                    'event_file_name = "EXPERIMENT.DAT"',
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "must be different"):
+                load_config(overlapping)
+
     def test_completed_poll_cannot_overwrite_a_new_target(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
