@@ -18,6 +18,18 @@ class ReleaseContractTests(unittest.TestCase):
             project = tomllib.load(handle)
         self.assertEqual(project["project"]["version"], __version__)
 
+        for relative_path in (
+            "README.md",
+            "docs/ARCHITECTURE.md",
+            "docs/DAT_FORMAT.md",
+            "docs/TECHNICAL_SPECIFICATION.md",
+        ):
+            with self.subTest(path=relative_path):
+                self.assertIn(
+                    __version__,
+                    (ROOT / relative_path).read_text(encoding="utf-8"),
+                )
+
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
         self.assertIn("from labcontrol import __version__", specification)
         self.assertIn("version=version_info", specification)
