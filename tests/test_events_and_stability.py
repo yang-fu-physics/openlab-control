@@ -42,6 +42,37 @@ class EventTests(unittest.TestCase):
         self.assertEqual(len(notices), 2)
         self.assertEqual(manager.active_events(), ())
 
+    def test_occurrence_listener_receives_latched_repeats(self) -> None:
+        manager = EventManager()
+        visible = []
+        occurrences = []
+        manager.subscribe(visible.append)
+        manager.subscribe_occurrences(occurrences.append)
+        manager.report(Severity.ERROR, "meter", "FAULT", "fault")
+        manager.report(Severity.ERROR, "meter", "FAULT", "fault again")
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(len(occurrences), 2)
+        self.assertFalse(occurrences[-1].show_popup)
+        self.assertEqual(occurrences[-1].event.count, 2)
+
+    def test_warning_escalation_to_error_is_visible_and_latched_as_error(self) -> None:
+        manager = EventManager()
+        notices = []
+        manager.subscribe(notices.append)
+        _, warning_is_new = manager.report(
+            Severity.WARNING, "meter", "LIMIT", "near limit", "channel"
+        )
+        escalated, error_is_new = manager.report(
+            Severity.ERROR, "meter", "LIMIT", "interlock open", "channel"
+        )
+        self.assertTrue(warning_is_new)
+        self.assertTrue(error_is_new)
+        self.assertEqual(escalated.severity, Severity.ERROR)
+        self.assertEqual(escalated.count, 2)
+        self.assertEqual(len(notices), 2)
+        self.assertTrue(notices[-1].show_popup)
+        self.assertEqual(manager.active_events()[0].severity, Severity.ERROR)
+
 
 class StabilityTests(unittest.TestCase):
     def test_requires_tolerance_slope_and_dwell(self) -> None:

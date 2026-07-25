@@ -51,7 +51,7 @@ class SequenceEngine:
         self._total_steps = 0
         self._current_path = ""
         self._call_stack: list[Path] = []
-        self.events.subscribe(self._on_event)
+        self.events.subscribe_occurrences(self._on_event)
 
     def _on_event(self, notice: EventNotice) -> None:
         if (

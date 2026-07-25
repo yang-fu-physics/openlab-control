@@ -139,6 +139,19 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertEqual(state, RunState.FAULTED)
             self.assertAlmostEqual(field.target or 0.0, field.current or 0.0, places=4)
 
+    def test_latched_idle_error_repeated_while_running_requests_fatal_stop(self) -> None:
+        events = EventManager()
+        engine = SequenceEngine(
+            object(), object(), events, object(), object()  # type: ignore[arg-type]
+        )
+        events.report(Severity.ERROR, "device", "FAULT", "fault")
+        self.assertEqual(engine.state, RunState.IDLE)
+        engine.state = RunState.RUNNING
+        events.report(Severity.ERROR, "device", "FAULT", "fault persists")
+        self.assertEqual(engine.state, RunState.STOPPING)
+        self.assertTrue(engine._abort_requested)
+        self.assertTrue(engine._fatal_abort)
+
     def test_disabled_command_and_scan_block_are_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))

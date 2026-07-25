@@ -17,6 +17,7 @@ class EventManager:
     def __init__(self, popup_warnings: bool = True, popup_errors: bool = True) -> None:
         self._active: dict[str, LabEvent] = {}
         self._listeners: list[EventListener] = []
+        self._occurrence_listeners: list[EventListener] = []
         self._lock = RLock()
         self.popup_warnings = popup_warnings
         self.popup_errors = popup_errors
@@ -28,6 +29,16 @@ class EventManager:
     def subscribe(self, listener: EventListener) -> None:
         with self._lock:
             self._listeners.append(listener)
+
+    def subscribe_occurrences(self, listener: EventListener) -> None:
+        """Subscribe to every report, including latched duplicate events.
+
+        Ordinary listeners receive only popup/log-worthy state changes. Runtime
+        safety consumers use this channel so deduplication cannot suppress a
+        repeated fatal condition.
+        """
+        with self._lock:
+            self._occurrence_listeners.append(listener)
 
     def report(
         self,
@@ -53,8 +64,11 @@ class EventManager:
             )
             with self._lock:
                 listeners = tuple(self._listeners)
+                occurrence_listeners = tuple(self._occurrence_listeners)
             notice = EventNotice(copy(event), show_popup=False)
             for listener in listeners:
+                listener(notice)
+            for listener in occurrence_listeners:
                 listener(notice)
             return copy(event), True
         with self._lock:
@@ -63,30 +77,43 @@ class EventManager:
                 existing.count += 1
                 existing.last_seen = now
                 existing.message = message
-                return copy(existing), False
-
-            event = LabEvent(
-                key=key,
-                severity=severity,
-                source=source,
-                code=code,
-                message=message,
-                context=context,
-                timestamp=now,
-                last_seen=now,
-            )
-            self._active[key] = event
-            listeners = tuple(self._listeners)
+                severity_upgraded = (
+                    existing.severity is Severity.WARNING
+                    and severity is Severity.ERROR
+                )
+                if severity_upgraded:
+                    existing.severity = Severity.ERROR
+                event = copy(existing)
+                listeners = tuple(self._listeners) if severity_upgraded else ()
+                occurrence_listeners = tuple(self._occurrence_listeners)
+            else:
+                event = LabEvent(
+                    key=key,
+                    severity=severity,
+                    source=source,
+                    code=code,
+                    message=message,
+                    context=context,
+                    timestamp=now,
+                    last_seen=now,
+                )
+                self._active[key] = event
+                listeners = tuple(self._listeners)
+                occurrence_listeners = tuple(self._occurrence_listeners)
+                severity_upgraded = False
 
         show_popup = (
-            severity is Severity.ERROR and self.popup_errors
+            event.severity is Severity.ERROR and self.popup_errors
         ) or (
-            severity is Severity.WARNING and self.popup_warnings
+            event.severity is Severity.WARNING and self.popup_warnings
         )
-        notice = EventNotice(copy(event), show_popup=show_popup)
+        notice = EventNotice(copy(event), show_popup=show_popup if listeners else False)
         for listener in listeners:
             listener(notice)
-        return copy(event), True
+        occurrence_notice = EventNotice(copy(event), show_popup=False)
+        for listener in occurrence_listeners:
+            listener(occurrence_notice)
+        return copy(event), existing is None or severity_upgraded
 
     def resolve(self, source: str, code: str, context: str = "") -> LabEvent | None:
         key = self.make_key(source, code, context)
