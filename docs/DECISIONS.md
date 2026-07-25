@@ -194,3 +194,11 @@ Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 
 状态：Accepted
 
 模块窗口是主窗口拥有的独立 modeless 窗口，可移动/最小化但移除关闭能力；只有 Disable 成功才隐藏。窗口可见性因此准确反映 Enabled 会话，关闭窗口不会被误解为输出已停止。主窗口最小化会联动最小化当前可见模块窗口。
+
+## ADR-028：发布资源保持外置且只保留一份
+
+状态：Accepted
+
+配置、模块、示例、模板和文档必须位于 EXE 同级目录，既便于实验室审查和维护，也与冻结运行时的项目根目录解析一致。PyInstaller 不再把这些目录同时复制到 `_internal/`；`build.bat` 是发布目录的唯一资源装配步骤。Windows 版本资源直接读取核心包版本，避免 EXE 属性与应用版本漂移。
+
+源码入口 `run.bat` 只启动当前源码环境。发布包由 `dist/OpenLabControl/OpenLabControl.exe` 显式启动，避免开发目录存在旧构建时静默运行旧版本。

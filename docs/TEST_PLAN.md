@@ -159,6 +159,8 @@ build.bat
 - `dist/OpenLabControl/OpenLabControl.exe`；
 - `configs/`、`examples/`、`docs/`、`modules/`、`plugin_templates/`；
 - 可写 `runs/`、`module_data/`、`module_runtime/site-packages/`、`wheels/`；
+- `_internal/` 不重复包含上述外置资源；
+- EXE 文件版本和产品版本与应用版本一致；
 - EXE GUI smoke；
 - EXE headless demo（无模块和 `--enable-module simulated_transport` 两种）；
 - 在没有开发仓库/PYTHONPATH 的干净目录仍能发现 `simulated_transport`。

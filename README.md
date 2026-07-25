@@ -26,6 +26,8 @@ setup.bat
 run.bat
 ```
 
+`run.bat` 始终启动当前源码，不会因为 `dist/` 中残留旧构建而改为运行旧 EXE。
+
 已有环境可直接运行：
 
 ```text
@@ -48,7 +50,7 @@ run.bat
 build.bat
 ```
 
-输出位于 `dist\OpenLabControl\`。发布包旁的 `configs/`、`modules/`、`module_data/`、`module_runtime/`、`wheels/` 和 `runs/` 都会保留为可维护目录。
+输出位于 `dist\OpenLabControl\`。发布包旁的 `configs/`、`modules/`、`module_data/`、`module_runtime/`、`wheels/` 和 `runs/` 都会保留为可维护目录；这些资源只在 EXE 同级保留一份，不会在 `_internal/` 中重复打包。
 
 ## 第一次使用测量模块
 

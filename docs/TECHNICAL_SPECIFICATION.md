@@ -171,6 +171,7 @@
 - NFR-006：源码、示例、配置、模块和文档 SHALL 随发布包提供。
 - NFR-007：模块源码视为受信任；文档 SHALL 明确非安全沙箱。
 - NFR-008：关键生命周期、解析、数据、事件和 UI SHALL 有自动测试。
+- NFR-009：Windows EXE SHALL 写入与应用版本一致的文件/产品版本；外置可维护资源不得在 `_internal/` 重复打包。
 
 ## 5. 状态机
 
@@ -238,6 +239,7 @@ events.dat
 4. 一次 Measure 产生 R1–R4 四个顺序行和每行系统快照。
 5. 无模块 Measure 产生 Warning + 一行系统状态并完成。
 6. 旧 Measure 参数和 Initialize 被解析 Error 拒绝。
-7. Windows 文件夹发布包构建成功，包含 modules/templates/docs。
+7. Windows 文件夹发布包构建成功，包含 modules/templates/docs，且 `_internal/` 无资源副本。
 8. 发布 EXE GUI smoke 与 headless demo 通过。
-9. Git 作者唯一为 `yang-fu-physics <yfu.physics@gmail.com>`。
+9. EXE 文件版本和产品版本与应用版本一致。
+10. Git 作者唯一为 `yang-fu-physics <yfu.physics@gmail.com>`。
