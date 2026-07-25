@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 
@@ -50,6 +51,7 @@ class DatafileTests(unittest.TestCase):
             )
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
+            time.sleep(0.001)
             events.resolve("meter", "OVERLOAD")
             logger.close()
             data = paths.data_file.read_text(encoding="utf-8")
@@ -66,6 +68,15 @@ class DatafileTests(unittest.TestCase):
             self.assertIn("RAISED", event_data)
             self.assertIn("RESOLVED", event_data)
             self.assertIn(",2,", event_data)
+            event_rows = [
+                line.split(",")
+                for line in event_data.splitlines()
+                if ",meter,OVERLOAD," in line
+            ]
+            self.assertEqual(len(event_rows), 2)
+            raised_at = datetime.fromisoformat(event_rows[0][1])
+            resolved_at = datetime.fromisoformat(event_rows[1][1])
+            self.assertGreater(resolved_at, raised_at)
 
     def test_explicit_custom_folder_is_allowed_without_weakening_legacy_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -106,6 +117,59 @@ class DatafileTests(unittest.TestCase):
                 "DATAFILE_RELOCATED",
                 [notice.event.code for notice in safe_notices if not notice.is_resolution],
             )
+
+    def test_invalid_mode_and_schema_mismatch_preserve_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            (temp_root / "configs").mkdir()
+            config_path = temp_root / "configs" / "default.toml"
+            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config = load_config(config_path)
+            logger = DatRunLogger(config, EventManager())
+            logger.open_run("safe.seq", "T End Sequence\n")
+            target = temp_root / "existing.dat"
+            sentinel = "[Data]\nOnly,Two\nkeep,this\n"
+            target.write_text(sentinel, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unknown data file mode"):
+                logger.set_datafile(
+                    str(target), "typo", allow_external=True
+                )
+            self.assertEqual(target.read_text(encoding="utf-8"), sentinel)
+            with self.assertRaisesRegex(ValueError, "different schema"):
+                logger.set_datafile(
+                    str(target), "open", allow_external=True
+                )
+            self.assertEqual(target.read_text(encoding="utf-8"), sentinel)
+            logger.close()
+
+    def test_matching_schema_appends_and_empty_run_creates_default_dat(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            (temp_root / "configs").mkdir()
+            config_path = temp_root / "configs" / "default.toml"
+            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config = load_config(config_path)
+            target = temp_root / "shared.dat"
+
+            first = DatRunLogger(config, EventManager())
+            first.open_run("first.seq", "T End Sequence\n")
+            first.set_datafile(str(target), "create", allow_external=True)
+            first.close()
+
+            second = DatRunLogger(config, EventManager())
+            second.open_run("second.seq", "T End Sequence\n")
+            second.set_datafile(str(target), "open", allow_external=True)
+            second.write_system_row({}, "Measure")
+            second.close()
+            data = target.read_text(encoding="utf-8")
+            self.assertEqual(data.count("[Data]"), 1)
+            self.assertIn(",Measure,", data)
+
+            empty = DatRunLogger(config, EventManager())
+            paths = empty.open_run("empty.seq", "T End Sequence\n")
+            empty.close()
+            self.assertTrue(paths.data_file.exists())
+            self.assertIn("[Data]", paths.data_file.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

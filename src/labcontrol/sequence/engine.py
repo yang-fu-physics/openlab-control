@@ -164,8 +164,8 @@ class SequenceEngine:
             elif self.state is RunState.COMPLETED:
                 self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
             self._publish(self._abort_message or self.state.value)
-            self.logger.close()
             self.events.resolve_source("logging")
+            self.logger.close()
         return self.state
 
     def pause(self) -> None:

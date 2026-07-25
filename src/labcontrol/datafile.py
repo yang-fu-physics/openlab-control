@@ -19,6 +19,7 @@ from .measurement.settings import save_settings
 
 
 LABVIEW_UNIX_OFFSET_SECONDS = 2_082_844_800.0
+DATAFILE_MODES = frozenset({"open", "open|create", "create"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,7 @@ class DatRunLogger:
         self._event_handle: TextIO | None = None
         self._event_writer: csv.writer | None = None
         self._columns: list[str] = []
+        self._data_file_initialized = False
         self._module_descriptors: tuple[ModuleDescriptor, ...] = ()
         self._pending_events: list[EventNotice] = []
         self.events.subscribe(self.on_event)
@@ -95,6 +97,7 @@ class DatRunLogger:
             config_snapshot,
             module_settings_directory,
         )
+        self._data_file_initialized = False
         self._started_monotonic = time.monotonic()
         self._open_event_file(event_file)
         for notice in self._pending_events:
@@ -111,6 +114,7 @@ class DatRunLogger:
     ) -> Path:
         if self.paths is None:
             raise RuntimeError("Run directory has not been created")
+        normalized_mode = self._normalize_datafile_mode(mode)
         path = Path(requested)
         external_allowed = allow_external or self.config.logging.allow_external_paths
         if path.is_absolute() and not external_allowed:
@@ -135,9 +139,22 @@ class DatRunLogger:
                     f"Out-of-scope data path redirected to the run directory: {destination.name}",
                     requested,
                 )
+        if not destination.name:
+            raise ValueError("Data file path must name a file")
+        columns = self._build_columns()
+        append = self._validate_data_file_plan(
+            destination,
+            normalized_mode,
+            columns,
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
         self._close_data_file()
-        self._open_data_file(destination, mode)
+        self._open_data_file(
+            destination,
+            normalized_mode,
+            columns=columns,
+            append=append,
+        )
         self.paths = RunPaths(
             self.paths.directory,
             destination,
@@ -155,16 +172,27 @@ class DatRunLogger:
             self._open_data_file(self.paths.data_file, "open|create")
         return self.paths.data_file
 
-    def _open_data_file(self, path: Path, mode: str) -> None:
-        normalized = mode.lower()
-        if normalized == "open" and not path.exists():
-            raise FileNotFoundError(path)
-        append = normalized in ("open", "open|create") and path.exists() and path.stat().st_size > 0
-        handle_mode = "a" if append else "w"
+    def _open_data_file(
+        self,
+        path: Path,
+        mode: str,
+        *,
+        columns: list[str] | None = None,
+        append: bool | None = None,
+    ) -> None:
+        normalized = self._normalize_datafile_mode(mode)
+        planned_columns = columns if columns is not None else self._build_columns()
+        should_append = (
+            append
+            if append is not None
+            else self._validate_data_file_plan(path, normalized, planned_columns)
+        )
+        handle_mode = "a" if should_append else "w"
         self._data_handle = path.open(handle_mode, encoding="utf-8", newline="")
         self._data_writer = csv.writer(self._data_handle, lineterminator="\n")
-        self._columns = self._build_columns()
-        if not append:
+        self._columns = list(planned_columns)
+        self._data_file_initialized = True
+        if not should_append:
             self._data_handle.write("[Header]\n")
             self._data_handle.write("; OpenLab Control Data File (default extension .dat)\n")
             self._data_handle.write("; Timestamp(s) uses the LabVIEW 1904 epoch for template compatibility.\n")
@@ -183,7 +211,69 @@ class DatRunLogger:
                 ])
             self._data_handle.write("\n[Data]\n")
             self._data_writer.writerow(self._columns)
+        elif path.stat().st_size > 0 and not self._ends_with_newline(path):
+            self._data_handle.write("\n")
         self._flush_data()
+
+    @staticmethod
+    def _normalize_datafile_mode(mode: str) -> str:
+        normalized = mode.strip().casefold()
+        if normalized not in DATAFILE_MODES:
+            allowed = ", ".join(sorted(DATAFILE_MODES))
+            raise ValueError(f"Unknown data file mode {mode!r}; expected one of: {allowed}")
+        return normalized
+
+    def _validate_data_file_plan(
+        self,
+        path: Path,
+        mode: str,
+        columns: list[str],
+    ) -> bool:
+        if mode == "open" and not path.exists():
+            raise FileNotFoundError(path)
+        append = (
+            mode in {"open", "open|create"}
+            and path.exists()
+            and path.stat().st_size > 0
+        )
+        if append:
+            existing = self._read_data_columns(path)
+            if existing != columns:
+                raise ValueError(
+                    "Cannot append to a DAT file with a different schema: "
+                    f"expected {columns!r}, found {existing!r}"
+                )
+        return append
+
+    @staticmethod
+    def _read_data_columns(path: Path) -> list[str]:
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                for line in handle:
+                    if line.strip().casefold() == "[data]":
+                        break
+                else:
+                    raise ValueError(
+                        f"Cannot append to {path}: the file has no [Data] section"
+                    )
+                for record in csv.reader(handle):
+                    values = [cell.strip() for cell in record]
+                    if not any(values):
+                        continue
+                    if values[0].lstrip().startswith(";"):
+                        continue
+                    return values
+        except UnicodeError as exc:
+            raise ValueError(
+                f"Cannot append to {path}: the file is not UTF-8"
+            ) from exc
+        raise ValueError(f"Cannot append to {path}: the file has no column header")
+
+    @staticmethod
+    def _ends_with_newline(path: Path) -> bool:
+        with path.open("rb") as handle:
+            handle.seek(-1, 2)
+            return handle.read(1) in {b"\n", b"\r"}
 
     def _build_columns(self) -> list[str]:
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]
@@ -285,11 +375,16 @@ class DatRunLogger:
         if self._event_writer is None:
             return
         event = notice.event
-        unix = event.timestamp.timestamp()
+        timestamp = (
+            event.resolved_at
+            if notice.is_resolution and event.resolved_at is not None
+            else event.timestamp
+        )
+        unix = timestamp.timestamp()
         absolute = unix + LABVIEW_UNIX_OFFSET_SECONDS if self.config.logging.timestamp_epoch == "labview_1904" else unix
         self._event_writer.writerow([
             f"{absolute:.2f}",
-            event.timestamp.isoformat(),
+            timestamp.isoformat(),
             event.severity.value,
             event.source,
             event.code,
@@ -313,6 +408,8 @@ class DatRunLogger:
         self._data_writer = None
 
     def close(self) -> None:
+        if self.paths is not None and not self._data_file_initialized:
+            self.ensure_data_file()
         self._close_data_file()
         if self._event_handle is not None:
             self._event_handle.flush()

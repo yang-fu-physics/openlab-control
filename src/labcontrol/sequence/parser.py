@@ -238,12 +238,36 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
     if lowered.startswith("set datafile "):
         payload = text[len("Set Datafile "):].strip()
         parts = payload.split(maxsplit=1)
-        mode = parts[0] if parts else "open|create"
+        mode = parts[0].casefold() if parts else "open|create"
+        if mode not in {"open", "open|create", "create"}:
+            return Command(
+                CommandType.UNKNOWN,
+                {"text": text},
+                raw_text=text,
+                source_line=line_number,
+            ), SequenceIssue(
+                line_number,
+                "error",
+                "Set Datafile mode must be open, open|create, or create",
+                text,
+            )
         path = parts[1] if len(parts) > 1 else "experiment.dat"
         path_scope = "Run folder"
         if path.lower().startswith("external "):
             path_scope = "Custom folder"
             path = path[len("external "):].strip()
+        if not path:
+            return Command(
+                CommandType.UNKNOWN,
+                {"text": text},
+                raw_text=text,
+                source_line=line_number,
+            ), SequenceIssue(
+                line_number,
+                "error",
+                "Set Datafile requires a non-empty file path",
+                text,
+            )
         return Command(
             CommandType.SET_DATAFILE,
             {"mode": mode, "path_scope": path_scope, "path": path},

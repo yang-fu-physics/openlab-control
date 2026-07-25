@@ -167,6 +167,14 @@ class SequenceParserTests(unittest.TestCase):
             "Set Datafile open|create external C:\\Experiment Data\\sample.dat",
         )
 
+    def test_invalid_datafile_mode_is_a_parse_error(self) -> None:
+        result = parse_sequence(
+            "T Set Datafile typo experiment.dat\nT End Sequence\n"
+        )
+        self.assertTrue(result.has_errors)
+        self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
+        self.assertIn("mode must be", result.issues[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()
