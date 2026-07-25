@@ -60,6 +60,17 @@ T Wait For 10.0 secs
 
 Pause 会冻结等待进度；Stop/Error 可在最多约一个运行时检查周期内打断。
 
+### 设备选择
+
+温度/磁场 Set 和 Scan 都可在末尾显式选择配置中的设备：
+
+```text
+T Set Temperature 20.000 K at 5.000 K/min in Settle mode using device "cryostat_primary"
+T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using device "magnet A"
+```
+
+参数窗口按设备类型列出真实配置 ID，并随选择项切换上下限和最大速率。省略 `using device` 时选择该类型的第一个配置设备；旧文件中的 `temperature`/`field` 角色名也按此规则兼容。显式 ID 会随保存和重新打开保持，ID 不得指向错误的设备类型。
+
 ### Set Temperature
 
 ```text

@@ -70,6 +70,8 @@
 - DEV-007：设备 Connect/Poll/Set/Hold/Disconnect SHALL 有配置化有限框架超时。
 - DEV-008：一次设备操作超时后，框架 SHALL 禁止该设备后续 I/O 直到重启，并报告 Error。
 - DEV-009：Stop 时任一控制设备未确认 Hold Current，最终运行状态 SHALL 为 Faulted。
+- DEV-010：SEQ 参数窗口 SHALL 按类型列出配置设备 ID，使用对应设备的 Target/Rate 限制。
+- DEV-011：显式 SEQ 设备 ID SHALL 可保存/重载；省略 ID 或旧角色名 SHALL 解析到该类型第一个配置设备。
 
 ### 3.4 Measurement Module 发现与依赖
 

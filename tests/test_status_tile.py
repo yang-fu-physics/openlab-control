@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -183,6 +184,39 @@ class StatusTileTests(unittest.TestCase):
         temperature_scan_dialog.close()
         field_dialog.close()
         field_scan_dialog.close()
+
+    def test_sequence_dialog_selects_custom_device_ids_and_their_limits(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        temperature = next(
+            device for device in config.devices
+            if device.kind is DeviceKind.TEMPERATURE
+        )
+        custom_devices = (
+            replace(temperature, id="cryostat_primary"),
+            replace(
+                temperature,
+                id="cryostat_backup",
+                min_value=2.0,
+                max_value=350.0,
+                max_rate_per_minute=12.0,
+            ),
+        )
+        spec = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE]
+        dialog = CommandDialog(
+            spec.create(),
+            spec,
+            device_configs=custom_devices,
+        )
+        device_input = dialog.inputs["device_id"]
+        self.assertEqual(device_input.currentText(), "cryostat_primary")
+        self.assertEqual(device_input.count(), 2)
+        self.assertEqual(dialog.inputs["target"].maximum(), 400.0)
+        device_input.setCurrentText("cryostat_backup")
+        self.assertEqual(dialog.inputs["target"].minimum(), 2.0)
+        self.assertEqual(dialog.inputs["target"].maximum(), 350.0)
+        self.assertEqual(dialog.inputs["rate"].maximum(), 12.0)
+        self.assertEqual(dialog.values()["device_id"], "cryostat_backup")
+        dialog.close()
 
     def test_temperature_list_dialog_rejects_points_outside_configured_limits(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")

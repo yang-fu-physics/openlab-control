@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import dataclass
@@ -33,12 +34,13 @@ class ParseResult:
 
 _SET_TEMPERATURE = re.compile(
     rf"^Set\s+Temperature\s+(?P<target>{NUMBER})\s*K\s+at\s+"
-    rf"(?P<rate>{NUMBER})\s*K/min\s+in\s+(?P<mode>.+?)\s+mode$",
+    rf"(?P<rate>{NUMBER})\s*K/min\s+in\s+(?P<mode>Settle|Sweep)\s+mode$",
     re.IGNORECASE,
 )
 _SET_FIELD = re.compile(
     rf"^Set\s+Field\s+(?P<target>{NUMBER})\s*(?P<unit>T|Oe)\s+at\s+"
-    rf"(?P<rate>{NUMBER})\s*(?P<rate_unit>T|Oe)/min\s+in\s+(?P<mode>.+?)\s+mode$",
+    rf"(?P<rate>{NUMBER})\s*(?P<rate_unit>T|Oe)/min\s+in\s+"
+    rf"(?P<mode>Settle|Sweep)\s+mode$",
     re.IGNORECASE,
 )
 _SCAN_TEMPERATURE = re.compile(
@@ -65,6 +67,15 @@ _SCAN_TIME = re.compile(
 )
 _WAIT = re.compile(
     rf"^Wait(?:\s+For)?\s+(?P<seconds>{NUMBER})\s*(?:secs?|seconds?)$",
+    re.IGNORECASE,
+)
+_DEVICE_SUFFIX = re.compile(
+    r'^(?P<body>.+?)\s+using\s+device\s+'
+    r'(?P<device>"(?:\\.|[^"\\])*"|[^\s]+)\s*$',
+    re.IGNORECASE,
+)
+_DEVICE_COMMAND_PREFIX = re.compile(
+    r"^(?:Set|Scan)\s+(?:Temperature|Field)\b",
     re.IGNORECASE,
 )
 
@@ -105,7 +116,7 @@ def format_temperature_points(value: object) -> str:
     return ", ".join(fixed_number(point, 3) for point in parse_temperature_points(value))
 
 
-def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
+def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
     lowered = text.lower()
     match = _SET_TEMPERATURE.match(text)
     if match:
@@ -346,6 +357,78 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
     ), SequenceIssue(line_number, "warning", "Unknown command will be preserved and skipped at runtime", text)
 
 
+def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
+    original = text
+    device_id: str | None = None
+    if _DEVICE_COMMAND_PREFIX.match(text):
+        suffix = _DEVICE_SUFFIX.match(text)
+        if suffix is not None:
+            text = suffix.group("body").rstrip()
+            raw_device = suffix.group("device")
+            try:
+                parsed_device = (
+                    json.loads(raw_device)
+                    if raw_device.startswith('"')
+                    else raw_device
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                command = Command(
+                    CommandType.UNKNOWN,
+                    {"text": original},
+                    raw_text=original,
+                    source_line=line_number,
+                )
+                return command, SequenceIssue(
+                    line_number,
+                    "error",
+                    f"Invalid device ID suffix: {exc}",
+                    original,
+                )
+            device_id = str(parsed_device).strip()
+            if not device_id:
+                command = Command(
+                    CommandType.UNKNOWN,
+                    {"text": original},
+                    raw_text=original,
+                    source_line=line_number,
+                )
+                return command, SequenceIssue(
+                    line_number,
+                    "error",
+                    "Device ID in a control command cannot be empty",
+                    original,
+                )
+
+    command, issue = _parse_base_command(text, line_number)
+    command.raw_text = original
+    if (
+        command.type is CommandType.UNKNOWN
+        and _DEVICE_COMMAND_PREFIX.match(original)
+        and (issue is None or issue.level != "error")
+    ):
+        issue = SequenceIssue(
+            line_number,
+            "error",
+            "Invalid temperature or field command syntax, mode, or device suffix",
+            original,
+        )
+    if device_id is not None:
+        if command.type not in {
+            CommandType.SET_TEMPERATURE,
+            CommandType.SET_FIELD,
+            CommandType.SCAN_TEMPERATURE,
+            CommandType.SCAN_FIELD,
+        }:
+            return command, SequenceIssue(
+                line_number,
+                "error",
+                "The device suffix is valid only on temperature or field commands",
+                original,
+            )
+        command.params["device_id"] = device_id
+    return command, issue
+
+
 def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = None) -> ParseResult:
     document = SequenceDocument(name=name, path=path)
     stack: list[list[Command]] = [document.commands]
@@ -422,6 +505,13 @@ def _format_number(value: object, decimals: int = 3) -> str:
     return fixed_number(value, decimals)
 
 
+def _device_suffix(params: dict[str, object], default_id: str) -> str:
+    device_id = str(params.get("device_id", "")).strip()
+    if not device_id or device_id == default_id:
+        return ""
+    return f" using device {json.dumps(device_id, ensure_ascii=False)}"
+
+
 def format_command(command: Command) -> str:
     if command.raw_text is not None:
         return command.raw_text
@@ -438,6 +528,7 @@ def format_command(command: Command) -> str:
         return (
             f"Set Temperature {_format_number(p.get('target', 300.0))} K at "
             f"{_format_number(p.get('rate', 5.0))} K/min in {p.get('mode', 'Settle')} mode"
+            f"{_device_suffix(p, 'temperature')}"
         )
     if command.type is CommandType.SET_FIELD:
         unit = p.get("unit", "Oe")
@@ -445,6 +536,7 @@ def format_command(command: Command) -> str:
         return (
             f"Set Field {_format_number(p.get('target', 0.0), decimals)} {unit} at "
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min in {p.get('mode', 'Settle')} mode"
+            f"{_device_suffix(p, 'field')}"
         )
     if command.type is CommandType.SCAN_TEMPERATURE:
         if str(p.get("point_mode", "Linear")).casefold() == "list":
@@ -455,11 +547,13 @@ def format_command(command: Command) -> str:
             return (
                 f"Scan Temperature List {points} K at "
                 f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
+                f"{_device_suffix(p, 'temperature')}"
             )
         return (
             f"Scan Temperature {_format_number(p.get('start', 300.0))} K to "
             f"{_format_number(p.get('stop', 10.0))} K in {int(p.get('steps', 10))} steps at "
             f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
+            f"{_device_suffix(p, 'temperature')}"
         )
     if command.type is CommandType.SCAN_FIELD:
         unit = p.get("unit", "Oe")
@@ -468,6 +562,7 @@ def format_command(command: Command) -> str:
             f"Scan Field {_format_number(p.get('start', 0.0), decimals)} {unit} to "
             f"{_format_number(p.get('stop', 10000.0), decimals)} {unit} in {int(p.get('steps', 11))} steps at "
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min, {p.get('mode', 'Settle')}"
+            f"{_device_suffix(p, 'field')}"
         )
     if command.type is CommandType.SCAN_TIME:
         return (

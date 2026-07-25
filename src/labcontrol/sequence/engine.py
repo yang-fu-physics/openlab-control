@@ -257,7 +257,10 @@ class SequenceEngine:
             await self._interruptible_sleep(float(p.get("seconds", 0.0)))
             return
         if command.type is CommandType.SET_TEMPERATURE:
-            device_id = str(p.get("device_id", "temperature"))
+            device_id = self.devices.resolve_device_id(
+                DeviceKind.TEMPERATURE,
+                p.get("device_id"),
+            )
             applied = await self.devices.set_target_by_kind(
                 DeviceKind.TEMPERATURE,
                 float(p.get("target", 300.0)),
@@ -271,7 +274,10 @@ class SequenceEngine:
                 await self._wait_for_stability(device_id)
             return
         if command.type is CommandType.SET_FIELD:
-            device_id = str(p.get("device_id", "field"))
+            device_id = self.devices.resolve_device_id(
+                DeviceKind.FIELD,
+                p.get("device_id"),
+            )
             device_unit = self.devices.device_configs[device_id].unit
             source_unit = str(p.get("unit", device_unit))
             target = convert_value(float(p.get("target", 0.0)), source_unit, device_unit)
@@ -340,7 +346,7 @@ class SequenceEngine:
         path: list[str],
     ) -> None:
         p = command.params
-        device_id = str(p.get("device_id", kind.value))
+        device_id = self.devices.resolve_device_id(kind, p.get("device_id"))
         config = self.devices.device_configs[device_id]
         source_unit = "K" if kind is DeviceKind.TEMPERATURE else str(p.get("unit", config.unit))
         rate = convert_value(float(p.get("rate", config.default_rate_per_minute)), source_unit, config.unit)

@@ -178,6 +178,38 @@ class SequenceEditorTests(unittest.TestCase):
         self.assertTrue(editor.copy_action.isEnabled())
         editor.close()
 
+    def test_batch_paste_keeps_items_after_a_scan_as_siblings(self) -> None:
+        scan = Command(
+            CommandType.SCAN_TIME,
+            {"duration_seconds": 1.0, "steps": 2},
+            [Command(CommandType.MEASURE)],
+        )
+        document = SequenceDocument([
+            scan,
+            Command(CommandType.REMARK, {"text": "sibling"}),
+        ])
+        editor = SequenceEditorWidget(document)
+        editor.show()
+        self.application.processEvents()
+
+        self._select_rows(editor, 0, 3)
+        editor.copy_selected()
+        self.assertEqual(len(editor._clipboard), 2)
+        self._select_rows(editor, editor.list.count() - 1)
+        editor.paste()
+
+        self.assertEqual(len(document.commands), 4)
+        pasted_scan = document.commands[2]
+        pasted_sibling = document.commands[3]
+        self.assertEqual(pasted_scan.type, CommandType.SCAN_TIME)
+        self.assertEqual(
+            [child.type for child in pasted_scan.children],
+            [CommandType.MEASURE],
+        )
+        self.assertEqual(pasted_sibling.type, CommandType.REMARK)
+        self.assertEqual(pasted_sibling.params["text"], "sibling")
+        editor.close()
+
     def test_rebuild_keeps_command_prefixes_visible(self) -> None:
         document = SequenceDocument([
             Command(CommandType.REMARK, {"text": "long command " * 30}),

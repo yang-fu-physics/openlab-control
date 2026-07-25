@@ -262,9 +262,11 @@ class SequenceEditorWidget(QWidget):
         inserted: list[Command] = []
         for template in self._clipboard:
             duplicate = template.clone()
-            self.document.insert(duplicate, anchor)
+            if inserted:
+                self.document.insert_after(duplicate, inserted[-1].id)
+            else:
+                self.document.insert(duplicate, anchor)
             inserted.append(duplicate)
-            anchor = FlatRow(duplicate.id, 0, False)
         self.rebuild(
             inserted[-1].id,
             select_command_ids={command.id for command in inserted},

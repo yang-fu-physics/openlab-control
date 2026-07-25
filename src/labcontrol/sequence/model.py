@@ -134,6 +134,14 @@ class SequenceDocument:
         parent, index = location
         parent.insert(index + 1, command)
 
+    def insert_after(self, command: Command, anchor_id: str) -> None:
+        location = self._locate(anchor_id)
+        if location is None:
+            self.commands.append(command)
+            return
+        parent, index = location
+        parent.insert(index + 1, command)
+
     def delete(self, command_id: str) -> bool:
         location = self._locate(command_id)
         if location is None:

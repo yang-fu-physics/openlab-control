@@ -258,6 +258,31 @@ class DeviceManager:
                 return config.id
         raise DeviceError(f"No {kind.value} device is configured", "DEVICE_NOT_CONFIGURED", kind.value)
 
+    def resolve_device_id(
+        self,
+        kind: DeviceKind,
+        requested: object | None = None,
+    ) -> str:
+        candidate = str(requested or "").strip()
+        if not candidate or (
+            candidate == kind.value and candidate not in self.device_configs
+        ):
+            candidate = self.first_device_id(kind)
+        config = self.device_configs.get(candidate)
+        if config is None:
+            raise DeviceError(
+                f"Unknown {kind.value} device: {candidate}",
+                "UNKNOWN_DEVICE",
+                candidate,
+            )
+        if config.kind is not kind:
+            raise DeviceError(
+                f"Device {candidate} is {config.kind.value}, not {kind.value}",
+                "DEVICE_KIND_MISMATCH",
+                candidate,
+            )
+        return candidate
+
     def validate_target(self, device_id: str, value: float, rate_per_minute: float) -> None:
         config = self.device_configs[device_id]
         if config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
@@ -337,7 +362,7 @@ class DeviceManager:
         mode: str = "Settle",
         device_id: str | None = None,
     ) -> bool:
-        selected = device_id or self.first_device_id(kind)
+        selected = self.resolve_device_id(kind, device_id)
         return await self.set_target(selected, value, rate_per_minute, mode)
 
     async def hold_all(self) -> bool:

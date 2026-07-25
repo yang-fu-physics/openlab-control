@@ -65,7 +65,35 @@ class CommandDialog(QDialog):
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         for field in spec.fields:
             value = command.params.get(field.name, field.default)
-            if field.field_type == "choice":
+            expected_kind = (
+                DeviceKind.TEMPERATURE
+                if command.type in TEMPERATURE_COMMANDS
+                else DeviceKind.FIELD
+            )
+            if (
+                field.name == "device_id"
+                and command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS
+            ):
+                widget = QComboBox()
+                candidates = [
+                    item.id
+                    for item in device_configs
+                    if item.kind is expected_kind
+                ]
+                widget.addItems(candidates)
+                requested = str(value).strip()
+                index = widget.findText(
+                    requested,
+                    Qt.MatchFlag.MatchFixedString,
+                )
+                if index >= 0:
+                    widget.setCurrentIndex(index)
+                elif requested and (
+                    requested != expected_kind.value or not candidates
+                ):
+                    widget.insertItem(0, requested)
+                    widget.setCurrentIndex(0)
+            elif field.field_type == "choice":
                 widget = QComboBox()
                 widget.addItems(field.choices)
                 index = widget.findText(str(value), Qt.MatchFlag.MatchFixedString)
@@ -112,6 +140,8 @@ class CommandDialog(QDialog):
             device_input = self.inputs.get("device_id")
             if isinstance(device_input, QLineEdit):
                 device_input.textChanged.connect(self._apply_device_limits)
+            elif isinstance(device_input, QComboBox):
+                device_input.currentTextChanged.connect(self._apply_device_limits)
             self._apply_device_limits()
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel

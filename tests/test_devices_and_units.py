@@ -60,6 +60,37 @@ class DeviceManagerTests(unittest.TestCase):
         with self.assertRaises(SafetyViolation):
             manager.validate_target("temperature", math.inf, 10.0)
 
+    def test_device_role_aliases_resolve_custom_ids_and_reject_wrong_kinds(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        custom = replace(
+            config,
+            devices=tuple(
+                replace(
+                    device,
+                    id={
+                        "temperature": "cryostat_primary",
+                        "field": "magnet_primary",
+                    }.get(device.id, device.id),
+                )
+                for device in config.devices
+            ),
+        )
+        manager = DeviceManager(custom, EventManager())
+        self.assertEqual(
+            manager.resolve_device_id(DeviceKind.TEMPERATURE, "temperature"),
+            "cryostat_primary",
+        )
+        self.assertEqual(
+            manager.resolve_device_id(DeviceKind.FIELD, "magnet_primary"),
+            "magnet_primary",
+        )
+        with self.assertRaises(DeviceError) as wrong_kind:
+            manager.resolve_device_id(DeviceKind.TEMPERATURE, "magnet_primary")
+        self.assertEqual(wrong_kind.exception.code, "DEVICE_KIND_MISMATCH")
+        with self.assertRaises(DeviceError) as missing:
+            manager.resolve_device_id(DeviceKind.FIELD, "missing")
+        self.assertEqual(missing.exception.code, "UNKNOWN_DEVICE")
+
     def test_configuration_rejects_nonfinite_and_nonpositive_safety_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)

@@ -183,6 +183,59 @@ class SequenceParserTests(unittest.TestCase):
         self.assertTrue(result.has_errors)
         self.assertIn("non-finite", result.issues[0].message)
 
+    def test_explicit_device_ids_round_trip_and_remark_text_is_unchanged(self) -> None:
+        result = parse_sequence(
+            'T Set Temperature 20.000 K at 5.000 K/min in Settle mode '
+            'using device "cryostat temperature"\n'
+            "T Scan Field 0.00 Oe to 100.00 Oe in 2 steps at "
+            "50.00 Oe/min, Sweep using device magnet_primary\n"
+            "T     Measure\n"
+            "T End Scan\n"
+            "T Remark calibrated using device field\n"
+            "T End Sequence\n"
+        )
+        self.assertFalse(result.has_errors)
+        self.assertEqual(
+            result.document.commands[0].params["device_id"],
+            "cryostat temperature",
+        )
+        self.assertEqual(
+            result.document.commands[1].params["device_id"],
+            "magnet_primary",
+        )
+        self.assertEqual(
+            result.document.commands[2].params["text"],
+            "calibrated using device field",
+        )
+
+        result.document.commands[0].update_params(
+            dict(result.document.commands[0].params)
+        )
+        result.document.commands[1].update_params(
+            dict(result.document.commands[1].params)
+        )
+        serialized = serialize_sequence(result.document)
+        self.assertIn('using device "cryostat temperature"', serialized)
+        self.assertIn('using device "magnet_primary"', serialized)
+        reparsed = parse_sequence(serialized)
+        self.assertFalse(reparsed.has_errors)
+        self.assertEqual(
+            reparsed.document.commands[0].params["device_id"],
+            "cryostat temperature",
+        )
+        self.assertEqual(
+            reparsed.document.commands[1].params["device_id"],
+            "magnet_primary",
+        )
+
+    def test_invalid_control_mode_is_a_parse_error(self) -> None:
+        result = parse_sequence(
+            "T Set Temperature 20 K at 5 K/min in Unsafe mode\n"
+            "T End Sequence\n"
+        )
+        self.assertTrue(result.has_errors)
+        self.assertIn("mode", result.issues[0].message)
+
 
 if __name__ == "__main__":
     unittest.main()
