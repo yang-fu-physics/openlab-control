@@ -1,3 +1,13 @@
+"""把核心事件异步发送到外部报警接收端。
+
+这里的 HTTP 报警只负责“尽力通知”，不是仪表互锁的一部分。网络不可用、接收端离线或
+程序退出超时都不能阻塞 SEQ 的 Error 处理、温场 Hold 或设备进程回收。因此实现采用
+有界队列和独立后台线程，并把最终发送失败重新报告为本地 Warning。
+
+收件人不由发射端指定。发射端只发送 Warning/Error 级别及事件内容，管理员和测试员的
+路由完全由接收端配置，避免持有 Token 的客户端任意选择 QQ 目标。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,11 +34,19 @@ _MAX_RESPONSE_BYTES = 64 * 1024
 
 @dataclass(frozen=True, slots=True)
 class AlarmReport:
+    """一次报警投递的不可变快照。
+
+    ``event_id`` 在全部重试中保持不变，接收端可以据此实现幂等去重；``level`` 只允许
+    由上游 Event 的严重级别生成，不接受 UI 或远端输入直接覆盖。
+    """
+
     event_id: str
     level: str
     message: str
 
     def payload(self) -> bytes:
+        """生成紧凑 UTF-8 JSON；禁止 NaN，避免产生非标准 JSON。"""
+
         return json.dumps(
             {
                 "event_id": self.event_id,
@@ -42,7 +60,12 @@ class AlarmReport:
 
 
 class AlarmReporter:
-    """Non-blocking HTTP sender for deduplicated Warning/Error notices."""
+    """非阻塞、可重试且有容量上限的 Warning/Error HTTP 发射端。
+
+    主运行线程只调用 :meth:`handle_notice` 做一次非阻塞入队。DNS、TCP、TLS 和 HTTP
+    等可能长时间等待的工作全部在 ``OpenLabAlarmReporter`` 线程完成。队列满时宁可
+    丢弃新通知并在本地留下 Warning，也不能反向拖住仪表安全动作。
+    """
 
     def __init__(
         self,
@@ -56,6 +79,8 @@ class AlarmReporter:
         self.project_root = project_root.resolve()
         self._delivery_state_callback = delivery_state_callback
         self._opener = opener
+        # 队列必须有上限。报警接收端长期离线时，无界队列会持续占用内存，并可能把一个
+        # 次要的通知故障放大成主程序崩溃。
         self._queue: queue.Queue[AlarmReport | object] = queue.Queue(
             maxsize=config.queue_size
         )
@@ -69,6 +94,8 @@ class AlarmReporter:
         return self.config.enabled
 
     def start(self) -> None:
+        """校验凭据后启动发送线程；配置或 Token 无效时保持 fail-closed。"""
+
         if not self.enabled or self._thread is not None:
             return
         try:
@@ -84,6 +111,12 @@ class AlarmReporter:
         self._thread.start()
 
     def handle_notice(self, notice: EventNotice) -> None:
+        """接收 EventManager 通知并尝试非阻塞入队。
+
+        RESOLVED、Info 和报警发射端自身产生的事件都不向外发送。最后一条限制用于阻断
+        “报警发送失败 -> 新报警 -> 再次发送失败”的反馈回路。
+        """
+
         if (
             not self.enabled
             or self._thread is None
@@ -98,6 +131,8 @@ class AlarmReporter:
             f"{event.key}|{event.timestamp.isoformat()}|"
             f"{event.severity.value}"
         )
+        # key 标识 Source/Code/Context，时间戳区分同一故障恢复后的再次发生，severity
+        # 区分 Warning 升级为 Error。重试复用同一 event_id，便于接收端幂等处理。
         event_id = hashlib.sha256(
             identity.encode("utf-8")
         ).hexdigest()
@@ -115,6 +150,13 @@ class AlarmReporter:
             )
 
     def close(self, timeout_seconds: float | None = None) -> None:
+        """在给定总时限内停止后台线程，不无限等待远端网络。
+
+        优先放入哨兵，让已排队任务按正常路径收尾；队列已满或线程没有按时退出时再设置
+        stop Event。这里不会为了“保证消息送达”延长应用关闭，因为设备和模块资源释放
+        的优先级更高。
+        """
+
         thread = self._thread
         if thread is None:
             self._disable_callback()
@@ -139,6 +181,8 @@ class AlarmReporter:
         self._disable_callback()
 
     def _run(self) -> None:
+        """后台线程主循环；每个 ``get`` 都与一次 ``task_done`` 成对。"""
+
         while not self._stop.is_set():
             try:
                 item = self._queue.get(timeout=0.2)
@@ -153,6 +197,8 @@ class AlarmReporter:
                 self._queue.task_done()
 
     def _deliver_with_retries(self, report: AlarmReport) -> None:
+        """用同一个 event_id 重试，且等待可被关闭请求立即打断。"""
+
         last_error: BaseException | None = None
         for attempt in range(1, self.config.retry_attempts + 1):
             if self._stop.is_set():
@@ -176,6 +222,8 @@ class AlarmReporter:
         )
 
     def _deliver(self, report: AlarmReport) -> None:
+        """执行一次有超时的 HTTP POST，并限制接收端响应体大小。"""
+
         request = Request(
             self.config.endpoint,
             data=report.payload(),
@@ -202,6 +250,8 @@ class AlarmReporter:
             body = response.read(
                 _MAX_RESPONSE_BYTES + 1
             )
+        # urllib 通常会把非 2xx 变成 HTTPError，但测试 opener 或其他实现未必如此，
+        # 所以仍显式检查状态码，不把“收到响应”误判为“报警已接收”。
         if not 200 <= status < 300:
             raise OSError(
                 f"Alarm receiver returned HTTP {status}"
@@ -212,6 +262,12 @@ class AlarmReporter:
             )
 
     def _load_token(self) -> str:
+        """从环境变量或独立文件读取 Token，绝不从普通配置正文回显秘密。
+
+        环境变量优先，文件只作离线部署的替代方案。长度和字符集限制既能发现误配，也
+        避免把整份配置文件或带换行内容意外放进 HTTP Header。
+        """
+
         token = ""
         if self.config.token_env:
             token = os.environ.get(
@@ -251,6 +307,8 @@ class AlarmReporter:
 
     @staticmethod
     def _format_message(notice: EventNotice) -> str:
+        """生成适合即时消息阅读的文本，并限制远端单条消息长度。"""
+
         event = notice.event
         lines = [
             f"【OpenLab Control {event.severity.value.upper()}】",
@@ -274,6 +332,8 @@ class AlarmReporter:
         )
 
     def _notify_success(self) -> None:
+        """通知核心清除“报警发送失败”Warning；回调异常不得杀死发送线程。"""
+
         callback = self._callback()
         if callback is not None:
             try:
@@ -282,6 +342,8 @@ class AlarmReporter:
                 pass
 
     def _notify_failure(self, message: str) -> None:
+        """把最终投递失败转为本地状态，不递归投递该 Warning。"""
+
         callback = self._callback()
         if callback is not None:
             try:
