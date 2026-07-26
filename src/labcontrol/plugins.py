@@ -1,3 +1,13 @@
+"""设备实例管理、访问串行化、安全限制与断线恢复。
+
+``DeviceManager`` 是所有温度、磁场和只读 Monitor 的唯一运行时入口。它把每台设备限制为
+一个异步锁，统一执行操作超时、读数校验、目标上下限、速率限制和 1 分钟重连策略。SEQ
+运行期间还会取得控制权租约，使手动调用即使绕过 GUI 按钮也无法修改主控目标。
+
+外部 Device Plugin 默认在独立进程中运行；内置模拟设备可以进程内运行。两种客户端在本层
+之后使用相同的安全和状态恢复逻辑。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -41,6 +51,8 @@ T = TypeVar("T")
 
 
 class DeviceManager:
+    """拥有全部设备客户端、最新快照和连接恢复状态的异步管理器。"""
+
     def __init__(
         self,
         config: AppConfig,
@@ -49,6 +61,8 @@ class DeviceManager:
         *,
         isolate_processes: bool = True,
     ) -> None:
+        """建立设备映射和安全状态；此阶段只实例化客户端，不连接真实仪表。"""
+
         self.config = config
         self.events = events
         self.descriptors = {descriptor.id: descriptor for descriptor in descriptors}
@@ -73,6 +87,12 @@ class DeviceManager:
         self._load_plugins()
 
     def _load_plugins(self) -> None:
+        """根据已验证配置创建设备客户端，但暂不连接真实仪表。
+
+        外部插件必须同时满足清单有效、目录指纹仍匹配信任记录、API 版本兼容和隔离依赖完整；
+        不能通过在配置中直接写任意 ``module:class`` 来加载第三方代码。
+        """
+
         trust_store: PluginTrustStore | None = None
         for device_config in self.config.devices:
             descriptor: DevicePluginDescriptor | None = None
@@ -230,13 +250,19 @@ class DeviceManager:
                 self._stability[device_config.id] = StabilityEvaluator(device_config.stability)
 
     def connection_state(self, device_id: str) -> DeviceConnectionState:
+        """返回指定设备当前连接生命周期状态。"""
+
         return self._connection_states[device_id]
 
     @property
     def control_ready(self) -> bool:
+        """所有参与控制的设备均已连接且读数新鲜时为真。"""
+
         return self.control_block_reason() is None
 
     def control_block_reason(self) -> str | None:
+        """返回首个阻止手动控制或启动 SEQ 的原因。"""
+
         now = time.monotonic()
         for config in self.config.devices:
             if not config.control_enabled:
@@ -252,6 +278,8 @@ class DeviceManager:
         return None
 
     def ensure_run_ready(self) -> None:
+        """在 SEQ 启动前执行运行时就绪检查，不能只依赖 GUI 灰化。"""
+
         reason = self.control_block_reason()
         if reason is not None:
             raise DeviceError(
@@ -266,6 +294,8 @@ class DeviceManager:
         state: DeviceConnectionState,
         message: str,
     ) -> None:
+        """保留最后已知目标，但明确把读数标成不可用、过期或故障。"""
+
         config = self.device_configs[device_id]
         snapshot = deepcopy(self.latest.get(device_id))
         if snapshot is None:
@@ -293,6 +323,8 @@ class DeviceManager:
 
     @staticmethod
     def _recoverable_read_error(exc: DeviceError) -> bool:
+        """判断读失败能否尝试重连；非法数据本身不能靠重连掩盖。"""
+
         return exc.code not in {
             "INVALID_DEVICE_SNAPSHOT",
             "NONFINITE_DEVICE_READING",
@@ -302,6 +334,8 @@ class DeviceManager:
 
     @staticmethod
     def _uncertain_write_error(exc: DeviceError) -> bool:
+        """识别“指令可能已送达但回复丢失”的写入失败。"""
+
         return exc.code in {
             "DEVICE_OPERATION_TIMEOUT",
             "DEVICE_WORKER_DISCONNECTED",
@@ -311,6 +345,8 @@ class DeviceManager:
         }
 
     def _begin_recovery(self, device_id: str, exc: DeviceError) -> None:
+        """把设备转入重连状态，并确保同一设备最多只有一个恢复任务。"""
+
         if self._shutting_down:
             return
         existing = self._recovery_tasks.get(device_id)
@@ -347,6 +383,8 @@ class DeviceManager:
         device_id: str,
         snapshot: DeviceSnapshot,
     ) -> None:
+        """核对重连后的实际目标和速率，防止带着未知仪表状态继续运行。"""
+
         expected_target = self._expected_targets.get(device_id)
         if expected_target is None:
             return
@@ -390,6 +428,12 @@ class DeviceManager:
         generation: int,
         initial_error: DeviceError,
     ) -> None:
+        """在配置的总时限内反复重建客户端、连接并核对恢复后的状态。
+
+        仅“重新连上”还不够：对于可能已经送达仪表的写操作，必须读取并验证实际目标和速率；
+        无法证明状态一致时进入故障路径，绝不自动重发不确定写入。
+        """
+
         timeout = self.config.plugins.device_reconnect_timeout_seconds
         interval = self.config.plugins.device_reconnect_interval_seconds
         deadline = time.monotonic() + timeout
@@ -512,6 +556,8 @@ class DeviceManager:
         operation: str,
         exc: DeviceError,
     ) -> None:
+        """处理结果不确定的写操作，并把设备置于不可继续控制的故障状态。"""
+
         self.events.report(
             Severity.ERROR,
             device_id,
@@ -555,6 +601,12 @@ class DeviceManager:
         shutdown: bool = False,
         origin: str | None = None,
     ) -> T:
+        """在设备专属锁内执行一次有时限操作，并按来源和连接状态决定是否放行。
+
+        写超时可能意味着指令已经到达仪表，因此不会盲目重试。对于不自带硬超时的进程内
+        驱动，一次超时后禁止后续 I/O，避免仍在执行的底层调用与新指令并发接触同一仪表。
+        """
+
         config = self.device_configs[device_id]
         timeout = (
             config.shutdown_timeout_seconds
@@ -618,6 +670,8 @@ class DeviceManager:
         return await serialized()
 
     async def connect_all(self) -> None:
+        """并发连接全部配置设备；失败会反映到连接状态和事件系统。"""
+
         async def connect(device_id: str, device: object) -> None:
             try:
                 await self._operate(device_id, "connect", device.connect)
@@ -656,6 +710,8 @@ class DeviceManager:
         )
 
     async def disconnect_all(self) -> None:
+        """停止恢复任务并有界断开全部设备，用于应用关闭。"""
+
         self._shutting_down = True
         self._generation = {
             device_id: generation + 1
@@ -718,6 +774,8 @@ class DeviceManager:
         )
 
     async def poll_all(self) -> dict[str, DeviceSnapshot]:
+        """并发轮询已连接设备并返回快照副本；单台失败不会阻塞其他设备。"""
+
         device_ids = tuple(
             device_id
             for device_id in self.devices
@@ -770,6 +828,8 @@ class DeviceManager:
         return deepcopy(self.latest)
 
     async def _poll_one(self, device_id: str) -> DeviceSnapshot:
+        """读取、校验并在设备锁内发布一台设备的最新状态。"""
+
         async def poll() -> DeviceSnapshot:
             snapshot = await self.devices[device_id].poll()  # type: ignore[attr-defined]
             self._validate_snapshot(device_id, snapshot)
@@ -795,8 +855,8 @@ class DeviceManager:
                     )
                 else:
                     self.events.resolve(device_id, timeout_code)
-            # Publish while the device lock is still held. Otherwise an older
-            # concurrent poll can overwrite the target just written by set_target().
+            # 必须在仍持有设备锁时发布：否则较早开始的 poll 可能在 set_target 完成后才返回，
+            # 用旧目标覆盖刚写入的新目标。
             self.latest[device_id] = snapshot
             return snapshot
 
@@ -807,6 +867,8 @@ class DeviceManager:
         device_id: str,
         snapshot: DeviceSnapshot,
     ) -> None:
+        """拒绝设备 ID、类型、连接标志或数值不合法的插件快照。"""
+
         config = self.device_configs[device_id]
         if snapshot.device_id != device_id or snapshot.kind is not config.kind:
             raise DeviceError(
@@ -845,6 +907,8 @@ class DeviceManager:
         *,
         poll_succeeded: bool,
     ) -> None:
+        """根据单调时钟锁存或解除读数过期事件。"""
+
         snapshot = self.latest.get(device_id)
         if snapshot is None:
             return
@@ -876,6 +940,8 @@ class DeviceManager:
             self.events.resolve(device_id, "STALE_READING", device_id)
 
     def first_device_id(self, kind: DeviceKind) -> str:
+        """取得指定类型的标准主控设备 ID。"""
+
         for config in self.config.devices:
             if (
                 config.kind is kind
@@ -894,6 +960,8 @@ class DeviceManager:
         kind: DeviceKind,
         requested: object | None = None,
     ) -> str:
+        """解析 SEQ 可选设备后缀，并限制其类型和控制权限。"""
+
         candidate = str(requested or "").strip()
         if not candidate or (
             candidate == kind.value and candidate not in self.device_configs
@@ -921,6 +989,8 @@ class DeviceManager:
         return candidate
 
     def validate_target(self, device_id: str, value: float, rate_per_minute: float) -> None:
+        """在任何写入前强制检查有限值、上下限、最大速率和设备角色。"""
+
         config = self.device_configs[device_id]
         if (
             config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD)
@@ -967,6 +1037,8 @@ class DeviceManager:
         *,
         origin: str = "sequence",
     ) -> bool:
+        """设置目标；手动来源在 SEQ 持有控制租约时会被运行时拒绝。"""
+
         try:
             self.validate_target(device_id, value, rate_per_minute)
             await self._operate(
@@ -1021,6 +1093,8 @@ class DeviceManager:
         *,
         origin: str = "sequence",
     ) -> bool:
+        """供标准 SEQ 命令按类型选择主控设备并设置目标。"""
+
         selected = self.resolve_device_id(kind, device_id)
         return await self.set_target(
             selected,
@@ -1031,6 +1105,8 @@ class DeviceManager:
         )
 
     async def hold_all(self) -> bool:
+        """尽力 Hold 所有可控温度和磁场设备，并返回是否全部成功。"""
+
         async def hold(device_id: str) -> bool:
             config = self.device_configs[device_id]
             if not config.control_enabled:
@@ -1115,6 +1191,8 @@ class DeviceManager:
         *,
         origin: str = "manual",
     ) -> None:
+        """Hold 单台设备；同样执行控制权与连接状态检查。"""
+
         if device_id not in self.devices:
             raise DeviceError(f"Unknown device: {device_id}", "UNKNOWN_DEVICE", device_id)
         if not self.device_configs[device_id].control_enabled:
@@ -1158,6 +1236,8 @@ class DeviceManager:
             snapshot.activity = DeviceActivity.HOLDING
 
     def acquire_sequence_control(self) -> None:
+        """由运行时在 SEQ 开始前取得唯一控制租约。"""
+
         if self._control_owner is not None:
             raise DeviceError(
                 f"Device control is already owned by {self._control_owner}",
@@ -1167,8 +1247,12 @@ class DeviceManager:
         self._control_owner = "sequence"
 
     def release_sequence_control(self) -> None:
+        """在 SEQ 的所有退出路径释放控制租约。"""
+
         if self._control_owner == "sequence":
             self._control_owner = None
 
     def snapshots(self) -> dict[str, DeviceSnapshot]:
+        """返回最新状态的深拷贝，防止调用方修改安全判定依据。"""
+
         return deepcopy(self.latest)

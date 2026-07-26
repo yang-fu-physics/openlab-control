@@ -1,3 +1,11 @@
+"""应用程序入口以及源码版、打包版共用的启动流程。
+
+本文件负责命令行参数、Qt 外观、插件信任与离线依赖预检，然后才创建
+:class:`~labcontrol.runtime.RuntimeService`。无界面演示和 GUI 共用同一套配置、设备清单与
+SEQ 解析器，因此发布验证不会绕过正式运行路径。这里不实现仪表控制逻辑；所有 I/O 都交给
+后台运行时，防止 GUI 线程直接接触设备。
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -32,7 +40,7 @@ from .sequence.parser import load_sequence
 
 
 def configure_qt_font(application, point_size: float = 10.0) -> None:
-    """Load a Windows CJK font explicitly; offscreen and packaged Qt need it."""
+    """显式加载 Windows 中文字体，保证打包版和无屏幕截图中的中文不会变成方框。"""
     from PySide6.QtGui import QFont, QFontDatabase
 
     fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
@@ -53,6 +61,12 @@ def configure_qt_font(application, point_size: float = 10.0) -> None:
 
 
 def _plugin_python_executable(config) -> Path | None:
+    """选择离线安装插件额外依赖时使用的 Python。
+
+    源码版可以复用当前解释器；冻结后的 EXE 不能把自己当作 Python，因此只接受配置中明确
+    指定的解释器，或随安装包携带的 ``runtime/python/python.exe``。
+    """
+
     configured = config.plugins.python_executable.strip()
     if configured:
         candidate = config.resolve_project_path(configured)
@@ -69,7 +83,7 @@ def _plugin_python_executable(config) -> Path | None:
 
 
 def configure_qt_appearance(application, requested_scale: float | None = None) -> float:
-    """Apply the same desktop appearance in production and visual QA tools."""
+    """为正式 GUI 和视觉回归工具应用同一套主题、字体与缩放系数。"""
     from PySide6.QtGui import QColor, QPalette
     from .ui.scaling import screen_ui_scale
 
@@ -88,6 +102,8 @@ def configure_qt_appearance(application, requested_scale: float | None = None) -
 
 
 def _arguments(argv: list[str] | None) -> argparse.Namespace:
+    """解析所有启动模式；返回值由 :func:`main` 统一执行和映射退出码。"""
+
     parser = argparse.ArgumentParser(description="OpenLab Control")
     parser.add_argument("--config", type=Path, default=default_config_path())
     parser.add_argument("--sequence", type=Path)
@@ -117,6 +133,13 @@ def _headless_demo(
     module_ids: list[str] | None = None,
     device_descriptors: tuple[DevicePluginDescriptor, ...] = (),
 ) -> int:
+    """在没有 Qt 窗口的情况下运行一条真实 SEQ，供自动化和发布冒烟验证使用。
+
+    ``--enable-module`` 仍需通过插件信任检查，SEQ 配套设置也只会应用到明确请求启用的模块；
+    文件中出现其他模块不会造成隐式初始化。无论成功、失败或超时，``finally`` 都会关闭完整
+    运行时。
+    """
+
     diagnostic_path = config.project_root / "headless_demo.log"
     diagnostic = diagnostic_path.open("w", encoding="utf-8")
 
@@ -249,6 +272,10 @@ def _headless_demo(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """启动 OpenLab Control，并把可预期的启动失败转换为稳定的进程退出码。"""
+
+    # Windows 冻结程序创建插件/设备子进程前必须调用 freeze_support，否则子进程可能再次
+    # 执行 GUI 入口并形成递归启动。
     multiprocessing.freeze_support()
     args = _arguments(argv)
     try:
@@ -325,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.gui_smoke:
-        # This mode is used by release verification and never opens a visible window.
+        # 发布验证只在离屏平台创建窗口、截图后退出，不显示或接管用户桌面。
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
     try:

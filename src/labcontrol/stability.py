@@ -1,3 +1,9 @@
+"""独立于仪表状态字的温度/磁场稳定性判定。
+
+判定同时要求误差进入容差、滑动窗口斜率足够小，并连续保持 ``dwell_seconds``。任何一个
+条件失效都会重新开始 dwell；读数超时和长期不更新分别产生 TIMED_OUT 与 STALE。
+"""
+
 from __future__ import annotations
 
 from collections import deque
@@ -9,6 +15,8 @@ from .models import StabilityState
 
 @dataclass(frozen=True, slots=True)
 class StabilityResult:
+    """一次判定结果及用于诊断的误差、斜率和计时信息。"""
+
     state: StabilityState
     error: float
     slope_per_minute: float | None
@@ -17,7 +25,7 @@ class StabilityResult:
 
 
 class StabilityEvaluator:
-    """Numerical stability detector independent of instrument-reported status."""
+    """只依据实际采样值计算稳定状态，不直接信任仪表报告的稳定标志。"""
 
     def __init__(self, config: StabilityConfig) -> None:
         self.config = config
@@ -31,6 +39,8 @@ class StabilityEvaluator:
         )
 
     def reset(self, target: float, now: float) -> None:
+        """目标改变时清空历史和已累计的稳定驻留时间。"""
+
         self._target = target
         self._target_started_at = now
         self._qualified_at = None
@@ -38,6 +48,8 @@ class StabilityEvaluator:
         self._history.clear()
 
     def update(self, current: float, target: float, now: float) -> StabilityResult:
+        """加入新样本并计算 MOVING、SETTLING、STABLE 或 TIMED_OUT。"""
+
         if self._target is None or target != self._target:
             self.reset(target, now)
         self._last_sample_at = now
@@ -54,6 +66,7 @@ class StabilityEvaluator:
         slope_ok = slope is not None and abs(slope) <= self.config.max_slope_per_minute
         elapsed = now - self._target_started_at if self._target_started_at is not None else 0.0
 
+        # 必须同时满足误差、最小历史长度和斜率；仅偶然落入容差带不能开始稳定计时。
         if within and enough_history and slope_ok:
             if self._qualified_at is None:
                 self._qualified_at = now
@@ -75,6 +88,8 @@ class StabilityEvaluator:
         return self._last_result
 
     def check_stale(self, now: float) -> StabilityResult:
+        """在没有新样本时检查最后一次读数是否已经过期。"""
+
         if self._last_sample_at is not None and now - self._last_sample_at > self.config.stale_after_seconds:
             self._last_result = StabilityResult(
                 StabilityState.STALE,
@@ -86,6 +101,8 @@ class StabilityEvaluator:
         return self._last_result
 
     def _slope_per_minute(self) -> float | None:
+        """用滑动窗口内的最小二乘直线计算每分钟变化率。"""
+
         if len(self._history) < 2:
             return None
         base = self._history[0][0]

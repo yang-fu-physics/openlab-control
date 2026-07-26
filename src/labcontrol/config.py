@@ -1,3 +1,10 @@
+"""严格读取并验证主配置文件。
+
+配置对象在启动时一次性构造为不可变 dataclass，之后由 UI、运行时和插件服务共同读取。
+所有影响真实仪表安全的值（上下限、速率、超时、主设备角色）都在进入运行时前验证；不能
+依赖某个对话框临时校验，因为无界面模式和第三方调用同样会使用这些配置。
+"""
+
 from __future__ import annotations
 
 import math
@@ -13,7 +20,7 @@ from .models import DeviceKind, DeviceRole, Severity
 
 
 class ConfigurationError(ValueError):
-    pass
+    """配置缺字段、类型错误或违反框架安全约束。"""
 
 
 _WINDOWS_RESERVED_FILE_STEMS = frozenset(
@@ -32,6 +39,8 @@ _WINDOWS_RESERVED_FILE_STEMS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class StabilityConfig:
+    """框架独立稳定性判定参数，单位沿用对应设备的显示单位。"""
+
     tolerance: float
     max_slope_per_minute: float
     dwell_seconds: float
@@ -42,6 +51,13 @@ class StabilityConfig:
 
 @dataclass(frozen=True, slots=True)
 class DeviceConfig:
+    """一个逻辑设备实例的驱动选择、角色、限制和超时。
+
+    ``plugin`` 可以指向内置 ``module:class``，也可以是外部 Device Plugin 的清单 ID。
+    ``control_enabled`` 是运行时的最终授权边界：Monitor 和只读设备不能因 UI 操作而绕过它。
+    ``extras`` 原样传递给具体驱动，便于更换仪表时只改 TOML。
+    """
+
     id: str
     display_name: str
     kind: DeviceKind
@@ -63,6 +79,8 @@ class DeviceConfig:
 
 @dataclass(frozen=True, slots=True)
 class LoggingConfig:
+    """每次运行的目录、DAT 文件名以及落盘策略。"""
+
     directory: str = "runs"
     data_file_name: str = "experiment.dat"
     event_file_name: str = "events.dat"
@@ -73,6 +91,8 @@ class LoggingConfig:
 
 @dataclass(frozen=True, slots=True)
 class AlarmReportingConfig:
+    """HTTP 报警发射端配置；令牌只保存引用位置，不直接写入普通配置快照。"""
+
     enabled: bool = False
     endpoint: str = "http://127.0.0.1:3889/alarm/report"
     token_env: str = "OPENLAB_ALARM_TOKEN"
@@ -87,6 +107,8 @@ class AlarmReportingConfig:
 
 @dataclass(frozen=True, slots=True)
 class AlarmConfig:
+    """本地事件级别、弹窗策略和远程报警配置。"""
+
     stability_timeout: Severity = Severity.ERROR
     stale_reading: Severity = Severity.WARNING
     popup_warnings: bool = True
@@ -98,6 +120,8 @@ class AlarmConfig:
 
 @dataclass(frozen=True, slots=True)
 class ModuleConfig:
+    """Measurement Module 的目录、隔离运行时和操作超时。"""
+
     directory: str = "modules"
     data_directory: str = "module_data"
     shared_wheels_directory: str = "wheels"
@@ -110,6 +134,8 @@ class ModuleConfig:
 
 @dataclass(frozen=True, slots=True)
 class PluginConfig:
+    """Device Plugin 的发现目录、信任状态、依赖目录和重连策略。"""
+
     device_directory: str = "device_plugins"
     state_directory: str = "plugin_state"
     runtime_directory: str = "plugin_runtime"
@@ -122,6 +148,8 @@ class PluginConfig:
 
 @dataclass(frozen=True, slots=True)
 class AppConfig:
+    """经过完整验证、可在线程间安全共享的应用配置快照。"""
+
     source_path: Path
     title: str
     ui_scale: float | None
@@ -140,15 +168,21 @@ class AppConfig:
 
     @property
     def project_root(self) -> Path:
+        """返回配置文件所属项目根目录，而不是依赖当前工作目录。"""
+
         return self.source_path.resolve().parent.parent
 
     def resolve_project_path(self, value: str | Path) -> Path:
+        """把配置中的相对路径稳定解析到项目根目录。"""
+
         path = Path(value)
         if path.is_absolute():
             return path
         return (self.project_root / path).resolve()
 
     def device(self, device_id: str) -> DeviceConfig:
+        """按 ID 返回设备配置；不存在时明确抛出 ``KeyError``。"""
+
         for item in self.devices:
             if item.id == device_id:
                 return item
@@ -156,6 +190,8 @@ class AppConfig:
 
 
 def _severity(value: str, key: str) -> Severity:
+    """解析事件等级，并在错误消息中保留具体配置键名。"""
+
     try:
         return Severity(value.lower())
     except ValueError as exc:
@@ -163,6 +199,8 @@ def _severity(value: str, key: str) -> Severity:
 
 
 def _ui_scale(value: object) -> float | None:
+    """解析手动缩放；``None`` 表示由当前屏幕 DPI 自动计算。"""
+
     if value is None or (isinstance(value, str) and value.strip().casefold() == "auto"):
         return None
     try:
@@ -175,6 +213,8 @@ def _ui_scale(value: object) -> float | None:
 
 
 def _finite_float(value: object, key: str) -> float:
+    """解析有限浮点数，统一拒绝 NaN 和正负无穷。"""
+
     try:
         result = float(value)
     except (TypeError, ValueError) as exc:
@@ -185,6 +225,8 @@ def _finite_float(value: object, key: str) -> float:
 
 
 def _positive_float(value: object, key: str) -> float:
+    """解析严格大于零的浮点数。"""
+
     result = _finite_float(value, key)
     if result <= 0:
         raise ConfigurationError(f"{key} must be greater than zero")
@@ -192,6 +234,8 @@ def _positive_float(value: object, key: str) -> float:
 
 
 def _positive_int(value: object, key: str) -> int:
+    """解析严格大于零的整数。"""
+
     try:
         result = int(value)
     except (TypeError, ValueError) as exc:
@@ -202,6 +246,8 @@ def _positive_int(value: object, key: str) -> int:
 
 
 def _nonnegative_float(value: object, key: str) -> float:
+    """解析大于等于零的有限浮点数。"""
+
     result = _finite_float(value, key)
     if result < 0:
         raise ConfigurationError(
@@ -211,12 +257,16 @@ def _nonnegative_float(value: object, key: str) -> float:
 
 
 def _boolean(value: object, key: str) -> bool:
+    """只接受 TOML 布尔值，避免字符串 ``"false"`` 被误当成真。"""
+
     if not isinstance(value, bool):
         raise ConfigurationError(f"{key} must be true or false")
     return value
 
 
 def _windows_file_name(value: object, key: str) -> str:
+    """验证单个 Windows 文件名，禁止目录穿越、设备名和保留字符。"""
+
     result = str(value)
     path = Path(result)
     invalid_characters = '<>:"/\\|?*'
@@ -237,6 +287,8 @@ def _windows_file_name(value: object, key: str) -> str:
 
 
 def _device_identifier(value: object) -> str:
+    """验证可安全用于映射键和事件上下文的设备 ID。"""
+
     result = str(value)
     if (
         not result
@@ -250,6 +302,8 @@ def _device_identifier(value: object) -> str:
 
 
 def _device_config(raw: dict[str, Any]) -> DeviceConfig:
+    """把一个 ``[[devices]]`` 表转换为经过角色与安全限制校验的配置。"""
+
     required = ("id", "display_name", "kind", "plugin")
     missing = [key for key in required if key not in raw]
     if missing:
@@ -411,6 +465,13 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
 
 
 def load_config(path: str | Path) -> AppConfig:
+    """加载 TOML 并返回完整 :class:`AppConfig`。
+
+    该函数是配置的唯一入口。它会拒绝重复设备 ID、多个同类主控设备、不可控的 primary、
+    可控的 monitor、无效文件名、越界初始值和不安全的报警地址。调用方可以假定返回对象的
+    结构约束已经成立，但实际目标值仍必须由 ``DeviceManager.validate_target`` 再检查。
+    """
+
     source = Path(path).resolve()
     with source.open("rb") as handle:
         raw = tomllib.load(handle)
