@@ -67,8 +67,47 @@ class StatusTileTests(unittest.TestCase):
         trend = TrendCanvas()
         trend.add_snapshots({"second_stage": snapshot})
         self.assertEqual(len(trend.history["2nd Stage"]), 1)
+        self.assertEqual(
+            trend.history["2nd Stage"][0][0],
+            snapshot.timestamp,
+        )
+        self.assertFalse(trend._redraw_timer.isActive())
         trend.close()
         tile.close()
+
+    def test_live_trend_coalesces_visible_redraws_and_stops_them_when_hidden(
+        self,
+    ) -> None:
+        trend = TrendCanvas()
+        snapshot = DeviceSnapshot(
+            device_id="temperature",
+            display_name="Temperature",
+            kind=DeviceKind.TEMPERATURE,
+            timestamp=123.0,
+            connected=True,
+            unit="K",
+            current=4.2,
+        )
+        trend.add_snapshots({"temperature": snapshot})
+        self.assertFalse(trend._redraw_timer.isActive())
+
+        trend.show()
+        self.app.processEvents()
+        self.assertTrue(trend._redraw_timer.isActive())
+        QTest.qWait(trend.REDRAW_INTERVAL_MS + 50)
+        self.assertFalse(trend._redraw_timer.isActive())
+
+        for index in range(50):
+            snapshot.timestamp += 0.2
+            snapshot.current = 4.2 + index / 1000
+            trend.add_snapshots({"temperature": snapshot})
+        self.assertEqual(len(trend.history["Temperature"]), 51)
+        self.assertTrue(trend._redraw_timer.isActive())
+
+        trend.hide()
+        self.app.processEvents()
+        self.assertFalse(trend._redraw_timer.isActive())
+        trend.close()
 
     def test_tile_distinguishes_reconnecting_and_faulted_states(
         self,

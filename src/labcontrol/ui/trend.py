@@ -6,10 +6,9 @@
 
 from __future__ import annotations
 
-import time
 from collections import defaultdict, deque
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
@@ -21,25 +20,57 @@ class TrendCanvas(QWidget):
     """直接用 QPainter 绘制最多六条、各自独立量程的实时曲线。"""
 
     COLORS = ("#2d6cdf", "#d64545", "#2a9d55", "#9b51e0", "#e08b24", "#008c99")
+    REDRAW_INTERVAL_MS = 250
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumSize(scaled(760), scaled(430))
         self.history: dict[str, deque[tuple[float, float]]] = defaultdict(lambda: deque(maxlen=900))
         self.setAutoFillBackground(True)
+        # 设备通常每 200 ms 推送一次快照。直接在每次推送后重绘，会反复遍历全部
+        # 历史点并在 GUI 线程创建 QPainterPath。单次定时器把短时间内的多次更新
+        # 合并为最多 4 FPS；它只影响显示，不降低设备轮询和 DAT 的采样频率。
+        self._redraw_timer = QTimer(self)
+        self._redraw_timer.setSingleShot(True)
+        self._redraw_timer.setInterval(self.REDRAW_INTERVAL_MS)
+        self._redraw_timer.timeout.connect(self.update)
 
     def add_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
-        """追加有数值的设备快照，并请求下一次重绘。"""
+        """追加有数值的设备快照，并合并安排下一次可见重绘。"""
 
-        now = time.monotonic()
+        appended = False
         for snapshot in snapshots.values():
             if snapshot.kind in (
                 DeviceKind.TEMPERATURE,
                 DeviceKind.FIELD,
                 DeviceKind.MONITOR,
             ) and snapshot.current is not None:
-                self.history[snapshot.display_name].append((now, snapshot.current))
-        self.update()
+                # 使用读数本身的单调时间，避免 GUI 消息排队时把延迟错误画成采样时间。
+                self.history[snapshot.display_name].append(
+                    (snapshot.timestamp, snapshot.current)
+                )
+                appended = True
+        if appended:
+            self._schedule_redraw()
+
+    def _schedule_redraw(self) -> None:
+        """仅在可见且没有待处理重绘时启动一次合并定时器。"""
+
+        if self.isVisible() and not self._redraw_timer.isActive():
+            self._redraw_timer.start()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """重新显示窗口时绘制隐藏期间积累的最新历史。"""
+
+        super().showEvent(event)
+        if any(self.history.values()):
+            self._schedule_redraw()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        """隐藏时取消无意义的待处理重绘，但继续保留有界历史。"""
+
+        self._redraw_timer.stop()
+        super().hideEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
