@@ -33,6 +33,8 @@ class ReleaseContractTests(unittest.TestCase):
 
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
         self.assertIn("from labcontrol import __version__", specification)
+        self.assertIn("Version(__version__)", specification)
+        self.assertIn("parsed_version.pre", specification)
         self.assertIn("version=version_info", specification)
 
     def test_release_dependencies_are_exactly_locked(self) -> None:

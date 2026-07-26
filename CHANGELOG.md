@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.11.0b1 - 2026-07-26 (Beta 1)
+
+- 新增外部 Device Plugin `device.toml` 发现、API/core 兼容检查、内容树指纹和首次加载信任；
+  修改源码、清单、lock 或 wheel 后旧信任自动失效。
+- 每个配置设备实例改为独立 spawn 子进程和受 1 MiB 限制的 JSON IPC；阻塞驱动可被
+  terminate/kill，不再阻塞其他设备或主运行时。
+- 温度/磁场增加 primary/secondary 角色和 `control_enabled`；每种最多一个 SEQ 主控，
+  其他设备默认只读，Monitor 永远不可控。
+- 读链路失联进入可配置恢复状态，默认每 2 秒尝试、最长 60 秒；SEQ 主设备恢复期间冻结
+  活动计时，恢复后核对实际 target/rate。
+- 写超时不自动重放；Run 预检要求 primary 已连接并具有新鲜读回；Stop/取消/关闭均尝试
+  基于当前读回 Hold，不能确认时最终 Faulted。
+- Measurement Module 增加内容指纹信任，Enable 前重新验证源码与依赖 runtime。
+- 模块 IPC 从 pickle 改为受大小限制、拒绝 NaN/Infinity/复杂对象的 UTF-8 JSON。
+- Device/Module 依赖改为按 type/ID/content fingerprint 隔离；不同扩展可以使用同一包
+  的不同版本，依赖不会进入 GUI/核心进程或执行 `.pth`。
+- 扩展依赖只允许完全离线安装：精确 `==`、SHA-256 `requirements.lock`、本地 wheels、
+  `--no-index --only-binary --require-hashes`，并验证整个 runtime 摘要。
+- 依赖安装使用 staging + 原子替换；缺失、版本不符、marker 异常或内容篡改均阻止加载。
+- 模块关闭采用 abort + close 的单一总期限；abort 失败仍保留 Error，但有界强制回收本机
+  worker 并明确不把进程关闭描述为仪表安全。
+- 核心 `modules/` 与 `device_plugins/` 默认空；示例模块移入独立 Measurement Modules
+  仓库模板，并新增正式 Device Plugins 私密共享仓库模板。
+- 更换温控仪/磁体电源改为复制插件、修改一个配置文件并重启，不再建议为设备维护核心
+  分支；首阶段安装流程完全离线且手动复制。
+- 同步架构、配置、操作、插件开发、测试计划和安全边界；新增仓库模板与离线依赖契约测试。
+- Windows 版本资源改用 PEP 440 解析，可正确构建 `0.11.0b1` 等预发布版本。
+
 ## 0.10.3 - 2026-07-26
 
 - 修复活动 Error 被去重后不再中止后续 SEQ 的问题；Warning 仍继续运行并只提醒一次。

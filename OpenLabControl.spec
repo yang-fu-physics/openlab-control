@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 
+from packaging.version import Version
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
@@ -20,9 +21,15 @@ from labcontrol import __version__
 
 
 hiddenimports = ["labcontrol.devices.simulated"] + collect_submodules("labcontrol_plugins")
-version_numbers = tuple(
-    (list(map(int, __version__.split("."))) + [0, 0, 0, 0])[:4]
+parsed_version = Version(__version__)
+release_numbers = list(parsed_version.release[:3])
+release_numbers.extend([0] * (3 - len(release_numbers)))
+prerelease_number = (
+    int(parsed_version.pre[1])
+    if parsed_version.pre is not None
+    else 0
 )
+version_numbers = tuple(release_numbers + [prerelease_number])
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(
         filevers=version_numbers,

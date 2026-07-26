@@ -1,4 +1,4 @@
-# OpenLab Control 0.10.3 技术规格
+# OpenLab Control 0.11.0b1 技术规格
 
 状态：Beta Candidate（仿真验证；未验证真实仪表）
 日期：2026-07-26

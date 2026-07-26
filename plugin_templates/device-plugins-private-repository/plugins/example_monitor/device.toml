@@ -2,7 +2,7 @@ id = "example_monitor"
 name = "Example Read-only Monitor"
 version = "0.1.0"
 api_version = "1.0"
-core_requires = ">=0.10.3,<0.12"
+core_requires = ">=0.11.0b1,<0.12"
 backend = "backend:ExampleMonitor"
 kinds = ["monitor"]
 dependencies = []
