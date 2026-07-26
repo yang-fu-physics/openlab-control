@@ -32,6 +32,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..axis_ticks import (
+    TimestampReference,
+    full_timestamp_label,
+    is_timestamp_column,
+    linear_ticks,
+    logarithmic_ticks,
+    numeric_tick_label,
+    timestamp_axis_title,
+    timestamp_reference,
+    timestamp_tick_label,
+    timestamp_ticks,
+)
 from ..dat_reader import DatDocument, DatPoint
 from ..plot_format import (
     LINEAR_SCALE,
@@ -167,6 +179,7 @@ class DatPlotCanvas(QWidget):
         self._drag_origin: QPointF | None = None
         self._drag_current: QPointF | None = None
         self._drag_series: str | None = None
+        self._timestamp_reference: TimestampReference | None = None
 
     @property
     def x_label(self) -> str:
@@ -203,8 +216,19 @@ class DatPlotCanvas(QWidget):
             self.x_column is not None and self.x_column not in numeric
         ):
             self.x_column = next(
-                (name for name in ("Time(s)", "Timestamp(s)") if name in numeric),
-                None,
+                (
+                    name
+                    for name in ("Time(s)", "Timestamp(s)")
+                    if name in numeric
+                ),
+                next(
+                    (
+                        name
+                        for name in numeric
+                        if is_timestamp_column(name)
+                    ),
+                    None,
+                ),
             )
 
         valid_y = tuple(name for name in self.y_columns if name in numeric)
@@ -212,7 +236,10 @@ class DatPlotCanvas(QWidget):
             preferred = [
                 name
                 for name in numeric
-                if name not in {self.x_column, "Timestamp(s)", "Time(s)"}
+                if (
+                    name not in {self.x_column, "Time(s)"}
+                    and not is_timestamp_column(name)
+                )
             ]
             valid_y = tuple(preferred[:1] or numeric[:1])
         self.y_columns = valid_y
@@ -415,6 +442,7 @@ class DatPlotCanvas(QWidget):
 
         if self.document is None:
             self.points_by_series = {}
+            self._timestamp_reference = None
             return
         self.points_by_series = {
             name: tuple(
@@ -424,6 +452,39 @@ class DatPlotCanvas(QWidget):
             )
             for name in self.y_columns
         }
+        sample_x = next(
+            (
+                point.x
+                for points in self.points_by_series.values()
+                for point in points
+            ),
+            None,
+        )
+        self._timestamp_reference = timestamp_reference(
+            self.document.header_lines,
+            self.x_column,
+            sample_x,
+        )
+
+    def format_x_value(
+        self,
+        value: float,
+        *,
+        full: bool = False,
+    ) -> str:
+        """按当前 X 轴语义格式化点值，绝对时间优先显示实际日期时间。"""
+
+        reference = self._timestamp_reference
+        if (
+            reference is not None
+            and self.x_scale == LINEAR_SCALE
+        ):
+            return full_timestamp_label(value, reference)
+        return (
+            f"{value:.12g}"
+            if full
+            else numeric_tick_label(value, None)
+        )
 
     @staticmethod
     def _padded_range(
@@ -558,6 +619,25 @@ class DatPlotCanvas(QWidget):
             plot.bottom() - (y_value - y_low) / (y_high - y_low) * plot.height(),
         )
 
+    @staticmethod
+    def _axis_fraction(
+        value: float,
+        low: float,
+        high: float,
+        scale: str,
+    ) -> float:
+        """返回刻度在轴上的 0–1 位置；对数轴在 log10 空间计算。"""
+
+        if scale == LOG_SCALE:
+            return (
+                math.log10(value)
+                - math.log10(low)
+            ) / (
+                math.log10(high)
+                - math.log10(low)
+            )
+        return (value - low) / (high - low)
+
     def _data_x(
         self,
         pixel_x: float,
@@ -672,43 +752,83 @@ class DatPlotCanvas(QWidget):
         if ranges is None:
             return
         x_min, x_max, y_min, y_max = ranges
-        for index in range(6):
-            fraction = index / 5
+        timestamp_axis = (
+            self._timestamp_reference
+            if self.x_scale == LINEAR_SCALE
+            else None
+        )
+        if timestamp_axis is not None:
+            x_ticks = timestamp_ticks(
+                x_min,
+                x_max,
+                timestamp_axis,
+            )
+        elif self.x_scale == LOG_SCALE:
+            x_ticks = logarithmic_ticks(x_min, x_max)
+        else:
+            x_ticks = linear_ticks(x_min, x_max)
+        y_ticks = (
+            logarithmic_ticks(y_min, y_max)
+            if self.y_scale == LOG_SCALE
+            else linear_ticks(y_min, y_max)
+        )
+
+        for x_value in x_ticks.values:
+            fraction = self._axis_fraction(
+                x_value,
+                x_min,
+                x_max,
+                self.x_scale,
+            )
             x = plot.left() + plot.width() * fraction
-            y = plot.bottom() - plot.height() * fraction
             painter.setPen(QPen(QColor("#e1e5ea"), 1))
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
-            painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
-            painter.setPen(QColor("#4c5562"))
             if show_x_labels:
-                x_value = (
-                    10
-                    ** (
-                        math.log10(x_min)
-                        + (math.log10(x_max) - math.log10(x_min)) * fraction
+                painter.setPen(QColor("#4c5562"))
+                label = (
+                    timestamp_tick_label(
+                        x_value,
+                        timestamp_axis,
+                        x_min,
+                        x_max,
+                        x_ticks.step,
                     )
-                    if self.x_scale == LOG_SCALE
-                    else x_min + (x_max - x_min) * fraction
+                    if timestamp_axis is not None
+                    else numeric_tick_label(
+                        x_value,
+                        x_ticks.step,
+                    )
+                )
+                label_width = scaled_float(
+                    140
+                    if timestamp_axis is not None
+                    else 110
                 )
                 painter.drawText(
                     QRectF(
-                        x - scaled_float(55),
+                        x - label_width / 2,
                         plot.bottom() + scaled_float(4),
-                        scaled_float(110),
+                        label_width,
                         scaled_float(20),
                     ),
                     Qt.AlignmentFlag.AlignHCenter,
-                    f"{x_value:.6g}",
+                    label,
                 )
-            y_value = (
-                10
-                ** (
-                    math.log10(y_min)
-                    + (math.log10(y_max) - math.log10(y_min)) * fraction
-                )
-                if self.y_scale == LOG_SCALE
-                else y_min + (y_max - y_min) * fraction
+
+        for y_value in y_ticks.values:
+            fraction = self._axis_fraction(
+                y_value,
+                y_min,
+                y_max,
+                self.y_scale,
             )
+            y = plot.bottom() - plot.height() * fraction
+            painter.setPen(QPen(QColor("#e1e5ea"), 1))
+            painter.drawLine(
+                QPointF(plot.left(), y),
+                QPointF(plot.right(), y),
+            )
+            painter.setPen(QColor("#4c5562"))
             painter.drawText(
                 QRectF(
                     scaled_float(2),
@@ -717,11 +837,22 @@ class DatPlotCanvas(QWidget):
                     scaled_float(20),
                 ),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                f"{y_value:.6g}",
+                numeric_tick_label(
+                    y_value,
+                    y_ticks.step,
+                ),
             )
 
         if show_x_labels:
             painter.setPen(QColor("#26313f"))
+            x_axis_title = self.x_label
+            if timestamp_axis is not None:
+                x_axis_title = timestamp_axis_title(
+                    self.x_label,
+                    x_min,
+                    x_max,
+                    timestamp_axis,
+                )
             painter.drawText(
                 QRectF(
                     plot.left(),
@@ -730,7 +861,12 @@ class DatPlotCanvas(QWidget):
                     scaled_float(20),
                 ),
                 Qt.AlignmentFlag.AlignCenter,
-                self.x_label + (" [Log]" if self.x_scale == LOG_SCALE else ""),
+                x_axis_title
+                + (
+                    " [Log]"
+                    if self.x_scale == LOG_SCALE
+                    else ""
+                ),
             )
         if self.layout_mode == STACKED_LAYOUT and series is not None:
             color = QColor(PLOT_COLORS[self.y_columns.index(series) % len(PLOT_COLORS)])

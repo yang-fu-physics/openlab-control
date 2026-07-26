@@ -260,8 +260,17 @@ class DatRunLogger:
         if not should_append:
             self._data_handle.write("[Header]\n")
             self._data_handle.write("; OpenLab Control Data File (default extension .dat)\n")
-            self._data_handle.write("; Timestamp(s) uses the LabVIEW 1904 epoch for template compatibility.\n")
+            self._data_handle.write(
+                "; Timestamp(s) uses "
+                f"{self.config.logging.timestamp_epoch}.\n"
+            )
             self._data_writer.writerow(["BYAPP", "OpenLab Control", __version__])
+            self._data_writer.writerow(
+                [
+                    "TIMESTAMP_EPOCH",
+                    self.config.logging.timestamp_epoch,
+                ]
+            )
             self._data_writer.writerow(["INFO", "Plugin-oriented laboratory control framework"])
             self._data_writer.writerow(["INFO", f"Started: {datetime.now().astimezone().isoformat()}"])
             for device in self.config.devices:
@@ -395,6 +404,12 @@ class DatRunLogger:
         )
         self._device_status_writer.writerow(
             ["BYAPP", "OpenLab Control", __version__]
+        )
+        self._device_status_writer.writerow(
+            [
+                "TIMESTAMP_EPOCH",
+                self.config.logging.timestamp_epoch,
+            ]
         )
         self._device_status_writer.writerow(
             [

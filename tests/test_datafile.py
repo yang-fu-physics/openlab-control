@@ -77,6 +77,10 @@ class DatafileTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("[Header]", data)
+            self.assertIn(
+                "TIMESTAMP_EPOCH,labview_1904",
+                data,
+            )
             self.assertIn("[Data]", data)
             self.assertIn("simulated_transport.R1(Ohm)", data)
             self.assertIn("Field(Oe)", data)
@@ -103,6 +107,10 @@ class DatafileTests(unittest.TestCase):
             self.assertIn(
                 ",3.124,3.000,1.000,holding,"
                 "not_applicable,connected,true,",
+                device_status,
+            )
+            self.assertIn(
+                "TIMESTAMP_EPOCH,labview_1904",
                 device_status,
             )
             status_rows = (

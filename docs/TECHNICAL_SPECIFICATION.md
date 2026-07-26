@@ -181,6 +181,10 @@
 - GRAPH-005：X/Y SHALL 可独立切换 Log。
 - GRAPH-006：SHALL 支持框选放大、双击最近点详情。
 - GRAPH-007：显示配置 SHALL 保存为 DAT 同目录同 stem `.plt`。
+- GRAPH-008：可由文件元数据或保守 epoch 推断确认的绝对时间列，在线性坐标中 SHALL
+  显示实际日期时间；不能确认时 SHALL 保留原始数值。
+- GRAPH-009：线性数值轴 SHALL 使用 `1/2/5 × 10ⁿ` 主步长；绝对时间轴 SHALL 使用
+  对齐墙上时间的常用整步长。
 
 ### 3.10 事件
 
@@ -199,7 +203,7 @@
 - LOG-003：状态日志 SHALL 使用独立可配置正周期节流；不得为了日志增加设备查询。
 - LOG-004：Run 开始 SHALL 强制写初始状态；Stop/Error/完成 SHALL 刷新并关闭文件。
 - LOG-005：实验 DAT 不得覆盖事件、状态、SEQ、配置或模块设置快照。
-- GRAPH-008：Live Trend SHALL 使用设备采样时间，并合并可见重绘而不阻塞设备 I/O。
+- GRAPH-010：Live Trend SHALL 使用设备采样时间，并合并可见重绘而不阻塞设备 I/O。
 
 ## 4. 非功能需求
 

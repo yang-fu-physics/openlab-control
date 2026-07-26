@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Data Browser 会把可确认来源的绝对时间戳显示为实际日期时间：Quantum Design DAT
+  使用 `FILEOPENTIME` 校准，OpenLab DAT 使用新增的 `TIMESTAMP_EPOCH` 标记；
+  双击详情同时保留原始秒值。
+- 线性坐标主刻度改为 `1/2/5 × 10ⁿ`，时间轴改为整毫秒、秒、分钟、小时或日期，
+  不再显示由等分边界产生的 `200.333` 一类刻度。
 - `Set Datafile` 参数窗口增加 `Browse…`，按 Mode 直接调用 Windows 原生打开/保存窗口，
   自动补 `.dat` 后缀并保存明确授权的绝对路径。
 - Live Trend 改用设备快照采样时间；隐藏时不重绘，可见时把高频快照合并为最多每

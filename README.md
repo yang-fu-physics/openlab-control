@@ -25,7 +25,8 @@ Measurement Module 提供。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认
   关闭且网络失败不阻塞 SEQ。
 - Stop/Error 后温度和磁场保持当前状态；`2nd Stage` 仅显示。
-- 独立 Data Browser 可打开任意 DAT 并追踪文件追加，不与当前 Run 强制绑定。
+- 独立 Data Browser 可打开任意 DAT 并追踪文件追加，不与当前 Run 强制绑定；已知绝对
+  时间戳显示为实际日期时间，数值轴使用 `1/2/5 × 10ⁿ` 整齐主刻度。
 - 每次 Run 独立保存节流后的设备状态宽表，包含当前值、目标、速率、稳定与连接状态。
 - Live Trend 使用设备采样时间并合并 GUI 重绘，不改变设备轮询或 DAT 采样频率。
 

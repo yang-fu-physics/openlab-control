@@ -187,6 +187,18 @@ Data Browser 与当前 Run 不绑定：
 - X/Y 可独立启用 Log；非正数据在 Log 模式不绘制；
 - 框选放大，双击最近数据点查看原始行全部字段。
 
+对于名称为 `Timestamp(s)`、`Time Stamp (sec)` 等的绝对时间列，Data Browser 会在
+线性轴上显示实际日期时间，而不是数十亿秒的原始数值。时间换算按以下证据顺序进行：
+
+1. Quantum Design DAT 的 `FILEOPENTIME,<原始秒>,<日期>,<时间>`；
+2. OpenLab DAT 的 `TIMESTAMP_EPOCH` 与 `Started`；
+3. 旧 OpenLab 文件的 `Started`、epoch 注释和首个样本交叉校验；
+4. 缺少头部信息时，仅对现代 Unix/LabVIEW 数值范围作保守推断。
+
+不能可靠判断来源时仍显示原始数值，不猜测厂商 epoch。双击点位时，摘要显示换算后的
+完整时间，字段表仍保留 DAT 中的原始秒值。线性数值轴使用 `1/2/5 × 10ⁿ` 主刻度；
+时间轴对齐到整毫秒、秒、分钟、小时或日期。此处理只改变显示，不修改 DAT 和 `.plt`。
+
 ## `.plt` 显示伴随文件
 
 对 `sample.dat` 的显示设置保存在同目录 `sample.plt`。它与实验数据分离，只记录：

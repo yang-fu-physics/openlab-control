@@ -16,9 +16,15 @@ from PySide6.QtGui import QDropEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialogButtonBox  # noqa: E402
 
-from labcontrol.ui.data_browser import DatBrowserWidget  # noqa: E402
+from labcontrol.ui.data_browser import (  # noqa: E402
+    DatBrowserWidget,
+    PointDetailsDialog,
+)
 from labcontrol.plot_format import LOG_SCALE, load_plot_format  # noqa: E402
-from labcontrol.ui.dat_plot import YSeriesSelectionDialog  # noqa: E402
+from labcontrol.ui.dat_plot import (  # noqa: E402
+    PlotHit,
+    YSeriesSelectionDialog,
+)
 
 
 class DataBrowserTests(unittest.TestCase):
@@ -106,6 +112,63 @@ class DataBrowserTests(unittest.TestCase):
             browser.dropEvent(drop)
             self.assertTrue(drop.isAccepted())
             self.assertEqual(browser.current_path, dropped_path.resolve())
+            browser.close()
+
+    def test_quantum_design_timestamp_displays_as_instrument_time(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "quantum.dat"
+            path.write_text(
+                "[Header]\n"
+                "FILEOPENTIME,3589995867.25658,"
+                "04/26/2025,6:56 pm\n"
+                "[Data]\n"
+                "Time Stamp (sec),Temperature (K),"
+                "Magnetic Field (Oe)\n"
+                "3589998029.84072,1.8007,49.52\n"
+                "3590001629.84072,10.0,20000\n"
+                "3590005229.84072,20.0,40000\n",
+                encoding="utf-8",
+            )
+            browser = DatBrowserWidget(Path(temp))
+            browser.resize(980, 620)
+            browser.show()
+            self.application.processEvents()
+            self.assertTrue(browser.load_path(path))
+            self.assertEqual(
+                browser.canvas.x_column,
+                "Time Stamp (sec)",
+            )
+            self.assertIsNotNone(
+                browser.canvas._timestamp_reference
+            )
+            point = browser.canvas.points[0]
+            formatted = browser.canvas.format_x_value(
+                point.x,
+                full=True,
+            )
+            self.assertEqual(
+                formatted,
+                (
+                    "2025-04-26 19:32:02.584 "
+                    "(instrument time)"
+                ),
+            )
+
+            details = PointDetailsDialog(
+                browser.document,
+                PlotHit("Temperature (K)", point),
+                browser.canvas.x_label,
+                formatted,
+            )
+            self.assertIn(
+                "2025-04-26 19:32:02.584",
+                details.summary_label.text(),
+            )
+            details.close()
+            browser.canvas.repaint()
+            self.application.processEvents()
             browser.close()
 
     def test_y_series_batch_selection_and_logarithmic_axes(self) -> None:

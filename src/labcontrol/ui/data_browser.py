@@ -53,6 +53,7 @@ class PointDetailsDialog(QDialog):
         document: DatDocument,
         hit: PlotHit,
         x_label: str,
+        x_value_text: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -60,14 +61,22 @@ class PointDetailsDialog(QDialog):
         self.setWindowTitle(f"Data Point Details - Row {point.row_index + 1}")
         self.resize(scaled(620), scaled(470))
         layout = QVBoxLayout(self)
-        summary = QLabel(
+        displayed_x = (
+            x_value_text
+            if x_value_text is not None
+            else f"{point.x:.12g}"
+        )
+        self.summary_label = QLabel(
             f"File: {document.path}\n"
-            f"Data row: {point.row_index + 1:,}    {x_label}: {point.x:.12g}    "
+            f"Data row: {point.row_index + 1:,}    "
+            f"{x_label}: {displayed_x}    "
             f"{hit.series}: {point.y:.12g}"
         )
-        summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        summary.setWordWrap(True)
-        layout.addWidget(summary)
+        self.summary_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.summary_label.setWordWrap(True)
+        layout.addWidget(self.summary_label)
         table = QTableWidget(len(document.columns), 2)
         table.setHorizontalHeaderLabels(["Field", "Value"])
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -331,6 +340,10 @@ class DatBrowserWidget(QWidget):
             self.document,
             hit,
             self.canvas.x_label,
+            self.canvas.format_x_value(
+                hit.x,
+                full=True,
+            ),
             self,
         )
         try:
