@@ -1,3 +1,13 @@
+"""SEQ 的执行状态机、任意嵌套扫描和 Pause/Stop 安全检查点。
+
+SequenceEngine 只在核心 asyncio 线程运行。所有耗时等待都基于“活动逻辑时间”，主动
+扣除用户 Pause 和主设备重连等待，因此恢复后不会把暂停时间误判为 dwell/settle 已完成
+或稳定超时。
+
+Stop/Error 都沿协作路径退出当前命令，再尝试温度和磁场 Hold Current；Stop 不把目标
+改回起始值。强制取消仅用于应用关闭超时，并仍会尝试 Hold 与模块收尾。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,13 +34,15 @@ from .parser import format_command, load_sequence, parse_temperature_points, ser
 
 
 class SequenceAbort(RuntimeError):
-    pass
+    """内部控制流：把用户 Stop 或已锁存 Error 从任意检查点带回 run()。"""
 
 
 ProgressCallback = Callable[[RunProgress], None]
 
 
 class SequenceEngine:
+    """执行一个已解析的 SEQ，并协调设备、模块、DAT 和事件状态。"""
+
     def __init__(
         self,
         config: AppConfig,
@@ -47,8 +59,11 @@ class SequenceEngine:
         self.modules = modules or MeasurementModuleService((), events, devices)
         self.progress_callback = progress_callback or (lambda _: None)
         self.state = RunState.IDLE
+        # gate 被 clear 时，所有经过 _checkpoint 的 SEQ 调度都停住。它不会主动关闭
+        # 模块输出或设备连接；这些物理策略由具体模块/设备定义。
         self._pause_gate = asyncio.Event()
         self._pause_gate.set()
+        # 以下累计量共同构成逻辑时钟：Pause 和主设备恢复等待都不计入实验计时。
         self._paused_at: float | None = None
         self._paused_total = 0.0
         self._device_wait_total = 0.0
@@ -63,6 +78,12 @@ class SequenceEngine:
         self.events.subscribe_occurrences(self._on_event)
 
     def _on_event(self, notice: EventNotice) -> None:
+        """把运行期间任意 Error 统一转换为 fatal Stop 请求。
+
+        订阅 occurrence 而非只订阅“首次锁存”，因此一个在 Idle 已存在、运行中再次发生
+        的 Error 仍能终止当前 SEQ。
+        """
+
         if (
             not notice.is_resolution
             and notice.event.severity is Severity.ERROR
@@ -75,6 +96,8 @@ class SequenceEngine:
         document: SequenceDocument,
         module_settings: dict[str, dict[str, object]] | None = None,
     ) -> RunState:
+        """执行一次完整 Run，并保证所有退出路径都经过模块收尾和日志关闭。"""
+
         if self.state in (RunState.RUNNING, RunState.PAUSED, RunState.STOPPING):
             raise RuntimeError("A sequence is already running")
         self._abort_requested = False
@@ -89,6 +112,8 @@ class SequenceEngine:
         self._call_stack.clear()
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
+        # 在连接设备、创建运行目录或移动第一个设定点之前递归验证全部参数，防止后段的
+        # 非法点让实验只执行一半。
         invalid_parameter = self._find_invalid_parameter(document.commands)
         if invalid_parameter is not None:
             command, parameter_issues = invalid_parameter
@@ -120,6 +145,8 @@ class SequenceEngine:
             1,
         )
         try:
+            # 新鲜读回预检确保 primary 温度/磁场可用，不能仅凭缓存的 Connected UI
+            # 状态开始 Run。
             self.devices.ensure_run_ready()
         except DeviceError as exc:
             self.state = RunState.FAULTED
@@ -136,6 +163,8 @@ class SequenceEngine:
             return self.state
         self.state = RunState.RUNNING
         try:
+            # prepare_sequence 冻结 Enabled 模块集合；open_run 同时写入本次实际 SEQ、
+            # 配置、模块 desired settings 和 status-at-start。
             descriptors, module_status = await self.modules.prepare_sequence(
                 module_settings or {}
             )
@@ -175,6 +204,8 @@ class SequenceEngine:
             await self._execute_commands(document.commands, [])
             self._check_control()
         except SequenceAbort:
+            # 用户 Stop 和事件 Error 共用这里。二者都 Hold Current，区别只在最终
+            # STOPPED/FAULTED；Hold 无法确认时必须升级为 FAULTED。
             self.state = RunState.FAULTED if self._fatal_abort else RunState.STOPPED
             hold_succeeded = await self.devices.hold_all()
             if not hold_succeeded:
@@ -192,6 +223,8 @@ class SequenceEngine:
                 self._abort_message or ("Aborted due to error" if self._fatal_abort else "Stopped by user"),
             )
         except asyncio.CancelledError:
+            # 只有应用关闭等待超时才应走强制 task cancellation。即使如此仍先尝试
+            # Hold，再把取消继续抛给 RuntimeService 完成其余资源回收。
             self._fatal_abort = True
             self._abort_message = (
                 "Sequence task was cancelled during shutdown"
@@ -225,6 +258,8 @@ class SequenceEngine:
         else:
             self.state = RunState.COMPLETED
         finally:
+            # end_sequence 对 completed/stopped/error 都执行。它不是 abort：Stop 后模块
+            # 保持 Enabled，只有本次运行资源应在这里结束。
             reason = {
                 RunState.COMPLETED: "completed",
                 RunState.STOPPED: "stopped",
@@ -248,6 +283,8 @@ class SequenceEngine:
         return self.state
 
     def pause(self) -> None:
+        """请求协作 Pause；冻结调度和模块计时，不改变仪表当前输出。"""
+
         if self.state is RunState.RUNNING:
             self.state = RunState.PAUSED
             self._paused_at = time.monotonic()
@@ -263,6 +300,8 @@ class SequenceEngine:
             self._publish("Paused")
 
     def resume(self) -> None:
+        """结束 Pause，并把暂停时长从后续逻辑计时中扣除。"""
+
         if self.state is RunState.PAUSED:
             self.state = RunState.RUNNING
             self._finish_pause()
@@ -278,6 +317,13 @@ class SequenceEngine:
             self._publish("Resumed")
 
     def request_stop(self, fatal: bool = False, message: str = "Stopped by user") -> None:
+        """设置 Stop 标志并唤醒所有 Pause checkpoint。
+
+        本方法必须快速且不做仪表 I/O。真正的 Hold 在 ``run`` 捕获
+        :class:`SequenceAbort` 后异步执行；模块通过 ``cancel_operations`` 在自己的
+        checkpoint 收到协作取消。正在阻塞的第三方驱动调用仍受模块操作总超时约束。
+        """
+
         if self.state not in (RunState.RUNNING, RunState.PAUSED, RunState.STOPPING):
             return
         self._abort_requested = True
@@ -291,12 +337,15 @@ class SequenceEngine:
         )
         if callable(cancel_modules):
             cancel_modules()
+        # Stop 发生在 Paused 时必须先打开 gate，否则 SEQ 永远到不了抛出
+        # SequenceAbort 的下一次 _check_control。
         self._finish_pause()
         self._pause_gate.set()
         self._publish(message)
 
     async def _execute_commands(self, commands: list[Command], prefix: list[str]) -> None:
         for index, command in enumerate(commands, start=1):
+            # 每条命令（包括嵌套 Scan 子命令）前都有统一 Pause/Stop/设备恢复检查点。
             await self._checkpoint()
             parameter_issues = validate_command_parameters(command)
             if parameter_issues:
@@ -478,8 +527,8 @@ class SequenceEngine:
             steps = int(p.get("steps", 1))
             points = self._linspace(start, stop, steps)
 
-        # Validate the complete path before moving the first device. A bad later
-        # list entry must not leave an experiment half-executed.
+        # 在移动第一个设定点之前验证完整路径。后面的坏点不能让实验停在“已执行一半”
+        # 的中间状态。
         for point in points:
             self.devices.validate_target(device_id, point, rate)
         for point_index, point in enumerate(points, start=1):
@@ -508,6 +557,8 @@ class SequenceEngine:
             await self._execute_commands(command.children, point_path)
 
     async def _measure(self) -> None:
+        # 前一个 checkpoint 防止 Pause 后启动新测量；后一个 checkpoint 让测量期间到达
+        # 的 Stop/Error 在进入下一条 SEQ 命令前立即生效。
         await self._checkpoint()
         await self.modules.measure_all(self.logger, self._current_path)
         await self._checkpoint()
@@ -668,6 +719,13 @@ class SequenceEngine:
         return True
 
     async def _checkpoint(self) -> None:
+        """统一等待用户 Pause 和 primary 设备恢复，并随时响应 Stop/Error。
+
+        先检查 Stop，再等待 pause gate，gate 打开后再检查一次，避免 Stop 与 Resume
+        竞态漏过。主设备恢复期间每 100 ms 检查 Stop；整段恢复等待累计到
+        ``_device_wait_total``，不消耗 Settle/Wait/Scan Time 的逻辑时限。
+        """
+
         while True:
             self._check_control()
             await self._pause_gate.wait()
@@ -719,10 +777,14 @@ class SequenceEngine:
                 )
 
     def _check_control(self) -> None:
+        """在当前协程栈中同步抛出已请求的 Stop/Error。"""
+
         if self._abort_requested:
             raise SequenceAbort(self._abort_message)
 
     async def _interruptible_sleep(self, seconds: float) -> None:
+        """按活动逻辑时间等待，最长约 100 ms 响应 Pause/Stop/设备失联。"""
+
         deadline = self._active_time() + max(0.0, seconds)
         while True:
             await self._checkpoint()
@@ -735,6 +797,12 @@ class SequenceEngine:
         await self._interruptible_sleep(max(0.0, deadline - self._active_time()))
 
     def _active_time(self) -> float:
+        """返回扣除 Pause 与主设备恢复等待后的单调逻辑时间。
+
+        使用 ``time.monotonic`` 避免系统时钟校时影响实验时限。当前仍在进行的 Pause
+        单独即时扣除，已结束 Pause 和设备等待使用累计值扣除。
+        """
+
         now = time.monotonic()
         current_pause = (
             max(0.0, now - self._paused_at)
@@ -749,6 +817,8 @@ class SequenceEngine:
         )
 
     def _finish_pause(self) -> None:
+        """把当前 Pause 结算进累计量；可重复调用。"""
+
         if self._paused_at is None:
             return
         self._paused_total += max(0.0, time.monotonic() - self._paused_at)

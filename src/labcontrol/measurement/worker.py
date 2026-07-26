@@ -1,3 +1,14 @@
+"""Measurement Module 的进程隔离和双向 IPC 实现。
+
+每个 Enabled 模块拥有一个独立 ``spawn`` 子进程和一条双工 Pipe。同一模块的生命周期
+请求严格串行，不同模块可以由 service 并行等待。IPC 只允许有大小上限的 UTF-8 JSON，
+避免把 Python 对象、Qt 对象或主进程资源隐式共享给第三方模块。
+
+worker 超时或协议失配后不会继续复用。因为主进程已经无法判断旧请求是否仍在操作仪表，
+复用同一进程可能让后续命令与迟到结果交叉；框架因此关闭管道并终止该 worker。该动作只
+回收本机资源，不证明外部仪表进入安全状态。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,6 +44,8 @@ _MAX_IPC_BYTES = 1024 * 1024
 
 
 class WorkerRequestError(RuntimeError):
+    """把 worker/IPC 故障转换为核心可分类的错误信息。"""
+
     def __init__(
         self,
         message: str,
@@ -50,6 +63,8 @@ def _send_message(
     connection: Connection,
     message: dict[str, Any],
 ) -> None:
+    """把一条消息编码成受限 JSON frame 后写入 Pipe。"""
+
     try:
         payload = json.dumps(
             message,
@@ -71,6 +86,8 @@ def _send_message(
 
 
 def _receive_message(connection: Connection) -> dict[str, Any]:
+    """读取并验证一条 JSON object；拒绝超长、损坏或非 object 消息。"""
+
     try:
         payload = connection.recv_bytes(_MAX_IPC_BYTES)
         decoded = json.loads(payload.decode("utf-8"))
@@ -88,6 +105,8 @@ def _receive_message(connection: Connection) -> dict[str, Any]:
 
 
 def _result(value: Any) -> dict[str, Any]:
+    """统一生命周期返回值，禁止返回任意 Python 对象穿过 IPC。"""
+
     if value is None:
         return {}
     if not isinstance(value, Mapping):
@@ -96,6 +115,8 @@ def _result(value: Any) -> dict[str, Any]:
 
 
 def _invoke(method: Callable[..., Any], *args: Any) -> dict[str, Any]:
+    """调用同步后端，同时兼容后端为了方便返回 awaitable。"""
+
     value = method(*args)
     if inspect.isawaitable(value):
         value = asyncio.run(value)
@@ -107,7 +128,11 @@ def module_worker_main(
     descriptor: ModuleDescriptor,
     dependency_directory: str,
 ) -> None:
+    """子进程入口：验证扩展、加载后端并串行执行生命周期请求。"""
+
     backend: ModuleBackend | None = None
+    # 后端方法和 context 回调可能从不同线程发送消息；Pipe 的多次写必须保持 frame
+    # 边界，不能让两个 JSON 字节串互相穿插。
     send_lock = threading.Lock()
 
     def send(message: dict[str, Any]) -> None:
@@ -115,6 +140,8 @@ def module_worker_main(
             _send_message(connection, message)
 
     try:
+        # 信任绑定的是发现时的完整目录摘要。必须在 import 第三方源码之前重算一次，
+        # 否则攻击者可在用户确认后、worker 启动前替换文件。
         if (
             descriptor.fingerprint
             and extension_tree_digest(descriptor.path)
@@ -142,6 +169,8 @@ def module_worker_main(
                     + "; ".join(dependency_errors)
                 )
             if dependency_path.is_dir():
+                # 隔离依赖只加入当前模块子进程。主进程和其他模块不会看到这个目录，
+                # 因而两个模块可以使用互不兼容的依赖版本。
                 sys.path.insert(
                     0,
                     str(dependency_path.resolve()),
@@ -164,6 +193,8 @@ def module_worker_main(
                 f"{getattr(backend_class, 'api_version', '')!r}"
             )
         backend = backend_class()
+        # 只有源码、API 和隔离依赖全部验证并成功实例化后才发送 ready。主进程在收到
+        # ready 之前不会把模块标记为 Enabled。
         send({"type": "ready"})
     except Exception as exc:
         send({"type": "boot_error", "message": f"{type(exc).__name__}: {exc}"})
@@ -179,6 +210,8 @@ def module_worker_main(
         action = str(request.get("action", ""))
         payload = dict(request.get("payload", {}))
         if action == "close":
+            # close 只用于 IPC/进程的正常收尾；仪表安全动作应在此前的 abort 或
+            # end_sequence 中完成，不能把“关闭 Python 进程”当成“关闭仪表输出”。
             send({"type": "response", "id": request_id, "ok": True, "result": {}})
             break
 
@@ -191,6 +224,12 @@ def module_worker_main(
             kind: str,
             timeout_seconds: float,
         ) -> dict[str, Any]:
+            """在一次后端调用中向核心同步请求新快照或 Pause/Stop 状态。
+
+            外层 request id 与递增的 context_request_id 必须同时匹配，防止迟到响应被
+            当前请求误用。等待同样有上限，核心线程异常时模块不能永久卡死。
+            """
+
             nonlocal context_request_number
             context_request_number += 1
             context_request_id = str(context_request_number)
@@ -278,6 +317,8 @@ def module_worker_main(
             float(payload.get("operation_timeout_seconds", 120.0)),
         )
         try:
+            # 一个 worker 同一时刻只执行这一条分派链。并行 Measure 发生在“不同模块
+            # 进程之间”，不是在同一 VISA session 上并发调用后端。
             if action == "initialize":
                 result = _invoke(backend.initialize, dict(payload.get("settings", {})), context)
             elif action == "apply_settings":
@@ -303,6 +344,7 @@ def module_worker_main(
                 raise ModuleError(f"Unknown worker action: {action}", "UNKNOWN_MODULE_ACTION", action)
             send({"type": "response", "id": request_id, "ok": True, "result": result})
         except ModuleWarning as exc:
+            # Warning 表示本次调用可恢复；Error 和未处理异常则由主进程进入故障路径。
             send({
                 "type": "response",
                 "id": request_id,
@@ -313,6 +355,7 @@ def module_worker_main(
                 "context": exc.context,
             })
         except ModuleOperationCancelled as exc:
+            # Stop 的协作取消单独编码，service 不把它重新报告成 Error/Warning。
             send({
                 "type": "response",
                 "id": request_id,
@@ -346,7 +389,12 @@ def module_worker_main(
 
 
 class ModuleWorkerClient:
-    """One serialized IPC connection to one independently spawned module backend."""
+    """主进程侧的单模块 IPC 客户端。
+
+    ``_lock`` 覆盖一次请求从发送到最终响应的整个期间，保证同一 Pipe 上没有并发请求；
+    ``_state_lock`` 只保护 connection/process 引用的替换，不在持有它时等待子进程。
+    这种拆分允许关闭线程在请求卡住时废弃进程，而不会和普通请求交叉写 Pipe。
+    """
 
     def __init__(
         self,
@@ -357,6 +405,7 @@ class ModuleWorkerClient:
         self.dependency_directory = dependency_directory
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
+        # RLock 是有意选择：close() 获得锁后会调用 request("close")，需要同一线程重入。
         self._lock = threading.RLock()
         self._state_lock = threading.Lock()
         self._request_number = 0
@@ -370,6 +419,12 @@ class ModuleWorkerClient:
 
     @staticmethod
     def _stop_process(process: multiprocessing.Process, timeout_seconds: float) -> None:
+        """在总时限内按 terminate → kill 升级并回收进程句柄。
+
+        这是本机资源回收的最后手段。terminate/kill 会跳过模块 ``finally``，因此调用者
+        必须在可能时先请求 abort，并在 abort 未确认时向用户保留 Error。
+        """
+
         timeout = max(0.0, timeout_seconds)
         deadline = time.monotonic() + timeout
         try:
@@ -398,6 +453,12 @@ class ModuleWorkerClient:
         process: multiprocessing.Process | None,
         timeout_seconds: float,
     ) -> None:
+        """仅当仍拥有这些对象时使客户端失效，并关闭对应进程。
+
+        ownership 检查防止一个迟到的旧请求把未来可能替换进去的新 connection/process
+        一并关闭。
+        """
+
         with self._state_lock:
             owns_connection = self._connection is connection
             owns_process = self._process is process
@@ -426,10 +487,14 @@ class ModuleWorkerClient:
             self._stop_process(process, timeout_seconds)
 
     def start(self, timeout_seconds: float = 10.0) -> None:
+        """使用 spawn 创建干净子进程，并等待经过验证的 ready 握手。"""
+
         timeout = self._timeout(timeout_seconds, "Module startup")
         with self._state_lock:
             if self._process is not None:
                 return
+        # Windows 默认也是 spawn；这里显式指定，使源码测试与打包版都不会继承主进程
+        # 已打开的 Qt/VISA/线程状态。
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe(duplex=True)
         process = context.Process(
@@ -457,6 +522,7 @@ class ModuleWorkerClient:
             self._connection = parent
             self._process = process
         try:
+            # startup timeout 包含第三方源码 import、依赖验证和 backend 构造。
             if not parent.poll(timeout):
                 self._invalidate(parent, process, min(timeout, 1.0))
                 raise WorkerRequestError(
@@ -496,6 +562,13 @@ class ModuleWorkerClient:
         event_handler: WorkerEventHandler | None = None,
         timeout_seconds: float = 120.0,
     ) -> dict[str, Any]:
+        """发送一个串行请求，并在同一总 deadline 内处理事件和最终响应。
+
+        deadline 从等待 ``_lock`` 前开始，因此排队、IPC、核心事件处理和后端执行共同
+        消耗一个时限。任一阶段超时都会废弃 worker；不能简单重发写操作，因为旧请求
+        可能已经到达仪表并产生副作用。
+        """
+
         timeout = self._timeout(timeout_seconds, "Module operation")
         deadline = time.monotonic() + timeout
         acquired = self._lock.acquire(timeout=timeout)
@@ -547,6 +620,8 @@ class ModuleWorkerClient:
                         action,
                     ) from exc
                 if not ready:
+                    # 超时后不尝试读取“迟到响应”，直接使 worker 失效，避免下一次请求
+                    # 把旧响应当成自己的结果。
                     self._invalidate(connection, process, min(timeout, 1.0))
                     raise WorkerRequestError(
                         f"Module operation {action!r} timed out after {timeout:g} seconds",
@@ -563,6 +638,8 @@ class ModuleWorkerClient:
                         action,
                     ) from exc
                 if str(message.get("id", "")) != request_id:
+                    # 正常串行协议不应出现其他 id。忽略它并继续受同一 deadline 约束，
+                    # 不允许异常消息延长请求。
                     continue
                 if message.get("type") != "response":
                     event_result: Mapping[str, Any] | None = None
@@ -572,6 +649,8 @@ class ModuleWorkerClient:
                         except Exception as exc:
                             event_error = exc
                     if message.get("type") == "context_request":
+                        # worker 在执行长测量时可同步询问新温场快照或 Pause/Stop 状态。
+                        # 响应沿同一 Pipe 返回，仍由 request id 和子请求 id 双重关联。
                         context_response = {
                             "type": "context_response",
                             "id": request_id,
@@ -643,6 +722,8 @@ class ModuleWorkerClient:
             self._lock.release()
 
     def force_stop(self, timeout_seconds: float = 0.25) -> None:
+        """立即废弃管道并回收进程，不声称外部仪表已经安全。"""
+
         with self._state_lock:
             connection = self._connection
             process = self._process
@@ -653,6 +734,12 @@ class ModuleWorkerClient:
         )
 
     def close(self, timeout_seconds: float = 3.0) -> None:
+        """优先请求正常 close；被活动请求占用时在总时限内强制回收。
+
+        如果短时间拿不到请求锁，说明后端可能仍在阻塞调用。此时先终止进程让 Pipe
+        解阻，再尝试取得锁关闭父端 connection。所有分支共用一个 deadline。
+        """
+
         timeout = self._timeout(timeout_seconds, "Module shutdown")
         with self._state_lock:
             connection = self._connection

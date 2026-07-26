@@ -1,3 +1,10 @@
+"""Qt/UI 线程与 asyncio 设备运行时之间的总边界。
+
+RuntimeService 在独立线程中拥有唯一 asyncio loop、DeviceManager、SequenceEngine 和
+MeasurementModuleService。UI 只通过线程安全提交与消息队列交互，避免 Qt 线程直接等待
+仪表 I/O。关闭顺序集中在本文件，保证先停止 SEQ，再回收模块、设备、报警线程和日志。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +28,7 @@ from .sequence.model import SequenceDocument
 
 
 class RuntimeService:
-    """Owns the asynchronous device runtime on a background thread."""
+    """在后台线程拥有完整异步运行时，并向 UI 暴露线程安全入口。"""
 
     def __init__(
         self,
@@ -52,6 +59,8 @@ class RuntimeService:
         )
 
     def start(self, timeout: float = 10.0) -> None:
+        """启动运行时线程并等待初始化阶段结束；不会无限卡住 UI。"""
+
         if self._thread is not None:
             return
         self._thread = threading.Thread(target=self._thread_main, name="OpenLabRuntime", daemon=True)
@@ -60,6 +69,8 @@ class RuntimeService:
             raise TimeoutError("Device runtime startup timed out")
 
     def _thread_main(self) -> None:
+        """运行时线程入口：创建、运行并最终销毁该线程专属 event loop。"""
+
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         self._loop = loop
@@ -76,6 +87,7 @@ class RuntimeService:
         self.events.subscribe(
             self.alarm_reporter.handle_notice
         )
+        # 报警线程先启动，但它只订阅事件，不参与任何设备安全决策。
         self.alarm_reporter.start()
         try:
             self.devices = DeviceManager(
@@ -113,6 +125,8 @@ class RuntimeService:
         try:
             loop.run_forever()
         finally:
+            # 正常 shutdown 应已逐项清理；这里再取消残余 task，作为 event loop 关闭的
+            # 最后兜底，避免 Python 报 “Task was destroyed but pending”。
             pending = asyncio.all_tasks(loop)
             for task in pending:
                 task.cancel()
@@ -146,6 +160,8 @@ class RuntimeService:
         self,
         error: str | None,
     ) -> None:
+        """把报警线程的结果安全切回 runtime loop，避免跨线程调用 EventManager。"""
+
         loop = self._loop
         if (
             loop is None
@@ -164,6 +180,8 @@ class RuntimeService:
         self,
         error: str | None,
     ) -> None:
+        """在 runtime 线程锁存或解除本地报警投递 Warning。"""
+
         if self.events is None:
             return
         if error is None:
@@ -191,6 +209,8 @@ class RuntimeService:
         return result
 
     def _submit(self, coroutine: Any) -> Future[Any]:
+        """从 UI/调用线程把协程提交到唯一 runtime loop。"""
+
         if self._loop is None or not self._loop.is_running():
             raise RuntimeError("Device runtime has not started")
         return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
@@ -209,10 +229,13 @@ class RuntimeService:
         document: SequenceDocument,
         module_settings: dict[str, dict[str, object]],
     ) -> Any:
+        """持有 sequence control lease 运行 SEQ，并在任何退出路径释放 lease。"""
+
         if self._sequence_task is not None and not self._sequence_task.done():
             raise RuntimeError("A sequence is already running")
         assert self.engine is not None
         assert self.devices is not None
+        # lease 让手动 Set/Hold 在 SEQ 期间被运行时拒绝，不能只依赖 UI 按钮变灰。
         self.devices.acquire_sequence_control()
         self._sequence_task = asyncio.create_task(
             self.engine.run(document, module_settings)
@@ -306,6 +329,8 @@ class RuntimeService:
         self._loop.call_soon_threadsafe(self.events.resolve, source, code, context)
 
     def shutdown(self, timeout: float = 8.0) -> None:
+        """从调用线程执行有总时限的关闭，并确认 runtime 线程真正退出。"""
+
         if self._loop is None or self._thread is None:
             return
         thread = self._thread
@@ -314,6 +339,8 @@ class RuntimeService:
             try:
                 future.result(timeout=timeout)
             except Exception:
+                # 异步清理超出调用方总时限时先要求 loop 停止；之后仍 join 并在残留时
+                # 明确抛错，不能静默留下后台线程。
                 self._loop.call_soon_threadsafe(self._loop.stop)
         thread.join(timeout=timeout)
         if thread.is_alive():
@@ -325,6 +352,16 @@ class RuntimeService:
         self._loop = None
 
     async def _shutdown_async(self) -> None:
+        """按安全依赖顺序关闭运行时。
+
+        1. 请求 SEQ Stop，使正常路径有机会 Hold 并调用模块 end_sequence；
+        2. 最多等待 3 秒，超时才取消 task；
+        3. 停止轮询，避免清理期间又产生新设备请求；
+        4. 模块 abort/回收 worker；
+        5. 断开温场和 Monitor；
+        6. 有界关闭非关键报警线程，最后关闭日志和 event loop。
+        """
+
         if self.engine is not None:
             self.engine.request_stop(False, "Application closing")
         sequence_task = self._sequence_task
@@ -335,6 +372,7 @@ class RuntimeService:
                     timeout=3.0,
                 )
             except asyncio.TimeoutError:
+                # 取消是最后手段；SequenceEngine 的 CancelledError 分支仍会尝试 Hold。
                 sequence_task.cancel()
                 await asyncio.gather(
                     sequence_task,
@@ -356,6 +394,8 @@ class RuntimeService:
             self._poll_task.cancel()
             await asyncio.gather(self._poll_task, return_exceptions=True)
         if self.modules is not None:
+            # 模块先于设备断开，因为模块 abort 可能仍需要自己的仪表连接；二者都在设备
+            # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
             await self.modules.shutdown()
         if self.devices is not None:
             await self.devices.disconnect_all()
