@@ -16,6 +16,7 @@ xcopy /E /I /Y "docs" "dist\OpenLabControl\docs" >nul
 xcopy /E /I /Y "plugin_templates" "dist\OpenLabControl\plugin_templates" >nul
 xcopy /E /I /Y "integrations" "dist\OpenLabControl\integrations" >nul
 xcopy /E /I /Y "modules" "dist\OpenLabControl\modules" >nul
+for %%R in (configs examples docs plugin_templates integrations modules) do call :remove_python_caches "dist\OpenLabControl\%%R"
 copy /Y "README.md" "dist\OpenLabControl\README.md" >nul
 copy /Y "CHANGELOG.md" "dist\OpenLabControl\CHANGELOG.md" >nul
 copy /Y "SECURITY.md" "dist\OpenLabControl\SECURITY.md" >nul
@@ -29,6 +30,15 @@ if not exist "dist\OpenLabControl\plugin_state" mkdir "dist\OpenLabControl\plugi
 echo.
 echo Build completed: dist\OpenLabControl\OpenLabControl.exe
 pause
+exit /b 0
+
+:remove_python_caches
+for /d /r "%~1" %%D in (__pycache__) do @if exist "%%D" rd /s /q "%%D"
+for /d /r "%~1" %%D in (.pytest_cache) do @if exist "%%D" rd /s /q "%%D"
+for /d /r "%~1" %%D in (.mypy_cache) do @if exist "%%D" rd /s /q "%%D"
+for /d /r "%~1" %%D in (.ruff_cache) do @if exist "%%D" rd /s /q "%%D"
+del /s /q "%~1\*.pyc" >nul 2>&1
+del /s /q "%~1\*.pyo" >nul 2>&1
 exit /b 0
 
 :error

@@ -91,6 +91,20 @@ class ReleaseContractTests(unittest.TestCase):
                 f'dist\\OpenLabControl\\{name}',
                 build_script,
             )
+        self.assertIn(
+            'call :remove_python_caches "dist\\OpenLabControl\\%%R"',
+            build_script,
+        )
+        for generated_name in (
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "*.pyc",
+            "*.pyo",
+        ):
+            with self.subTest(generated_name=generated_name):
+                self.assertIn(generated_name, build_script)
 
     def test_current_docs_describe_isolated_offline_extensions(self) -> None:
         current_documents = "\n".join(
