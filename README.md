@@ -5,8 +5,8 @@ Python/PySide6 控制框架。它不控制 PPMS 本体。温控仪、磁体电�
 Device Plugin 提供；吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的
 Measurement Module 提供。
 
-当前版本：`0.11.0b2`（v0.11.0 Beta 2）。这是尚未连接真实仪表验证的 Beta；默认配置
-全部使用仿真设备。
+当前版本：`0.11.0`。核心框架、扩展 API 和仿真流程进入稳定版本；默认配置全部使用
+仿真设备。Lake Shore 372A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
 
 ![主窗口](docs/main-window-preview.png)
 
@@ -138,6 +138,7 @@ tests/                    核心自动测试
 - [技术规格](docs/TECHNICAL_SPECIFICATION.md)
 - [测试计划](docs/TEST_PLAN.md)
 - [验证报告](docs/VERIFICATION_REPORT.md)
+- [Beta 2 历史验证报告](docs/VERIFICATION_REPORT_BETA2.md)
 - [Beta 1 历史验证报告](docs/VERIFICATION_REPORT_BETA1.md)
 - [架构决策](docs/DECISIONS.md)
 

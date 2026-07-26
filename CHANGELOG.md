@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0 - 2026-07-26
+
+- 将经过 Beta 2 完整仿真、源码端到端和 Windows 干净包验证的核心框架提升为稳定版本。
+- 稳定范围包括 SEQ、设备/模块生命周期、DAT/Data Browser、扩展隔离、报警发送和
+  Windows 打包契约；扩展 API 保持与 0.11.0 Beta 2 兼容。
+- 默认设备仍为仿真；Lake Shore 372A 等未经过真实仪表验证的硬件扩展继续保留各自的
+  Beta 版本和真机上线门槛。
+
 ## 0.11.0b2 - 2026-07-26 (Beta 2)
 
 - Measurement Module context 增加实时只读系统快照、Pause 冻结的可中断等待和 Stop
