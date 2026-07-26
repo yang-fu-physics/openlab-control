@@ -186,3 +186,16 @@ def configured_device_plugins(
             selected.append(descriptor)
             seen.add(descriptor.id)
     return tuple(selected)
+
+
+def device_dependency_directory(
+    config: AppConfig,
+    descriptor: DevicePluginDescriptor,
+) -> Path:
+    return (
+        config.resolve_project_path(config.plugins.runtime_directory)
+        / "device"
+        / descriptor.id
+        / descriptor.fingerprint[:16]
+        / "site-packages"
+    )

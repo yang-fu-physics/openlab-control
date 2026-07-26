@@ -188,7 +188,7 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config = copied_project(Path(temp))
             events = EventManager()
-            devices = DeviceManager(config, events)
+            devices = DeviceManager(config, events, isolate_processes=False)
             descriptor = ModuleDescriptor(
                 id="finite_values",
                 name="Finite Values",
@@ -222,7 +222,7 @@ class ModuleServiceTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            devices = DeviceManager(config, events)
+            devices = DeviceManager(config, events, isolate_processes=False)
             modules = MeasurementModuleService(discover_modules(config), events, devices)
             logger = DatRunLogger(config, events)
             await devices.connect_all()
@@ -280,7 +280,7 @@ class ModuleServiceTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            devices = DeviceManager(config, events)
+            devices = DeviceManager(config, events, isolate_processes=False)
             modules = MeasurementModuleService(discover_modules(config), events, devices)
             logger = DatRunLogger(config, events)
             await devices.connect_all()
@@ -314,7 +314,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(config, events)
+            devices = DeviceManager(config, events, isolate_processes=False)
 
             end_service = MeasurementModuleService(discover_modules(config), events, devices)
             end_record = end_service.records["simulated_transport"]
@@ -349,7 +349,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(config, events)
+            devices = DeviceManager(config, events, isolate_processes=False)
             descriptors = tuple(
                 ModuleDescriptor(
                     id=module_id,
@@ -394,7 +394,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(config, events)
+            devices = DeviceManager(config, events, isolate_processes=False)
             descriptors = tuple(
                 ModuleDescriptor(
                     id=module_id,

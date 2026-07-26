@@ -9,7 +9,16 @@ from typing import TypeVar
 
 from .config import AppConfig, DeviceConfig
 from .devices.base import DeviceError, DevicePlugin, DeviceWarning, SafetyViolation
-from .devices.manifest import DevicePluginDescriptor
+from .devices.manifest import (
+    DevicePluginDescriptor,
+    device_dependency_directory,
+)
+from .devices.worker import (
+    DeviceWorkerClient,
+    DeviceWorkerSpec,
+    InProcessDeviceClient,
+    IsolatedDeviceClient,
+)
 from .events import EventManager
 from .extensions.loading import load_import_object, load_source_object
 from .extensions.trust import PluginTrustStore, extension_tree_digest
@@ -26,11 +35,14 @@ class DeviceManager:
         config: AppConfig,
         events: EventManager,
         descriptors: tuple[DevicePluginDescriptor, ...] = (),
+        *,
+        isolate_processes: bool = True,
     ) -> None:
         self.config = config
         self.events = events
         self.descriptors = {descriptor.id: descriptor for descriptor in descriptors}
-        self.devices: dict[str, DevicePlugin] = {}
+        self.isolate_processes = isolate_processes
+        self.devices: dict[str, object] = {}
         self.device_configs: dict[str, DeviceConfig] = {item.id: item for item in config.devices}
         self._locks: dict[str, asyncio.Lock] = {}
         self._stability: dict[str, StabilityEvaluator] = {}
@@ -43,6 +55,7 @@ class DeviceManager:
     def _load_plugins(self) -> None:
         trust_store: PluginTrustStore | None = None
         for device_config in self.config.devices:
+            descriptor: DevicePluginDescriptor | None = None
             if ":" in device_config.plugin:
                 module_name = device_config.plugin.split(":", 1)[0]
                 if not module_name.startswith("labcontrol.devices."):
@@ -50,7 +63,6 @@ class DeviceManager:
                         "Unmanifested third-party device imports are disabled; "
                         f"copy {device_config.plugin!r} into device_plugins with device.toml"
                     )
-                plugin_class = load_import_object(device_config.plugin)
             else:
                 descriptor = self.descriptors.get(device_config.plugin)
                 if descriptor is None:
@@ -82,21 +94,78 @@ class DeviceManager:
                     raise PermissionError(
                         f"Device plugin {descriptor.id} has not been trusted"
                     )
-                plugin_class = load_source_object(
-                    descriptor.path,
-                    descriptor.backend,
-                    f"device_{descriptor.id}",
+            if self.isolate_processes:
+                dependency_directory = (
+                    ""
+                    if descriptor is None
+                    else str(device_dependency_directory(self.config, descriptor))
                 )
-            if not isinstance(plugin_class, type) or not issubclass(plugin_class, DevicePlugin):
-                raise TypeError(f"{device_config.plugin} is not a DevicePlugin")
-            if str(getattr(plugin_class, "api_version", "")) != DevicePlugin.api_version:
-                raise TypeError(
-                    f"{device_config.plugin} uses incompatible device API "
-                    f"{getattr(plugin_class, 'api_version', '')!r}"
+                worker_spec = DeviceWorkerSpec(
+                    device_config=device_config,
+                    simulation_speed=self.config.simulation_speed,
+                    plugin_id=(
+                        "builtin"
+                        if descriptor is None
+                        else descriptor.id
+                    ),
+                    backend=(
+                        device_config.plugin
+                        if descriptor is None
+                        else descriptor.backend
+                    ),
+                    plugin_directory=(
+                        ""
+                        if descriptor is None
+                        else str(descriptor.path)
+                    ),
+                    fingerprint=(
+                        ""
+                        if descriptor is None
+                        else descriptor.fingerprint
+                    ),
+                    dependency_directory=dependency_directory,
                 )
-            self.devices[device_config.id] = plugin_class(
-                device_config, simulation_speed=self.config.simulation_speed
-            )
+                self.devices[device_config.id] = IsolatedDeviceClient(
+                    DeviceWorkerClient(worker_spec),
+                    startup_timeout_seconds=(
+                        self.config.plugins.device_startup_timeout_seconds
+                    ),
+                    operation_timeout_seconds=(
+                        device_config.operation_timeout_seconds
+                    ),
+                    shutdown_timeout_seconds=(
+                        device_config.shutdown_timeout_seconds
+                    ),
+                )
+            else:
+                plugin_class = (
+                    load_import_object(device_config.plugin)
+                    if descriptor is None
+                    else load_source_object(
+                        descriptor.path,
+                        descriptor.backend,
+                        f"device_{descriptor.id}",
+                    )
+                )
+                if (
+                    not isinstance(plugin_class, type)
+                    or not issubclass(plugin_class, DevicePlugin)
+                ):
+                    raise TypeError(f"{device_config.plugin} is not a DevicePlugin")
+                if (
+                    str(getattr(plugin_class, "api_version", ""))
+                    != DevicePlugin.api_version
+                ):
+                    raise TypeError(
+                        f"{device_config.plugin} uses incompatible device API "
+                        f"{getattr(plugin_class, 'api_version', '')!r}"
+                    )
+                self.devices[device_config.id] = InProcessDeviceClient(
+                    plugin_class(
+                        device_config,
+                        simulation_speed=self.config.simulation_speed,
+                    )
+                )
             self._locks[device_config.id] = asyncio.Lock()
             self._poll_issues[device_config.id] = set()
             if device_config.stability is not None:
@@ -111,14 +180,6 @@ class DeviceManager:
         shutdown: bool = False,
     ) -> T:
         config = self.device_configs[device_id]
-        previous = self._unavailable_after_timeout.get(device_id)
-        if previous is not None:
-            raise DeviceError(
-                f"{config.display_name} is unavailable after timed-out "
-                f"{previous}; restart OpenLab Control before further I/O",
-                "DEVICE_UNAVAILABLE_AFTER_TIMEOUT",
-                operation,
-            )
         timeout = (
             config.shutdown_timeout_seconds
             if shutdown
@@ -127,21 +188,36 @@ class DeviceManager:
 
         async def serialized() -> T:
             async with self._locks[device_id]:
-                return await callback()
+                previous = self._unavailable_after_timeout.get(device_id)
+                if previous is not None and not shutdown:
+                    raise DeviceError(
+                        f"{config.display_name} is unavailable after timed-out "
+                        f"{previous}; restart OpenLab Control before further I/O",
+                        "DEVICE_UNAVAILABLE_AFTER_TIMEOUT",
+                        operation,
+                    )
+                device = self.devices[device_id]
+                try:
+                    if bool(getattr(device, "enforces_timeouts", False)):
+                        return await callback()
+                    return await asyncio.wait_for(callback(), timeout=timeout)
+                except TimeoutError as exc:
+                    self._unavailable_after_timeout[device_id] = operation
+                    raise DeviceError(
+                        f"{config.display_name} {operation} timed out after "
+                        f"{timeout:g} seconds; further I/O is blocked until restart",
+                        "DEVICE_OPERATION_TIMEOUT",
+                        operation,
+                    ) from exc
+                except DeviceError as exc:
+                    if exc.code == "DEVICE_OPERATION_TIMEOUT":
+                        self._unavailable_after_timeout[device_id] = operation
+                    raise
 
-        try:
-            return await asyncio.wait_for(serialized(), timeout=timeout)
-        except TimeoutError as exc:
-            self._unavailable_after_timeout[device_id] = operation
-            raise DeviceError(
-                f"{config.display_name} {operation} timed out after "
-                f"{timeout:g} seconds; further I/O is blocked until restart",
-                "DEVICE_OPERATION_TIMEOUT",
-                operation,
-            ) from exc
+        return await serialized()
 
     async def connect_all(self) -> None:
-        async def connect(device_id: str, device: DevicePlugin) -> None:
+        async def connect(device_id: str, device: object) -> None:
             try:
                 await self._operate(device_id, "connect", device.connect)
                 self.events.resolve(device_id, "CONNECT_FAILED")
@@ -160,7 +236,7 @@ class DeviceManager:
         )
 
     async def disconnect_all(self) -> None:
-        async def disconnect(device_id: str, device: DevicePlugin) -> None:
+        async def disconnect(device_id: str, device: object) -> None:
             try:
                 await self._operate(
                     device_id,
@@ -176,6 +252,16 @@ class DeviceManager:
                     str(exc),
                     getattr(exc, "context", ""),
                 )
+            finally:
+                try:
+                    await device.close()  # type: ignore[attr-defined]
+                except Exception as exc:
+                    self.events.report(
+                        Severity.WARNING,
+                        device_id,
+                        "DEVICE_WORKER_CLOSE_FAILED",
+                        str(exc),
+                    )
 
         await asyncio.gather(
             *(disconnect(device_id, device) for device_id, device in self.devices.items())
@@ -414,7 +500,7 @@ class DeviceManager:
         return await self.set_target(selected, value, rate_per_minute, mode)
 
     async def hold_all(self) -> bool:
-        async def hold(device_id: str, device: DevicePlugin) -> bool:
+        async def hold(device_id: str, device: object) -> bool:
             config = self.device_configs[device_id]
             if config.kind is DeviceKind.TEMPERATURE:
                 strategy = self.config.abort_temperature

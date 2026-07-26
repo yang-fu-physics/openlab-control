@@ -63,7 +63,7 @@ class SequenceEngineTests(unittest.TestCase):
     async def _run(self, config, document, notices, progresses=None):
         events = EventManager()
         events.subscribe(notices.append)
-        manager = DeviceManager(config, events)
+        manager = DeviceManager(config, events, isolate_processes=False)
         logger = DatRunLogger(config, events)
         modules = MeasurementModuleService(discover_modules(config), events, manager)
         engine = SequenceEngine(
@@ -224,7 +224,7 @@ class SequenceEngineTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             now = asyncio.get_running_loop().time()
             manager.latest["temperature"] = DeviceSnapshot(
                 device_id="temperature",
@@ -318,7 +318,7 @@ class SequenceEngineTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             logger = DatRunLogger(config, events)
             modules = MeasurementModuleService((), events, manager)
             engine = SequenceEngine(config, manager, events, logger, modules)
@@ -507,7 +507,7 @@ class SequenceEngineTests(unittest.TestCase):
 
         async def scenario(config):
             events = EventManager()
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             logger = DatRunLogger(config, events)
             modules = FailingModules()
             engine = SequenceEngine(config, manager, events, logger, modules)  # type: ignore[arg-type]

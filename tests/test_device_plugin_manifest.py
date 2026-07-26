@@ -185,12 +185,22 @@ class DevicePluginManifestTests(unittest.TestCase):
                 )
                 descriptors = discover_device_plugins(config)
                 with self.assertRaisesRegex(PermissionError, "has not been trusted"):
-                    DeviceManager(config, EventManager(), descriptors)
+                    DeviceManager(
+                        config,
+                        EventManager(),
+                        descriptors,
+                        isolate_processes=False,
+                    )
                 self.assertFalse(marker.exists())
 
                 store = PluginTrustStore(state / "trusted_plugins.json")
                 store.trust("device", descriptors[0])
-                manager = DeviceManager(config, EventManager(), descriptors)
+                manager = DeviceManager(
+                    config,
+                    EventManager(),
+                    descriptors,
+                    isolate_processes=False,
+                )
                 self.assertTrue(marker.exists())
                 await manager.connect_all()
                 snapshots = await manager.poll_all()
@@ -210,7 +220,7 @@ class DevicePluginManifestTests(unittest.TestCase):
             ),
         )
         with self.assertRaisesRegex(PermissionError, "Unmanifested third-party"):
-            DeviceManager(config, EventManager())
+            DeviceManager(config, EventManager(), isolate_processes=False)
 
 
 class PluginTrustStoreTests(unittest.TestCase):

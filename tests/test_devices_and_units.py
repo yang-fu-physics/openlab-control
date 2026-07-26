@@ -26,7 +26,7 @@ class DeviceManagerTests(unittest.TestCase):
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
             events = EventManager()
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             await manager.connect_all()
             snapshots = await manager.poll_all()
             self.assertEqual(len(snapshots), 3)
@@ -50,7 +50,7 @@ class DeviceManagerTests(unittest.TestCase):
         self.assertEqual(field.min_value, -90000.0)
         self.assertEqual(field.max_value, 90000.0)
         self.assertEqual(field.default_rate_per_minute, 5000.0)
-        manager = DeviceManager(config, EventManager())
+        manager = DeviceManager(config, EventManager(), isolate_processes=False)
         with self.assertRaises(SafetyViolation):
             manager.validate_target("field", 200000.0, 5000.0)
         with self.assertRaises(SafetyViolation):
@@ -75,7 +75,7 @@ class DeviceManagerTests(unittest.TestCase):
                 for device in config.devices
             ),
         )
-        manager = DeviceManager(custom, EventManager())
+        manager = DeviceManager(custom, EventManager(), isolate_processes=False)
         self.assertEqual(
             manager.resolve_device_id(DeviceKind.TEMPERATURE, "temperature"),
             "cryostat_primary",
@@ -210,7 +210,11 @@ class DeviceManagerTests(unittest.TestCase):
     def test_completed_poll_cannot_overwrite_a_new_target(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
-            manager = DeviceManager(config, EventManager())
+            manager = DeviceManager(
+                config,
+                EventManager(),
+                isolate_processes=False,
+            )
             await manager.connect_all()
             await manager.poll_all()
 
@@ -241,7 +245,7 @@ class DeviceManagerTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe_occurrences(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             await manager.connect_all()
             await manager.poll_all()
             monitor = manager.devices["second_stage"]
@@ -280,7 +284,7 @@ class DeviceManagerTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             await manager.connect_all()
             await manager.poll_all()
             temperature = manager.devices["temperature"]
@@ -318,7 +322,7 @@ class DeviceManagerTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             await manager.connect_all()
             field = manager.devices["field"]
             original_hold = field.hold
@@ -349,7 +353,11 @@ class DeviceManagerTests(unittest.TestCase):
                 abort_temperature="keep_target",
                 abort_field="keep_target",
             )
-            manager = DeviceManager(config, EventManager())
+            manager = DeviceManager(
+                config,
+                EventManager(),
+                isolate_processes=False,
+            )
             called: list[str] = []
 
             for device_id in ("temperature", "field"):
@@ -376,7 +384,7 @@ class DeviceManagerTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             await manager.connect_all()
             await manager.poll_all()
 
@@ -419,7 +427,7 @@ class DeviceManagerTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events)
+            manager = DeviceManager(config, events, isolate_processes=False)
             await manager.connect_all()
             await manager.poll_all()
             monitor = manager.devices["second_stage"]
