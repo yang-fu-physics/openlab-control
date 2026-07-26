@@ -142,7 +142,22 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertEqual(state, RunState.COMPLETED)
             self.assertIsNotNone(paths)
             data = paths.data_file.read_text(encoding="utf-8")
+            device_status = paths.device_status_file.read_text(
+                encoding="utf-8"
+            )
             self.assertGreaterEqual(data.count("Measure"), 16)
+            self.assertIn(
+                "temperature.Stability",
+                device_status,
+            )
+            self.assertGreaterEqual(
+                len(
+                    device_status.split("[Data]\n", 1)[1]
+                    .strip()
+                    .splitlines()
+                ),
+                2,
+            )
             self.assertEqual(progresses[-1].completed_steps, 7)
             self.assertEqual(progresses[-1].total_steps, 7)
             self.assertTrue(

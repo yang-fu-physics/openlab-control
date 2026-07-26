@@ -139,6 +139,24 @@ class RuntimeService:
         while True:
             try:
                 snapshots = await self.devices.poll_all()
+                if self.logger is not None:
+                    try:
+                        self.logger.write_device_status(
+                            snapshots
+                        )
+                    except Exception as exc:
+                        if self.events is not None:
+                            self.events.report(
+                                Severity.ERROR,
+                                "logging",
+                                "DEVICE_STATUS_WRITE_FAILED",
+                                str(exc),
+                                str(
+                                    self.logger.paths.device_status_file
+                                    if self.logger.paths is not None
+                                    else ""
+                                ),
+                            )
                 self.messages.put(RuntimeMessage("snapshots", snapshots))
             except asyncio.CancelledError:
                 raise

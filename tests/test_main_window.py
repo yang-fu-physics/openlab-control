@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -19,6 +20,7 @@ MODULE_REPOSITORY = (
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
@@ -164,6 +166,63 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
             self.assertEqual(window.module_descriptors, ())
             self.assertEqual(window.windowTitle(), self.config.title)
+        finally:
+            window.close()
+
+    def test_live_trend_stays_connected_under_continuous_simulated_polling(
+        self,
+    ) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.show()
+            window._show_graph()
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                self.application.processEvents()
+                QTest.qWait(20)
+
+            self.assertTrue(window.trend_dialog.isVisible())
+            self.assertEqual(
+                set(window.current_snapshots),
+                {device.id for device in self.config.devices},
+            )
+            self.assertTrue(
+                all(
+                    snapshot.connected
+                    and snapshot.connection_state.value
+                    == "connected"
+                    and snapshot.stability.value
+                    not in {"timed_out", "stale"}
+                    for snapshot in window.current_snapshots.values()
+                )
+            )
+            self.assertTrue(
+                all(
+                    len(points) >= 2
+                    for points
+                    in window.trend_dialog.canvas.history.values()
+                )
+            )
+            active_events = (
+                ()
+                if window.runtime.events is None
+                else window.runtime.events.active_events()
+            )
+            self.assertEqual(
+                [
+                    event.code
+                    for event in active_events
+                    if (
+                        "TIMEOUT" in event.code
+                        or event.code
+                        in {
+                            "POLL_LOOP_FAILED",
+                            "STALE_READING",
+                        }
+                    )
+                ],
+                [],
+            )
         finally:
             window.close()
 

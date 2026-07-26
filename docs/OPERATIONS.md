@@ -78,6 +78,7 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 - 底部 `Device Status`：Temperature、Magnetic Field、`2nd Stage` 等控制/Monitor；不再显示测量 Transport 块。
 - 工具栏 `Modules`：测量模块管理。
 - `Run Log`：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。
+- `Live Trend`：保留最近设备快照，最多每 250 ms 合并一次可见重绘；只影响显示。
 
 温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，
 不弹控制窗口。每种 temperature/field 最多一个 primary 供 SEQ 使用；其他 secondary
@@ -180,6 +181,8 @@ abort 失败时程序报告 Error，并在关闭总上限内强制回收模块�
 
 - 右侧命令双击：弹参数窗口，确认后插入。
 - SEQ 行双击：编辑该行参数。
+- `Set Datafile` 的 `Browse…` 直接打开 Windows 文件窗口；`open` 选已有文件，
+  `create` / `open|create` 可选或新建文件。
 - 插入在 Scan/End Scan 上时会进入该 Scan；否则插在所选命令之后。
 - 所有温场弹窗直接显示配置中的上下限和最大速率。
 
@@ -304,12 +307,17 @@ configuration.toml
 module_settings/*.settings.toml
 module_settings/*.status-at-start.json
 experiment.dat
+device_status.dat
 events.dat
 ```
 
 建议实验结束后整体复制整个运行目录，而不是只复制 DAT。模块 desired 设置和实际 Status 对复现实验同样重要。
 Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，但不会自动发送到
 仪表。
+
+`device_status.dat` 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
+稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
+记录频率或增加仪表查询。
 
 ## 关闭程序
 

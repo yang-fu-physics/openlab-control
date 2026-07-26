@@ -17,7 +17,7 @@ PySide6 主进程 / GUI 线程
 ├─ DeviceManager：角色、限制、恢复与快照
 ├─ SequenceEngine：嵌套 SEQ、Pause、Stop、Error
 ├─ MeasurementModuleService：模块生命周期与并行 Measure
-├─ DatRunLogger：DAT / events.dat 唯一写入者
+├─ DatRunLogger：实验 DAT / device_status.dat / events.dat 唯一写入者
 ├─ EventManager：Warning / Error 锁存与弹窗去重
 └─ AlarmReporter：有界队列中的异步 HTTP Warning/Error 报告
        │ JSON IPC（每实例独立连接，单消息 ≤ 1 MiB）
@@ -36,7 +36,7 @@ PySide6 主进程 / GUI 线程
 - 模块只获得系统状态的 JSON 只读副本，没有设置温度或磁场的 API；长测量可请求新快照，
   并通过协作检查点响应 SEQ Pause/Stop。
 - 报警发射线程不参与 SEQ 判定或仪表安全动作；网络失败只锁存本地 Warning。
-- `DatRunLogger` 是 DAT 和事件文件的唯一写入者。
+- `DatRunLogger` 是实验 DAT、设备状态和事件文件的唯一写入者。
 - 子进程隔离用于约束阻塞、资源和崩溃影响，不是恶意代码沙箱；Frontend 仍在主进程，
   所以扩展必须经过人工审查与内容指纹信任。
 
@@ -152,11 +152,17 @@ runs/<timestamp>_<sequence>/
 │  ├─ <id>.settings.toml
 │  └─ <id>.status-at-start.json
 ├─ experiment.dat
+├─ device_status.dat
 └─ events.dat
 ```
 
 动态列只发生在 Run 开始：系统列 + 每个模块清单列，名称带 `<module_id>.` 前缀。一次
 Measure 的每个模块行都附带当时温度、磁场和 Monitor 快照。写盘可每行 Flush。
+
+后台 poll 得到同一批快照后还会调用 `DatRunLogger.write_device_status()`。该写入仅在
+Run 已打开时有效，并按独立配置周期节流；SequenceEngine 在创建目录后先强制写初始行。
+日志 I/O 失败报告 `DEVICE_STATUS_WRITE_FAILED` Error，使运行 fail-closed，同时仍把该批
+快照交给 UI。
 
 Data Browser 与当前 Run 不绑定，只跟踪用户明确打开的 DAT。定时器检查文件大小/修改
 时间并增量刷新；对应 `.plt` 保存显示设置，不改变 DAT。

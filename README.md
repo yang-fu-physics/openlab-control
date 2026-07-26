@@ -26,6 +26,8 @@ Measurement Module 提供。
   关闭且网络失败不阻塞 SEQ。
 - Stop/Error 后温度和磁场保持当前状态；`2nd Stage` 仅显示。
 - 独立 Data Browser 可打开任意 DAT 并追踪文件追加，不与当前 Run 强制绑定。
+- 每次 Run 独立保存节流后的设备状态宽表，包含当前值、目标、速率、稳定与连接状态。
+- Live Trend 使用设备采样时间并合并 GUI 重绘，不改变设备轮询或 DAT 采样频率。
 
 ## 启动与测试
 

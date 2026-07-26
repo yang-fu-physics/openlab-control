@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `Set Datafile` 参数窗口增加 `Browse…`，按 Mode 直接调用 Windows 原生打开/保存窗口，
+  自动补 `.dat` 后缀并保存明确授权的绝对路径。
+- Live Trend 改用设备快照采样时间；隐藏时不重绘，可见时把高频快照合并为最多每
+  250 ms 一次 GUI 重绘，避免曲线历史反复计算占用界面线程。
+- 每个 Run 新增 `device_status.dat`，默认每秒记录全部配置设备的当前值、目标、速率、
+  Activity、Stability、Connection、Connected、读数年龄和消息；极短 Run 也保留初始行。
+- 数据、事件和设备状态三个默认文件名必须互不相同；`Set Datafile` 不能覆盖运行目录
+  中的事件、状态、SEQ、配置或模块设置快照。
 - 保存 SEQ 时把当前关联模块和所有 Enabled 模块的界面设置写入同名
   `<序列名>.modules.toml`；再次 Load SEQ 时一同导入。
 - 导入模块设置不会自动 Enable 模块、连接仪表或 Apply Settings；已 Enabled 模块只更新

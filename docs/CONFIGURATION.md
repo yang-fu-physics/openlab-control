@@ -23,13 +23,19 @@
 | `directory` | `runs` | 自动运行目录根位置 |
 | `data_file_name` | `experiment.dat` | 默认实验数据文件名 |
 | `event_file_name` | `events.dat` | 事件文件名 |
+| `device_status_file_name` | `device_status.dat` | 连续设备状态文件名 |
+| `device_status_interval_seconds` | `1.0` | Run 中设备状态写入周期，必须大于 0 |
 | `timestamp_epoch` | `labview_1904` | `labview_1904` 或 Unix 秒 |
 | `flush_every_row` | `true` | 每写一行立即 Flush，降低断电损失 |
 | `allow_external_paths` | `false` | 是否全局允许绝对/越界数据路径 |
 
-`data_file_name` 与 `event_file_name` 必须是两个不同的 Windows 单文件名，不得包含目录、盘符、保留名、控制字符或尾随空格/句点。该限制防止默认日志绕过自动运行目录，也避免数据与事件文件互相覆盖。
+`data_file_name`、`event_file_name` 与 `device_status_file_name` 必须是三个互不相同的
+Windows 单文件名，不得包含目录、盘符、保留名、控制字符或尾随空格/句点。该限制防止
+默认日志绕过自动运行目录，也避免三类文件互相覆盖。
 
-推荐保持 `allow_external_paths = false`，由单条 `Set Datafile ... external ...` 明确授权自定义目录。无论实验 DAT 选到哪里，SEQ、配置和模块快照始终保留在自动运行目录。
+推荐保持 `allow_external_paths = false`，由单条 `Set Datafile ... external ...` 明确授权
+自定义目录。无论实验 DAT 选到哪里，SEQ、配置、设备状态和模块快照始终保留在自动运行
+目录。状态周期独立于 `poll_interval_seconds`；提高轮询频率不会自动增加状态文件写入量。
 
 ## `[abort]`
 

@@ -79,11 +79,13 @@ class DeviceConfig:
 
 @dataclass(frozen=True, slots=True)
 class LoggingConfig:
-    """每次运行的目录、DAT 文件名以及落盘策略。"""
+    """每次运行的数据、事件、设备状态文件以及落盘策略。"""
 
     directory: str = "runs"
     data_file_name: str = "experiment.dat"
     event_file_name: str = "events.dat"
+    device_status_file_name: str = "device_status.dat"
+    device_status_interval_seconds: float = 1.0
     timestamp_epoch: str = "labview_1904"
     flush_every_row: bool = True
     allow_external_paths: bool = False
@@ -565,10 +567,28 @@ def load_config(path: str | Path) -> AppConfig:
         logging_raw.get("event_file_name", "events.dat"),
         "logging.event_file_name",
     )
-    if data_file_name.casefold() == event_file_name.casefold():
+    device_status_file_name = _windows_file_name(
+        logging_raw.get(
+            "device_status_file_name",
+            "device_status.dat",
+        ),
+        "logging.device_status_file_name",
+    )
+    if len({
+        data_file_name.casefold(),
+        event_file_name.casefold(),
+        device_status_file_name.casefold(),
+    }) != 3:
         raise ConfigurationError(
-            "logging.data_file_name and logging.event_file_name must be different"
+            "logging data, event, and device status file names must be different"
         )
+    device_status_interval_seconds = _positive_float(
+        logging_raw.get(
+            "device_status_interval_seconds",
+            1.0,
+        ),
+        "logging.device_status_interval_seconds",
+    )
     if not isinstance(reporting_raw, dict):
         raise ConfigurationError(
             "alarms.reporting must be a TOML table"
@@ -656,6 +676,10 @@ def load_config(path: str | Path) -> AppConfig:
             directory=str(logging_raw.get("directory", "runs")),
             data_file_name=data_file_name,
             event_file_name=event_file_name,
+            device_status_file_name=device_status_file_name,
+            device_status_interval_seconds=(
+                device_status_interval_seconds
+            ),
             timestamp_epoch=timestamp_epoch,
             flush_every_row=bool(logging_raw.get("flush_every_row", True)),
             allow_external_paths=bool(logging_raw.get("allow_external_paths", False)),

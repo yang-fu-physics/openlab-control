@@ -51,6 +51,15 @@ class DatafileTests(unittest.TestCase):
                 "field": DeviceSnapshot("field", "磁场", DeviceKind.FIELD, now, True, "Oe", 123.456, 100.0, 10.0, DeviceActivity.HOLDING),
                 "second_stage": DeviceSnapshot("second_stage", "2nd Stage", DeviceKind.MONITOR, now, True, "K", 4.2345),
             }
+            self.assertTrue(
+                logger.write_device_status(
+                    snapshots,
+                    force=True,
+                )
+            )
+            self.assertFalse(
+                logger.write_device_status(snapshots)
+            )
             logger.write_module_row(
                 snapshots, module.id, {"R1": 1.2, "Status": "OK"}, "Measure"
             )
@@ -64,6 +73,9 @@ class DatafileTests(unittest.TestCase):
             logger.close()
             data = paths.data_file.read_text(encoding="utf-8")
             event_data = paths.event_file.read_text(encoding="utf-8")
+            device_status = paths.device_status_file.read_text(
+                encoding="utf-8"
+            )
             self.assertIn("[Header]", data)
             self.assertIn("[Data]", data)
             self.assertIn("simulated_transport.R1(Ohm)", data)
@@ -76,6 +88,29 @@ class DatafileTests(unittest.TestCase):
             self.assertIn("RAISED", event_data)
             self.assertIn("RESOLVED", event_data)
             self.assertIn(",2,", event_data)
+            self.assertIn(
+                "temperature.Current(K),"
+                "temperature.Target(K),"
+                "temperature.Rate(K/min),"
+                "temperature.Activity,"
+                "temperature.Stability,"
+                "temperature.Connection,"
+                "temperature.Connected,"
+                "temperature.ReadingAge(s),"
+                "temperature.Message",
+                device_status,
+            )
+            self.assertIn(
+                ",3.124,3.000,1.000,holding,"
+                "not_applicable,connected,true,",
+                device_status,
+            )
+            status_rows = (
+                device_status.split("[Data]\n", 1)[1]
+                .strip()
+                .splitlines()
+            )
+            self.assertEqual(len(status_rows), 2)
             event_rows = [
                 line.split(",")
                 for line in event_data.splitlines()
@@ -148,6 +183,45 @@ class DatafileTests(unittest.TestCase):
                     str(target), "open", allow_external=True
                 )
             self.assertEqual(target.read_text(encoding="utf-8"), sentinel)
+            paths = logger.paths
+            self.assertIsNotNone(paths)
+            protected_status = paths.device_status_file.read_text(
+                encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "reserved run artifact",
+            ):
+                logger.set_datafile(
+                    str(paths.device_status_file),
+                    "create",
+                    allow_external=True,
+                )
+            self.assertEqual(
+                paths.device_status_file.read_text(encoding="utf-8"),
+                protected_status,
+            )
+            protected_module_setting = (
+                paths.module_settings_directory
+                / "protected.settings.toml"
+            )
+            protected_module_setting.write_text(
+                "keep = true\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ValueError,
+                "reserved run artifact",
+            ):
+                logger.set_datafile(
+                    str(protected_module_setting),
+                    "create",
+                    allow_external=True,
+                )
+            self.assertEqual(
+                protected_module_setting.read_text(encoding="utf-8"),
+                "keep = true\n",
+            )
             logger.close()
 
     def test_matching_schema_appends_and_empty_run_creates_default_dat(self) -> None:
@@ -177,6 +251,7 @@ class DatafileTests(unittest.TestCase):
             paths = empty.open_run("empty.seq", "T End Sequence\n")
             empty.close()
             self.assertTrue(paths.data_file.exists())
+            self.assertTrue(paths.device_status_file.exists())
             self.assertIn("[Data]", paths.data_file.read_text(encoding="utf-8"))
 
     def test_run_directory_allocation_retries_an_atomic_creation_race(self) -> None:

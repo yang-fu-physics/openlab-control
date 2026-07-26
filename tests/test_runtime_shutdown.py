@@ -32,6 +32,13 @@ class RuntimeShutdownTests(unittest.TestCase):
                 ROOT / "configs" / "default.toml",
                 config_path,
             )
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    "device_status_interval_seconds = 1.0",
+                    "device_status_interval_seconds = 0.05",
+                ),
+                encoding="utf-8",
+            )
             runtime = RuntimeService(
                 load_config(config_path),
                 module_descriptors=(),
@@ -59,10 +66,13 @@ class RuntimeShutdownTests(unittest.TestCase):
                     "shutdown.seq",
                 )
             )
-            time.sleep(0.05)
+            time.sleep(0.35)
             devices = runtime.devices
             self.assertIsNotNone(devices)
             clients = tuple(devices.devices.values())
+            self.assertIsNotNone(runtime.logger)
+            self.assertIsNotNone(runtime.logger.paths)
+            run_paths = runtime.logger.paths
             runtime.shutdown(timeout=6.0)
 
             self.assertIsNone(runtime._thread)
@@ -73,6 +83,15 @@ class RuntimeShutdownTests(unittest.TestCase):
                     for client in clients
                 )
             )
+            device_status = run_paths.device_status_file.read_text(
+                encoding="utf-8"
+            )
+            status_rows = (
+                device_status.split("[Data]\n", 1)[1]
+                .strip()
+                .splitlines()
+            )
+            self.assertGreaterEqual(len(status_rows), 3)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ runs/20260723_120000_nested_scan/
 │  ├─ simulated_transport.settings.toml
 │  └─ simulated_transport.status-at-start.json
 ├─ experiment.dat
+├─ device_status.dat
 └─ events.dat
 ```
 
@@ -136,11 +137,41 @@ Timestamp(s),ISO8601,Severity,Source,Code,State,Count,Context,Message
 
 活动事件键为 Source+Code+Context。重复报告只增加 Count，不重复弹窗；恢复时写 RESOLVED。Info 不锁存。模块手动动作成功也写 Info，但不会写实验 DAT。
 
+## `device_status.dat`
+
+此文件在 Run 创建时立即建立，和 `events.dat` 一样始终位于自动运行目录。它不依赖
+`Measure` 指令，也不随 external `Set Datafile` 移动。默认每 1 秒写一行；Run 开始时
+额外强制写入一行最新状态，因此只有 `End Sequence` 的极短 SEQ 也有记录。
+
+```text
+[Header]
+; OpenLab Control Device Status Log
+...
+[Data]
+Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.Connection,temperature.Connected,temperature.ReadingAge(s),temperature.Message,...
+```
+
+每个配置设备拥有同一组固定列：
+
+- `Current`、`Target`、`Rate`：读回值、当前目标和每分钟速率；Monitor 的后两项为空；
+- `Activity`：`idle`、`moving`、`holding`、`fault` 等设备动作；
+- `Stability`：`moving`、`settling`、`stable`、`timed_out`、`stale` 或
+  `not_applicable`；
+- `Connection`：连接生命周期，例如 `connected`、`reconnecting`、`faulted`；
+- `Connected`：本次快照是否有效连接；
+- `ReadingAge(s)`：写入时刻与设备单调采样时间的差，用于定位排队或旧读数；
+- `Message`：驱动、恢复或状态说明。
+
+文件使用和实验 DAT 相同的绝对时间 epoch、数值精度与逐行 Flush 策略。它只记录 Run
+期间状态；Idle 监视仍显示在状态块和 Live Trend，但不会为尚未开始的实验创建运行目录。
+
 ## 写入保证
 
 - 默认每行 Flush。
 - 同一模块的行顺序保持。
 - 多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。
+- 设备轮询仍按 `poll_interval_seconds` 运行；状态日志按自己的周期节流，不会为了写日志
+  增加仪表查询。
 - Error/Stop/完成都会在 `end_sequence()` 结束后关闭文件。
 - 异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。
 

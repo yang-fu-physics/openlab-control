@@ -338,6 +338,34 @@ max_rate_per_minute = 10.0
             with self.assertRaisesRegex(ConfigurationError, "must be different"):
                 load_config(overlapping)
 
+            overlapping_status = temp_root / "overlapping-status.toml"
+            overlapping_status.write_text(
+                source.replace(
+                    'device_status_file_name = "device_status.dat"',
+                    'device_status_file_name = "EVENTS.DAT"',
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "must be different",
+            ):
+                load_config(overlapping_status)
+
+            invalid_interval = temp_root / "invalid-status-interval.toml"
+            invalid_interval.write_text(
+                source.replace(
+                    "device_status_interval_seconds = 1.0",
+                    "device_status_interval_seconds = 0",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "must be greater than zero",
+            ):
+                load_config(invalid_interval)
+
     def test_completed_poll_cannot_overwrite_a_new_target(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")

@@ -191,6 +191,16 @@
 - EVT-005：Error SHALL 使 Running/Paused SEQ Faulted。
 - EVT-006：所有 Raised/Resolved SHALL 写 events.dat。
 
+### 3.11 设备状态日志与实时趋势
+
+- LOG-001：每个 Run SHALL 在自动运行目录建立独立 `device_status.dat`。
+- LOG-002：状态日志 SHALL 包含每台配置设备的 Current、Target、Rate、Activity、
+  Stability、Connection、Connected、ReadingAge 和 Message。
+- LOG-003：状态日志 SHALL 使用独立可配置正周期节流；不得为了日志增加设备查询。
+- LOG-004：Run 开始 SHALL 强制写初始状态；Stop/Error/完成 SHALL 刷新并关闭文件。
+- LOG-005：实验 DAT 不得覆盖事件、状态、SEQ、配置或模块设置快照。
+- GRAPH-008：Live Trend SHALL 使用设备采样时间，并合并可见重绘而不阻塞设备 I/O。
+
 ## 4. 非功能需求
 
 - NFR-001：核心 SHALL 运行于 Python 3.11+。
@@ -247,6 +257,7 @@ configuration.toml
 module_settings/<id>.settings.toml
 module_settings/<id>.status-at-start.json
 experiment.dat
+device_status.dat
 events.dat
 ```
 

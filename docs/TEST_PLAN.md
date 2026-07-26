@@ -170,6 +170,20 @@
 7. 双击数据点显示完整源行。
 8. 关闭重开，`.plt` 恢复；DAT 列变化时安全回退。
 
+## 设备状态日志与 Live Trend 验收
+
+1. 启动包含温度、磁场和 Monitor 的仿真 Run，确认自动目录出现
+   `device_status.dat`。
+2. 检查初始行以及后续 Current、Target、Rate、Activity、Stability、Connection、
+   Connected、ReadingAge、Message。
+3. 把状态周期设为 1 秒、轮询设为 0.2 秒，确认约每秒一行且没有额外设备查询。
+4. 分别制造 moving、stable、stale、reconnecting 和 faulted，确认状态文字及消息落盘。
+5. 选择 external 实验 DAT，确认状态文件仍留在运行目录。
+6. 尝试把实验 DAT 指向 events、device status、SEQ、配置或模块设置快照，确认拒绝且
+   原文件不变。
+7. Live Trend 隐藏时持续接收有界历史但不重绘；打开后最多每 250 ms 一次重绘。
+8. 6 条曲线各 900 点连续更新，确认 GUI 可操作、设备 poll 不超时、状态日志周期不变。
+
 ## Windows 发布包验证
 
 ```text

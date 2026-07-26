@@ -1,8 +1,9 @@
-"""一次 SEQ 运行的目录、快照、DAT 数据和事件日志写入。
+"""一次 SEQ 运行的目录、快照、DAT 数据、设备状态和事件日志写入。
 
 运行开始即复制规范化 SEQ、主配置、各模块期望设置和启动状态。DAT 列由全部设备与已启用
 模块清单一次构造；一个模块返回多行时每行独立写入，只有该模块的列填值，其他模块列留空。
-追加已有 DAT 前必须验证完整列结构一致，防止动态列变化造成静默错位。
+设备状态按独立节流周期写入固定宽表，不受 Measure 数量影响。追加已有 DAT 前必须验证完整
+列结构一致，防止动态列变化造成静默错位。
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ class RunPaths:
     directory: Path
     data_file: Path
     event_file: Path
+    device_status_file: Path
     sequence_snapshot: Path
     configuration_snapshot: Path
     module_settings_directory: Path
@@ -55,6 +57,9 @@ class DatRunLogger:
         self._data_writer: csv.writer | None = None
         self._event_handle: TextIO | None = None
         self._event_writer: csv.writer | None = None
+        self._device_status_handle: TextIO | None = None
+        self._device_status_writer: csv.writer | None = None
+        self._last_device_status_monotonic: float | None = None
         self._columns: list[str] = []
         self._data_file_initialized = False
         self._module_descriptors: tuple[ModuleDescriptor, ...] = ()
@@ -92,6 +97,10 @@ class DatRunLogger:
             break
         data_file = directory / self.config.logging.data_file_name
         event_file = directory / self.config.logging.event_file_name
+        device_status_file = (
+            directory
+            / self.config.logging.device_status_file_name
+        )
         sequence_snapshot = directory / "sequence.seq"
         config_snapshot = directory / "configuration.toml"
         module_settings_directory = directory / "module_settings"
@@ -112,16 +121,19 @@ class DatRunLogger:
                 newline="\n",
             )
         self.paths = RunPaths(
-            directory,
-            data_file,
-            event_file,
-            sequence_snapshot,
-            config_snapshot,
-            module_settings_directory,
+            directory=directory,
+            data_file=data_file,
+            event_file=event_file,
+            device_status_file=device_status_file,
+            sequence_snapshot=sequence_snapshot,
+            configuration_snapshot=config_snapshot,
+            module_settings_directory=module_settings_directory,
         )
         self._data_file_initialized = False
         self._started_monotonic = time.monotonic()
+        self._last_device_status_monotonic = None
         self._open_event_file(event_file)
+        self._open_device_status_file(device_status_file)
         for notice in self._pending_events:
             self._write_event(notice)
         self._pending_events.clear()
@@ -169,6 +181,26 @@ class DatRunLogger:
                 )
         if not destination.name:
             raise ValueError("Data file path must name a file")
+        destination_resolved = destination.resolve()
+        module_settings_resolved = (
+            self.paths.module_settings_directory.resolve()
+        )
+        reserved_paths = {
+            self.paths.directory.resolve(),
+            self.paths.event_file.resolve(),
+            self.paths.device_status_file.resolve(),
+            self.paths.sequence_snapshot.resolve(),
+            self.paths.configuration_snapshot.resolve(),
+            module_settings_resolved,
+        }
+        if (
+            destination_resolved in reserved_paths
+            or module_settings_resolved
+            in destination_resolved.parents
+        ):
+            raise ValueError(
+                "Data file path collides with a reserved run artifact"
+            )
         columns = self._build_columns()
         append = self._validate_data_file_plan(
             destination,
@@ -184,12 +216,13 @@ class DatRunLogger:
             append=append,
         )
         self.paths = RunPaths(
-            self.paths.directory,
-            destination,
-            self.paths.event_file,
-            self.paths.sequence_snapshot,
-            self.paths.configuration_snapshot,
-            self.paths.module_settings_directory,
+            directory=self.paths.directory,
+            data_file=destination,
+            event_file=self.paths.event_file,
+            device_status_file=self.paths.device_status_file,
+            sequence_snapshot=self.paths.sequence_snapshot,
+            configuration_snapshot=self.paths.configuration_snapshot,
+            module_settings_directory=self.paths.module_settings_directory,
         )
         return destination
 
@@ -339,6 +372,189 @@ class DatRunLogger:
             columns.extend(f"{module.id}.{column.label}" for column in module.columns)
         return columns
 
+    def _open_device_status_file(self, path: Path) -> None:
+        """创建每次 Run 独立的设备状态宽表并写入固定列头。"""
+
+        self._device_status_handle = path.open(
+            "w",
+            encoding="utf-8",
+            newline="",
+        )
+        self._device_status_handle.write("[Header]\n")
+        self._device_status_handle.write(
+            "; OpenLab Control Device Status Log\n"
+        )
+        self._device_status_handle.write(
+            "; One row records all configured devices; "
+            "the default interval is controlled by "
+            "logging.device_status_interval_seconds.\n"
+        )
+        self._device_status_writer = csv.writer(
+            self._device_status_handle,
+            lineterminator="\n",
+        )
+        self._device_status_writer.writerow(
+            ["BYAPP", "OpenLab Control", __version__]
+        )
+        self._device_status_writer.writerow(
+            [
+                "INFO",
+                (
+                    "Started: "
+                    f"{datetime.now().astimezone().isoformat()}"
+                ),
+            ]
+        )
+        for device in self.config.devices:
+            self._device_status_writer.writerow(
+                [
+                    "INFO",
+                    (
+                        f"Device {device.id}: {device.display_name}; "
+                        f"kind={device.kind.value}; "
+                        f"role={device.role.value}; "
+                        f"unit={device.unit}"
+                    ),
+                ]
+            )
+        self._device_status_handle.write("\n[Data]\n")
+        self._device_status_writer.writerow(
+            self._device_status_columns()
+        )
+        self._device_status_handle.flush()
+
+    def _device_status_columns(self) -> list[str]:
+        """按配置顺序构造稳定且可直接导入表格软件的状态列。"""
+
+        columns = ["Timestamp(s)", "Time(s)"]
+        for device in self.config.devices:
+            prefix = device.id
+            unit_suffix = (
+                f"({device.unit})"
+                if device.unit
+                else ""
+            )
+            rate_suffix = (
+                f"({device.unit}/min)"
+                if device.unit
+                else ""
+            )
+            columns.extend(
+                [
+                    f"{prefix}.Current{unit_suffix}",
+                    f"{prefix}.Target{unit_suffix}",
+                    f"{prefix}.Rate{rate_suffix}",
+                    f"{prefix}.Activity",
+                    f"{prefix}.Stability",
+                    f"{prefix}.Connection",
+                    f"{prefix}.Connected",
+                    f"{prefix}.ReadingAge(s)",
+                    f"{prefix}.Message",
+                ]
+            )
+        return columns
+
+    def write_device_status(
+        self,
+        snapshots: Mapping[str, DeviceSnapshot],
+        *,
+        force: bool = False,
+    ) -> bool:
+        """在 Run 活动时按独立周期记录全部设备状态。
+
+        返回值说明本次是否真正写入。Run 尚未开始或刚写过一行时安静返回
+        ``False``，因此后台轮询可以无条件调用而不创建空闲期文件。
+        """
+
+        if self._device_status_writer is None:
+            return False
+        now = time.monotonic()
+        previous = self._last_device_status_monotonic
+        if (
+            not force
+            and previous is not None
+            and (
+                now - previous
+                < self.config.logging.device_status_interval_seconds
+            )
+        ):
+            return False
+        unix_now = time.time()
+        absolute = (
+            unix_now + LABVIEW_UNIX_OFFSET_SECONDS
+            if self.config.logging.timestamp_epoch == "labview_1904"
+            else unix_now
+        )
+        row: list[object] = [
+            f"{absolute:.2f}",
+            f"{now - self._started_monotonic:.2f}",
+        ]
+        for device in self.config.devices:
+            snapshot = snapshots.get(device.id)
+            if snapshot is None:
+                row.extend(
+                    [
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "false",
+                        "",
+                        "No snapshot",
+                    ]
+                )
+                continue
+            decimals = (
+                control_decimals(device.kind, device.unit)
+                if device.kind
+                in (DeviceKind.TEMPERATURE, DeviceKind.FIELD)
+                else 3
+            )
+            row.extend(
+                [
+                    (
+                        ""
+                        if snapshot.current is None
+                        else fixed_number(
+                            snapshot.current,
+                            decimals,
+                        )
+                    ),
+                    (
+                        ""
+                        if snapshot.target is None
+                        else fixed_number(
+                            snapshot.target,
+                            decimals,
+                        )
+                    ),
+                    (
+                        ""
+                        if snapshot.rate_per_minute is None
+                        else fixed_number(
+                            snapshot.rate_per_minute,
+                            decimals,
+                        )
+                    ),
+                    snapshot.activity.value,
+                    snapshot.stability.value,
+                    snapshot.connection_state.value,
+                    str(snapshot.connected).lower(),
+                    f"{max(0.0, now - snapshot.timestamp):.3f}",
+                    snapshot.message,
+                ]
+            )
+        self._device_status_writer.writerow(row)
+        self._last_device_status_monotonic = now
+        if (
+            self.config.logging.flush_every_row
+            and self._device_status_handle is not None
+        ):
+            self._device_status_handle.flush()
+        return True
+
     def write_module_row(
         self,
         snapshots: dict[str, DeviceSnapshot],
@@ -469,11 +685,17 @@ class DatRunLogger:
         self._data_writer = None
 
     def close(self) -> None:
-        """确保至少生成默认 DAT，然后关闭数据和事件句柄。"""
+        """确保至少生成默认 DAT，然后关闭数据、状态和事件句柄。"""
 
         if self.paths is not None and not self._data_file_initialized:
             self.ensure_data_file()
         self._close_data_file()
+        if self._device_status_handle is not None:
+            self._device_status_handle.flush()
+            self._device_status_handle.close()
+        self._device_status_handle = None
+        self._device_status_writer = None
+        self._last_device_status_monotonic = None
         if self._event_handle is not None:
             self._event_handle.flush()
             self._event_handle.close()
