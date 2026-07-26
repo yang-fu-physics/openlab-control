@@ -249,7 +249,10 @@ noise = 0.002
 
 未被框架识别的设备键进入 `DeviceConfig.extras`，例如仿真 `noise`。真实插件可在此放 address、baud rate、termination 等，但密码、令牌和私钥不得提交到仓库。
 
-Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 管理并保存到 `module_data/<id>/settings.toml`。
+Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 管理并保存到
+`module_data/<id>/settings.toml`。保存 SEQ 时，当前实验关联值还会复制到同目录同名
+`<sequence>.modules.toml`，使不同 SEQ 可以携带不同的模块参数。Load 只把值装入界面，
+不会自动 Enable 或 Apply；因此主配置的设备安全限制和模块显式确认流程不会被绕过。
 
 ## 配置验证
 

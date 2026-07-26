@@ -111,6 +111,15 @@
 5. Run Without Applying 后检查运行快照：settings 是界面值，status JSON 是实际值。
 6. Running 时 Settings 灰化，Status 可继续显示。
 7. 手动 Measure Now 只更新 Status/Run Log，不增加 experiment.dat 行。
+8. Enabled 模块修改 Settings 后保存 SEQ，确认生成同名 `.modules.toml` 并记录当前值。
+9. 重新启动、保持全部模块 Disabled 后 Load SEQ，确认设置已导入但没有初始化 worker。
+10. 模块已 Enabled 时 Load 另一 SEQ，确认 Settings 页切换并标记未 Apply，后台没有
+    `apply_settings` 调用。
+11. Load 无伴随文件的旧 SEQ，确认继续读取模块自己的持久设置。
+12. Load 运行目录 `sequence.seq`，确认导入 `module_settings/*.settings.toml`。
+13. 制造损坏、超大、错误格式版本、非法模块 ID 和模块版本变化，确认 Warning/fail
+    closed，SEQ 文本仍能打开且仪表不收到命令。
+14. Call Sequence 指向带伴随文件的子 SEQ，确认运行中不会隐式切换模块设置。
 
 ## 生命周期故障注入
 

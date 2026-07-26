@@ -145,6 +145,16 @@
 - SET-003：应用关闭 SHALL 先保存，再 abort。
 - SET-004：Run 前有未 Apply 修改时 SHALL 提供 Apply and Run、Run Without Applying、Cancel。
 - SET-005：Run SHALL 分别保存 desired Settings 和实际 Status。
+- SET-006：保存顶层 SEQ SHALL 把关联模块和 Enabled 模块的界面值写入同名
+  `.modules.toml` 伴随文件。
+- SET-007：Load 顶层 SEQ SHALL 导入有效伴随设置，但 SHALL NOT 自动 Enable、连接或
+  Apply。
+- SET-008：已 Enabled 模块导入后 SHALL 标为未 Apply；缺失模块和版本不一致 SHALL
+  Warning，不得静默声称设置已生效。
+- SET-009：打开运行快照 `sequence.seq` MAY 从同目录 `module_settings/` 导入 desired
+  Settings；Call Sequence SHALL NOT 在运行中隐式切换伴随设置。
+- SET-010：无伴随文件的旧 SEQ SHALL 保持原加载行为；无效伴随文件 SHALL 整体拒绝
+  设置导入，但不得阻止 SEQ 文本打开。
 
 ### 3.8 并行测量与数据
 

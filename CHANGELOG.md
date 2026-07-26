@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- 保存 SEQ 时把当前关联模块和所有 Enabled 模块的界面设置写入同名
+  `<序列名>.modules.toml`；再次 Load SEQ 时一同导入。
+- 导入模块设置不会自动 Enable 模块、连接仪表或 Apply Settings；已 Enabled 模块只更新
+  Settings 页并明确标记为未 Apply。
+- 打开运行目录内的标准 `sequence.seq` 时，兼容导入同目录
+  `module_settings/*.settings.toml` 快照；旧 SEQ 没有伴随文件时行为不变。
+- 伴随文件使用 1 MiB、128 个模块和纯 TOML 数据限制；结构错误时整体拒绝设置导入，
+  但仍允许打开 SEQ 文本。
+
 ## 0.11.1 - 2026-07-26
 
 - 修复正式 Windows 包中 Lake Shore 372A 被误判为需要私有 PyVISA runtime、因而首次

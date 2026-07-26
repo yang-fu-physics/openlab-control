@@ -161,6 +161,11 @@ Measure 的每个模块行都附带当时温度、磁场和 Monitor 快照。写
 Data Browser 与当前 Run 不绑定，只跟踪用户明确打开的 DAT。定时器检查文件大小/修改
 时间并增量刷新；对应 `.plt` 保存显示设置，不改变 DAT。
 
+用户保存的顶层 SEQ 可带同目录 `<stem>.modules.toml`。该伴随文件只保存模块 desired
+Settings；Load 后进入 UI 内存覆盖层，Disabled 模块仍不启动，Enabled 模块只显示
+“未 Apply”。运行时的 Call Sequence 只读取指令树，不读取子 SEQ 伴随设置，避免在运行
+途中出现隐式仪表重配置。
+
 ## Warning / Error
 
 活动事件键为 `source + code + context`：

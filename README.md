@@ -101,6 +101,12 @@ worker；不会污染主进程或覆盖框架统一版本。
 5. 运行含无参数 `T Measure` 的 SEQ。
 6. Disable 成功后模块才会 abort、关闭工作进程并隐藏窗口。
 
+保存一个 SEQ 时，程序会把该实验已关联模块和当前 Enabled 模块的界面值保存为同目录
+同名伴随文件，例如 `experiment.seq` + `experiment.modules.toml`。以后 Load
+`experiment.seq` 会同时导入这些设置。导入过程不自动 Enable、不连接仪表，也不
+Apply；模块仍遵守“启动默认 Disabled，用户核对后显式 Apply”的安全规则。没有伴随文件
+的旧 SEQ 保持原行为。
+
 ## 更换温度或磁场设备
 
 正式设备代码放在私密 Device Plugin 仓库中，不使用“每个设备一个核心分支”。部署时：

@@ -17,6 +17,33 @@ OpenLab Control 的 `.seq` 是可直接阅读和编辑的单行指令文件。�
 - 缩进只用于显示；真正层级由 Scan/End Scan 决定。
 - 解析器保留未知厂商行并给 Warning；结构错误、旧 Initialize、带参数 Measure 给 Error，Run 会被阻止。
 
+## 模块设置伴随文件
+
+SEQ 指令仍只保存在 `.seq` 文本中。File → Save 会把当前实验已关联模块及所有 Enabled
+模块的 Settings 页值另存为同目录同名文件：
+
+```text
+experiment.seq
+experiment.modules.toml
+```
+
+File → Open/Load `experiment.seq` 时会自动读取 `experiment.modules.toml`。导入只改变
+模块 Settings 页的期望值：
+
+- 不自动 Enable 或 Disable 任何模块；
+- 不连接仪表，不调用 `apply_settings`，不发送命令；
+- 已 Enabled 模块会显示 `SEQ settings imported — not applied`；
+- Disabled 模块以后 Enable 时才看到导入值，仍须人工核对并点击 Apply Settings；
+- 缺少模块或模块版本变化只给 Warning，并保留原始设置供安装/升级后检查；
+- 伴随文件损坏、超过 1 MiB、格式版本错误或含非法模块 ID 时，模块设置整体不导入，
+  但 `.seq` 指令仍可打开；
+- 没有伴随文件的旧 SEQ 与以前完全相同。
+
+运行目录使用既有快照结构。打开其中的标准 `sequence.seq` 时，如果没有同名伴随文件，
+程序会兼容读取同目录 `module_settings/*.settings.toml`。`Call Sequence` 不会在运行中
+切换被调用文件的伴随设置，防止一次 Run 中隐式重配真实仪表；只有用户在界面中 Load
+的顶层 SEQ 才导入设置。
+
 多层嵌套示例：
 
 ```text

@@ -110,6 +110,23 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 
 Settings 在 Apply、Disable、关闭程序和 Run 前自动保存。设置保存在 `module_data/<id>/settings.toml`，不修改模块源码。
 
+### SEQ 对应的模块设置
+
+File → Save 同时保存 `<SEQ 文件名去掉 .seq>.modules.toml`。文件包含当前 SEQ 已导入的
+模块设置，以及保存时所有 Enabled 模块的 Settings 页当前值。File → Open 会自动导入
+同名伴随文件；旧 SEQ 没有该文件时继续使用 `module_data/<id>/settings.toml`。
+
+导入不是 Apply：
+
+- 启动默认 Disabled 的规则不变，Load 不会替用户勾选模块；
+- 已 Enabled 模块只更新界面并标为未 Apply；
+- 下一次 Run 会按既有流程询问 Apply and Run / Run Without Applying / Cancel；
+- 模块缺失或版本不同会显示 Warning；真实仪表参数必须重新核对；
+- Save As 会为新 SEQ 生成新的同名伴随文件，复制实验时应同时复制这两个文件。
+
+打开运行目录中的 `sequence.seq` 时，程序还可直接读取该目录已经保存的
+`module_settings/*.settings.toml`，方便从历史运行快照恢复实验参数。
+
 ### Run 前未 Apply
 
 如果 Settings 页面有修改但尚未 Apply，Run 会询问：
@@ -157,6 +174,7 @@ abort 失败时程序报告 Error，并在关闭总上限内强制回收模块�
 - File → New/Open/Save/Save As。
 - 关闭浮动 SEQ 后，点击 New/Open/Edit 会重新显示现有编辑器。
 - 文件扩展名是 `.seq`。
+- 有模块设置的实验还会保存同名 `.modules.toml`；Load 时自动导入但不 Apply。
 
 ### 插入与修改
 
@@ -290,6 +308,8 @@ events.dat
 ```
 
 建议实验结束后整体复制整个运行目录，而不是只复制 DAT。模块 desired 设置和实际 Status 对复现实验同样重要。
+Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，但不会自动发送到
+仪表。
 
 ## 关闭程序
 
