@@ -69,6 +69,8 @@ class _SimulatedRampController(DevicePlugin):
         self._activity = DeviceActivity.MOVING
 
     async def hold(self) -> None:
+        if not self._connected:
+            raise DeviceError("Device is not connected", "NOT_CONNECTED")
         self._target = self._current
         self._activity = DeviceActivity.HOLDING
 

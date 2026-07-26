@@ -23,6 +23,8 @@ from .events import EventManager
 from .extensions.loading import load_import_object, load_source_object
 from .extensions.trust import PluginTrustStore, extension_tree_digest
 from .models import (
+    DeviceActivity,
+    DeviceConnectionState,
     DeviceKind,
     DeviceRole,
     DeviceSnapshot,
@@ -49,6 +51,7 @@ class DeviceManager:
         self.descriptors = {descriptor.id: descriptor for descriptor in descriptors}
         self.isolate_processes = isolate_processes
         self.devices: dict[str, object] = {}
+        self._client_factories: dict[str, Callable[[], object]] = {}
         self.device_configs: dict[str, DeviceConfig] = {item.id: item for item in config.devices}
         self._locks: dict[str, asyncio.Lock] = {}
         self._stability: dict[str, StabilityEvaluator] = {}
@@ -56,6 +59,13 @@ class DeviceManager:
         self._stale_devices: set[str] = set()
         self._unavailable_after_timeout: dict[str, str] = {}
         self._control_owner: str | None = None
+        self._connection_states: dict[str, DeviceConnectionState] = {}
+        self._recovery_tasks: dict[str, asyncio.Task[None]] = {}
+        self._recovery_clients: dict[str, object] = {}
+        self._generation: dict[str, int] = {}
+        self._expected_targets: dict[str, float | None] = {}
+        self._expected_rates: dict[str, float | None] = {}
+        self._shutting_down = False
         self.latest: dict[str, DeviceSnapshot] = {}
         self._load_plugins()
 
@@ -132,18 +142,25 @@ class DeviceManager:
                     ),
                     dependency_directory=dependency_directory,
                 )
-                self.devices[device_config.id] = IsolatedDeviceClient(
-                    DeviceWorkerClient(worker_spec),
-                    startup_timeout_seconds=(
-                        self.config.plugins.device_startup_timeout_seconds
-                    ),
-                    operation_timeout_seconds=(
-                        device_config.operation_timeout_seconds
-                    ),
-                    shutdown_timeout_seconds=(
-                        device_config.shutdown_timeout_seconds
-                    ),
-                )
+                def isolated_factory(
+                    spec: DeviceWorkerSpec = worker_spec,
+                    configured: DeviceConfig = device_config,
+                ) -> IsolatedDeviceClient:
+                    return IsolatedDeviceClient(
+                        DeviceWorkerClient(spec),
+                        startup_timeout_seconds=(
+                            self.config.plugins.device_startup_timeout_seconds
+                        ),
+                        operation_timeout_seconds=(
+                            configured.operation_timeout_seconds
+                        ),
+                        shutdown_timeout_seconds=(
+                            configured.shutdown_timeout_seconds
+                        ),
+                    )
+
+                self._client_factories[device_config.id] = isolated_factory
+                self.devices[device_config.id] = isolated_factory()
             else:
                 plugin_class = (
                     load_import_object(device_config.plugin)
@@ -167,16 +184,344 @@ class DeviceManager:
                         f"{device_config.plugin} uses incompatible device API "
                         f"{getattr(plugin_class, 'api_version', '')!r}"
                     )
-                self.devices[device_config.id] = InProcessDeviceClient(
-                    plugin_class(
-                        device_config,
-                        simulation_speed=self.config.simulation_speed,
+                def in_process_factory(
+                    backend_class: type[DevicePlugin] = plugin_class,
+                    configured: DeviceConfig = device_config,
+                ) -> InProcessDeviceClient:
+                    return InProcessDeviceClient(
+                        backend_class(
+                            configured,
+                            simulation_speed=self.config.simulation_speed,
+                        )
                     )
-                )
+
+                self._client_factories[device_config.id] = in_process_factory
+                self.devices[device_config.id] = in_process_factory()
             self._locks[device_config.id] = asyncio.Lock()
             self._poll_issues[device_config.id] = set()
+            self._connection_states[device_config.id] = (
+                DeviceConnectionState.STARTING
+            )
+            self._generation[device_config.id] = 0
             if device_config.stability is not None:
                 self._stability[device_config.id] = StabilityEvaluator(device_config.stability)
+
+    def connection_state(self, device_id: str) -> DeviceConnectionState:
+        return self._connection_states[device_id]
+
+    @property
+    def control_ready(self) -> bool:
+        return self.control_block_reason() is None
+
+    def control_block_reason(self) -> str | None:
+        now = time.monotonic()
+        for config in self.config.devices:
+            if not config.control_enabled:
+                continue
+            state = self._connection_states[config.id]
+            if state is not DeviceConnectionState.CONNECTED:
+                return f"{config.display_name} is {state.value}"
+            snapshot = self.latest.get(config.id)
+            if snapshot is None or not snapshot.connected:
+                return f"{config.display_name} has no connected reading"
+            if now - snapshot.timestamp > config.stale_after_seconds:
+                return f"{config.display_name} reading is stale"
+        return None
+
+    def ensure_run_ready(self) -> None:
+        reason = self.control_block_reason()
+        if reason is not None:
+            raise DeviceError(
+                f"Cannot run SEQ: {reason}",
+                "PRIMARY_DEVICE_NOT_READY",
+                reason,
+            )
+
+    def _mark_snapshot_unavailable(
+        self,
+        device_id: str,
+        state: DeviceConnectionState,
+        message: str,
+    ) -> None:
+        config = self.device_configs[device_id]
+        snapshot = deepcopy(self.latest.get(device_id))
+        if snapshot is None:
+            snapshot = DeviceSnapshot(
+                device_id=device_id,
+                display_name=config.display_name,
+                kind=config.kind,
+                timestamp=time.monotonic(),
+                connected=False,
+                unit=config.unit,
+                current=None,
+                target=self._expected_targets.get(device_id),
+                rate_per_minute=self._expected_rates.get(device_id),
+            )
+        snapshot.connected = False
+        snapshot.activity = (
+            DeviceActivity.FAULT
+            if state is DeviceConnectionState.FAULTED
+            else DeviceActivity.DISCONNECTED
+        )
+        snapshot.stability = StabilityState.STALE
+        snapshot.message = message
+        snapshot.connection_state = state
+        self.latest[device_id] = snapshot
+
+    @staticmethod
+    def _recoverable_read_error(exc: DeviceError) -> bool:
+        return exc.code not in {
+            "INVALID_DEVICE_SNAPSHOT",
+            "NONFINITE_DEVICE_READING",
+            "DEVICE_KIND_MISMATCH",
+            "UNKNOWN_DEVICE",
+        }
+
+    @staticmethod
+    def _uncertain_write_error(exc: DeviceError) -> bool:
+        return exc.code in {
+            "DEVICE_OPERATION_TIMEOUT",
+            "DEVICE_WORKER_DISCONNECTED",
+            "DEVICE_WORKER_EXITED",
+            "DEVICE_WORKER_NOT_RUNNING",
+            "DEVICE_IPC_INVALID_MESSAGE",
+        }
+
+    def _begin_recovery(self, device_id: str, exc: DeviceError) -> None:
+        if self._shutting_down:
+            return
+        existing = self._recovery_tasks.get(device_id)
+        if existing is not None and not existing.done():
+            return
+        self._generation[device_id] += 1
+        generation = self._generation[device_id]
+        self._connection_states[device_id] = DeviceConnectionState.RECONNECTING
+        self._unavailable_after_timeout.pop(device_id, None)
+        message = (
+            f"{self.device_configs[device_id].display_name} lost communication; "
+            f"retrying for up to "
+            f"{self.config.plugins.device_reconnect_timeout_seconds:g} seconds"
+        )
+        self._mark_snapshot_unavailable(
+            device_id,
+            DeviceConnectionState.RECONNECTING,
+            message,
+        )
+        self.events.report(
+            Severity.WARNING,
+            device_id,
+            "DEVICE_RECONNECTING",
+            message,
+            device_id,
+        )
+        task = asyncio.create_task(
+            self._recover_device(device_id, generation, exc)
+        )
+        self._recovery_tasks[device_id] = task
+
+    def _validate_recovered_state(
+        self,
+        device_id: str,
+        snapshot: DeviceSnapshot,
+    ) -> None:
+        expected_target = self._expected_targets.get(device_id)
+        if expected_target is None:
+            return
+        actual_target = snapshot.target
+        tolerance = max(1e-9, abs(expected_target) * 1e-9)
+        if (
+            actual_target is None
+            or not math.isclose(
+                actual_target,
+                expected_target,
+                rel_tol=1e-9,
+                abs_tol=tolerance,
+            )
+        ):
+            raise DeviceError(
+                f"{self.device_configs[device_id].display_name} reconnected with "
+                f"target {actual_target!r}, expected {expected_target:g}",
+                "DEVICE_STATE_MISMATCH_AFTER_RECONNECT",
+                device_id,
+            )
+        expected_rate = self._expected_rates.get(device_id)
+        if expected_rate is not None and snapshot.rate_per_minute is not None:
+            rate_tolerance = max(1e-9, abs(expected_rate) * 1e-9)
+            if not math.isclose(
+                snapshot.rate_per_minute,
+                expected_rate,
+                rel_tol=1e-9,
+                abs_tol=rate_tolerance,
+            ):
+                raise DeviceError(
+                    f"{self.device_configs[device_id].display_name} reconnected "
+                    f"with rate {snapshot.rate_per_minute:g}, expected "
+                    f"{expected_rate:g}",
+                    "DEVICE_STATE_MISMATCH_AFTER_RECONNECT",
+                    device_id,
+                )
+
+    async def _recover_device(
+        self,
+        device_id: str,
+        generation: int,
+        initial_error: DeviceError,
+    ) -> None:
+        timeout = self.config.plugins.device_reconnect_timeout_seconds
+        interval = self.config.plugins.device_reconnect_interval_seconds
+        deadline = time.monotonic() + timeout
+        last_error: Exception = initial_error
+        failure_code = "DEVICE_RECONNECT_FAILED"
+        try:
+            while not self._shutting_down and time.monotonic() < deadline:
+                candidate = self._client_factories[device_id]()
+                self._recovery_clients[device_id] = candidate
+                remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    async with self._locks[device_id]:
+                        if (
+                            self._generation[device_id] != generation
+                            or self._shutting_down
+                        ):
+                            return
+                        previous = self.devices[device_id]
+                        await previous.force_stop(  # type: ignore[attr-defined]
+                            min(0.25, remaining)
+                        )
+                        await asyncio.wait_for(
+                            candidate.connect(),  # type: ignore[attr-defined]
+                            timeout=remaining,
+                        )
+                        remaining = max(0.0, deadline - time.monotonic())
+                        snapshot = await asyncio.wait_for(
+                            candidate.poll(),  # type: ignore[attr-defined]
+                            timeout=remaining,
+                        )
+                        self._validate_snapshot(device_id, snapshot)
+                        self._validate_recovered_state(device_id, snapshot)
+                        self.devices[device_id] = candidate
+                        snapshot.connected = True
+                        snapshot.connection_state = (
+                            DeviceConnectionState.CONNECTED
+                        )
+                        self.latest[device_id] = snapshot
+                        self._connection_states[device_id] = (
+                            DeviceConnectionState.CONNECTED
+                        )
+                        self._unavailable_after_timeout.pop(device_id, None)
+                        evaluator = self._stability.get(device_id)
+                        if evaluator is not None and snapshot.target is not None:
+                            evaluator.reset(snapshot.target, snapshot.timestamp)
+                    self._recovery_clients.pop(device_id, None)
+                    self.events.resolve(
+                        device_id,
+                        "DEVICE_RECONNECTING",
+                        device_id,
+                    )
+                    self.events.resolve(
+                        device_id,
+                        "DEVICE_RECONNECT_FAILED",
+                        device_id,
+                    )
+                    self.events.report(
+                        Severity.INFO,
+                        device_id,
+                        "DEVICE_RECONNECTED",
+                        f"{snapshot.display_name} reconnected and state was verified",
+                        device_id,
+                    )
+                    return
+                except asyncio.CancelledError:
+                    await candidate.force_stop(0.25)  # type: ignore[attr-defined]
+                    raise
+                except Exception as exc:
+                    last_error = exc
+                    await candidate.force_stop(0.25)  # type: ignore[attr-defined]
+                    self._recovery_clients.pop(device_id, None)
+                    if (
+                        isinstance(exc, DeviceError)
+                        and exc.code
+                        == "DEVICE_STATE_MISMATCH_AFTER_RECONNECT"
+                    ):
+                        failure_code = exc.code
+                        break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(interval, remaining))
+            if self._generation[device_id] != generation or self._shutting_down:
+                return
+            self._connection_states[device_id] = DeviceConnectionState.FAULTED
+            if failure_code == "DEVICE_STATE_MISMATCH_AFTER_RECONNECT":
+                message = str(last_error)
+            else:
+                message = (
+                    f"{self.device_configs[device_id].display_name} did not reconnect "
+                    f"within {timeout:g} seconds: {last_error}"
+                )
+            self._mark_snapshot_unavailable(
+                device_id,
+                DeviceConnectionState.FAULTED,
+                message,
+            )
+            config = self.device_configs[device_id]
+            severity = (
+                Severity.ERROR
+                if config.control_enabled
+                else Severity.WARNING
+            )
+            self.events.report(
+                severity,
+                device_id,
+                failure_code,
+                message,
+                device_id,
+            )
+        finally:
+            current = self._recovery_tasks.get(device_id)
+            if current is asyncio.current_task():
+                self._recovery_tasks.pop(device_id, None)
+            self._recovery_clients.pop(device_id, None)
+
+    async def _fault_uncertain_write(
+        self,
+        device_id: str,
+        operation: str,
+        exc: DeviceError,
+    ) -> None:
+        self.events.report(
+            Severity.ERROR,
+            device_id,
+            exc.code,
+            str(exc),
+            exc.context,
+        )
+        self._generation[device_id] += 1
+        task = self._recovery_tasks.pop(device_id, None)
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._connection_states[device_id] = DeviceConnectionState.FAULTED
+        message = (
+            f"{self.device_configs[device_id].display_name} {operation} result is "
+            f"unknown after communication failure; the command will not be replayed"
+        )
+        self._mark_snapshot_unavailable(
+            device_id,
+            DeviceConnectionState.FAULTED,
+            message,
+        )
+        try:
+            await self.devices[device_id].force_stop(0.25)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        self.events.report(
+            Severity.ERROR,
+            device_id,
+            "DEVICE_WRITE_RESULT_UNKNOWN",
+            f"{message}: {exc}",
+            operation,
+        )
 
     async def _operate(
         self,
@@ -202,6 +547,19 @@ class DeviceManager:
                         "MANUAL_CONTROL_BLOCKED",
                         device_id,
                     )
+                if (
+                    operation
+                    not in {"connect", "disconnect", "poll"}
+                    and self._connection_states[device_id]
+                    is not DeviceConnectionState.CONNECTED
+                ):
+                    state = self._connection_states[device_id]
+                    raise DeviceError(
+                        f"{config.display_name} is {state.value}; "
+                        f"{operation} was not sent",
+                        "DEVICE_NOT_READY",
+                        device_id,
+                    )
                 previous = self._unavailable_after_timeout.get(device_id)
                 if previous is not None and not shutdown:
                     raise DeviceError(
@@ -216,15 +574,21 @@ class DeviceManager:
                         return await callback()
                     return await asyncio.wait_for(callback(), timeout=timeout)
                 except TimeoutError as exc:
-                    self._unavailable_after_timeout[device_id] = operation
+                    if not bool(getattr(device, "enforces_timeouts", False)):
+                        self._unavailable_after_timeout[device_id] = operation
                     raise DeviceError(
                         f"{config.display_name} {operation} timed out after "
-                        f"{timeout:g} seconds; further I/O is blocked until restart",
+                        f"{timeout:g} seconds",
                         "DEVICE_OPERATION_TIMEOUT",
                         operation,
                     ) from exc
                 except DeviceError as exc:
-                    if exc.code == "DEVICE_OPERATION_TIMEOUT":
+                    if (
+                        exc.code == "DEVICE_OPERATION_TIMEOUT"
+                        and not bool(
+                            getattr(device, "enforces_timeouts", False)
+                        )
+                    ):
                         self._unavailable_after_timeout[device_id] = operation
                     raise
 
@@ -234,15 +598,34 @@ class DeviceManager:
         async def connect(device_id: str, device: object) -> None:
             try:
                 await self._operate(device_id, "connect", device.connect)
+                self._connection_states[device_id] = (
+                    DeviceConnectionState.CONNECTED
+                )
                 self.events.resolve(device_id, "CONNECT_FAILED")
                 self.events.report(Severity.INFO, device_id, "CONNECTED", "Device connected")
-            except Exception as exc:
+            except DeviceError as exc:
+                if self.isolate_processes:
+                    self._begin_recovery(device_id, exc)
+                    return
+                self._connection_states[device_id] = (
+                    DeviceConnectionState.FAULTED
+                )
                 self.events.report(
                     Severity.ERROR,
                     device_id,
-                    getattr(exc, "code", "CONNECT_FAILED"),
+                    exc.code,
                     str(exc),
-                    getattr(exc, "context", ""),
+                    exc.context,
+                )
+            except Exception as exc:
+                self._connection_states[device_id] = (
+                    DeviceConnectionState.FAULTED
+                )
+                self.events.report(
+                    Severity.ERROR,
+                    device_id,
+                    "CONNECT_FAILED",
+                    str(exc),
                 )
 
         await asyncio.gather(
@@ -250,6 +633,28 @@ class DeviceManager:
         )
 
     async def disconnect_all(self) -> None:
+        self._shutting_down = True
+        self._generation = {
+            device_id: generation + 1
+            for device_id, generation in self._generation.items()
+        }
+        recovery_tasks = tuple(self._recovery_tasks.values())
+        for task in recovery_tasks:
+            task.cancel()
+        if recovery_tasks:
+            await asyncio.gather(*recovery_tasks, return_exceptions=True)
+        recovery_clients = tuple(self._recovery_clients.values())
+        self._recovery_tasks.clear()
+        self._recovery_clients.clear()
+        if recovery_clients:
+            await asyncio.gather(
+                *(
+                    client.force_stop(0.25)  # type: ignore[attr-defined]
+                    for client in recovery_clients
+                ),
+                return_exceptions=True,
+            )
+
         async def disconnect(device_id: str, device: object) -> None:
             try:
                 await self._operate(
@@ -276,24 +681,59 @@ class DeviceManager:
                         "DEVICE_WORKER_CLOSE_FAILED",
                         str(exc),
                     )
+                self._connection_states[device_id] = (
+                    DeviceConnectionState.DISCONNECTED
+                )
+                self._mark_snapshot_unavailable(
+                    device_id,
+                    DeviceConnectionState.DISCONNECTED,
+                    "Device disconnected",
+                )
 
         await asyncio.gather(
             *(disconnect(device_id, device) for device_id, device in self.devices.items())
         )
 
     async def poll_all(self) -> dict[str, DeviceSnapshot]:
+        device_ids = tuple(
+            device_id
+            for device_id in self.devices
+            if self._connection_states[device_id]
+            is DeviceConnectionState.CONNECTED
+        )
         results = await asyncio.gather(
-            *(self._poll_one(device_id) for device_id in self.devices),
+            *(self._poll_one(device_id) for device_id in device_ids),
             return_exceptions=True,
         )
         now = time.monotonic()
-        for device_id, result in zip(self.devices, results, strict=True):
+        for device_id, result in zip(device_ids, results, strict=True):
             if isinstance(result, Exception):
+                if (
+                    self.isolate_processes
+                    and isinstance(result, DeviceError)
+                    and not isinstance(result, DeviceWarning)
+                    and self._recoverable_read_error(result)
+                ):
+                    self._begin_recovery(device_id, result)
+                    continue
                 severity = Severity.WARNING if isinstance(result, DeviceWarning) else Severity.ERROR
                 code = getattr(result, "code", "POLL_FAILED")
                 context = getattr(result, "context", "")
                 self._poll_issues[device_id].add((code, context))
                 self.events.report(severity, device_id, code, str(result), context)
+                if (
+                    not isinstance(result, DeviceWarning)
+                    and isinstance(result, DeviceError)
+                    and not self._recoverable_read_error(result)
+                ):
+                    self._connection_states[device_id] = (
+                        DeviceConnectionState.FAULTED
+                    )
+                    self._mark_snapshot_unavailable(
+                        device_id,
+                        DeviceConnectionState.FAULTED,
+                        str(result),
+                    )
             else:
                 self.events.resolve(device_id, "POLL_FAILED")
                 for code, context in self._poll_issues[device_id]:
@@ -307,11 +747,17 @@ class DeviceManager:
         return deepcopy(self.latest)
 
     async def _poll_one(self, device_id: str) -> DeviceSnapshot:
-        device = self.devices[device_id]
-
         async def poll() -> DeviceSnapshot:
-            snapshot = await device.poll()
+            snapshot = await self.devices[device_id].poll()  # type: ignore[attr-defined]
             self._validate_snapshot(device_id, snapshot)
+            snapshot.connected = True
+            snapshot.connection_state = DeviceConnectionState.CONNECTED
+            self._connection_states[device_id] = (
+                DeviceConnectionState.CONNECTED
+            )
+            if device_id not in self._expected_targets:
+                self._expected_targets[device_id] = snapshot.target
+                self._expected_rates[device_id] = snapshot.rate_per_minute
             evaluator = self._stability.get(device_id)
             if evaluator is not None and snapshot.current is not None and snapshot.target is not None:
                 result = evaluator.update(snapshot.current, snapshot.target, snapshot.timestamp)
@@ -343,6 +789,12 @@ class DeviceManager:
             raise DeviceError(
                 f"{config.display_name} returned a snapshot for the wrong device or kind",
                 "INVALID_DEVICE_SNAPSHOT",
+                device_id,
+            )
+        if not snapshot.connected:
+            raise DeviceError(
+                f"{config.display_name} reported that it is disconnected",
+                "DEVICE_REPORTED_DISCONNECTED",
                 device_id,
             )
         numeric_values = {
@@ -508,8 +960,22 @@ class DeviceManager:
             self.events.report(Severity.WARNING, device_id, exc.code, str(exc), exc.context)
             return False
         except DeviceError as exc:
+            if self._uncertain_write_error(exc):
+                await self._fault_uncertain_write(
+                    device_id,
+                    "set_target",
+                    exc,
+                )
+                raise DeviceError(
+                    f"{self.device_configs[device_id].display_name} set_target "
+                    "could not be confirmed and was not replayed",
+                    "DEVICE_WRITE_RESULT_UNKNOWN",
+                    device_id,
+                ) from exc
             self.events.report(Severity.ERROR, device_id, exc.code, str(exc), exc.context)
             raise
+        self._expected_targets[device_id] = value
+        self._expected_rates[device_id] = rate_per_minute
         snapshot = self.latest.get(device_id)
         if snapshot is not None:
             snapshot.target = value
@@ -542,7 +1008,7 @@ class DeviceManager:
         )
 
     async def hold_all(self) -> bool:
-        async def hold(device_id: str, device: object) -> bool:
+        async def hold(device_id: str) -> bool:
             config = self.device_configs[device_id]
             if not config.control_enabled:
                 return True
@@ -560,9 +1026,51 @@ class DeviceManager:
                     f"Unknown abort strategy {strategy}; using hold_current",
                     device_id,
                 )
+            if (
+                self._connection_states[device_id]
+                is not DeviceConnectionState.CONNECTED
+            ):
+                state = self._connection_states[device_id]
+                self.events.report(
+                    Severity.ERROR,
+                    device_id,
+                    "HOLD_UNCONFIRMED",
+                    f"{config.display_name} is {state.value}; Hold Current "
+                    "could not be sent or confirmed",
+                    device_id,
+                )
+                return False
             try:
-                await self._operate(device_id, "hold", device.hold)
+                await self._operate(
+                    device_id,
+                    "hold",
+                    lambda: self.devices[device_id].hold(),  # type: ignore[attr-defined]
+                )
+                snapshot = self.latest.get(device_id)
+                if snapshot is not None:
+                    self._expected_targets[device_id] = snapshot.current
+                    self._expected_rates[device_id] = (
+                        snapshot.rate_per_minute
+                    )
+                    snapshot.target = snapshot.current
+                    snapshot.activity = DeviceActivity.HOLDING
                 return True
+            except DeviceError as exc:
+                if self._uncertain_write_error(exc):
+                    await self._fault_uncertain_write(
+                        device_id,
+                        "hold",
+                        exc,
+                    )
+                    return False
+                self.events.report(
+                    Severity.ERROR,
+                    device_id,
+                    exc.code,
+                    str(exc),
+                    exc.context,
+                )
+                return False
             except Exception as exc:
                 self.events.report(
                     Severity.ERROR,
@@ -574,7 +1082,7 @@ class DeviceManager:
                 return False
 
         results = await asyncio.gather(
-            *(hold(device_id, device) for device_id, device in self.devices.items())
+            *(hold(device_id) for device_id in self.devices)
         )
         return all(results)
 
@@ -596,13 +1104,35 @@ class DeviceManager:
             await self._operate(
                 device_id,
                 "hold",
-                self.devices[device_id].hold,
+                lambda: self.devices[device_id].hold(),  # type: ignore[attr-defined]
                 origin=origin,
             )
         except (DeviceError, DeviceWarning) as exc:
+            if (
+                isinstance(exc, DeviceError)
+                and not isinstance(exc, DeviceWarning)
+                and self._uncertain_write_error(exc)
+            ):
+                await self._fault_uncertain_write(
+                    device_id,
+                    "hold",
+                    exc,
+                )
+                raise DeviceError(
+                    f"{self.device_configs[device_id].display_name} hold "
+                    "could not be confirmed and was not replayed",
+                    "DEVICE_WRITE_RESULT_UNKNOWN",
+                    device_id,
+                ) from exc
             severity = Severity.WARNING if isinstance(exc, DeviceWarning) else Severity.ERROR
             self.events.report(severity, device_id, exc.code, str(exc), exc.context)
             raise
+        snapshot = self.latest.get(device_id)
+        if snapshot is not None:
+            self._expected_targets[device_id] = snapshot.current
+            self._expected_rates[device_id] = snapshot.rate_per_minute
+            snapshot.target = snapshot.current
+            snapshot.activity = DeviceActivity.HOLDING
 
     def acquire_sequence_control(self) -> None:
         if self._control_owner is not None:

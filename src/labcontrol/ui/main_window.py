@@ -34,7 +34,16 @@ from .. import __version__
 from ..config import AppConfig
 from ..devices.manifest import DevicePluginDescriptor
 from ..formatting import control_decimals, fixed_number
-from ..models import DeviceKind, DeviceSnapshot, EventNotice, RunProgress, RunState, Severity
+from ..models import (
+    DeviceConnectionState,
+    DeviceKind,
+    DeviceSnapshot,
+    EventNotice,
+    RunProgress,
+    RunState,
+    Severity,
+    StabilityState,
+)
 from ..measurement.manifest import (
     ModuleDescriptor,
     activate_shared_dependencies,
@@ -220,6 +229,7 @@ class MainWindow(QMainWindow):
         self.run_button.clicked.connect(self._run_sequence)
         self.pause_button.clicked.connect(self._pause_or_resume)
         self.stop_button.clicked.connect(self.runtime.stop_sequence)
+        self.run_button.setEnabled(False)
         self.pause_button.setEnabled(False)
         self.stop_button.setEnabled(False)
         run_buttons.addWidget(self.run_button)
@@ -730,7 +740,7 @@ class MainWindow(QMainWindow):
         errors = [future.exception() for future in futures if future.exception() is not None]
         if errors:
             self._set_runtime_editable(True)
-            self.run_button.setEnabled(True)
+            self._update_run_availability()
             self.run_status_label.setText("Sequence Idle")
             self.statusBar().showMessage("Run cancelled because module settings could not be applied", 5000)
             return
@@ -750,6 +760,42 @@ class MainWindow(QMainWindow):
             if dialog is not None:
                 dialog.update_snapshot(snapshot)
         self.trend_dialog.add_snapshots(snapshots)
+        self._update_run_availability()
+
+    def _update_run_availability(self) -> None:
+        if (
+            self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        ):
+            self.run_button.setEnabled(False)
+            return
+        reason = ""
+        for config in self.config.devices:
+            if not config.control_enabled:
+                continue
+            snapshot = self.current_snapshots.get(config.id)
+            if snapshot is None:
+                reason = f"Waiting for {config.display_name}"
+                break
+            if (
+                not snapshot.connected
+                or snapshot.connection_state
+                is not DeviceConnectionState.CONNECTED
+            ):
+                reason = (
+                    snapshot.message
+                    or f"{config.display_name} is not connected"
+                )
+                break
+            if snapshot.stability is StabilityState.STALE:
+                reason = f"{config.display_name} reading is stale"
+                break
+        self.run_button.setEnabled(not reason)
+        self.run_button.setToolTip(
+            reason
+            if reason
+            else "Run the current sequence"
+        )
 
     def _handle_event(self, notice: EventNotice) -> None:
         event = notice.event
@@ -781,7 +827,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(progress.step_path or progress.message)
         if progress.state in self.TERMINAL_STATES:
             self._set_runtime_editable(True)
-            self.run_button.setEnabled(True)
+            self._update_run_availability()
             self.pause_button.setEnabled(False)
             self.stop_button.setEnabled(False)
             self.pause_button.setText("Pause")
@@ -1231,5 +1277,17 @@ class MainWindow(QMainWindow):
             window.allow_application_close()
             window.close()
         self.timer.stop()
-        self.runtime.shutdown()
+        try:
+            self.runtime.shutdown()
+        except Exception as exc:
+            self.timer.start(self.config.ui_refresh_ms)
+            QMessageBox.critical(
+                self,
+                "Shutdown Incomplete",
+                "The instrument runtime did not stop cleanly. "
+                "OpenLab Control will remain open so the failure is visible.\n\n"
+                f"{exc}",
+            )
+            event.ignore()
+            return
         event.accept()

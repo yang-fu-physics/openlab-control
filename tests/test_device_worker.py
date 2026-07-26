@@ -179,14 +179,18 @@ class DeviceWorkerTests(unittest.TestCase):
                 elapsed = time.monotonic() - started
                 self.assertLess(elapsed, 1.0)
                 self.assertEqual(snapshots["healthy"].current, 4.2)
-                self.assertNotIn("hung", snapshots)
+                self.assertFalse(snapshots["hung"].connected)
+                self.assertEqual(
+                    snapshots["hung"].connection_state.value,
+                    "reconnecting",
+                )
                 self.assertEqual(getattr(manager.devices["healthy"], "pid"), healthy_pid)
                 self.assertIsNotNone(healthy_pid)
                 self.assertIsNone(getattr(manager.devices["hung"], "pid"))
                 self.assertTrue(
                     any(
                         event.source == "hung"
-                        and event.code == "DEVICE_OPERATION_TIMEOUT"
+                        and event.code == "DEVICE_RECONNECTING"
                         for event in events.active_events()
                     )
                 )

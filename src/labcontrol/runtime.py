@@ -88,6 +88,12 @@ class RuntimeService:
                 progress_callback=self._on_progress,
             )
             loop.run_until_complete(self.devices.connect_all())
+            initial_snapshots = loop.run_until_complete(
+                self.devices.poll_all()
+            )
+            self.messages.put(
+                RuntimeMessage("snapshots", initial_snapshots)
+            )
             self._poll_task = loop.create_task(self._poll_loop())
         except Exception as exc:
             self.messages.put(RuntimeMessage("startup_error", str(exc)))
@@ -252,23 +258,50 @@ class RuntimeService:
     def shutdown(self, timeout: float = 8.0) -> None:
         if self._loop is None or self._thread is None:
             return
+        thread = self._thread
         if self._loop.is_running():
             future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), self._loop)
             try:
                 future.result(timeout=timeout)
             except Exception:
                 self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=timeout)
+        thread.join(timeout=timeout)
+        if thread.is_alive():
+            raise TimeoutError(
+                "OpenLab runtime thread did not stop within "
+                f"{timeout:g} seconds"
+            )
         self._thread = None
+        self._loop = None
 
     async def _shutdown_async(self) -> None:
         if self.engine is not None:
             self.engine.request_stop(False, "Application closing")
-        if self._sequence_task is not None:
+        sequence_task = self._sequence_task
+        if sequence_task is not None:
             try:
-                await asyncio.wait_for(self._sequence_task, timeout=3.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                self._sequence_task.cancel()
+                await asyncio.wait_for(
+                    asyncio.shield(sequence_task),
+                    timeout=3.0,
+                )
+            except asyncio.TimeoutError:
+                sequence_task.cancel()
+                await asyncio.gather(
+                    sequence_task,
+                    return_exceptions=True,
+                )
+            except asyncio.CancelledError:
+                sequence_task.cancel()
+                await asyncio.gather(
+                    sequence_task,
+                    return_exceptions=True,
+                )
+                raise
+            except Exception:
+                await asyncio.gather(
+                    sequence_task,
+                    return_exceptions=True,
+                )
         if self._poll_task is not None:
             self._poll_task.cancel()
             await asyncio.gather(self._poll_task, return_exceptions=True)

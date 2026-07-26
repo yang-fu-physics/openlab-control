@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     DeviceActivity,
+    DeviceConnectionState,
     DeviceKind,
     DeviceRole,
     DeviceSnapshot,
@@ -67,6 +68,34 @@ class StatusTileTests(unittest.TestCase):
         trend.add_snapshots({"second_stage": snapshot})
         self.assertEqual(len(trend.history["2nd Stage"]), 1)
         trend.close()
+        tile.close()
+
+    def test_tile_distinguishes_reconnecting_and_faulted_states(
+        self,
+    ) -> None:
+        tile = StatusTile(
+            "temperature",
+            "Temperature",
+            DeviceKind.TEMPERATURE,
+        )
+        snapshot = DeviceSnapshot(
+            "temperature",
+            "Temperature",
+            DeviceKind.TEMPERATURE,
+            time.monotonic(),
+            False,
+            "K",
+            message="Retrying for up to 60 seconds",
+            connection_state=DeviceConnectionState.RECONNECTING,
+        )
+        tile.update_snapshot(snapshot)
+        self.assertEqual(tile.state_label.text(), "Reconnecting")
+        self.assertIn("Retrying", tile.detail_label.text())
+        snapshot.connection_state = DeviceConnectionState.FAULTED
+        snapshot.message = "Reconnect deadline exceeded"
+        tile.update_snapshot(snapshot)
+        self.assertEqual(tile.state_label.text(), "Faulted")
+        self.assertIn("deadline", tile.detail_label.text())
         tile.close()
 
     def test_secondary_temperature_tile_and_dialog_are_display_only(self) -> None:

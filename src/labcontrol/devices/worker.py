@@ -18,6 +18,7 @@ from ..extensions.loading import load_import_object, load_source_object
 from ..extensions.trust import extension_tree_digest
 from ..models import (
     DeviceActivity,
+    DeviceConnectionState,
     DeviceKind,
     DeviceSnapshot,
     StabilityState,
@@ -113,6 +114,7 @@ def _snapshot_payload(snapshot: DeviceSnapshot) -> dict[str, Any]:
         "activity": snapshot.activity.value,
         "stability": snapshot.stability.value,
         "message": snapshot.message,
+        "connection_state": snapshot.connection_state.value,
     }
 
 
@@ -145,6 +147,14 @@ def snapshot_from_payload(payload: dict[str, Any]) -> DeviceSnapshot:
                 str(payload.get("stability", "not_applicable"))
             ),
             message=str(payload.get("message", "")),
+            connection_state=DeviceConnectionState(
+                str(
+                    payload.get(
+                        "connection_state",
+                        "connected" if payload.get("connected") else "disconnected",
+                    )
+                )
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise DeviceWorkerError(
@@ -682,6 +692,9 @@ class IsolatedDeviceClient:
             self.shutdown_timeout_seconds,
         )
 
+    async def force_stop(self, timeout_seconds: float = 0.25) -> None:
+        await asyncio.to_thread(self.worker.force_stop, timeout_seconds)
+
 
 class InProcessDeviceClient:
     enforces_timeouts = False
@@ -712,3 +725,6 @@ class InProcessDeviceClient:
 
     async def close(self) -> None:
         return None
+
+    async def force_stop(self, timeout_seconds: float = 0.25) -> None:
+        del timeout_seconds

@@ -17,6 +17,7 @@ from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     DeviceActivity,
+    DeviceConnectionState,
     DeviceKind,
     DeviceSnapshot,
     RunState,
@@ -203,6 +204,123 @@ class SequenceEngineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_device_recovery_freezes_interruptible_wait_deadline(
+        self,
+    ) -> None:
+        class RecoveringDevices:
+            control_ready = True
+
+            @staticmethod
+            def control_block_reason():
+                return "primary temperature is reconnecting"
+
+        async def scenario() -> None:
+            events = EventManager()
+            devices = RecoveringDevices()
+            engine = SequenceEngine(
+                object(), devices, events, object(), object()  # type: ignore[arg-type]
+            )
+            engine.state = RunState.RUNNING
+            wait_task = asyncio.create_task(
+                engine._interruptible_sleep(0.16)
+            )
+            await asyncio.sleep(0.03)
+            devices.control_ready = False
+            await asyncio.sleep(0.20)
+            self.assertFalse(wait_task.done())
+            restored_at = asyncio.get_running_loop().time()
+            devices.control_ready = True
+            await asyncio.wait_for(wait_task, timeout=0.5)
+            self.assertGreaterEqual(
+                asyncio.get_running_loop().time() - restored_at,
+                0.09,
+            )
+
+        asyncio.run(scenario())
+
+    def test_run_preflight_rejects_missing_primary_readback(self) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            await manager.connect_all()
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+            )
+            state = await engine.run(
+                SequenceDocument([], "preflight.seq")
+            )
+            self.assertEqual(state, RunState.FAULTED)
+            self.assertIn(
+                "PRIMARY_DEVICE_NOT_READY",
+                [notice.event.code for notice in notices],
+            )
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(
+                scenario(self._fast_config(Path(temp)))
+            )
+
+    def test_task_cancellation_attempts_hold_before_exiting(self) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            manager = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            logger = DatRunLogger(config, events)
+            modules = MeasurementModuleService((), events, manager)
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                logger,
+                modules,
+            )
+            await manager.connect_all()
+            await manager.poll_all()
+            task = asyncio.create_task(
+                engine.run(
+                    SequenceDocument(
+                        [
+                            Command(
+                                CommandType.WAIT,
+                                {"seconds": 5.0},
+                            )
+                        ],
+                        "cancel.seq",
+                    )
+                )
+            )
+            await asyncio.sleep(0.03)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            for device_id in ("temperature", "field"):
+                snapshot = manager.latest[device_id]
+                self.assertAlmostEqual(
+                    snapshot.target or 0.0,
+                    snapshot.current or 0.0,
+                )
+            await modules.shutdown()
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(
+                scenario(self._fast_config(Path(temp)))
+            )
+
     def test_control_waits_timeout_without_new_device_readings(self) -> None:
         async def scenario(config) -> None:
             temperature = config.device("temperature")
@@ -225,6 +343,8 @@ class SequenceEngineTests(unittest.TestCase):
             notices = []
             events.subscribe(notices.append)
             manager = DeviceManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
             now = asyncio.get_running_loop().time()
             manager.latest["temperature"] = DeviceSnapshot(
                 device_id="temperature",
@@ -238,6 +358,9 @@ class SequenceEngineTests(unittest.TestCase):
                 rate_per_minute=1.0,
                 activity=DeviceActivity.MOVING,
                 stability=StabilityState.MOVING,
+            )
+            manager._connection_states["temperature"] = (
+                DeviceConnectionState.CONNECTED
             )
             engine = SequenceEngine(
                 config,
@@ -262,6 +385,7 @@ class SequenceEngineTests(unittest.TestCase):
                 and not notice.is_resolution
             ]
             self.assertEqual(len(timeout_notices), 2)
+            await manager.disconnect_all()
 
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))

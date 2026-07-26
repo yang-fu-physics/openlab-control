@@ -32,6 +32,14 @@ class DeviceActivity(str, Enum):
     FAULT = "fault"
 
 
+class DeviceConnectionState(str, Enum):
+    STARTING = "starting"
+    CONNECTED = "connected"
+    RECONNECTING = "reconnecting"
+    FAULTED = "faulted"
+    DISCONNECTED = "disconnected"
+
+
 class StabilityState(str, Enum):
     NOT_APPLICABLE = "not_applicable"
     MOVING = "moving"
@@ -65,6 +73,7 @@ class DeviceSnapshot:
     activity: DeviceActivity = DeviceActivity.IDLE
     stability: StabilityState = StabilityState.NOT_APPLICABLE
     message: str = ""
+    connection_state: DeviceConnectionState = DeviceConnectionState.CONNECTED
 
 
 @dataclass(slots=True)

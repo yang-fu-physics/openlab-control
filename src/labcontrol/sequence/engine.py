@@ -51,6 +51,8 @@ class SequenceEngine:
         self._pause_gate.set()
         self._paused_at: float | None = None
         self._paused_total = 0.0
+        self._device_wait_total = 0.0
+        self._waiting_for_devices = False
         self._abort_requested = False
         self._fatal_abort = False
         self._abort_message = ""
@@ -81,6 +83,8 @@ class SequenceEngine:
         self._pause_gate.set()
         self._paused_at = None
         self._paused_total = 0.0
+        self._device_wait_total = 0.0
+        self._waiting_for_devices = False
         self._completed_steps = 0
         self._call_stack.clear()
         if document.path is not None:
@@ -115,6 +119,21 @@ class SequenceEngine:
             ),
             1,
         )
+        try:
+            self.devices.ensure_run_ready()
+        except DeviceError as exc:
+            self.state = RunState.FAULTED
+            self._fatal_abort = True
+            self._abort_message = str(exc)
+            self.events.report(
+                Severity.ERROR,
+                "sequence",
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            self._publish(self._abort_message)
+            return self.state
         self.state = RunState.RUNNING
         try:
             descriptors, module_status = await self.modules.prepare_sequence(
@@ -172,6 +191,25 @@ class SequenceEngine:
                 code,
                 self._abort_message or ("Aborted due to error" if self._fatal_abort else "Stopped by user"),
             )
+        except asyncio.CancelledError:
+            self._fatal_abort = True
+            self._abort_message = (
+                "Sequence task was cancelled during shutdown"
+            )
+            self.state = RunState.FAULTED
+            hold_succeeded = await self.devices.hold_all()
+            if not hold_succeeded:
+                self._abort_message += (
+                    "; one or more control devices could not confirm "
+                    "Hold Current"
+                )
+            self.events.report(
+                Severity.ERROR,
+                "sequence",
+                "RUN_CANCELLED",
+                self._abort_message,
+            )
+            raise
         except DeviceError as exc:
             self._fatal_abort = True
             self._abort_message = str(exc)
@@ -542,7 +580,7 @@ class SequenceEngine:
         return None
 
     async def _wait_for_stability(self, device_id: str) -> None:
-        started = time.monotonic()
+        started = self._active_time()
         while True:
             await self._checkpoint()
             snapshot = self.devices.latest.get(device_id)
@@ -564,7 +602,7 @@ class SequenceEngine:
     async def _wait_for_target(self, device_id: str) -> None:
         config = self.devices.device_configs[device_id]
         tolerance = config.stability.tolerance if config.stability else 0.0
-        started = time.monotonic()
+        started = self._active_time()
         while True:
             await self._checkpoint()
             snapshot = self.devices.latest.get(device_id)
@@ -595,7 +633,7 @@ class SequenceEngine:
             if config.stability is not None
             else config.operation_timeout_seconds
         )
-        elapsed = time.monotonic() - started
+        elapsed = self._active_time() - started
         if elapsed < timeout:
             return False
         self.events.report(
@@ -608,9 +646,55 @@ class SequenceEngine:
         return True
 
     async def _checkpoint(self) -> None:
-        self._check_control()
-        await self._pause_gate.wait()
-        self._check_control()
+        while True:
+            self._check_control()
+            await self._pause_gate.wait()
+            self._check_control()
+            control_ready = bool(
+                getattr(self.devices, "control_ready", True)
+            )
+            if control_ready:
+                if self._waiting_for_devices:
+                    self._waiting_for_devices = False
+                    self._publish(
+                        "Primary device communication restored"
+                    )
+                return
+            if not self._waiting_for_devices:
+                self._waiting_for_devices = True
+                reason_callback = getattr(
+                    self.devices,
+                    "control_block_reason",
+                    None,
+                )
+                reason = (
+                    reason_callback()
+                    if callable(reason_callback)
+                    else None
+                )
+                self._publish(
+                    "Waiting for primary device recovery"
+                    + (f": {reason}" if reason else "")
+                )
+            wait_started = time.monotonic()
+            try:
+                while (
+                    self._pause_gate.is_set()
+                    and not bool(
+                        getattr(
+                            self.devices,
+                            "control_ready",
+                            True,
+                        )
+                    )
+                ):
+                    self._check_control()
+                    await asyncio.sleep(0.1)
+            finally:
+                self._device_wait_total += max(
+                    0.0,
+                    time.monotonic() - wait_started,
+                )
 
     def _check_control(self) -> None:
         if self._abort_requested:
@@ -635,7 +719,12 @@ class SequenceEngine:
             if self._paused_at is not None
             else 0.0
         )
-        return now - self._paused_total - current_pause
+        return (
+            now
+            - self._paused_total
+            - current_pause
+            - self._device_wait_total
+        )
 
     def _finish_pause(self) -> None:
         if self._paused_at is None:

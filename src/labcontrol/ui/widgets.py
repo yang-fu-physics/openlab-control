@@ -5,7 +5,12 @@ from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ..formatting import control_decimals, fixed_number
-from ..models import DeviceKind, DeviceSnapshot, StabilityState
+from ..models import (
+    DeviceConnectionState,
+    DeviceKind,
+    DeviceSnapshot,
+    StabilityState,
+)
 from .scaling import scaled
 
 
@@ -100,8 +105,22 @@ class StatusTile(QFrame):
     def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
         if not snapshot.connected:
             self.value_label.setText("—")
-            self.state_label.setText("Disconnected")
-            self._set_state_style("disconnected")
+            state_text = {
+                DeviceConnectionState.STARTING: "Starting",
+                DeviceConnectionState.RECONNECTING: "Reconnecting",
+                DeviceConnectionState.FAULTED: "Faulted",
+                DeviceConnectionState.DISCONNECTED: "Disconnected",
+            }.get(snapshot.connection_state, "Disconnected")
+            self.state_label.setText(state_text)
+            self.detail_label.setText(
+                snapshot.message
+                or (
+                    "Display only · not used for control"
+                    if not self.controllable
+                    else "Device communication unavailable"
+                )
+            )
+            self._set_state_style(snapshot.connection_state.value)
             return
         if snapshot.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
             precision = control_decimals(snapshot.kind, snapshot.unit)
@@ -142,6 +161,9 @@ class StatusTile(QFrame):
             "moving": "#2e73c5",
             "timed_out": "#c53b3b",
             "stale": "#a55a00",
+            "starting": "#777777",
+            "reconnecting": "#d08a00",
+            "faulted": "#c53b3b",
             "disconnected": "#777777",
         }.get(state, "#777777")
         self.setStyleSheet(

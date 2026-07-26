@@ -497,8 +497,13 @@ max_rate_per_minute = 10.0
 
                 manager.devices[device_id].hold = record_hold  # type: ignore[method-assign]
 
-            self.assertTrue(await manager.hold_all())
-            self.assertCountEqual(called, ["temperature", "field"])
+            await manager.connect_all()
+            try:
+                await manager.poll_all()
+                self.assertTrue(await manager.hold_all())
+                self.assertCountEqual(called, ["temperature", "field"])
+            finally:
+                await manager.disconnect_all()
 
         asyncio.run(scenario())
 
