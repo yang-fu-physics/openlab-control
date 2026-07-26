@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.11.0b1 的实际实现边界。Device Plugin 与 Measurement Module
+本文描述 OpenLab Control 0.11.0b2 的实际实现边界。Device Plugin 与 Measurement Module
 是两套不同的扩展机制；它们分别放在独立共享仓库中，不进入核心源码。
 
 ## 进程与线程模型
@@ -18,7 +18,8 @@ PySide6 主进程 / GUI 线程
 ├─ SequenceEngine：嵌套 SEQ、Pause、Stop、Error
 ├─ MeasurementModuleService：模块生命周期与并行 Measure
 ├─ DatRunLogger：DAT / events.dat 唯一写入者
-└─ EventManager：Warning / Error 锁存与弹窗去重
+├─ EventManager：Warning / Error 锁存与弹窗去重
+└─ AlarmReporter：有界队列中的异步 HTTP Warning/Error 报告
        │ JSON IPC（每实例独立连接，单消息 ≤ 1 MiB）
        ├──────────────┬──────────────┬──────────────┐
        ▼              ▼              ▼              ▼
@@ -31,7 +32,9 @@ PySide6 主进程 / GUI 线程
 - 每个配置设备实例独占一个 `spawn` 子进程，阻塞/崩溃不会占住其他设备。
 - 每个 Enabled 模块独占一个 `spawn` 子进程并拥有其测量仪表。
 - 扩展依赖只插入对应子进程的 `sys.path`，不污染核心/GUI，也不执行 `.pth`。
-- 模块只获得系统状态的 JSON 只读副本，没有设置温度或磁场的 API。
+- 模块只获得系统状态的 JSON 只读副本，没有设置温度或磁场的 API；长测量可请求新快照，
+  并通过协作检查点响应 SEQ Pause/Stop。
+- 报警发射线程不参与 SEQ 判定或仪表安全动作；网络失败只锁存本地 Warning。
 - `DatRunLogger` 是 DAT 和事件文件的唯一写入者。
 - 子进程隔离用于约束阻塞、资源和崩溃影响，不是恶意代码沙箱；Frontend 仍在主进程，
   所以扩展必须经过人工审查与内容指纹信任。

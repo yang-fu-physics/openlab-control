@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0b2 - 2026-07-26 (Beta 2)
+
+- Measurement Module context 增加实时只读系统快照、Pause 冻结的可中断等待和 Stop
+  协作取消；长 pause/dwell 不再阻止 SEQ 及时停止。
+- 模块系统快照增加设备 role 与 control 状态，但仍不向模块暴露温度或磁场写入 API。
+- 新增有界后台 HTTP 报警发射端；Warning 只路由给测试员，Error 路由给管理员和测试员，
+  网络失败不阻塞或改变 SEQ 安全语义。
+- 新增 fail-closed 的 NoneBot2 OneBot V11 接收端参考；Token 必填，收件人仅由服务端
+  配置，并按稳定事件 ID 对部分重试去重。
+- Measurement Module 仓库新增 Lake Shore 372A Beta 模块：GPIB 资源选择、R1-R4
+  稀疏多行结果、两次温场平均、状态分类、设置回读和分流确认。
+- 模块模板等待统一改用可中断 API；使用该 API 的模块清单要求 OpenLab Control
+  0.11.0 Beta 2 或更新版本。
+
 ## 0.11.0b1 - 2026-07-26 (Beta 1)
 
 - 新增外部 Device Plugin `device.toml` 发现、API/core 兼容检查、内容树指纹和首次加载信任；
