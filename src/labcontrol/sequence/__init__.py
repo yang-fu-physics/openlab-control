@@ -1,3 +1,5 @@
+"""SEQ 文档模型、解析/序列化以及同名模块设置配套文件的公共入口。"""
+
 from .model import Command, CommandType, SequenceDocument
 from .module_settings import (
     SequenceModuleSettings,

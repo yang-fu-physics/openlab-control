@@ -1,3 +1,10 @@
+"""一次 SEQ 运行的目录、快照、DAT 数据和事件日志写入。
+
+运行开始即复制规范化 SEQ、主配置、各模块期望设置和启动状态。DAT 列由全部设备与已启用
+模块清单一次构造；一个模块返回多行时每行独立写入，只有该模块的列填值，其他模块列留空。
+追加已有 DAT 前必须验证完整列结构一致，防止动态列变化造成静默错位。
+"""
+
 from __future__ import annotations
 
 import csv
@@ -24,6 +31,8 @@ DATAFILE_MODES = frozenset({"open", "open|create", "create"})
 
 @dataclass(frozen=True, slots=True)
 class RunPaths:
+    """一份运行产生的全部规范路径。"""
+
     directory: Path
     data_file: Path
     event_file: Path
@@ -33,9 +42,11 @@ class RunPaths:
 
 
 class DatRunLogger:
-    """Writes template-compatible data and event files for one sequence run."""
+    """为一条 SEQ 写入模板兼容的 DAT、事件文件和可复现实验快照。"""
 
     def __init__(self, config: AppConfig, events: EventManager) -> None:
+        """订阅事件并初始化惰性文件句柄；此时尚不创建运行目录。"""
+
         self.config = config
         self.events = events
         self.paths: RunPaths | None = None
@@ -58,6 +69,12 @@ class DatRunLogger:
         module_settings: Mapping[str, Mapping[str, Any]] | None = None,
         module_status: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> RunPaths:
+        """创建唯一运行目录并先写入配置、SEQ 与模块启动快照。
+
+        目录名包含秒级时间；同一秒重复运行通过递增后缀避免覆盖。事件可能在目录建立前产生，
+        因此先暂存在内存，事件文件打开后按原顺序补写。
+        """
+
         root = self.config.resolve_project_path(self.config.logging.directory)
         root.mkdir(parents=True, exist_ok=True)
         stem = Path(sequence_name).stem or "sequence"
@@ -117,6 +134,12 @@ class DatRunLogger:
         *,
         allow_external: bool = False,
     ) -> Path:
+        """执行 ``Set Datafile``，限制路径范围并按 open/create 语义打开。
+
+        默认只允许运行目录内文件；绝对路径和 ``..`` 逃逸会被重定向并产生 Warning。只有主
+        配置或命令明确允许外部路径时才可写到任意位置。
+        """
+
         if self.paths is None:
             raise RuntimeError("Run directory has not been created")
         normalized_mode = self._normalize_datafile_mode(mode)
@@ -171,6 +194,8 @@ class DatRunLogger:
         return destination
 
     def ensure_data_file(self) -> Path:
+        """确保默认数据文件已经打开，供没有显式 Set Datafile 的 SEQ 使用。"""
+
         if self.paths is None:
             raise RuntimeError("Run directory has not been created")
         if self._data_writer is None:
@@ -185,6 +210,8 @@ class DatRunLogger:
         columns: list[str] | None = None,
         append: bool | None = None,
     ) -> None:
+        """创建新 DAT 头或在验证后的兼容文件末尾追加。"""
+
         normalized = self._normalize_datafile_mode(mode)
         planned_columns = columns if columns is not None else self._build_columns()
         should_append = (
@@ -225,6 +252,8 @@ class DatRunLogger:
 
     @staticmethod
     def _normalize_datafile_mode(mode: str) -> str:
+        """规范化并限制为 open、create 或 open|create。"""
+
         normalized = mode.strip().casefold()
         if normalized not in DATAFILE_MODES:
             allowed = ", ".join(sorted(DATAFILE_MODES))
@@ -237,6 +266,8 @@ class DatRunLogger:
         mode: str,
         columns: list[str],
     ) -> bool:
+        """在打开文件前验证存在性和列结构；返回是否应追加。"""
+
         if mode == "open" and not path.exists():
             raise FileNotFoundError(path)
         append = (
@@ -255,6 +286,8 @@ class DatRunLogger:
 
     @staticmethod
     def _read_data_columns(path: Path) -> list[str]:
+        """只读取已有 UTF-8 DAT 的 [Data] 列头用于追加兼容性检查。"""
+
         try:
             with path.open("r", encoding="utf-8-sig", newline="") as handle:
                 for line in handle:
@@ -279,11 +312,15 @@ class DatRunLogger:
 
     @staticmethod
     def _ends_with_newline(path: Path) -> bool:
+        """检查非空文件末尾是否已有换行，避免追加首行粘连。"""
+
         with path.open("rb") as handle:
             handle.seek(-1, 2)
             return handle.read(1) in {b"\n", b"\r"}
 
     def _build_columns(self) -> list[str]:
+        """按设备配置和模块清单确定本次运行固定的 DAT 列顺序。"""
+
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]
         temperature_count = sum(
             item.kind is DeviceKind.TEMPERATURE for item in self.config.devices
@@ -309,6 +346,8 @@ class DatRunLogger:
         values: Mapping[str, Any],
         sequence_step: str,
     ) -> None:
+        """写入一个模块结果行；其他模块的动态列保持为空。"""
+
         self.ensure_data_file()
         assert self._data_writer is not None
         self._data_writer.writerow(self._row(snapshots, module_id, values, sequence_step))
@@ -319,6 +358,8 @@ class DatRunLogger:
         snapshots: dict[str, DeviceSnapshot],
         sequence_step: str,
     ) -> None:
+        """写入只含系统设备快照、不含模块结果的行。"""
+
         self.ensure_data_file()
         assert self._data_writer is not None
         self._data_writer.writerow(self._row(snapshots, None, {}, sequence_step))
@@ -331,6 +372,8 @@ class DatRunLogger:
         values: Mapping[str, Any],
         sequence_step: str,
     ) -> list[object]:
+        """按固定列结构组装单行，并使用规定精度处理设备和模块数值。"""
+
         unix_now = time.time()
         absolute = (
             unix_now + LABVIEW_UNIX_OFFSET_SECONDS
@@ -364,6 +407,8 @@ class DatRunLogger:
         return row
 
     def _open_event_file(self, path: Path) -> None:
+        """创建本次运行的独立事件日志并立即写入列头。"""
+
         self._event_handle = path.open("w", encoding="utf-8", newline="")
         self._event_handle.write("[Header]\n")
         self._event_handle.write("; OpenLab Control Event Log\n\n[Events]\n")
@@ -374,12 +419,16 @@ class DatRunLogger:
         self._event_handle.flush()
 
     def on_event(self, notice: EventNotice) -> None:
+        """接收事件；运行目录建立前先排队，之后立即落盘。"""
+
         if self._event_writer is None:
             self._pending_events.append(notice)
         else:
             self._write_event(notice)
 
     def _write_event(self, notice: EventNotice) -> None:
+        """写入 RAISED/RESOLVED 事件及其锁存计数。"""
+
         if self._event_writer is None:
             return
         event = notice.event
@@ -405,10 +454,14 @@ class DatRunLogger:
             self._event_handle.flush()
 
     def _flush_data(self) -> None:
+        """按配置决定是否每行刷新，降低异常退出时的数据损失。"""
+
         if self.config.logging.flush_every_row and self._data_handle is not None:
             self._data_handle.flush()
 
     def _close_data_file(self) -> None:
+        """刷新并关闭当前 DAT；可在切换 Set Datafile 时重复调用。"""
+
         if self._data_handle is not None:
             self._data_handle.flush()
             self._data_handle.close()
@@ -416,6 +469,8 @@ class DatRunLogger:
         self._data_writer = None
 
     def close(self) -> None:
+        """确保至少生成默认 DAT，然后关闭数据和事件句柄。"""
+
         if self.paths is not None and not self._data_file_initialized:
             self.ensure_data_file()
         self._close_data_file()
@@ -427,6 +482,8 @@ class DatRunLogger:
 
     @staticmethod
     def _safe_name(value: str) -> str:
+        """把 SEQ 名称缩减为可安全用于 Windows 目录的 ASCII 片段。"""
+
         allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
         cleaned = "".join(character if character in allowed else "_" for character in value)
         return cleaned.strip("_") or "sequence"

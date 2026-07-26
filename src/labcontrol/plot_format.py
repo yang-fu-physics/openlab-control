@@ -1,3 +1,9 @@
+"""Data Browser 的可移植 ``.plt`` 绘图格式。
+
+PLT 只保存所选 DAT、列、叠加/分图布局、线性/对数坐标与当前缩放范围，不绑定正在测量的
+DAT。读取时严格验证版本、唯一列和有限递增范围；保存采用同目录原子替换。
+"""
+
 from __future__ import annotations
 
 import json
@@ -17,13 +23,15 @@ PLOT_SCALES = {LINEAR_SCALE, LOG_SCALE}
 
 
 class PlotFormatError(ValueError):
-    pass
+    """PLT 内容无效、不兼容或无法安全读写。"""
 
 
 Range = tuple[float, float]
 
 
 def _validated_range(value: Any, field_name: str) -> Range | None:
+    """解析一个可选的有限递增轴范围。"""
+
     if value is None:
         return None
     if not isinstance(value, (list, tuple)) or len(value) != 2:
@@ -39,6 +47,8 @@ def _validated_range(value: Any, field_name: str) -> Range | None:
 
 @dataclass(frozen=True, slots=True)
 class PlotFormat:
+    """一份经过验证、可序列化的 Data Browser 绘图状态。"""
+
     data_file: str
     layout: str
     x_column: str | None
@@ -50,6 +60,8 @@ class PlotFormat:
     y_scale: str = LINEAR_SCALE
 
     def __post_init__(self) -> None:
+        """在对象创建时统一执行布局、坐标类型和范围约束。"""
+
         if self.layout not in PLOT_LAYOUTS:
             raise PlotFormatError(f"Unknown plot layout: {self.layout}")
         if not self.y_columns:
@@ -77,6 +89,8 @@ class PlotFormat:
                 )
 
     def to_dict(self) -> dict[str, Any]:
+        """转换为包含格式标记和版本号的 JSON 对象。"""
+
         return {
             "format": PLOT_FORMAT_MARKER,
             "version": PLOT_FORMAT_VERSION,
@@ -99,6 +113,8 @@ class PlotFormat:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> PlotFormat:
+        """从受支持版本的 JSON 对象构造并再次验证格式。"""
+
         if raw.get("format") != PLOT_FORMAT_MARKER:
             raise PlotFormatError("Not an OpenLab Control PLT file")
         version = raw.get("version")
@@ -138,10 +154,14 @@ class PlotFormat:
 
 
 def plot_format_path(data_path: str | Path) -> Path:
+    """返回规范同名路径，例如 ``sample.dat`` 对应 ``sample.plt``。"""
+
     return Path(data_path).resolve().with_suffix(".plt")
 
 
 def find_plot_format(data_path: str | Path) -> Path | None:
+    """查找规范路径，并兼容旧版 ``sample.dat.plt`` 命名。"""
+
     source = Path(data_path).resolve()
     canonical = plot_format_path(source)
     if canonical.exists():
@@ -151,6 +171,8 @@ def find_plot_format(data_path: str | Path) -> Path | None:
 
 
 def save_plot_format(data_path: str | Path, plot_format: PlotFormat) -> Path:
+    """以 UTF-8 JSON 原子保存 DAT 对应的 PLT。"""
+
     destination = plot_format_path(data_path)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     payload = json.dumps(plot_format.to_dict(), ensure_ascii=False, indent=2) + "\n"
@@ -163,6 +185,8 @@ def save_plot_format(data_path: str | Path, plot_format: PlotFormat) -> Path:
 
 
 def load_plot_format(path: str | Path) -> PlotFormat:
+    """读取、检查根对象并验证 PLT 内容。"""
+
     source = Path(path).resolve()
     try:
         raw = json.loads(source.read_text(encoding="utf-8-sig"))

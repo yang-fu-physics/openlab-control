@@ -1,3 +1,10 @@
+"""SEQ 文本与树形 :class:`SequenceDocument` 之间的严格双向转换。
+
+解析器保留未知命令原文以便用户修复，但把语法不完整、单位不一致、无穷数和结构未闭合记录
+为明确问题。扫描使用栈而不是固定层数，因此支持任意嵌套。保存时统一输出 UTF-8/LF，并通过
+同目录临时文件原子替换，避免中断写入破坏原 SEQ。
+"""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +28,8 @@ MAX_TEMPERATURE_LIST_POINTS = 100000
 
 @dataclass(frozen=True, slots=True)
 class SequenceIssue:
+    """带原始行号和文本的解析问题；level 为 warning 或 error。"""
+
     line_number: int
     level: str
     message: str
@@ -29,11 +38,15 @@ class SequenceIssue:
 
 @dataclass(frozen=True, slots=True)
 class ParseResult:
+    """解析后的文档及全部问题；警告不会阻止运行。"""
+
     document: SequenceDocument
     issues: tuple[SequenceIssue, ...]
 
     @property
     def has_errors(self) -> bool:
+        """是否至少包含一个阻止运行的语法或参数错误。"""
+
         return any(issue.level == "error" for issue in self.issues)
 
 
@@ -86,7 +99,7 @@ _DEVICE_COMMAND_PREFIX = re.compile(
 
 
 def parse_temperature_points(value: object) -> tuple[float, ...]:
-    """Parse a comma-separated temperature list while preserving order and duplicates."""
+    """解析逗号分隔温度列表，并保留输入顺序和重复点。"""
     if isinstance(value, (list, tuple)):
         raw_points = list(value)
     else:
@@ -118,10 +131,14 @@ def parse_temperature_points(value: object) -> tuple[float, ...]:
 
 
 def format_temperature_points(value: object) -> str:
+    """按稳定三位小数格式序列化温度列表。"""
+
     return ", ".join(fixed_number(point, 3) for point in parse_temperature_points(value))
 
 
 def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
+    """解析不含 ``using device`` 后缀的一条规范命令。"""
+
     lowered = text.lower()
     match = _SET_TEMPERATURE.match(text)
     if match:
@@ -363,6 +380,8 @@ def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceI
 
 
 def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
+    """先安全解析可选设备后缀，再委托基础命令解析器。"""
+
     original = text
     device_id: str | None = None
     if _DEVICE_COMMAND_PREFIX.match(text):
@@ -435,6 +454,13 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
 
 
 def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = None) -> ParseResult:
+    """解析完整 SEQ，并使用栈构造任意深度扫描树。
+
+    每行可带 ``T`` 或 ``F``；这里只记录节点自身状态，父扫描禁用后的有效状态由文档模型和
+    引擎计算。遇到 ``End Scan`` 只关闭栈顶容器，未配对或在 ``End Sequence`` 前仍未闭合
+    都产生 Error。
+    """
+
     document = SequenceDocument(name=name, path=path)
     stack: list[list[Command]] = [document.commands]
     containers: list[Command] = []
@@ -502,10 +528,14 @@ def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = No
 
 
 def _format_number(value: object, decimals: int = 3) -> str:
+    """使用全框架一致的小数规则格式化 SEQ 数值。"""
+
     return fixed_number(value, decimals)
 
 
 def _device_suffix(params: dict[str, object], default_id: str) -> str:
+    """仅为非默认设备输出 JSON 转义后的 ``using device`` 后缀。"""
+
     device_id = str(params.get("device_id", "")).strip()
     if not device_id or device_id == default_id:
         return ""
@@ -513,6 +543,8 @@ def _device_suffix(params: dict[str, object], default_id: str) -> str:
 
 
 def format_command(command: Command) -> str:
+    """把一个命令转为规范文本；未编辑的未知命令保持原文。"""
+
     if command.raw_text is not None:
         return command.raw_text
     p = command.params
@@ -583,6 +615,8 @@ def format_command(command: Command) -> str:
 
 
 def serialize_sequence(document: SequenceDocument) -> str:
+    """递归序列化整棵命令树，并补齐 End Scan 与 End Sequence。"""
+
     lines: list[str] = []
 
     def visit(commands: list[Command], depth: int) -> None:
@@ -600,6 +634,8 @@ def serialize_sequence(document: SequenceDocument) -> str:
 
 
 def _read_text(path: Path) -> str:
+    """兼容读取 UTF-8、UTF-16 和常见中文旧文件编码。"""
+
     data = path.read_bytes()
     for encoding in ("utf-8-sig", "utf-16", "gb18030"):
         try:
@@ -610,11 +646,15 @@ def _read_text(path: Path) -> str:
 
 
 def load_sequence(path: str | Path) -> ParseResult:
+    """从磁盘读取并解析 SEQ，保存绝对来源路径供 Call Sequence 解析。"""
+
     source = Path(path).resolve()
     return parse_sequence(_read_text(source), name=source.name, path=source)
 
 
 def save_sequence(document: SequenceDocument, path: str | Path) -> Path:
+    """原子保存 SEQ，并在成功替换后更新文档的路径和名称。"""
+
     destination = Path(path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")

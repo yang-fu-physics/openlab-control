@@ -1,3 +1,10 @@
+"""SEQ 编辑器和执行引擎共享的树形文档模型。
+
+扫描命令通过 ``children`` 任意嵌套；文件中的 ``T/F`` 只保存在每个命令自身，实际是否执行
+还要与所有父节点状态合并。编辑器使用随机稳定 ID 定位节点，复制命令时必须为整棵子树刷新
+ID，避免视图操作命中原节点。
+"""
+
 from __future__ import annotations
 
 import math
@@ -10,6 +17,8 @@ from uuid import uuid4
 
 
 class CommandType(str, Enum):
+    """框架支持的规范化 SEQ 命令类型。"""
+
     SET_DATAFILE = "set_datafile"
     WAIT = "wait"
     SET_TEMPERATURE = "set_temperature"
@@ -26,6 +35,8 @@ class CommandType(str, Enum):
 
     @property
     def is_container(self) -> bool:
+        """该命令是否拥有由 ``End Scan`` 闭合的子命令列表。"""
+
         return self in {
             CommandType.SCAN_TEMPERATURE,
             CommandType.SCAN_FIELD,
@@ -35,6 +46,8 @@ class CommandType(str, Enum):
 
 @dataclass(slots=True)
 class Command:
+    """一个 SEQ 命令节点及其参数、子节点和源文件信息。"""
+
     type: CommandType
     params: dict[str, Any] = field(default_factory=dict)
     children: list["Command"] = field(default_factory=list)
@@ -44,10 +57,14 @@ class Command:
     enabled: bool = True
 
     def update_params(self, values: dict[str, Any]) -> None:
+        """替换编辑后的参数，并丢弃不再可信的原始文本缓存。"""
+
         self.params = dict(values)
         self.raw_text = None
 
     def clone(self) -> "Command":
+        """深拷贝整棵子树，并为每个节点生成新的编辑器 ID。"""
+
         duplicate = deepcopy(self)
 
         def refresh(command: Command) -> None:
@@ -61,6 +78,8 @@ class Command:
 
 @dataclass(frozen=True, slots=True)
 class FlatRow:
+    """树形命令在表格中的一行，可代表命令、End Scan 或 End Sequence。"""
+
     command_id: str | None
     depth: int
     is_end: bool
@@ -70,14 +89,20 @@ class FlatRow:
 
 @dataclass(slots=True)
 class SequenceDocument:
+    """一份可编辑的 SEQ 树及其来源路径。"""
+
     commands: list[Command] = field(default_factory=list)
     name: str = "Untitled.seq"
     path: Path | None = None
 
     def clone(self) -> "SequenceDocument":
+        """复制文档快照，供跨线程执行时与 UI 后续编辑隔离。"""
+
         return deepcopy(self)
 
     def flat_rows(self) -> list[FlatRow]:
+        """按深度优先顺序展开表格行，并计算继承父节点后的有效启用状态。"""
+
         rows: list[FlatRow] = []
 
         def visit(commands: list[Command], depth: int, parent_enabled: bool) -> None:
@@ -93,6 +118,8 @@ class SequenceDocument:
         return rows
 
     def find(self, command_id: str) -> Command | None:
+        """在任意嵌套层级查找命令。"""
+
         def search(commands: list[Command]) -> Command | None:
             for command in commands:
                 if command.id == command_id:
@@ -105,6 +132,8 @@ class SequenceDocument:
         return search(self.commands)
 
     def _locate(self, command_id: str) -> tuple[list[Command], int] | None:
+        """返回节点所在的可变兄弟列表和索引，供编辑操作使用。"""
+
         def search(commands: list[Command]) -> tuple[list[Command], int] | None:
             for index, command in enumerate(commands):
                 if command.id == command_id:
@@ -117,6 +146,8 @@ class SequenceDocument:
         return search(self.commands)
 
     def insert(self, command: Command, selected: FlatRow | None = None) -> None:
+        """按当前表格选择插入；选中容器或 End Scan 时插入其子列表。"""
+
         if selected is None or selected.is_sequence_end:
             self.commands.append(command)
             return
@@ -136,6 +167,8 @@ class SequenceDocument:
         parent.insert(index + 1, command)
 
     def insert_after(self, command: Command, anchor_id: str) -> None:
+        """在锚点的同级位置之后插入，找不到锚点时追加到根级。"""
+
         location = self._locate(anchor_id)
         if location is None:
             self.commands.append(command)
@@ -144,6 +177,8 @@ class SequenceDocument:
         parent.insert(index + 1, command)
 
     def delete(self, command_id: str) -> bool:
+        """删除命令及其完整子树，并返回是否找到节点。"""
+
         location = self._locate(command_id)
         if location is None:
             return False
@@ -152,6 +187,8 @@ class SequenceDocument:
         return True
 
     def move(self, command_id: str, offset: int) -> bool:
+        """只在同一父节点内移动命令，避免无意改变扫描语义。"""
+
         location = self._locate(command_id)
         if location is None:
             return False
@@ -163,6 +200,8 @@ class SequenceDocument:
         return True
 
     def set_enabled(self, command_id: str, enabled: bool) -> bool:
+        """更新命令自身的 T/F 标志；子节点原标志保持不变。"""
+
         command = self.find(command_id)
         if command is None or command.enabled is enabled:
             return False
@@ -170,6 +209,8 @@ class SequenceDocument:
         return True
 
     def count_commands(self, *, enabled_only: bool = False) -> int:
+        """递归统计命令；可选择仅统计父链也有效启用的节点。"""
+
         def count(commands: list[Command], parent_enabled: bool) -> int:
             total = 0
             for command in commands:
@@ -185,6 +226,8 @@ class SequenceDocument:
 
 @dataclass(frozen=True, slots=True)
 class FieldSpec:
+    """一个命令参数在编辑器中的类型、默认值和输入范围。"""
+
     name: str
     label: str
     field_type: str
@@ -196,12 +239,16 @@ class FieldSpec:
 
 @dataclass(frozen=True, slots=True)
 class CommandSpec:
+    """命令类型对应的编辑器字段集合。"""
+
     command_type: CommandType
     label: str
     category: str
     fields: tuple[FieldSpec, ...]
 
     def create(self) -> Command:
+        """用字段默认值创建一个新命令节点。"""
+
         return Command(self.command_type, {item.name: item.default for item in self.fields})
 
 
@@ -272,7 +319,7 @@ SPECS_BY_TYPE = {spec.command_type: spec for spec in COMMAND_SPECS}
 
 
 def validate_command_parameters(command: Command) -> tuple[str, ...]:
-    """Validate values shared by the editor, parser, and runtime."""
+    """执行编辑器、解析器和运行时共用的基础参数校验。"""
     spec = SPECS_BY_TYPE.get(command.type)
     if spec is None:
         return ()
