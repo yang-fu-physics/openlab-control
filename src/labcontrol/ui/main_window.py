@@ -778,10 +778,17 @@ class MainWindow(QMainWindow):
         command_type = CommandType(value)
         spec = SPECS_BY_TYPE[command_type]
         command = spec.create()
-        dialog = CommandDialog(command, spec, self, device_configs=self.config.devices)
+        dialog = CommandDialog(
+            command,
+            spec,
+            self,
+            device_configs=self.config.devices,
+            data_directory=self._last_data_directory,
+        )
         try:
             if dialog.exec() == CommandDialog.DialogCode.Accepted:
                 command.update_params(dialog.values())
+                self._remember_datafile_directory(command)
                 self.editor.insert_command(command)
         finally:
             dialog.deleteLater()
@@ -790,14 +797,33 @@ class MainWindow(QMainWindow):
         spec = SPECS_BY_TYPE.get(command.type)
         if spec is None:
             return
-        dialog = CommandDialog(command, spec, self, device_configs=self.config.devices)
+        dialog = CommandDialog(
+            command,
+            spec,
+            self,
+            device_configs=self.config.devices,
+            data_directory=self._last_data_directory,
+        )
         try:
             if dialog.exec() == CommandDialog.DialogCode.Accepted:
                 command.update_params(dialog.values())
+                self._remember_datafile_directory(command)
                 self.editor.rebuild(command.id)
                 self._mark_dirty()
         finally:
             dialog.deleteLater()
+
+    def _remember_datafile_directory(self, command: Command) -> None:
+        """记住参数窗口明确选择的目录，供下一次系统文件窗口使用。"""
+
+        if (
+            command.type is not CommandType.SET_DATAFILE
+            or command.params.get("path_scope") != "Custom folder"
+        ):
+            return
+        selected_path = Path(str(command.params.get("path", "")))
+        if selected_path.is_absolute():
+            self._last_data_directory = selected_path.parent
 
     def _change_datafile(self) -> None:
         selected, _ = QFileDialog.getSaveFileName(

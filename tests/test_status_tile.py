@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import time
 import unittest
 from dataclasses import replace
@@ -347,6 +348,53 @@ class StatusTileTests(unittest.TestCase):
         self.assertEqual(dialog.inputs["target"].maximum(), 400.0)
         self.assertEqual(dialog.values()["device_id"], "cryostat_primary")
         dialog.close()
+
+    def test_set_datafile_dialog_uses_native_file_chooser_for_save_and_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            spec = SPECS_BY_TYPE[CommandType.SET_DATAFILE]
+            dialog = CommandDialog(
+                spec.create(),
+                spec,
+                data_directory=directory,
+            )
+            self.assertIsNotNone(dialog.datafile_browse_button)
+
+            chosen_without_suffix = directory / "new measurement"
+            with patch(
+                "labcontrol.ui.dialogs.QFileDialog.getSaveFileName",
+                return_value=(
+                    str(chosen_without_suffix),
+                    "Data (*.dat)",
+                ),
+            ) as save_dialog:
+                dialog._browse_datafile()
+            self.assertEqual(
+                dialog.inputs["path"].text(),
+                str(chosen_without_suffix.with_suffix(".dat").resolve()),
+            )
+            self.assertEqual(
+                dialog.inputs["path_scope"].currentText(),
+                "Custom folder",
+            )
+            save_dialog.assert_called_once()
+
+            existing = directory / "existing.dat"
+            existing.write_text("[Data]\n", encoding="utf-8")
+            dialog.inputs["mode"].setCurrentText("open")
+            with patch(
+                "labcontrol.ui.dialogs.QFileDialog.getOpenFileName",
+                return_value=(str(existing), "Data (*.dat)"),
+            ) as open_dialog:
+                dialog.datafile_browse_button.click()
+            self.assertEqual(
+                dialog.inputs["path"].text(),
+                str(existing.resolve()),
+            )
+            open_dialog.assert_called_once()
+            dialog.close()
 
     def test_temperature_list_dialog_rejects_points_outside_configured_limits(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")

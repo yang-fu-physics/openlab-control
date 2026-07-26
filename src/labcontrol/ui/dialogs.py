@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -61,13 +63,16 @@ class CommandDialog(QDialog):
         parent: QWidget | None = None,
         *,
         device_configs: tuple[DeviceConfig, ...] = (),
+        data_directory: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.command = command
         self.spec = spec
         self._device_configs = {item.id: item for item in device_configs}
+        self._data_directory = Path(data_directory or Path.cwd()).resolve()
         self.inputs: dict[str, QWidget] = {}
         self.limit_label: QLabel | None = None
+        self.datafile_browse_button: QPushButton | None = None
         self.setWindowTitle(f"Command Parameters - {spec.label}")
         self.setModal(True)
         self.setMinimumWidth(scaled(430))
@@ -129,7 +134,26 @@ class CommandDialog(QDialog):
             else:
                 widget = QLineEdit(str(value))
             self.inputs[field.name] = widget
-            self.form.addRow(field.label, widget)
+            if (
+                command.type is CommandType.SET_DATAFILE
+                and field.name == "path"
+                and isinstance(widget, QLineEdit)
+            ):
+                # 使用 QFileDialog 的静态入口；在 Windows 上 Qt 默认调用系统原生
+                # 文件选择窗口。路径输入框仍然保留，便于粘贴网络盘或历史路径。
+                path_row = QWidget()
+                path_layout = QHBoxLayout(path_row)
+                path_layout.setContentsMargins(0, 0, 0, 0)
+                path_layout.setSpacing(scaled(6))
+                path_layout.addWidget(widget, 1)
+                self.datafile_browse_button = QPushButton("Browse…")
+                self.datafile_browse_button.clicked.connect(
+                    self._browse_datafile
+                )
+                path_layout.addWidget(self.datafile_browse_button)
+                self.form.addRow(field.label, path_row)
+            else:
+                self.form.addRow(field.label, widget)
         self._field_unit = ""
         if command.type in FIELD_COMMANDS:
             unit_input = self.inputs.get("unit")
@@ -160,6 +184,50 @@ class CommandDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _browse_datafile(self) -> None:
+        """按当前 Mode 调用 Windows 文件窗口并回填绝对 DAT 路径。"""
+
+        path_input = self.inputs.get("path")
+        mode_input = self.inputs.get("mode")
+        scope_input = self.inputs.get("path_scope")
+        if not isinstance(path_input, QLineEdit):
+            return
+        mode = (
+            mode_input.currentText().strip().casefold()
+            if isinstance(mode_input, QComboBox)
+            else "open|create"
+        )
+        current = Path(path_input.text().strip() or "experiment.dat")
+        initial = (
+            current
+            if current.is_absolute()
+            else self._data_directory / current
+        )
+        if mode == "open":
+            selected, _ = QFileDialog.getOpenFileName(
+                self,
+                "Open Existing DAT File",
+                str(initial),
+                "Data (*.dat);;All Files (*)",
+            )
+        else:
+            selected, _ = QFileDialog.getSaveFileName(
+                self,
+                "Select or Create DAT File",
+                str(initial),
+                "Data (*.dat);;All Files (*)",
+            )
+        if not selected:
+            return
+        selected_path = Path(selected)
+        if mode != "open" and selected_path.suffix.casefold() != ".dat":
+            selected_path = selected_path.with_suffix(".dat")
+        selected_path = selected_path.resolve()
+        path_input.setText(str(selected_path))
+        self._data_directory = selected_path.parent
+        if isinstance(scope_input, QComboBox):
+            scope_input.setCurrentText("Custom folder")
 
     def _set_field_visible(self, field_name: str, visible: bool) -> None:
         widget = self.inputs.get(field_name)

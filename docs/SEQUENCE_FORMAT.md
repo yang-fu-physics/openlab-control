@@ -79,6 +79,10 @@ Mode：
 
 `external` 是该命令对自定义路径的明确授权。运行目录中的 SEQ、配置、模块设置和 Status 快照不会随 DAT 移走。
 
+在图形界面插入或双击 `Set Datafile` 后，可点击 `Browse…`。框架直接调用 Windows
+原生文件选择窗口：`open` 选择已有 DAT，`create` / `open|create` 选择或新建 DAT；
+确认后写入绝对路径并自动切换为 `Custom folder`。路径仍可手动输入。
+
 ### Wait
 
 ```text
