@@ -49,18 +49,24 @@ SHA-256 指纹。首次加载要求用户确认类型、ID、版本、路径和�
 - 入口：只允许 `module_name:ClassName`，对应 `.py` 必须位于扩展根目录。
 - `dependencies`：可选 PEP 508 要求；禁止 URL。
 
-### 2.2 完全离线依赖
+### 2.2 框架共享依赖与额外离线依赖
 
-只要 `dependencies` 非空，扩展必须携带 `requirements.lock`：
+主框架统一提供并锁定 PySide6、QtAwesome、packaging、PyVISA 和
+typing_extensions。扩展可以在 `dependencies` 中声明兼容范围；若核心版本满足，该项
+自动归为框架共享，不需要 lock/wheel，也不会显示 Install Dependencies。若范围不兼容，
+扩展在源码导入前直接判为 Invalid，不能用私有副本覆盖核心版本。
+
+只有框架没有提供的额外依赖才必须携带 `requirements.lock`。例如模块声明
+`vendor_sdk>=2,<3` 时，lock 应包含：
 
 ```text
-pyvisa==1.14.1 --hash=sha256:<64 hex>
-pyserial==3.5 --hash=sha256:<64 hex>
+vendor_sdk==2.4.1 --hash=sha256:<64 hex>
+vendor_sdk_dependency==1.7.0 --hash=sha256:<64 hex>
 ```
 
-所有直接和传递依赖都必须精确 `==`、带 SHA-256。禁止 `-r`、`--index-url`、editable、
-URL、sdist 和未哈希项。把目标 Windows/Python 架构的 wheels 放在扩展 `wheels/`，或
-应用共享 `wheels/`。
+额外依赖的所有直接和传递项都必须精确 `==`、带 SHA-256。禁止 `-r`、
+`--index-url`、editable、URL、sdist 和未哈希项。把目标 Windows/Python 架构的
+wheels 放在扩展 `wheels/`，或应用共享 `wheels/`。
 
 安装固定执行：
 
@@ -75,8 +81,8 @@ plugin_runtime/device/<id>/<fingerprint>/site-packages/
 plugin_runtime/module/<id>/<fingerprint>/site-packages/
 ```
 
-扩展子进程启动时再次验证目录摘要。依赖路径只插入该子进程，不进入主进程、不执行
-`.pth`，所以不同扩展可使用同一库的不同版本。
+扩展子进程启动时再次验证额外依赖目录摘要。该路径只插入对应子进程，不进入主进程、
+不执行 `.pth`，也不能覆盖框架共享依赖。没有额外依赖的扩展不应携带 lock/wheels。
 
 ## 3. Device Plugin
 
@@ -195,7 +201,7 @@ id = "dc_transport"
 name = "DC Transport"
 version = "1.0.0"
 api_version = "1.0"
-core_requires = ">=0.11.0,<0.12"
+core_requires = ">=0.11.1,<0.12"
 frontend = "frontend:DcTransportFrontend"
 backend = "backend:DcTransportBackend"
 backend_type = "python"
@@ -209,8 +215,10 @@ unit = "Ohm"
 name = "Status"
 ```
 
-列在 Run 开始前固定，名字必须唯一、单行且不含逗号。模块应显式声明自己的
-Status/Warning 列。中央写盘时自动加 `<module_id>.` 前缀。
+这里的 PyVISA 范围由 OpenLab Control 0.11.1 提供的 1.16.2 满足，因此不需要
+`requirements.lock`、wheel 或安装步骤。列在 Run 开始前固定，名字必须唯一、单行且
+不含逗号。模块应显式声明自己的 Status/Warning 列。中央写盘时自动加
+`<module_id>.` 前缀。
 
 ### 4.2 仪表所有权
 
@@ -295,7 +303,7 @@ Frontend 继承 `ModuleFrontend`，实现 Settings/Status 页面、settings roun
 
 Device Plugin 至少覆盖：
 
-1. 清单/API/core/依赖 lock；
+1. 清单/API/core、框架共享依赖范围和额外依赖 lock；
 2. connect 身份不匹配、协议超时和幂等 disconnect；
 3. poll 新鲜时间戳、单位、target/rate/activity；
 4. 上下限、速率、Hold 新鲜读回；
@@ -311,7 +319,7 @@ Measurement Module 至少覆盖：
 4. Warning 去重/恢复、Error 终止；
 5. 未知列、NaN/Infinity、非 JSON 和超大消息；
 6. 启动/操作/关闭超时及强制回收；
-7. 精确离线 wheel 安装、依赖篡改和不同版本隔离；
+7. 框架依赖无需安装、额外 wheel 精确离线安装、篡改和隔离；
 8. 1080p/4K Frontend 布局、窗口重建与信号连接。
 
 真实硬件测试按“只读身份 → 最低风险输出 → Stop/Error/Hold → 断线恢复 → 长时间运行”
@@ -320,9 +328,9 @@ Measurement Module 至少覆盖：
 ## 6. 发布
 
 - 提升扩展 version；保持稳定 ID。
-- 锁定所有传递依赖并生成目标平台 wheels/hash。
+- 只为框架未提供的额外依赖锁定全部传递项并生成目标平台 wheels/hash。
 - 不提交地址密码、令牌、私钥、`plugin_runtime`、`plugin_state`、`module_data` 或 DAT。
-- 在干净离线 Windows 环境执行手动复制、首次信任、Install Dependencies、重启和完整
-  生命周期。
+- 在干净离线 Windows 环境执行手动复制、首次信任；仅有额外依赖时执行
+  Install Dependencies，然后重启并验证完整生命周期。
 - 记录支持的 OpenLab Control 范围、接线、仪表面板前置设置、安全上限、恢复流程和
   已测试固件。

@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.11.0 的实际实现边界。Device Plugin 与 Measurement Module
+本文描述 OpenLab Control 0.11.1 的实际实现边界。Device Plugin 与 Measurement Module
 是两套不同的扩展机制；它们分别放在独立共享仓库中，不进入核心源码。
 
 ## 进程与线程模型
@@ -31,7 +31,8 @@ PySide6 主进程 / GUI 线程
 - GUI 对象只存在于 GUI 线程；模块 Frontend 不得打开仪表连接。
 - 每个配置设备实例独占一个 `spawn` 子进程，阻塞/崩溃不会占住其他设备。
 - 每个 Enabled 模块独占一个 `spawn` 子进程并拥有其测量仪表。
-- 扩展依赖只插入对应子进程的 `sys.path`，不污染核心/GUI，也不执行 `.pth`。
+- 框架依赖由核心统一锁定和加载；只有扩展额外依赖才插入对应子进程的 `sys.path`，
+  不污染核心/GUI，也不执行 `.pth`。
 - 模块只获得系统状态的 JSON 只读副本，没有设置温度或磁场的 API；长测量可请求新快照，
   并通过协作检查点响应 SEQ Pause/Stop。
 - 报警发射线程不参与 SEQ 判定或仪表安全动作；网络失败只锁存本地 Warning。
@@ -57,15 +58,17 @@ OpenLab Control core repository
 
 - ID、版本、API、`core_requires` 和入口文件；
 - 支持的设备 kind 或固定测量列；
-- 依赖语法、精确带哈希的 lock 和禁止 URL/安装选项；
+- 依赖语法、框架共享版本兼容性，以及额外依赖的精确带哈希 lock 和禁止 URL/安装选项；
 - 目录树不能含逃逸链接或不安全内容，并计算 SHA-256 内容指纹。
 
 首次加载必须信任准确的 `type + id + version + fingerprint`。源文件、清单、lock 或 wheel
 发生变化后，旧信任不再匹配。
 
-依赖只从本地 wheel 安装，命令固定使用 `--no-index --only-binary=:all:
+PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 由主框架提供统一版本。
+manifest 中兼容的声明不生成私有 runtime；不兼容声明在源码导入前拒绝。只有框架没有
+提供的额外依赖才从本地 wheel 安装，命令固定使用 `--no-index --only-binary=:all:
 --require-hashes`。安装先进入 staging 目录，验证后原子替换。运行前再次检查扩展指纹、
-依赖版本、runtime marker 和整个依赖树摘要。
+额外依赖版本、runtime marker 和整个额外依赖树摘要。
 
 ## 设备能力与角色
 

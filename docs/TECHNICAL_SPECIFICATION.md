@@ -1,4 +1,4 @@
-# OpenLab Control 0.11.0 技术规格
+# OpenLab Control 0.11.1 技术规格
 
 状态：Stable Core（仿真验证；未验证真实仪表）
 日期：2026-07-26
@@ -92,14 +92,16 @@
 - MOD-004：Manager SHALL 只显示 Enabled、Name、Version 三列。
 - MOD-005：Refresh SHALL 仅在 SEQ Idle 且所有模块 Disabled 时允许。
 - MOD-006：清单 SHALL 验证唯一 ID、API、入口、backend type、固定列和依赖。
-- MOD-007：缺失、未哈希、版本不满足或 runtime 完整性失败 SHALL 禁止 Enable。
-- MOD-008：每个 Device/Module SHALL 使用按类型、ID 和内容指纹隔离的依赖目录；依赖
-  SHALL 只注入对应子进程。
-- MOD-009：Install Dependencies SHALL 显式触发；Enable 不得自动安装。
-- MOD-010：修改模块隔离依赖前 SHALL 只要求目标模块 Disabled；Refresh 仍要求全部模块
-  Disabled。
-- MOD-011：依赖安装 SHALL 只使用本地 wheels、精确带 SHA-256 的 lock 和 `--no-index
-  --require-hashes`；不得在线回退。
+- MOD-007：框架共享依赖范围不兼容，或额外依赖缺失、未哈希、版本不满足/runtime
+  完整性失败，SHALL 禁止 Enable。
+- MOD-008：PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions SHALL 由核心
+  统一锁定并供所有扩展使用；扩展不得用私有副本覆盖框架版本。
+- MOD-009：Install Dependencies SHALL 只在扩展存在额外依赖时显示并显式触发；
+  Enable 不得自动安装。
+- MOD-010：每个 Device/Module 的额外依赖 SHALL 使用按类型、ID 和内容指纹隔离的
+  目录，并只注入对应子进程。
+- MOD-011：额外依赖安装 SHALL 只使用本地 wheels、精确带 SHA-256 的 lock 和
+  `--no-index --require-hashes`；不得在线回退。
 - MOD-012：首次加载 SHALL 绑定 type/ID/version/content fingerprint 取得用户信任；
   内容变化 SHALL 使旧信任失效。
 
@@ -112,7 +114,8 @@
 - PROC-005：真实驱动 SHALL 自行配置有限协议超时；框架 SHALL 另行提供可配置的启动、IPC 操作和关闭最终超时。
 - PROC-006：模块工作进程超时 SHALL 报告 Error、使该进程失效并在有限时间内回收管道和进程。
 - PROC-007：设备和模块 IPC SHALL 使用受大小限制的 JSON，不得反序列化 pickle。
-- PROC-008：扩展依赖目录 SHALL 在子进程内直接插入，不得处理 `.pth` 或污染主进程。
+- PROC-008：扩展额外依赖目录 SHALL 在子进程内直接插入，不得处理 `.pth`、覆盖框架
+  共享包或污染主进程。
 - WIN-001：模块窗口 SHALL 是主窗口拥有的独立 modeless Windows 窗口。
 - WIN-002：窗口 SHALL 保持在主窗口之前但不得全局 Always-on-top。
 - WIN-003：窗口 SHALL 可移动/最小化，用户不得关闭。

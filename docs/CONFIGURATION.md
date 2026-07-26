@@ -103,25 +103,30 @@ shutdown_timeout_seconds = 3.0
 |---|---|
 | `directory` | 启动/Refresh 扫描的模块源码根目录 |
 | `data_directory` | 自动保存 `<module_id>/settings.toml` 的目录，必须与源码分离 |
-| `shared_wheels_directory` | 所有模块共用的离线 wheel 目录 |
-| `python_executable` | 安装依赖时使用的 Python；源码运行留空即使用当前 Python |
-| `runtime_directory` | 每模块隔离依赖 runtime 的根目录 |
+| `shared_wheels_directory` | 仅供模块额外依赖共用的离线 wheel 目录 |
+| `python_executable` | 安装额外依赖时使用的 Python；源码运行留空即使用当前 Python |
+| `runtime_directory` | 每模块额外依赖隔离 runtime 的根目录 |
 | `startup_timeout_seconds` | 模块工作进程启动并完成源码加载的上限 |
 | `operation_timeout_seconds` | initialize、Apply、Measure 等单次 IPC 操作的上限 |
 | `shutdown_timeout_seconds` | Disable/退出时 abort + close/force-stop 的总上限 |
 
-发布 EXE 不能把自身当作 pip。需要准备额外依赖时，可放置
+PySide6 6.11.1、QtAwesome 1.4.2、packaging 26.2、PyVISA 1.16.2 和
+typing_extensions 4.16.0 是框架共享依赖，源码环境和正式 EXE 均直接提供。所有模块
+默认使用这一组版本；manifest 中兼容的声明不会生成 runtime，也不会显示
+`Install Dependencies`。
+
+发布 EXE 不能把自身当作 pip。只有准备框架未提供的额外依赖时，才需要放置
 `runtime/python/python.exe`，或把 `python_executable` 指向完全离线的便携 Python。
-每个模块安装到：
+每个模块的额外依赖安装到：
 
 ```text
 plugin_runtime/module/<module-id>/<content-fingerprint>/site-packages/
 ```
 
-依赖不进入 GUI/核心进程，也不与其他模块共享，因此不同模块可以使用同一包的不同版本。
-安装只读取模块 `requirements.lock`、模块 `wheels/` 和共享 `wheels/`；lock 中每一项必须
-是精确 `==` 版本并携带 SHA-256。程序固定使用 `--no-index --only-binary=:all:
---require-hashes`，没有在线安装回退。
+额外依赖不进入 GUI/核心进程，也不能覆盖框架共享包；特殊模块仍可在自己的隔离目录中
+使用不同的额外包版本。安装只读取模块 `requirements.lock`、模块 `wheels/` 和共享
+`wheels/`；lock 中每一项必须是精确 `==` 版本并携带 SHA-256。程序固定使用
+`--no-index --only-binary=:all: --require-hashes`，没有在线安装回退。
 
 三个超时必须是大于零的有限秒数。框架超时是防止工作进程永久挂起的最终上限；真实
 模块仍须为每次 VISA、串口、TCP 或 SDK 调用设置更短的协议超时。
@@ -144,16 +149,16 @@ device_reconnect_interval_seconds = 2.0
 |---|---|
 | `device_directory` | 外部 Device Plugin 的手动安装目录 |
 | `state_directory` | 本机扩展内容指纹信任记录；不得作为共享配置提交 |
-| `runtime_directory` | Device/Module 各自隔离依赖的共同根目录 |
-| `shared_wheels_directory` | 可选的离线 wheel 公共池 |
-| `python_executable` | 为扩展准备依赖的 Python；源码运行留空使用当前 Python |
+| `runtime_directory` | Device/Module 各自额外依赖的共同隔离根目录 |
+| `shared_wheels_directory` | 可选的额外依赖离线 wheel 公共池 |
+| `python_executable` | 为扩展准备额外依赖的 Python；源码运行留空使用当前 Python |
 | `device_startup_timeout_seconds` | 每个设备工作进程启动/首次连接最终上限 |
 | `device_reconnect_timeout_seconds` | 读链路失联后的总恢复窗，默认 60 秒 |
 | `device_reconnect_interval_seconds` | 恢复窗内两次重新连接尝试之间的间隔 |
 
-每个外部设备插件的依赖路径为
+每个外部设备插件的额外依赖路径为
 `plugin_runtime/device/<plugin-id>/<content-fingerprint>/site-packages/`。安装、哈希和
-runtime 完整性规则与模块相同。
+runtime 完整性规则与模块相同；框架共享依赖仍直接使用核心版本。
 
 ## `[[devices]]`
 

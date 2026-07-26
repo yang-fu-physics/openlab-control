@@ -3,8 +3,8 @@
 This is the Git-ready layout for the single private repository that contains
 all formal temperature, magnetic-field, and read-only monitor plugins. Each
 folder under `plugins/` is independently installable and has its own
-`device.toml`, backend source, optional `requirements.lock`, and optional local
-`wheels/`.
+`device.toml` and backend source. `requirements.lock` and local `wheels/` are
+only needed for dependencies not supplied by the OpenLab Control framework.
 
 The example backends contain no real protocol commands. The controller fails
 closed until identity checks, bounded protocol timeouts, fresh readback, hold,
@@ -13,13 +13,15 @@ example is read-only.
 
 ## Manual offline installation
 
-1. Review one plugin folder and its wheel hashes.
+1. Review one plugin folder and any additional dependency wheel hashes.
 2. Copy it to `OpenLabControl/device_plugins/<plugin-id>/`.
 3. Change only the selected device's `plugin = "<plugin-id>"` in
    `configs/default.toml`; keep safety limits, role, and timeouts in that same
    device entry.
 4. Restart OpenLab Control and approve the first-load trust prompt.
-5. If dependencies are declared, prepare them from local wheels when prompted.
+5. PySide6, QtAwesome, packaging, PyVISA, and typing_extensions use the
+   framework versions. Only additional dependencies are prepared from local
+   wheels when prompted.
 
 A copied plugin is not enough to activate control. A device must also select
 the plugin in configuration. For each temperature/field kind there is at most

@@ -215,17 +215,20 @@ Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 
 
 状态：Accepted
 
-`pyproject.toml` 和 `requirements.txt` 保留兼容范围，供库元数据和受控升级使用；`requirements-lock.txt` 固定经过 Windows 发布验证的直接与传递依赖，`setup.bat` 只安装该锁定集合且不隐式升级 pip。这样日常升级意图与可复现发布环境分离。锁定文件只有在隔离环境完成完整测试、源码冒烟和打包验收后才能更新。
+`pyproject.toml`、`requirements.txt` 和 `requirements-lock.txt` 都固定经过 Windows
+发布验证的框架依赖版本，`setup.bat` 只安装该锁定集合且不隐式升级 pip。扩展 manifest
+可以声明兼容范围，但实际共享版本由核心决定。锁定文件只有在隔离环境完成完整测试、
+源码冒烟和打包验收后才能更新。
 
-## ADR-030：扩展依赖按内容指纹隔离并完全离线
+## ADR-030：扩展额外依赖按内容指纹隔离并完全离线
 
-状态：Accepted
+状态：Amended by ADR-034
 
 每个 Device Plugin 和 Measurement Module 使用
-`plugin_runtime/<type>/<id>/<fingerprint>/site-packages`。依赖只从扩展/共享 wheels
-安装，lock 必须精确版本加 SHA-256，固定使用 no-index/only-binary/require-hashes。
-staging 验证后原子替换，子进程启动再校验整个 runtime 摘要。依赖只加入该子进程路径，
-不处理 `.pth`，因此允许互不兼容版本共存且不污染 GUI。
+`plugin_runtime/<type>/<id>/<fingerprint>/site-packages` 保存框架未提供的额外依赖。
+额外依赖只从扩展/共享 wheels 安装，lock 必须精确版本加 SHA-256，固定使用
+no-index/only-binary/require-hashes。staging 验证后原子替换，子进程启动再校验整个
+runtime 摘要。额外依赖只加入该子进程路径，不处理 `.pth`。
 
 ## ADR-031：外部扩展按内容信任，核心与两个扩展仓库分离
 
@@ -253,3 +256,15 @@ SEQ 主设备恢复期间冻结计时，成功后验证实际 target/rate。写�
 secondary 默认 `control_enabled = false`，可以同时显示而不会被 SEQ 误控；Monitor 永远
 不可控。旧单设备配置只在没有任何显式 role 时兼容提升第一个设备。参数窗口和执行器都
 使用同一角色、连接状态和安全限制。
+
+## ADR-034：通用扩展依赖由核心统一提供
+
+状态：Accepted
+
+PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是稳定扩展 API 的通用
+运行时，全部由核心锁定并随源码环境和 Windows EXE 提供。所有模块/设备插件默认使用
+相同版本，manifest 中的兼容范围只用于加载前检查，不再触发重复安装。
+
+只有框架尚未提供的包才进入 ADR-030 的扩展隔离 runtime，并显示
+Install Dependencies。这样常见仪表模块手动复制后即可 Enable，同时保留特殊第三方
+SDK 的完全离线、可审计安装，不允许扩展私有副本覆盖框架包。

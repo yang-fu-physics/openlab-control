@@ -140,7 +140,7 @@ class ReleaseContractTests(unittest.TestCase):
             with self.subTest(generated_name=generated_name):
                 self.assertIn(generated_name, build_script)
 
-    def test_current_docs_describe_isolated_offline_extensions(self) -> None:
+    def test_current_docs_describe_shared_framework_and_isolated_extras(self) -> None:
         current_documents = "\n".join(
             (ROOT / relative_path).read_text(encoding="utf-8")
             for relative_path in (
@@ -166,6 +166,9 @@ class ReleaseContractTests(unittest.TestCase):
             "--no-index",
             "requirements.lock",
             "fingerprint",
+            "PyVISA",
+            "框架共享",
+            "额外依赖",
             "device-plugins-private-repository",
             "measurement-modules-repository",
         ):

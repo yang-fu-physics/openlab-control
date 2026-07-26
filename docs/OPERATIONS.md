@@ -22,7 +22,9 @@ setup.bat
 run.bat
 ```
 
-`setup.bat` 默认安装 `requirements-lock.txt` 中经过发布验证的精确版本。需要评估依赖升级时，先修改 `requirements.txt` 的直接依赖范围，在隔离环境解析并更新锁定文件，再完成全部测试和打包验收；不要在发布环境中临时升级单个包。
+`setup.bat` 默认安装 `requirements-lock.txt` 中经过发布验证的精确版本。需要评估依赖
+升级时，同时修改 `requirements.txt`、`pyproject.toml` 和核心共享依赖表，在隔离环境
+更新锁定文件，再完成全部测试和打包验收；不要在发布环境中临时升级单个包。
 
 或：
 
@@ -50,7 +52,7 @@ run.bat
 
 这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules
 Manager 手动启用。无界面模式不会弹信任确认：模块必须已经手动复制、在 GUI 中确认过
-完全相同的内容指纹，并且其离线依赖 runtime 已准备好，否则启动会拒绝。
+完全相同的内容指纹；存在额外依赖时，其离线 runtime 也必须已准备好，否则启动会拒绝。
 
 ## 报警报告
 
@@ -132,20 +134,21 @@ abort 失败时程序报告 Error，并在关闭总上限内强制回收模块�
 
 只有 SEQ Idle 且全部模块 Disabled 时可以 `Refresh`。它重新扫描 `modules/`，不做运行中的热替换。
 
-安装依赖只要求所选模块 Disabled；其他模块的隔离 runtime 不会被替换。Refresh 仍要求
-全部模块 Disabled，因为它会重新建立整个发现列表。
+框架共享依赖不需要安装。只有所选模块声明框架尚未提供的额外依赖时，Manager 才显示
+`Install Dependencies`；安装只要求该模块 Disabled，其他模块的隔离 runtime 不会被
+替换。Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。
 
-依赖缺失时：
+额外依赖缺失时：
 
 1. Disable 目标模块，再选中它。
 2. 点击 `Install Dependencies`。
 3. 核对并确认该模块的内容指纹。
-4. 程序只读取模块 `requirements.lock`、根 `wheels/` 和模块 `wheels/`，使用精确版本和
-   SHA-256 离线安装到该模块自己的 runtime。
+4. 程序只读取模块 `requirements.lock`、根 `wheels/` 和模块 `wheels/`，使用精确版本
+   和 SHA-256 离线安装到该模块自己的 runtime。
 5. 完成后 Refresh。
 
-没有在线回退，也不会从主 Python 环境“借用”已安装包。两个模块可安全使用同一依赖的
-不同版本。
+没有在线回退。PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是明确
+由主框架提供的统一版本，不属于“借用”；其他额外包只能来自已验证的隔离 runtime。
 
 ## 编辑 SEQ
 
@@ -304,14 +307,16 @@ SEQ 运行中关闭主窗口会确认；确认后请求 Stop/Hold/End。随后�
 ### 模块无法勾选
 
 选中行查看底部说明。常见原因：清单 Invalid、API/core 版本不匹配、未确认信任、
-依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。Disable 目标模块后重新准备依赖；
-需要重新扫描源码时先 Disable 全部模块再 Refresh。
+框架共享依赖范围不兼容、额外依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。
+Disable 目标模块后重新准备额外依赖；需要重新扫描源码时先 Disable 全部模块再
+Refresh。
 
 ### 发布包提示没有 Python Runtime
 
-Install Dependencies 需要配置 `modules.python_executable` /
-`plugins.python_executable`，或放置 `runtime/python/python.exe`。程序运行本身不要求该
-便携 Python；只有离线准备新依赖需要。便携 Python 也必须自带 pip。
+只有扩展声明额外依赖时才会显示 Install Dependencies，并需要配置
+`modules.python_executable` / `plugins.python_executable`，或放置
+`runtime/python/python.exe`。框架共享依赖（包括 PyVISA）已经在 EXE 内，不需要便携
+Python；只有离线准备额外依赖需要，且便携 Python 必须自带 pip。
 
 ### Enable 后参数没有作用
 

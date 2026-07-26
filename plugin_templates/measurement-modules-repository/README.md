@@ -7,13 +7,15 @@ reference implementation and test fixture.
 
 ## Manual offline installation
 
-1. Review the module source, `module.toml`, `requirements.lock`, and wheels.
+1. Review the module source and `module.toml`. Review `requirements.lock` and
+   wheels only when the module has dependencies not supplied by the framework.
 2. Copy one complete module folder to `OpenLabControl/modules/<id>/`.
-3. If the module declares dependencies, include every required Windows wheel
-   under that module's `wheels/` folder (or the application's shared
-   `wheels/` folder). Network fallback is intentionally unavailable.
-4. Restart OpenLab Control, open Modules Manager, select the module, and use
-   `Install Dependencies` if shown.
+3. PySide6, QtAwesome, packaging, PyVISA, and typing_extensions use the exact
+   versions supplied by OpenLab Control. Do not duplicate those wheels.
+4. For additional dependencies only, include every required Windows wheel
+   under the module's `wheels/` folder (or the application's shared `wheels/`
+   folder). Restart OpenLab Control and use `Install Dependencies` when shown.
+   Network fallback is intentionally unavailable.
 5. Enable the module and approve the first-load trust prompt.
 6. Verify that saved settings are loaded but not applied until the operator
    chooses `Apply Settings`.
@@ -32,5 +34,6 @@ temperature/field/monitor snapshots supplied by the core. Use
 - Verify Warning deduplication and Error termination.
 - Test multi-row output and parallel execution with another module.
 - Test bounded driver and framework timeouts plus forced worker cleanup.
-- Test the exact offline wheel set on the target Windows/Python architecture.
+- Verify framework dependency ranges, and test any additional offline wheel set
+  on the target Windows/Python architecture.
 - Increment `version` whenever shipped content or dependencies change.

@@ -5,7 +5,7 @@ Python/PySide6 控制框架。它不控制 PPMS 本体。温控仪、磁体电�
 Device Plugin 提供；吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的
 Measurement Module 提供。
 
-当前版本：`0.11.0`。核心框架、扩展 API 和仿真流程进入稳定版本；默认配置全部使用
+当前版本：`0.11.1`。核心框架、扩展 API 和仿真流程为稳定版本；默认配置全部使用
 仿真设备。Lake Shore 372A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
 
 ![主窗口](docs/main-window-preview.png)
@@ -75,15 +75,20 @@ plugin repository/plugins/<id>/  -> OpenLabControl/device_plugins/<id>/
 重启后，程序会在首次加载时显示类型、ID、版本、路径和内容指纹，必须由用户确认信任。
 任何源码或 wheel 改动都会使旧信任失效。
 
-声明第三方依赖的扩展必须携带：
+PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是主框架统一提供并锁定
+版本的依赖。模块和设备插件直接使用这同一组版本，不需要各自复制 wheel 或准备
+`plugin_runtime`。manifest 可以声明兼容范围；若范围不接受框架版本，程序会在导入
+扩展源码前拒绝加载。
+
+只有声明框架尚未提供的额外第三方依赖时，扩展才需要携带：
 
 - 精确 `==` 版本和 SHA-256 的 `requirements.lock`；
 - 与目标 Windows/Python 匹配的本地 wheels（扩展自己的 `wheels/` 或应用共享
   `wheels/`）。
 
-程序只执行 `--no-index --require-hashes` 离线安装，不存在联网回退。每个扩展的依赖
-安装到 `plugin_runtime/<type>/<id>/<fingerprint>/site-packages/`，不会进入主进程，也
-不会与其他扩展共享版本。
+额外依赖只执行 `--no-index --require-hashes` 离线安装，不存在联网回退，并安装到
+`plugin_runtime/<type>/<id>/<fingerprint>/site-packages/`。只有这些额外依赖加入对应
+worker；不会污染主进程或覆盖框架统一版本。
 
 ## 第一次使用示例模块
 
@@ -115,7 +120,7 @@ configs/                 主配置；选择设备插件和安全限制
 modules/                 手动安装的 Measurement Modules（默认空）
 device_plugins/          手动安装的 Device Plugins（默认空）
 module_data/<id>/        模块保存设置
-plugin_runtime/          各扩展隔离且可重建的离线依赖
+plugin_runtime/          仅存放扩展额外依赖的隔离、可重建 runtime
 plugin_state/            本机扩展信任记录
 wheels/                  可选共享离线 wheels
 plugin_templates/        两个独立扩展仓库模板

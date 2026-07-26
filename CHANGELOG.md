@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.1 - 2026-07-26
+
+- 修复正式 Windows 包中 Lake Shore 372A 被误判为需要私有 PyVISA runtime、因而首次
+  Enable 前要求不存在的便携 Python 的问题。
+- PySide6、QtAwesome、packaging、PyVISA 1.16.2 和 typing_extensions 4.16.0 改为
+  主框架统一锁定并随源码/EXE 提供；模块和设备插件默认使用相同版本。
+- manifest 中与框架版本兼容的依赖自动归为共享依赖，不再要求扩展携带重复 lock/wheel；
+  不兼容范围在扩展源码导入前 fail-closed。
+- `Install Dependencies` 只在所选模块存在真正额外依赖时显示；缺少 runtime marker
+  改为明确报告“尚未安装”，不再把正常首次状态写成 invalid marker。
+- Lake Shore 372A 升至 0.1.0b3，删除重复的 PyVISA/typing_extensions wheel，并要求
+  OpenLab Control 0.11.1 或更新版本。硬件支持仍保持 Beta，未声称通过真机验证。
+
 ## 0.11.0 - 2026-07-26
 
 - 将经过 Beta 2 完整仿真、源码端到端和 Windows 干净包验证的核心框架提升为稳定版本。

@@ -16,7 +16,7 @@
 | `test_sequence_editor.py` | 多行右键/键盘、父子去重、运行锁定 |
 | `test_engine.py` | 嵌套 Scan、Pause 时钟、Hold、控制等待上限、运行时参数防绕过与展开进度 |
 | `test_measurement_modules.py` | 清单、Settings、并行多行测量、信任、IPC/退出超时、完整生命周期 |
-| `test_extension_dependencies.py` | 精确哈希 lock、完全离线安装、runtime 篡改和跨模块版本隔离 |
+| `test_extension_dependencies.py` | 框架共享版本划分、额外依赖精确哈希 lock、离线安装和 runtime 篡改 |
 | `test_device_plugin_manifest.py` | 外部设备清单、core/API、内容指纹和首次信任 |
 | `test_device_worker.py` | 每设备独立进程、阻塞强杀、依赖只在子进程可见 |
 | `test_device_recovery.py` | 读链路重连、恢复状态核对、写超时不重放、最终故障 |
@@ -59,7 +59,7 @@
 
 预期 Completed；3 次 Measure 各流式写入 R1–R4，共 12 行模块数据。`--enable-module` 只用于无界面验收，不改变 GUI 每次启动全部 Disabled 的规则。
 执行前必须从仓库模板复制模块，并通过 GUI 预先信任完全相同的内容指纹；无界面模式不得
-自动信任。声明依赖的模块还必须先完成离线 runtime 准备。
+自动信任。只有声明框架未提供额外依赖的模块才必须先完成离线 runtime 准备。
 
 ### 模块视觉预览
 
@@ -95,9 +95,12 @@
 8. Disable 成功，窗口隐藏。
 9. SEQ 运行中 Enable/Disable/Refresh/Install 均不可用。
 10. 所有模块 Disabled 时 Refresh 生效。
-11. 目标模块 Enabled 时 Install Dependencies 被阻止；其他隔离模块 Enabled 不影响目标。
-12. 制造无效 manifest，程序仍启动，该模块禁止 Enable并显示原因。
-13. 修改已信任源码，确认旧信任失效且 Enable 前再次提示。
+11. 只声明 PyVISA 等框架共享依赖时，Install Dependencies 完全隐藏且可直接 Enable。
+12. 存在额外依赖时才显示 Install Dependencies；目标模块 Enabled 时安装被阻止，其他
+    隔离模块 Enabled 不影响目标。
+13. 制造共享依赖范围不兼容或其他无效 manifest，程序仍启动，该模块禁止 Enable 并
+    显示原因。
+14. 修改已信任源码，确认旧信任失效且 Enable 前再次提示。
 
 ## Settings/Status 验收
 
@@ -172,6 +175,8 @@ build.bat
 - 可写 `runs/`、`module_data/`、`plugin_runtime/`、`plugin_state/`、`wheels/`；
 - `_internal/` 不重复包含上述外置资源；
 - EXE 文件版本和产品版本与应用版本一致；
+- `_internal` 包含核心统一的 PyVISA 1.16.2，复制 372A 后无需
+  `plugin_runtime`/Install Dependencies 即可完成 Enable 和资源发现；
 - 记录 Authenticode 签名状态；未签名包必须在发布说明中明确标注；
 - EXE GUI smoke；
 - EXE headless demo（默认无模块，以及手动复制并预置信任 `simulated_transport` 两种）；
@@ -190,7 +195,8 @@ build.bat
 
 ### Device Plugin
 
-- [ ] 从私密共享仓库手动复制，首次内容指纹和离线依赖验证通过。
+- [ ] 从私密共享仓库手动复制，首次内容指纹和框架共享依赖范围验证通过；如有额外依赖，
+  再验证离线 runtime。
 - [ ] 每个温度/磁场 kind 只有一个 primary；所有 secondary 默认只读。
 - [ ] 只读 connect/poll 连续运行至少 1 小时。
 - [ ] connect 核对型号/固件且不改变仪表输出或自动 Apply 面板设置。
