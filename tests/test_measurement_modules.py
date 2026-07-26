@@ -902,6 +902,39 @@ class ModuleWindowTests(unittest.TestCase):
             window.close()
             owner.close()
 
+    def test_imported_sequence_settings_are_marked_unapplied(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            descriptor = discover_modules(
+                copied_project(Path(temp))
+            )[0]
+            owner = QWidget()
+            window = ModuleWindow(
+                descriptor,
+                owner,
+            )
+
+            window.load_settings(
+                {"delay_seconds": 0.75},
+                mark_unapplied=True,
+            )
+
+            self.assertAlmostEqual(
+                window.settings()["delay_seconds"],
+                0.75,
+            )
+            self.assertTrue(
+                window.has_unapplied_edits()
+            )
+            self.assertIn(
+                "not applied",
+                window.message_label.text(),
+            )
+            window.allow_application_close()
+            window.close()
+            owner.close()
+
     def test_window_uses_compact_content_minimum_at_4k_scale(self) -> None:
         previous_scale = self.application.property("openlabUiScale")
         self.application.setProperty("openlabUiScale", 1.4)

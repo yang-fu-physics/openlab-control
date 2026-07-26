@@ -33,6 +33,7 @@ class ModuleWindow(QDialog):
     applyRequested = Signal(str)
     manualActionRequested = Signal(str, str, dict)
     statusRefreshRequested = Signal(str)
+    moduleSettingsChanged = Signal(str)
 
     def __init__(self, descriptor: ModuleDescriptor, parent: QWidget) -> None:
         super().__init__(parent, Qt.WindowType.Window)
@@ -102,9 +103,24 @@ class ModuleWindow(QDialog):
             lambda: self.statusRefreshRequested.emit(descriptor.id)
         )
 
-    def load_settings(self, settings: Mapping[str, Any]) -> None:
+    def load_settings(
+        self,
+        settings: Mapping[str, Any],
+        *,
+        mark_unapplied: bool = False,
+    ) -> None:
+        """只更新 Settings 控件，不把任何值发送给模块 worker。
+
+        普通 Enable 读取模块自己的持久设置时保持干净；从 SEQ 伴随文件切换实验参数时，
+        ``mark_unapplied`` 会明确标记为待 Apply，避免窗口仍显示上一组设置已应用。
+        """
+
         self.frontend.load_settings(deepcopy(dict(settings)))
-        self._dirty = False
+        self._dirty = mark_unapplied
+        if mark_unapplied:
+            self.message_label.setText(
+                "SEQ settings imported — not applied"
+            )
 
     def settings(self) -> dict[str, Any]:
         return deepcopy(self.frontend.settings())
@@ -120,6 +136,9 @@ class ModuleWindow(QDialog):
     def _mark_dirty(self) -> None:
         self._dirty = True
         self.message_label.setText("Unapplied changes")
+        self.moduleSettingsChanged.emit(
+            self.descriptor.id
+        )
 
     def update_runtime(
         self,

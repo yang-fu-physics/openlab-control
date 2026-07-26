@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -24,7 +24,15 @@ from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.sequence.model import CommandType  # noqa: E402
-from labcontrol.sequence.parser import parse_sequence  # noqa: E402
+from labcontrol.sequence.module_settings import (  # noqa: E402
+    SequenceModuleSettings,
+    load_sequence_module_settings,
+    save_sequence_module_settings,
+)
+from labcontrol.sequence.parser import (  # noqa: E402
+    load_sequence,
+    parse_sequence,
+)
 from labcontrol.ui.dialogs import CommandDialog  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
@@ -189,6 +197,261 @@ class MainWindowLayoutTests(unittest.TestCase):
                 )
             finally:
                 window.close()
+
+    def test_open_sequence_imports_module_settings_without_enabling_or_applying(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            shutil.copytree(
+                MODULE_REPOSITORY / "modules",
+                root / "modules",
+            )
+            sequence = root / "experiment.seq"
+            sequence.write_text(
+                "T Remark imported settings\n"
+                "T End Sequence\n",
+                encoding="utf-8",
+            )
+            save_sequence_module_settings(
+                sequence,
+                {
+                    "simulated_transport": {
+                        "delay_seconds": 0.375,
+                    }
+                },
+                {"simulated_transport": "1.0.1"},
+            )
+            window = MainWindow(
+                load_config(
+                    root / "configs" / "default.toml"
+                )
+            )
+            try:
+                with (
+                    patch(
+                        "labcontrol.ui.main_window."
+                        "QFileDialog.getOpenFileName",
+                        return_value=(
+                            str(sequence),
+                            "Sequence (*.seq)",
+                        ),
+                    ),
+                    patch.object(
+                        window.runtime,
+                        "enable_module",
+                    ) as enable_module,
+                    patch.object(
+                        window.runtime,
+                        "apply_module_settings",
+                    ) as apply_settings,
+                    patch(
+                        "labcontrol.ui.main_window."
+                        "QMessageBox.warning"
+                    ) as warning,
+                ):
+                    window._open_sequence()
+
+                self.assertEqual(
+                    window.sequence_path,
+                    sequence.resolve(),
+                )
+                self.assertEqual(
+                    window._saved_module_settings(
+                        "simulated_transport"
+                    )["delay_seconds"],
+                    0.375,
+                )
+                self.assertEqual(
+                    window.enabled_modules,
+                    set(),
+                )
+                self.assertFalse(
+                    (
+                        root
+                        / "module_data"
+                        / "simulated_transport"
+                        / "settings.toml"
+                    ).exists()
+                )
+                enable_module.assert_not_called()
+                apply_settings.assert_not_called()
+                warning.assert_not_called()
+            finally:
+                window.close()
+
+    def test_save_sequence_writes_its_module_settings_companion(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            sequence = root / "saved.seq"
+            sequence.write_text(
+                "T End Sequence\n",
+                encoding="utf-8",
+            )
+            window = MainWindow(
+                load_config(
+                    root / "configs" / "default.toml"
+                )
+            )
+            try:
+                window._set_document(
+                    load_sequence(sequence).document,
+                    SequenceModuleSettings(
+                        {
+                            "third_party_module": {
+                                "gain": 4,
+                            }
+                        },
+                        {
+                            "third_party_module": (
+                                "2.3.0"
+                            )
+                        },
+                    ),
+                )
+
+                self.assertTrue(
+                    window._save_sequence()
+                )
+                loaded = (
+                    load_sequence_module_settings(
+                        sequence
+                    )
+                )
+
+                self.assertEqual(
+                    loaded.settings,
+                    {
+                        "third_party_module": {
+                            "gain": 4,
+                        }
+                    },
+                )
+                self.assertEqual(
+                    loaded.versions,
+                    {
+                        "third_party_module": "2.3.0"
+                    },
+                )
+            finally:
+                window.close()
+
+    def test_save_sequence_captures_enabled_module_window_values(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            shutil.copytree(
+                MODULE_REPOSITORY / "modules",
+                root / "modules",
+            )
+            sequence = root / "enabled.seq"
+            sequence.write_text(
+                "T End Sequence\n",
+                encoding="utf-8",
+            )
+            window = MainWindow(
+                load_config(
+                    root / "configs" / "default.toml"
+                )
+            )
+            fake_window = Mock()
+            fake_window.settings.return_value = {
+                "delay_seconds": 0.875,
+            }
+            try:
+                window._set_document(
+                    load_sequence(sequence).document
+                )
+                window.enabled_modules.add(
+                    "simulated_transport"
+                )
+                window.module_windows[
+                    "simulated_transport"
+                ] = fake_window
+
+                self.assertTrue(
+                    window._save_sequence()
+                )
+                loaded = (
+                    load_sequence_module_settings(
+                        sequence
+                    )
+                )
+
+                self.assertEqual(
+                    loaded.settings[
+                        "simulated_transport"
+                    ]["delay_seconds"],
+                    0.875,
+                )
+                self.assertEqual(
+                    loaded.versions[
+                        "simulated_transport"
+                    ],
+                    "1.0.1",
+                )
+            finally:
+                window.enabled_modules.clear()
+                window.module_windows.clear()
+                window.close()
+
+    def test_import_updates_enabled_window_but_never_applies_settings(
+        self,
+    ) -> None:
+        window = MainWindow(self.config)
+        fake_window = Mock()
+        module_id = "simulated_transport"
+        try:
+            window.enabled_modules.add(module_id)
+            window.module_windows[
+                module_id
+            ] = fake_window
+            imported = {
+                "delay_seconds": 0.625,
+            }
+            with patch.object(
+                window.runtime,
+                "apply_module_settings",
+            ) as apply_settings:
+                window._set_document(
+                    parse_sequence(
+                        "T End Sequence\n",
+                        "loaded.seq",
+                    ).document,
+                    SequenceModuleSettings(
+                        {module_id: imported},
+                        {module_id: "1.0.1"},
+                    ),
+                )
+
+            fake_window.load_settings.assert_called_once_with(
+                imported,
+                mark_unapplied=True,
+            )
+            apply_settings.assert_not_called()
+            self.assertFalse(window._dirty)
+        finally:
+            window.enabled_modules.clear()
+            window.module_windows.clear()
+            window.close()
 
     def test_legacy_measure_parameters_block_run(self) -> None:
         window = MainWindow(self.config)

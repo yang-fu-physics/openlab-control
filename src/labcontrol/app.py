@@ -25,6 +25,9 @@ from .models import RunProgress, RunState
 from .measurement.settings import load_settings
 from .paths import default_config_path
 from .runtime import RuntimeService
+from .sequence.module_settings import (
+    load_sequence_module_settings,
+)
 from .sequence.parser import load_sequence
 
 
@@ -129,7 +132,52 @@ def _headless_demo(
         diagnostic.close()
         return 2
     runtime = RuntimeService(config, device_descriptors=device_descriptors)
+    imported = load_sequence_module_settings(
+        sequence_path
+    )
+    if imported.issues:
+        for issue in imported.issues:
+            emit(
+                "ERROR   module settings import: "
+                + issue
+            )
+        diagnostic.close()
+        return 2
+    descriptors = {
+        descriptor.id: descriptor
+        for descriptor in runtime.module_descriptors
+    }
+    requested_modules = set(module_ids or [])
+    for module_id in sorted(imported.settings):
+        descriptor = descriptors.get(module_id)
+        if descriptor is None:
+            emit(
+                "WARNING module settings: unavailable "
+                f"module {module_id!r} was not enabled"
+            )
+            continue
+        recorded_version = imported.versions.get(
+            module_id,
+            "",
+        )
+        if (
+            module_id in requested_modules
+            and recorded_version
+            and recorded_version != descriptor.version
+        ):
+            emit(
+                "ERROR   module settings: "
+                f"{module_id} settings require module "
+                f"{recorded_version}, installed version is "
+                f"{descriptor.version}"
+            )
+            diagnostic.close()
+            return 2
     runtime.start()
+    enabled_settings: dict[
+        str,
+        dict[str, object],
+    ] = {}
     try:
         for module_id in module_ids or []:
             settings_path = (
@@ -137,14 +185,29 @@ def _headless_demo(
                 / module_id
                 / "settings.toml"
             )
-            runtime.enable_module(module_id, load_settings(settings_path)).result()
+            settings = (
+                dict(
+                    imported.settings[module_id]
+                )
+                if module_id
+                in imported.settings
+                else load_settings(settings_path)
+            )
+            enabled_settings[module_id] = settings
+            runtime.enable_module(
+                module_id,
+                settings,
+            ).result()
             emit(f"INFO    module:{module_id}/ENABLED: Module enabled for headless demo")
     except Exception as exc:
         emit(f"ERROR   module enable: {type(exc).__name__}: {exc}")
         runtime.shutdown()
         diagnostic.close()
         return 2
-    run_future = runtime.run_sequence(result.document)
+    run_future = runtime.run_sequence(
+        result.document,
+        enabled_settings,
+    )
     deadline = time.monotonic() + timeout
     terminal: RunState | None = None
     try:

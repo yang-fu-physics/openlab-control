@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -62,6 +63,12 @@ from ..measurement.manifest import (
 from ..measurement.settings import load_settings, save_settings
 from ..runtime import RuntimeService
 from ..sequence.model import COMMAND_SPECS, SPECS_BY_TYPE, Command, CommandType, SequenceDocument
+from ..sequence.module_settings import (
+    SequenceModuleSettings,
+    load_sequence_module_settings,
+    save_sequence_module_settings,
+    sequence_module_settings_path,
+)
 from ..sequence.parser import load_sequence, parse_sequence, save_sequence, serialize_sequence
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
@@ -97,6 +104,22 @@ class MainWindow(QMainWindow):
         )
         self.document = SequenceDocument()
         self.sequence_path: Path | None = None
+        # 这些值属于当前打开的 SEQ，而不是“已发送到仪表”的状态。模块保持 Disabled；
+        # 用户 Enable 后只会看到设置，仍须在 Settings 页显式 Apply。
+        self._sequence_module_settings: dict[
+            str,
+            dict[str, object],
+        ] = {}
+        self._sequence_module_versions: dict[
+            str,
+            str,
+        ] = {}
+        self._sequence_module_settings_source: (
+            Path | None
+        ) = None
+        self._sequence_module_window_issues: list[
+            str
+        ] = []
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_snapshots: dict[str, DeviceSnapshot] = {}
@@ -447,25 +470,133 @@ class MainWindow(QMainWindow):
         path = self.config.resolve_project_path(self.config.default_sequence)
         if path.exists():
             result = load_sequence(path)
-            self._set_document(result.document)
+            module_settings = (
+                load_sequence_module_settings(path)
+            )
+            self._set_document(
+                result.document,
+                module_settings,
+            )
             for issue in result.issues:
                 self._append_log(issue.level.upper(), "sequence", "PARSE", f"Line {issue.line_number}: {issue.message}")
+            for issue in (
+                self._module_settings_import_issues(
+                    module_settings
+                )
+            ):
+                self._append_log(
+                    "WARNING",
+                    "sequence",
+                    "MODULE_SETTINGS_IMPORT",
+                    issue,
+                )
+            if module_settings.settings:
+                self._append_log(
+                    "INFO",
+                    "sequence",
+                    "MODULE_SETTINGS_IMPORTED",
+                    (
+                        f"Imported {len(module_settings.settings)} "
+                        "module setting set(s); nothing was "
+                        "enabled or applied"
+                    ),
+                )
         else:
             self._set_document(SequenceDocument())
 
-    def _set_document(self, document: SequenceDocument) -> None:
+    def _set_document(
+        self,
+        document: SequenceDocument,
+        module_settings: (
+            SequenceModuleSettings | None
+        ) = None,
+    ) -> None:
         self.document = document
         self.sequence_path = document.path
+        imported = module_settings or (
+            SequenceModuleSettings({}, {})
+        )
+        self._sequence_module_settings = deepcopy(
+            imported.settings
+        )
+        self._sequence_module_versions = dict(
+            imported.versions
+        )
+        self._sequence_module_settings_source = (
+            imported.source
+        )
+        self._sequence_module_window_issues = []
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
         self.sequence_label.setFullText(document.name)
         self.sequence_window.setWindowTitle(document.name)
+        # 对已经 Enabled 的模块只替换 Settings 页显示值并标为未 Apply；不会调用
+        # runtime.apply_module_settings，更不会自动打开新的仪表 session。
+        for module_id, settings in (
+            self._sequence_module_settings.items()
+        ):
+            if module_id not in self.enabled_modules:
+                continue
+            window = self.module_windows.get(module_id)
+            if window is not None:
+                try:
+                    window.load_settings(
+                        settings,
+                        mark_unapplied=True,
+                    )
+                except Exception as exc:
+                    # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
+                    # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
+                    self._sequence_module_window_issues.append(
+                        f"Could not load imported settings "
+                        f"into enabled module {module_id!r}: "
+                        f"{exc}"
+                    )
         self._dirty = False
         self._sync_datafile_label()
         # Closing an MDI subwindow hides it because WA_DeleteOnClose is false.
         # Loading or creating a document must reopen that existing editor.
         self._focus_sequence()
+
+    def _module_settings_import_issues(
+        self,
+        imported: SequenceModuleSettings,
+    ) -> list[str]:
+        issues = [
+            *imported.issues,
+            *self._sequence_module_window_issues,
+        ]
+        descriptors = {
+            descriptor.id: descriptor
+            for descriptor in self.module_descriptors
+        }
+        for module_id in sorted(
+            imported.settings
+        ):
+            descriptor = descriptors.get(module_id)
+            if descriptor is None:
+                issues.append(
+                    f"Settings for unavailable module "
+                    f"{module_id!r} were kept but not loaded "
+                    "into a window"
+                )
+                continue
+            recorded = imported.versions.get(
+                module_id,
+                "",
+            )
+            if (
+                recorded
+                and recorded != descriptor.version
+            ):
+                issues.append(
+                    f"{descriptor.name} settings were saved "
+                    f"with module {recorded}, but installed "
+                    f"version is {descriptor.version}; review "
+                    "them before Apply Settings"
+                )
+        return issues
 
     def _sync_datafile_label(self) -> None:
         for command in self.document.commands:
@@ -502,10 +633,42 @@ class MainWindow(QMainWindow):
             return
         self._last_sequence_directory = Path(path).resolve().parent
         result = load_sequence(path)
-        self._set_document(result.document)
-        if result.issues:
-            summary = "\n".join(f"Line {item.line_number}: {item.message}" for item in result.issues[:12])
+        imported = load_sequence_module_settings(
+            path
+        )
+        self._set_document(
+            result.document,
+            imported,
+        )
+        messages = [
+            (
+                f"Line {item.line_number}: "
+                f"{item.message}"
+            )
+            for item in result.issues
+        ]
+        messages.extend(
+            self._module_settings_import_issues(
+                imported
+            )
+        )
+        if messages:
+            summary = "\n".join(messages[:12])
             QMessageBox.warning(self, "SEQ Validation", summary)
+        if imported.settings:
+            self.statusBar().showMessage(
+                (
+                    f"Imported {len(imported.settings)} "
+                    "module setting set(s); the import did "
+                    "not enable modules or apply settings"
+                ),
+                8000,
+            )
+        elif not messages:
+            self.statusBar().showMessage(
+                f"Loaded {Path(path).name}",
+                3000,
+            )
 
     def _save_sequence(self, save_as: bool = False) -> bool:
         path = self.sequence_path
@@ -522,10 +685,70 @@ class MainWindow(QMainWindow):
             if path.suffix.lower() != ".seq":
                 path = path.with_suffix(".seq")
             self._last_sequence_directory = path.resolve().parent
-        save_sequence(self.document, path)
-        self.sequence_path = path
-        self.sequence_label.setFullText(path.name)
-        self.sequence_window.setWindowTitle(path.name)
+        try:
+            (
+                associated_settings,
+                associated_versions,
+            ) = self._collect_sequence_module_settings()
+            destination = save_sequence(
+                self.document,
+                path,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "SEQ Save Failed",
+                str(exc),
+            )
+            return False
+
+        self.sequence_path = destination
+        self.sequence_label.setFullText(
+            destination.name
+        )
+        self.sequence_window.setWindowTitle(
+            destination.name
+        )
+        sidecar = sequence_module_settings_path(
+            destination
+        )
+        try:
+            # 不为完全没有模块关系的旧 SEQ 强行增加文件；若伴随文件已经存在，则用
+            # 空 modules 表覆盖，确保用户清空关系后不会再次导入旧设置。
+            if associated_settings or sidecar.exists():
+                sidecar = save_sequence_module_settings(
+                    destination,
+                    associated_settings,
+                    associated_versions,
+                )
+                self._sequence_module_settings_source = (
+                    sidecar
+                )
+            else:
+                self._sequence_module_settings_source = (
+                    None
+                )
+        except Exception as exc:
+            self._dirty = True
+            self.sequence_window.setWindowTitle(
+                destination.name + " *"
+            )
+            QMessageBox.critical(
+                self,
+                "Module Settings Save Failed",
+                (
+                    "The SEQ text was saved, but its module "
+                    "settings companion was not.\n\n"
+                    f"{exc}"
+                ),
+            )
+            return False
+        self._sequence_module_settings = deepcopy(
+            associated_settings
+        )
+        self._sequence_module_versions = dict(
+            associated_versions
+        )
         self._dirty = False
         return True
 
@@ -876,12 +1099,81 @@ class MainWindow(QMainWindow):
         return root / module_id / "settings.toml"
 
     def _saved_module_settings(self, module_id: str) -> dict[str, object]:
+        if module_id in self._sequence_module_settings:
+            return deepcopy(
+                self._sequence_module_settings[
+                    module_id
+                ]
+            )
         return load_settings(self._module_settings_path(module_id))
+
+    def _remember_sequence_module_settings(
+        self,
+        module_id: str,
+        settings: dict[str, object],
+    ) -> None:
+        self._sequence_module_settings[
+            module_id
+        ] = deepcopy(settings)
+        try:
+            descriptor = self._module_descriptor(
+                module_id
+            )
+        except KeyError:
+            return
+        self._sequence_module_versions[
+            module_id
+        ] = descriptor.version
+
+    def _collect_sequence_module_settings(
+        self,
+    ) -> tuple[
+        dict[str, dict[str, object]],
+        dict[str, str],
+    ]:
+        """合并已导入关系和当前 Enabled 模块的 Settings 页快照。
+
+        未安装或当前 Disabled 的关联模块会原样保留，避免仅打开再保存一次 SEQ 就丢掉
+        第三方模块设置；Enabled 模块则始终以界面当前值为准。
+        """
+
+        settings = deepcopy(
+            self._sequence_module_settings
+        )
+        versions = dict(
+            self._sequence_module_versions
+        )
+        for module_id in sorted(
+            self.enabled_modules
+        ):
+            window = self.module_windows.get(
+                module_id
+            )
+            values = (
+                window.settings()
+                if window is not None
+                else self._saved_module_settings(
+                    module_id
+                )
+            )
+            settings[module_id] = deepcopy(
+                values
+            )
+            versions[module_id] = (
+                self._module_descriptor(
+                    module_id
+                ).version
+            )
+        return settings, versions
 
     def _save_module_window(self, module_id: str) -> dict[str, object]:
         window = self.module_windows.get(module_id)
         settings = window.settings() if window is not None else self._saved_module_settings(module_id)
         save_settings(self._module_settings_path(module_id), settings)
+        self._remember_sequence_module_settings(
+            module_id,
+            settings,
+        )
         return settings
 
     def _save_and_collect_enabled_module_settings(self) -> dict[str, dict[str, object]]:
@@ -962,10 +1254,19 @@ class MainWindow(QMainWindow):
                 f"{descriptor.name} changed or is not trusted"
             )
         window = ModuleWindow(descriptor, self)
-        window.load_settings(self._saved_module_settings(module_id))
+        window.load_settings(
+            self._saved_module_settings(module_id),
+            mark_unapplied=(
+                module_id
+                in self._sequence_module_settings
+            ),
+        )
         window.applyRequested.connect(self._apply_module_settings)
         window.manualActionRequested.connect(self._module_manual_action)
         window.statusRefreshRequested.connect(self._refresh_module_status)
+        window.moduleSettingsChanged.connect(
+            lambda _module_id: self._mark_dirty()
+        )
         self.module_windows[module_id] = window
         return window
 
@@ -995,7 +1296,15 @@ class MainWindow(QMainWindow):
                 return
             window.update_runtime(state, status, message)
             if not was_enabled:
-                window.load_settings(self._saved_module_settings(module_id))
+                window.load_settings(
+                    self._saved_module_settings(
+                        module_id
+                    ),
+                    mark_unapplied=(
+                        module_id
+                        in self._sequence_module_settings
+                    ),
+                )
                 window.show_in_front()
             elif state == "faulted":
                 window.tabs.setCurrentIndex(1)
@@ -1038,6 +1347,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(window, "Module Settings Save Failed", str(exc))
             return
+        self._remember_sequence_module_settings(
+            module_id,
+            settings,
+        )
         self.runtime.apply_module_settings(module_id, settings)
         window.message_label.setText("Applying settings...")
 
