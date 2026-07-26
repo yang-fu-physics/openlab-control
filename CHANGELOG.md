@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.11.2 - 2026-07-27
+
 - Data Browser 会把可确认来源的绝对时间戳显示为实际日期时间：Quantum Design DAT
   使用 `FILEOPENTIME` 校准，OpenLab DAT 使用新增的 `TIMESTAMP_EPOCH` 标记；
   双击详情同时保留原始秒值。

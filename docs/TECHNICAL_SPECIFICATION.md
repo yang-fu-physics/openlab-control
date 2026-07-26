@@ -1,7 +1,7 @@
-# OpenLab Control 0.11.1 技术规格
+# OpenLab Control 0.11.2 技术规格
 
 状态：Stable Core（仿真验证；未验证真实仪表）
-日期：2026-07-26
+日期：2026-07-27
 作者：yang-fu-physics `<yfu.physics@gmail.com>`
 
 ## 1. 目的
