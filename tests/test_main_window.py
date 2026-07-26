@@ -152,14 +152,14 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_dependency_install_requires_every_module_to_be_disabled(self) -> None:
+    def test_dependency_install_requires_selected_module_to_be_disabled(self) -> None:
         window = MainWindow(self.config)
         try:
             window.enabled_modules.add("simulated_transport")
             with patch("labcontrol.ui.main_window.QMessageBox.warning") as warning:
                 window._install_module_dependencies("simulated_transport")
             warning.assert_called_once()
-            self.assertIn("Disable every measurement module", warning.call_args.args[2])
+            self.assertIn("Disable this measurement module", warning.call_args.args[2])
         finally:
             window.close()
 

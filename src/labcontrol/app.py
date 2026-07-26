@@ -11,11 +11,17 @@ from .config import ConfigurationError, load_config
 from .devices.manifest import (
     DevicePluginDescriptor,
     configured_device_plugins,
+    device_dependency_directory,
     discover_device_plugins,
+)
+from .extensions.dependencies import (
+    DependencyInstallError,
+    dependency_runtime_errors,
+    install_offline_dependencies,
+    missing_dependencies,
 )
 from .extensions.trust import ExtensionTrustError, PluginTrustStore
 from .models import RunProgress, RunState
-from .measurement.manifest import activate_shared_dependencies
 from .measurement.settings import load_settings
 from .paths import default_config_path
 from .runtime import RuntimeService
@@ -41,6 +47,22 @@ def configure_qt_font(application, point_size: float = 10.0) -> None:
     font = application.font()
     font.setPointSizeF(point_size)
     application.setFont(font)
+
+
+def _plugin_python_executable(config) -> Path | None:
+    configured = config.plugins.python_executable.strip()
+    if configured:
+        candidate = config.resolve_project_path(configured)
+        return candidate if candidate.is_file() else None
+    if not getattr(sys, "frozen", False):
+        return Path(sys.executable)
+    candidate = (
+        config.project_root
+        / "runtime"
+        / "python"
+        / "python.exe"
+    )
+    return candidate if candidate.is_file() else None
 
 
 def configure_qt_appearance(application, requested_scale: float | None = None) -> float:
@@ -184,8 +206,6 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, ExtensionTrustError) as exc:
         print(f"Device plugin error: {exc}", file=sys.stderr)
         return 2
-    activate_shared_dependencies(config)
-
     sequence_path = args.sequence or (
         config.resolve_project_path(config.default_sequence)
         if config.default_sequence
@@ -201,6 +221,35 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "Device plugin error: untrusted plugins cannot run headlessly: "
                 + ", ".join(untrusted),
+                file=sys.stderr,
+            )
+            return 2
+        invalid_runtime_by_plugin = {
+            descriptor.id: dependency_runtime_errors(
+                descriptor.dependencies,
+                device_dependency_directory(
+                    config,
+                    descriptor,
+                ),
+                descriptor.fingerprint,
+            )
+            for descriptor in selected_device_plugins
+        }
+        invalid_runtime_by_plugin = {
+            plugin_id: errors
+            for plugin_id, errors
+            in invalid_runtime_by_plugin.items()
+            if errors
+        }
+        if invalid_runtime_by_plugin:
+            print(
+                "Device plugin error: isolated dependencies are "
+                "missing; prepare them in the GUI first: "
+                + "; ".join(
+                    f"{plugin_id}: {'; '.join(errors)}"
+                    for plugin_id, errors
+                    in invalid_runtime_by_plugin.items()
+                ),
                 file=sys.stderr,
             )
             return 2
@@ -240,6 +289,70 @@ def main(argv: list[str] | None = None) -> int:
                 None,
                 "Device Plugin Not Trusted",
                 f"OpenLab Control will not load {descriptor.name}.",
+            )
+            return 1
+        runtime_errors = dependency_runtime_errors(
+            descriptor.dependencies,
+            device_dependency_directory(config, descriptor),
+            descriptor.fingerprint,
+        )
+        if not runtime_errors:
+            continue
+        missing = missing_dependencies(
+            descriptor.dependencies,
+            device_dependency_directory(config, descriptor),
+        )
+        python = _plugin_python_executable(config)
+        if python is None:
+            QMessageBox.critical(
+                None,
+                "Device Plugin Dependencies Missing",
+                f"{descriptor.name} requires:\n\n"
+                + "\n".join(
+                    missing or descriptor.dependencies
+                )
+                + "\n\nConfigure plugins.python_executable or "
+                "add runtime/python/python.exe.",
+            )
+            return 1
+        answer = QMessageBox.question(
+            None,
+            "Prepare Device Plugin Dependencies?",
+            f"{descriptor.name} requires:\n\n"
+            + "\n".join(
+                missing or descriptor.dependencies
+            )
+            + "\n\nCurrent runtime issue:\n"
+            + "\n".join(runtime_errors)
+            + "\n\nInstall from local wheels into this plugin's "
+            "isolated runtime? No network access will be used.",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return 1
+        try:
+            install_offline_dependencies(
+                python_executable=python,
+                extension_directory=descriptor.path,
+                site_packages=device_dependency_directory(
+                    config,
+                    descriptor,
+                ),
+                shared_wheels_directory=(
+                    config.resolve_project_path(
+                        config.plugins.shared_wheels_directory
+                    )
+                ),
+                dependencies=descriptor.dependencies,
+                fingerprint=descriptor.fingerprint,
+            )
+        except DependencyInstallError as exc:
+            QMessageBox.critical(
+                None,
+                "Offline Dependency Install Failed",
+                str(exc),
             )
             return 1
     try:

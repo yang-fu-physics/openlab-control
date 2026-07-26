@@ -20,6 +20,9 @@ from .devices.worker import (
     IsolatedDeviceClient,
 )
 from .events import EventManager
+from .extensions.dependencies import (
+    dependency_runtime_errors,
+)
 from .extensions.loading import load_import_object, load_source_object
 from .extensions.trust import PluginTrustStore, extension_tree_digest
 from .models import (
@@ -111,6 +114,21 @@ class DeviceManager:
                     raise PermissionError(
                         f"Device plugin {descriptor.id} has not been trusted"
                     )
+                dependency_directory = device_dependency_directory(
+                    self.config,
+                    descriptor,
+                )
+                runtime_errors = dependency_runtime_errors(
+                    descriptor.dependencies,
+                    dependency_directory,
+                    descriptor.fingerprint,
+                )
+                if runtime_errors:
+                    raise PermissionError(
+                        f"Device plugin {descriptor.id} has invalid isolated "
+                        "dependencies: "
+                        + "; ".join(runtime_errors)
+                    )
             if self.isolate_processes:
                 dependency_directory = (
                     ""
@@ -141,6 +159,11 @@ class DeviceManager:
                         else descriptor.fingerprint
                     ),
                     dependency_directory=dependency_directory,
+                    dependencies=(
+                        ()
+                        if descriptor is None
+                        else descriptor.dependencies
+                    ),
                 )
                 def isolated_factory(
                     spec: DeviceWorkerSpec = worker_spec,

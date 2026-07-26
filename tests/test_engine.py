@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
+from labcontrol.extensions.trust import PluginTrustStore  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     DeviceActivity,
     DeviceConnectionState,
@@ -39,6 +40,14 @@ class SequenceEngineTests(unittest.TestCase):
         shutil.copy2(ROOT / "configs" / "default.toml", target)
         shutil.copytree(ROOT / "modules", temp_root / "modules")
         config = load_config(target)
+        trust_store = PluginTrustStore(
+            config.resolve_project_path(
+                config.plugins.state_directory
+            )
+            / "trusted_plugins.json"
+        )
+        for descriptor in discover_modules(config):
+            trust_store.trust("module", descriptor)
         devices = []
         for device in config.devices:
             stability = device.stability

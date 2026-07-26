@@ -11,6 +11,7 @@ from packaging.version import InvalidVersion, Version
 
 from .. import __version__
 from ..config import AppConfig
+from ..extensions.dependencies import validate_requirements_lock
 from ..extensions.trust import ExtensionTrustError, extension_tree_digest
 from ..models import DeviceKind
 
@@ -111,6 +112,12 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
                 )
     if not _ENTRYPOINT.fullmatch(backend):
         errors.append("backend must use module:ClassName without a path")
+    else:
+        module_name = backend.split(":", 1)[0]
+        if not (path / f"{module_name}.py").is_file():
+            errors.append(
+                f"backend source does not exist: {module_name}.py"
+            )
     if not kinds:
         errors.append("at least one supported device kind is required")
     if len(kinds) != len(set(kinds)):
@@ -123,6 +130,9 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
             continue
         if requirement.url is not None:
             errors.append(f"dependency URLs are not allowed: {raw_requirement}")
+    errors.extend(
+        validate_requirements_lock(path, dependencies)
+    )
     try:
         descriptor.fingerprint = extension_tree_digest(path)
     except ExtensionTrustError as exc:

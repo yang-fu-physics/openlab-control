@@ -4,8 +4,7 @@ import asyncio
 import json
 import math
 import multiprocessing
-import os
-import site
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import DeviceConfig
+from ..extensions.dependencies import dependency_runtime_errors
 from ..extensions.loading import load_import_object, load_source_object
 from ..extensions.trust import extension_tree_digest
 from ..models import (
@@ -52,6 +52,7 @@ class DeviceWorkerSpec:
     plugin_directory: str = ""
     fingerprint: str = ""
     dependency_directory: str = ""
+    dependencies: tuple[str, ...] = ()
 
     @property
     def external(self) -> bool:
@@ -170,14 +171,12 @@ def _activate_dependency_directory(path: str) -> None:
     if not directory.is_dir():
         return
     value = str(directory.resolve())
-    site.addsitedir(value)
-    if value in os.sys.path:
-        os.sys.path.remove(value)
-    os.sys.path.insert(1, value)
+    if value in sys.path:
+        sys.path.remove(value)
+    sys.path.insert(0, value)
 
 
 def _load_backend(spec: DeviceWorkerSpec) -> type[DevicePlugin]:
-    _activate_dependency_directory(spec.dependency_directory)
     if spec.external:
         directory = Path(spec.plugin_directory)
         current = extension_tree_digest(directory)
@@ -185,6 +184,20 @@ def _load_backend(spec: DeviceWorkerSpec) -> type[DevicePlugin]:
             raise PermissionError(
                 f"Device plugin {spec.plugin_id} changed after trust verification"
             )
+        dependency_errors = dependency_runtime_errors(
+            spec.dependencies,
+            Path(spec.dependency_directory),
+            spec.fingerprint,
+        )
+        if dependency_errors:
+            raise PermissionError(
+                f"Device plugin {spec.plugin_id} dependency runtime "
+                "failed verification: "
+                + "; ".join(dependency_errors)
+            )
+        _activate_dependency_directory(
+            spec.dependency_directory
+        )
         backend = load_source_object(
             directory,
             spec.backend,

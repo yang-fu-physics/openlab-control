@@ -12,9 +12,17 @@ from typing import Any
 from ..datafile import DatRunLogger
 from ..devices.base import DeviceError
 from ..events import EventManager
+from ..extensions.trust import (
+    PluginTrustStore,
+    extension_tree_digest,
+)
 from ..models import DeviceSnapshot, Severity
 from ..plugins import DeviceManager
-from .manifest import ModuleDescriptor, missing_dependencies
+from .manifest import (
+    ModuleDescriptor,
+    module_dependency_errors,
+    module_dependency_directory,
+)
 from .worker import ModuleWorkerClient, WorkerRequestError
 
 
@@ -42,7 +50,14 @@ class MeasurementModuleService:
     ) -> None:
         self.events = events
         self.devices = devices
+        self.app_config = devices.config
         self.config = devices.config.modules
+        self.trust_store = PluginTrustStore(
+            devices.config.resolve_project_path(
+                devices.config.plugins.state_directory
+            )
+            / "trusted_plugins.json"
+        )
         self.message_callback = message_callback or (lambda _kind, _payload: None)
         self.records = {
             item.id: ModuleRuntimeRecord(item)
@@ -58,6 +73,48 @@ class MeasurementModuleService:
             raise DeviceError(
                 "Module changes and manual actions are unavailable while a SEQ is running",
                 "MODULE_OPERATION_DURING_SEQUENCE",
+            )
+
+    def _ensure_descriptor_ready(
+        self,
+        descriptor: ModuleDescriptor,
+    ) -> None:
+        if not descriptor.can_enable:
+            raise DeviceError(
+                descriptor.error or descriptor.dependency_error,
+                "MODULE_NOT_ENABLEABLE",
+                descriptor.id,
+            )
+        current_fingerprint = extension_tree_digest(
+            descriptor.path
+        )
+        if current_fingerprint != descriptor.fingerprint:
+            raise DeviceError(
+                f"Measurement module {descriptor.id} changed "
+                "after discovery",
+                "MODULE_CHANGED_AFTER_DISCOVERY",
+                descriptor.id,
+            )
+        if not self.trust_store.is_trusted(
+            "module",
+            descriptor,
+        ):
+            raise DeviceError(
+                f"Measurement module {descriptor.id} has not "
+                "been trusted",
+                "MODULE_NOT_TRUSTED",
+                descriptor.id,
+            )
+        dependency_errors = module_dependency_errors(
+            self.app_config,
+            descriptor,
+        )
+        if dependency_errors:
+            raise DeviceError(
+                "Invalid isolated module dependencies: "
+                + "; ".join(dependency_errors),
+                "MODULE_DEPENDENCIES_INVALID",
+                descriptor.id,
             )
 
     def replace_descriptors(self, descriptors: tuple[ModuleDescriptor, ...]) -> None:
@@ -97,6 +154,7 @@ class MeasurementModuleService:
                 "activity": snapshot.activity.value,
                 "stability": snapshot.stability.value,
                 "message": snapshot.message,
+                "connection_state": snapshot.connection_state.value,
             }
         return payload
 
@@ -219,22 +277,16 @@ class MeasurementModuleService:
         record = self.records[module_id]
         if record.enabled or record.state == "initializing":
             return
-        if not record.descriptor.can_enable:
-            raise DeviceError(
-                record.descriptor.error or record.descriptor.dependency_error,
-                "MODULE_NOT_ENABLEABLE",
-                module_id,
-            )
-        missing = missing_dependencies(record.descriptor)
-        if missing:
-            raise DeviceError(
-                "Missing module dependencies: " + ", ".join(missing),
-                "MODULE_DEPENDENCIES_MISSING",
-                module_id,
-            )
+        self._ensure_descriptor_ready(record.descriptor)
         record.state = "initializing"
         self._publish(record, f"Initializing {record.descriptor.name}...")
-        client = ModuleWorkerClient(record.descriptor)
+        client = ModuleWorkerClient(
+            record.descriptor,
+            module_dependency_directory(
+                self.app_config,
+                record.descriptor,
+            ),
+        )
         record.client = client
         try:
             await asyncio.to_thread(
@@ -274,7 +326,11 @@ class MeasurementModuleService:
         client = record.client
         failure: DeviceError | None = None
         try:
-            result = await self._request(record, "abort")
+            result = await self._request(
+                record,
+                "abort",
+                timeout_seconds=self.config.shutdown_timeout_seconds,
+            )
         except WorkerRequestError as exc:
             failure = self._operation_error(
                 record,
@@ -515,12 +571,20 @@ class MeasurementModuleService:
             if record.client is None:
                 return
             client = record.client
+            deadline = (
+                time.monotonic()
+                + self.config.shutdown_timeout_seconds
+            )
             if record.enabled:
                 try:
+                    remaining = max(
+                        0.001,
+                        deadline - time.monotonic(),
+                    )
                     await self._request(
                         record,
                         "abort",
-                        timeout_seconds=self.config.shutdown_timeout_seconds,
+                        timeout_seconds=remaining,
                     )
                 except WorkerRequestError as exc:
                     self._operation_error(
@@ -528,10 +592,11 @@ class MeasurementModuleService:
                         exc,
                         disable_failed_worker=False,
                     )
-            await asyncio.to_thread(
-                client.close,
-                self.config.shutdown_timeout_seconds,
+            remaining = max(
+                0.001,
+                deadline - time.monotonic(),
             )
+            await asyncio.to_thread(client.close, remaining)
             record.client = None
             record.enabled = False
             record.state = "disabled"

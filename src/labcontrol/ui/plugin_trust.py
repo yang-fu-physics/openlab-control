@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMessageBox, QWidget
 
 from ..devices.manifest import DevicePluginDescriptor
 from ..extensions.trust import PluginTrustStore
+from ..measurement.manifest import ModuleDescriptor
 
 
 def confirm_device_plugin_trust(
@@ -31,4 +32,34 @@ def confirm_device_plugin_trust(
     if answer != QMessageBox.StandardButton.Yes:
         return False
     store.trust("device", descriptor)
+    return True
+
+
+def confirm_module_plugin_trust(
+    parent: QWidget | None,
+    store: PluginTrustStore,
+    descriptor: ModuleDescriptor,
+) -> bool:
+    if store.is_trusted("module", descriptor):
+        return True
+    answer = QMessageBox.question(
+        parent,
+        "Trust Measurement Module?",
+        (
+            f"{descriptor.name} {descriptor.version}\n"
+            f"ID: {descriptor.id}\n"
+            f"Location: {descriptor.path}\n"
+            f"SHA-256: {descriptor.fingerprint}\n\n"
+            "A measurement module contains executable UI and worker code. "
+            "It can access files and its configured instrument. Trust it "
+            "only if you know its source. Any content change will require "
+            "confirmation again."
+        ),
+        QMessageBox.StandardButton.Yes
+        | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.No,
+    )
+    if answer != QMessageBox.StandardButton.Yes:
+        return False
+    store.trust("module", descriptor)
     return True

@@ -82,7 +82,7 @@ class ModuleConfig:
     data_directory: str = "module_data"
     shared_wheels_directory: str = "wheels"
     python_executable: str = ""
-    site_packages_directory: str = "module_runtime/site-packages"
+    runtime_directory: str = "plugin_runtime"
     startup_timeout_seconds: float = 10.0
     operation_timeout_seconds: float = 120.0
     shutdown_timeout_seconds: float = 3.0
@@ -507,8 +507,20 @@ def load_config(path: str | Path) -> AppConfig:
             data_directory=str(module_raw.get("data_directory", "module_data")),
             shared_wheels_directory=str(module_raw.get("shared_wheels_directory", "wheels")),
             python_executable=str(module_raw.get("python_executable", "")),
-            site_packages_directory=str(
-                module_raw.get("site_packages_directory", "module_runtime/site-packages")
+            runtime_directory=str(
+                module_raw.get(
+                    "runtime_directory",
+                    str(
+                        Path(
+                            str(
+                                module_raw.get(
+                                    "site_packages_directory",
+                                    "plugin_runtime/site-packages",
+                                )
+                            )
+                        ).parent
+                    ),
+                )
             ),
             startup_timeout_seconds=_positive_float(
                 module_raw.get("startup_timeout_seconds", 10.0),

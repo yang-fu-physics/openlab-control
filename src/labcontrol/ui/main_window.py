@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-import subprocess
 import sys
 
 import qtawesome as qta
@@ -33,6 +32,15 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..config import AppConfig
 from ..devices.manifest import DevicePluginDescriptor
+from ..extensions.dependencies import (
+    DependencyInstallError,
+    install_offline_dependencies,
+)
+from ..extensions.trust import (
+    ExtensionTrustError,
+    PluginTrustStore,
+    extension_tree_digest,
+)
 from ..formatting import control_decimals, fixed_number
 from ..models import (
     DeviceConnectionState,
@@ -46,9 +54,10 @@ from ..models import (
 )
 from ..measurement.manifest import (
     ModuleDescriptor,
-    activate_shared_dependencies,
     discover_modules,
     missing_dependencies,
+    module_dependency_errors,
+    module_dependency_directory,
 )
 from ..measurement.settings import load_settings, save_settings
 from ..runtime import RuntimeService
@@ -57,6 +66,7 @@ from ..sequence.parser import load_sequence, parse_sequence, save_sequence, seri
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
 from .measurement_modules import ModuleManagerDialog, ModuleWindow
+from .plugin_trust import confirm_module_plugin_trust
 from .scaling import current_ui_scale, scaled
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
@@ -73,6 +83,12 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.config = config
+        self.plugin_trust_store = PluginTrustStore(
+            config.resolve_project_path(
+                config.plugins.state_directory
+            )
+            / "trusted_plugins.json"
+        )
         self.module_descriptors = self._discover_module_descriptors()
         self.runtime = RuntimeService(
             config,
@@ -118,9 +134,14 @@ class MainWindow(QMainWindow):
         for descriptor in descriptors:
             if not descriptor.valid or descriptor.dependency_error:
                 continue
-            missing = missing_dependencies(descriptor)
-            if missing:
-                descriptor.dependency_error = "Missing dependencies: " + ", ".join(missing)
+            dependency_errors = module_dependency_errors(
+                self.config,
+                descriptor,
+            )
+            if dependency_errors:
+                descriptor.dependency_error = "; ".join(
+                    dependency_errors
+                )
         return descriptors
 
     def _build_ui(self) -> None:
@@ -887,6 +908,27 @@ class MainWindow(QMainWindow):
             return
         try:
             if enabled:
+                descriptor = self._module_descriptor(module_id)
+                current_fingerprint = extension_tree_digest(
+                    descriptor.path
+                )
+                if current_fingerprint != descriptor.fingerprint:
+                    raise ExtensionTrustError(
+                        f"{descriptor.name} changed after discovery; "
+                        "refresh modules before enabling it"
+                    )
+                if not confirm_module_plugin_trust(
+                    self,
+                    self.plugin_trust_store,
+                    descriptor,
+                ):
+                    self.module_manager.update_state(
+                        module_id,
+                        False,
+                        "disabled",
+                        "Module was not trusted",
+                    )
+                    return
                 settings = self._saved_module_settings(module_id)
                 self.runtime.enable_module(module_id, settings)
                 self.statusBar().showMessage(f"Initializing {self._module_descriptor(module_id).name}...")
@@ -908,6 +950,17 @@ class MainWindow(QMainWindow):
         if window is not None:
             return window
         descriptor = self._module_descriptor(module_id)
+        if (
+            extension_tree_digest(descriptor.path)
+            != descriptor.fingerprint
+            or not self.plugin_trust_store.is_trusted(
+                "module",
+                descriptor,
+            )
+        ):
+            raise PermissionError(
+                f"{descriptor.name} changed or is not trusted"
+            )
         window = ModuleWindow(descriptor, self)
         window.load_settings(self._saved_module_settings(module_id))
         window.applyRequested.connect(self._apply_module_settings)
@@ -1036,18 +1089,55 @@ class MainWindow(QMainWindow):
         return candidate if candidate.exists() else None
 
     def _install_module_dependencies(self, module_id: str) -> None:
-        if self.enabled_modules:
+        if module_id in self.enabled_modules:
             QMessageBox.warning(
                 self,
                 "Dependency Install Unavailable",
-                "Disable every measurement module before changing the shared dependencies.",
+                "Disable this measurement module before replacing "
+                "its isolated dependencies.",
             )
             return
         descriptor = self._module_descriptor(module_id)
-        missing = missing_dependencies(descriptor)
-        if not missing:
-            QMessageBox.information(self, "Dependencies", "All declared dependencies are installed.")
+        try:
+            current_fingerprint = extension_tree_digest(
+                descriptor.path
+            )
+        except ExtensionTrustError as exc:
+            QMessageBox.critical(
+                self,
+                "Module Validation Failed",
+                str(exc),
+            )
             return
+        if current_fingerprint != descriptor.fingerprint:
+            QMessageBox.warning(
+                self,
+                "Module Changed",
+                "Refresh modules before preparing dependencies.",
+            )
+            return
+        if not confirm_module_plugin_trust(
+            self,
+            self.plugin_trust_store,
+            descriptor,
+        ):
+            return
+        dependency_errors = module_dependency_errors(
+            self.config,
+            descriptor,
+        )
+        if not dependency_errors:
+            QMessageBox.information(
+                self,
+                "Dependencies",
+                "All declared dependencies are installed in "
+                "this module's isolated runtime.",
+            )
+            return
+        missing = missing_dependencies(
+            self.config,
+            descriptor,
+        )
         python = self._module_python_executable()
         if python is None:
             QMessageBox.warning(
@@ -1059,66 +1149,47 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Install Module Dependencies",
-            "Install the following packages into the shared Python environment?\n\n"
-            + "\n".join(missing),
+            "Prepare the following packages in this module's "
+            "isolated runtime using local wheels only?\n\n"
+            + "\n".join(
+                missing or descriptor.dependencies
+            )
+            + "\n\nCurrent runtime issue:\n"
+            + "\n".join(dependency_errors),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        wheel_folders = [
-            self.config.resolve_project_path(self.config.modules.shared_wheels_directory),
-            descriptor.path / "wheels",
-        ]
-        offline_args = [str(python), "-m", "pip", "install", "--no-index"]
-        target = self.config.resolve_project_path(self.config.modules.site_packages_directory)
-        target.mkdir(parents=True, exist_ok=True)
-        offline_args.extend(["--target", str(target), "--upgrade"])
-        for folder in wheel_folders:
-            if folder.exists():
-                offline_args.extend(["--find-links", str(folder)])
-        offline_args.extend(missing)
-        creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        result = subprocess.run(
-            offline_args,
-            capture_output=True,
-            text=True,
-            creationflags=creationflags,
-            check=False,
-        )
-        if result.returncode != 0:
-            online = QMessageBox.question(
+        try:
+            install_offline_dependencies(
+                python_executable=python,
+                extension_directory=descriptor.path,
+                site_packages=module_dependency_directory(
+                    self.config,
+                    descriptor,
+                ),
+                shared_wheels_directory=(
+                    self.config.resolve_project_path(
+                        self.config.modules.shared_wheels_directory
+                    )
+                ),
+                dependencies=descriptor.dependencies,
+                fingerprint=descriptor.fingerprint,
+            )
+        except DependencyInstallError as exc:
+            QMessageBox.critical(
                 self,
-                "Offline Install Failed",
-                "The required wheels were not available locally. Allow an online pip install?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                "Offline Dependency Install Failed",
+                str(exc),
             )
-            if online != QMessageBox.StandardButton.Yes:
-                QMessageBox.warning(self, "Dependencies Not Installed", result.stderr[-2000:])
-                return
-            result = subprocess.run(
-                [
-                    str(python),
-                    "-m",
-                    "pip",
-                    "install",
-                    "--target",
-                    str(target),
-                    "--upgrade",
-                    *missing,
-                ],
-                capture_output=True,
-                text=True,
-                creationflags=creationflags,
-                check=False,
-            )
-        if result.returncode == 0:
-            activate_shared_dependencies(self.config)
-            QMessageBox.information(self, "Dependencies Installed", "Installation completed.")
-            self._refresh_modules()
-        else:
-            QMessageBox.critical(self, "Dependency Install Failed", result.stderr[-3000:])
+            return
+        QMessageBox.information(
+            self,
+            "Dependencies Installed",
+            "Offline preparation completed for this module.",
+        )
+        self._refresh_modules()
 
     def _open_manual_control(self, device_id: str) -> None:
         config = self.config.device(device_id)

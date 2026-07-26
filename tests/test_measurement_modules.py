@@ -25,7 +25,13 @@ from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.devices.base import DeviceError  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.measurement.manifest import ModuleColumn, ModuleDescriptor, discover_modules  # noqa: E402
+from labcontrol.extensions.trust import PluginTrustStore  # noqa: E402
+from labcontrol.measurement.manifest import (  # noqa: E402
+    ModuleColumn,
+    ModuleDescriptor,
+    discover_modules,
+    module_dependency_directory,
+)
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.measurement.settings import load_settings, save_settings  # noqa: E402
 from labcontrol.measurement.worker import ModuleWorkerClient, WorkerRequestError  # noqa: E402
@@ -42,7 +48,17 @@ def copied_project(temp_root: Path):
     (temp_root / "configs").mkdir()
     shutil.copy2(ROOT / "configs" / "default.toml", temp_root / "configs" / "default.toml")
     shutil.copytree(ROOT / "modules", temp_root / "modules")
-    return load_config(temp_root / "configs" / "default.toml")
+    config = load_config(temp_root / "configs" / "default.toml")
+    store = PluginTrustStore(
+        config.resolve_project_path(
+            config.plugins.state_directory
+        )
+        / "trusted_plugins.json"
+    )
+    for descriptor in discover_modules(config):
+        if descriptor.valid:
+            store.trust("module", descriptor)
+    return config
 
 
 class ManifestAndSettingsTests(unittest.TestCase):
@@ -80,7 +96,7 @@ class ManifestAndSettingsTests(unittest.TestCase):
             save_settings(path, original)
             self.assertEqual(load_settings(path), original)
 
-    def test_marks_incompatible_shared_dependency_ranges(self) -> None:
+    def test_conflicting_dependency_ranges_are_isolated_by_module(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "configs").mkdir()
@@ -102,10 +118,38 @@ class ManifestAndSettingsTests(unittest.TestCase):
                     ]) + "\n",
                     encoding="utf-8",
                 )
-            descriptors = discover_modules(load_config(root / "configs" / "default.toml"))
+                locked_version = (
+                    "1.5.0"
+                    if module_id == "first"
+                    else "2.5.0"
+                )
+                (folder / "requirements.lock").write_text(
+                    "demo-package=="
+                    + locked_version
+                    + " --hash=sha256:"
+                    + "0" * 64
+                    + "\n",
+                    encoding="utf-8",
+                )
+                (folder / "frontend.py").write_text(
+                    "class Frontend:\n    pass\n",
+                    encoding="utf-8",
+                )
+                (folder / "backend.py").write_text(
+                    "class Backend:\n    pass\n",
+                    encoding="utf-8",
+                )
+            config = load_config(root / "configs" / "default.toml")
+            descriptors = discover_modules(config)
             self.assertEqual(len(descriptors), 2)
-            self.assertTrue(all("Dependency conflict" in item.dependency_error for item in descriptors))
-            self.assertTrue(all(not item.can_enable for item in descriptors))
+            self.assertTrue(
+                all(item.can_enable for item in descriptors),
+                [item.error for item in descriptors],
+            )
+            self.assertNotEqual(
+                module_dependency_directory(config, descriptors[0]),
+                module_dependency_directory(config, descriptors[1]),
+            )
 
 
 class ModuleServiceTests(unittest.TestCase):
@@ -183,6 +227,53 @@ class ModuleServiceTests(unittest.TestCase):
             del timeout_seconds
             self.actions.append("close")
             self.close_barrier.wait(timeout=2.0)
+
+    def test_enable_requires_trust_and_rechecks_module_content(
+        self,
+    ) -> None:
+        async def scenario(temp_root: Path) -> None:
+            config = copied_project(temp_root)
+            events = EventManager()
+            devices = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            descriptor = discover_modules(config)[0]
+            modules = MeasurementModuleService(
+                (descriptor,),
+                events,
+                devices,
+            )
+            modules.trust_store.revoke(
+                "module",
+                descriptor.id,
+            )
+            with self.assertRaises(DeviceError) as untrusted:
+                await modules.enable(descriptor.id, {})
+            self.assertEqual(
+                untrusted.exception.code,
+                "MODULE_NOT_TRUSTED",
+            )
+            modules.trust_store.trust(
+                "module",
+                descriptor,
+            )
+            backend = descriptor.path / "backend.py"
+            backend.write_text(
+                backend.read_text(encoding="utf-8")
+                + "\n# changed after trust\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(DeviceError) as changed:
+                await modules.enable(descriptor.id, {})
+            self.assertEqual(
+                changed.exception.code,
+                "MODULE_CHANGED_AFTER_DISCOVERY",
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(Path(temp)))
 
     def test_measurement_rows_reject_nan_and_infinity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

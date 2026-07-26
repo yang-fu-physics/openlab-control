@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import math
 import multiprocessing
+import sys
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -11,11 +13,14 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
+from ..extensions.dependencies import dependency_runtime_errors
+from ..extensions.trust import extension_tree_digest
 from .api import ModuleBackend, ModuleError, ModuleOperationContext, ModuleWarning
 from .manifest import ModuleDescriptor, load_source_object
 
 
 WorkerEventHandler = Callable[[dict[str, Any]], None]
+_MAX_IPC_BYTES = 1024 * 1024
 
 
 class WorkerRequestError(RuntimeError):
@@ -30,6 +35,47 @@ class WorkerRequestError(RuntimeError):
         self.code = code
         self.context = context
         self.severity = severity
+
+
+def _send_message(
+    connection: Connection,
+    message: dict[str, Any],
+) -> None:
+    try:
+        payload = json.dumps(
+            message,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise WorkerRequestError(
+            f"Module IPC value is not JSON serializable: {exc}",
+            "MODULE_IPC_INVALID_MESSAGE",
+        ) from exc
+    if len(payload) > _MAX_IPC_BYTES:
+        raise WorkerRequestError(
+            f"Module IPC message exceeds {_MAX_IPC_BYTES} bytes",
+            "MODULE_IPC_MESSAGE_TOO_LARGE",
+        )
+    connection.send_bytes(payload)
+
+
+def _receive_message(connection: Connection) -> dict[str, Any]:
+    try:
+        payload = connection.recv_bytes(_MAX_IPC_BYTES)
+        decoded = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+        raise WorkerRequestError(
+            f"Module IPC message is invalid: {exc}",
+            "MODULE_IPC_INVALID_MESSAGE",
+        ) from exc
+    if not isinstance(decoded, dict):
+        raise WorkerRequestError(
+            "Module IPC message must be a JSON object",
+            "MODULE_IPC_INVALID_MESSAGE",
+        )
+    return dict(decoded)
 
 
 def _result(value: Any) -> dict[str, Any]:
@@ -49,21 +95,65 @@ def _invoke(method: Callable[..., Any], *args: Any) -> dict[str, Any]:
 
 def module_worker_main(
     connection: Connection,
-    directory: str,
-    backend_specification: str,
-    module_id: str,
+    descriptor: ModuleDescriptor,
+    dependency_directory: str,
 ) -> None:
     backend: ModuleBackend | None = None
     send_lock = threading.Lock()
 
     def send(message: dict[str, Any]) -> None:
         with send_lock:
-            connection.send(message)
+            _send_message(connection, message)
 
     try:
-        backend_class = load_source_object(Path(directory), backend_specification, f"backend_{module_id}")
+        if (
+            descriptor.fingerprint
+            and extension_tree_digest(descriptor.path)
+            != descriptor.fingerprint
+        ):
+            raise PermissionError(
+                f"Measurement module {descriptor.id} changed after discovery"
+            )
+        if descriptor.dependencies and not dependency_directory:
+            raise PermissionError(
+                f"Measurement module {descriptor.id} has no isolated "
+                "dependency runtime"
+            )
+        if dependency_directory:
+            dependency_path = Path(dependency_directory)
+            dependency_errors = dependency_runtime_errors(
+                descriptor.dependencies,
+                dependency_path,
+                descriptor.fingerprint,
+            )
+            if dependency_errors:
+                raise PermissionError(
+                    f"Measurement module {descriptor.id} dependency "
+                    "runtime failed verification: "
+                    + "; ".join(dependency_errors)
+                )
+            if dependency_path.is_dir():
+                sys.path.insert(
+                    0,
+                    str(dependency_path.resolve()),
+                )
+        backend_class = load_source_object(
+            descriptor.path,
+            descriptor.backend,
+            f"backend_{descriptor.id}",
+        )
         if not isinstance(backend_class, type) or not issubclass(backend_class, ModuleBackend):
-            raise TypeError(f"{backend_specification} is not a ModuleBackend")
+            raise TypeError(
+                f"{descriptor.backend} is not a ModuleBackend"
+            )
+        if (
+            str(getattr(backend_class, "api_version", ""))
+            != ModuleBackend.api_version
+        ):
+            raise TypeError(
+                f"{descriptor.backend} uses incompatible module API "
+                f"{getattr(backend_class, 'api_version', '')!r}"
+            )
         backend = backend_class()
         send({"type": "ready"})
     except Exception as exc:
@@ -73,8 +163,8 @@ def module_worker_main(
 
     while True:
         try:
-            request = connection.recv()
-        except (EOFError, OSError):
+            request = _receive_message(connection)
+        except (EOFError, OSError, WorkerRequestError):
             break
         request_id = str(request.get("id", ""))
         action = str(request.get("action", ""))
@@ -148,8 +238,13 @@ def module_worker_main(
 class ModuleWorkerClient:
     """One serialized IPC connection to one independently spawned module backend."""
 
-    def __init__(self, descriptor: ModuleDescriptor) -> None:
+    def __init__(
+        self,
+        descriptor: ModuleDescriptor,
+        dependency_directory: Path | None = None,
+    ) -> None:
         self.descriptor = descriptor
+        self.dependency_directory = dependency_directory
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
         self._lock = threading.RLock()
@@ -229,7 +324,15 @@ class ModuleWorkerClient:
         parent, child = context.Pipe(duplex=True)
         process = context.Process(
             target=module_worker_main,
-            args=(child, str(self.descriptor.path), self.descriptor.backend, self.descriptor.id),
+            args=(
+                child,
+                self.descriptor,
+                (
+                    ""
+                    if self.dependency_directory is None
+                    else str(self.dependency_directory)
+                ),
+            ),
             name=f"OpenLabModule-{self.descriptor.id}",
             daemon=True,
         )
@@ -251,7 +354,16 @@ class ModuleWorkerClient:
                     "MODULE_WORKER_START_TIMEOUT",
                     self.descriptor.id,
                 )
-            hello = parent.recv()
+            hello = _receive_message(parent)
+        except WorkerRequestError as exc:
+            if exc.code == "MODULE_WORKER_START_TIMEOUT":
+                raise
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise WorkerRequestError(
+                "Module worker exited during startup",
+                "MODULE_WORKER_START_FAILED",
+                self.descriptor.id,
+            ) from exc
         except (EOFError, OSError) as exc:
             self._invalidate(parent, process, min(timeout, 1.0))
             raise WorkerRequestError(
@@ -275,7 +387,17 @@ class ModuleWorkerClient:
         timeout_seconds: float = 120.0,
     ) -> dict[str, Any]:
         timeout = self._timeout(timeout_seconds, "Module operation")
-        with self._lock:
+        deadline = time.monotonic() + timeout
+        acquired = self._lock.acquire(timeout=timeout)
+        if not acquired:
+            self.force_stop(min(timeout, 1.0))
+            raise WorkerRequestError(
+                f"Module operation {action!r} timed out waiting "
+                "for another request",
+                "MODULE_OPERATION_TIMEOUT",
+                action,
+            )
+        try:
             with self._state_lock:
                 connection = self._connection
                 process = self._process
@@ -287,19 +409,21 @@ class ModuleWorkerClient:
             self._request_number += 1
             request_id = str(self._request_number)
             try:
-                connection.send({
-                    "id": request_id,
-                    "action": action,
-                    "payload": dict(payload or {}),
-                })
-            except (EOFError, OSError) as exc:
+                _send_message(
+                    connection,
+                    {
+                        "id": request_id,
+                        "action": action,
+                        "payload": dict(payload or {}),
+                    },
+                )
+            except (EOFError, OSError, WorkerRequestError) as exc:
                 self._invalidate(connection, process, min(timeout, 1.0))
                 raise WorkerRequestError(
                     "Module worker connection closed unexpectedly",
                     "MODULE_WORKER_DISCONNECTED",
                     action,
                 ) from exc
-            deadline = time.monotonic() + timeout
             event_error: Exception | None = None
             while True:
                 remaining = deadline - time.monotonic()
@@ -320,8 +444,8 @@ class ModuleWorkerClient:
                         action,
                     )
                 try:
-                    message = connection.recv()
-                except (EOFError, OSError) as exc:
+                    message = _receive_message(connection)
+                except (EOFError, OSError, WorkerRequestError) as exc:
                     self._invalidate(connection, process, min(timeout, 1.0))
                     raise WorkerRequestError(
                         "Module worker connection closed unexpectedly",
@@ -352,7 +476,26 @@ class ModuleWorkerClient:
                         "MODULE_EVENT_PROCESSING_FAILED",
                         action,
                     ) from event_error
-                return dict(message.get("result", {}))
+                result = message.get("result", {})
+                if not isinstance(result, dict):
+                    raise WorkerRequestError(
+                        "Module worker result must be an object",
+                        "MODULE_IPC_INVALID_MESSAGE",
+                        action,
+                    )
+                return dict(result)
+        finally:
+            self._lock.release()
+
+    def force_stop(self, timeout_seconds: float = 0.25) -> None:
+        with self._state_lock:
+            connection = self._connection
+            process = self._process
+        self._invalidate(
+            connection,
+            process,
+            max(0.0, timeout_seconds),
+        )
 
     def close(self, timeout_seconds: float = 3.0) -> None:
         timeout = self._timeout(timeout_seconds, "Module shutdown")
