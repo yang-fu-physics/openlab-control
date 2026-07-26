@@ -1,3 +1,10 @@
+"""不依赖外部绘图库的 DAT 多曲线画布。
+
+画布支持叠加和共享 X 的分图、线性/对数坐标、框选缩放、点命中以及 PLT 导入导出。所有
+数据坐标与屏幕坐标转换集中在本类，缩放状态按布局分别保存；文件刷新只重建点列表，不会在
+用户查看过程中擅自重置手动视图。
+"""
+
 from __future__ import annotations
 
 import math
@@ -54,13 +61,12 @@ PLOT_COLORS = (
 
 @dataclass(frozen=True, slots=True)
 class PlotHit:
-    """A selected plot point together with the Y series that owns it."""
+    """被选中的绘图点及其所属 Y 曲线。"""
 
     series: str
     point: DatPoint
 
-    # These convenience properties retain the simple DatPoint-facing API used by
-    # earlier integrations while also exposing the selected series.
+    # 这些便捷属性保留旧集成面向 DatPoint 的简单接口，同时新增所属曲线信息。
     @property
     def x(self) -> float:
         return self.point.x
@@ -79,7 +85,7 @@ class PlotHit:
 
 
 class YSeriesSelectionDialog(QDialog):
-    """Apply several Y-series choices in one operation without closing per click."""
+    """一次勾选多条 Y 曲线，避免每选择一条就关闭窗口。"""
 
     def __init__(
         self,
@@ -116,6 +122,8 @@ class YSeriesSelectionDialog(QDialog):
         self._update_ok_button()
 
     def selected_columns(self) -> tuple[str, ...]:
+        """按列表顺序返回所有勾选列。"""
+
         return tuple(
             self.series_list.item(index).text()
             for index in range(self.series_list.count())
@@ -129,7 +137,7 @@ class YSeriesSelectionDialog(QDialog):
 
 
 class DatPlotCanvas(QWidget):
-    """Dependency-free DAT plot supporting overlay and shared-X stacked views."""
+    """支持叠加与共享 X 分图的纯 Qt DAT 绘图控件。"""
 
     openRequested = Signal()
     reloadRequested = Signal()
@@ -162,29 +170,33 @@ class DatPlotCanvas(QWidget):
 
     @property
     def x_label(self) -> str:
+        """返回实际 X 列，未选择时使用一开始计数的行号轴。"""
+
         return self.x_column or ROW_NUMBER_AXIS
 
     @property
     def y_column(self) -> str | None:
-        """Compatibility alias for callers that only need the first Y series."""
+        """兼容旧调用方：返回第一条 Y 曲线。"""
 
         return self.y_columns[0] if self.y_columns else None
 
     @property
     def points(self) -> tuple[DatPoint, ...]:
-        """Compatibility alias for points in the first selected Y series."""
+        """兼容旧调用方：返回第一条 Y 曲线的点。"""
 
         return self.points_by_series.get(self.y_column or "", ())
 
     @property
     def _view_range(self) -> tuple[float, float, float, float] | None:
-        """Compatibility view of the active plot range."""
+        """兼容旧调用方：返回当前活动面板的手动视图范围。"""
 
         if not self._manual_view:
             return None
         return self._ranges(self.y_column)
 
     def set_document(self, document: DatDocument, preserve_view: bool = False) -> None:
+        """替换数据快照，选择有效数值列，并按请求保留或重置手动缩放。"""
+
         self.document = document
         numeric = document.numeric_columns()
         if not self._axes_initialized or (
@@ -220,6 +232,8 @@ class DatPlotCanvas(QWidget):
         *,
         notify: bool = True,
     ) -> bool:
+        """原子验证并切换 X 与多条 Y；任何列无效时保持原状态。"""
+
         if self.document is None:
             return False
         numeric = self.document.numeric_columns()
@@ -246,6 +260,8 @@ class DatPlotCanvas(QWidget):
         return self.set_axes(self.x_column, y_columns)
 
     def toggle_y_column(self, column: str, enabled: bool) -> bool:
+        """切换单条 Y 曲线，但始终至少保留一条。"""
+
         selected = list(self.y_columns)
         if enabled and column not in selected:
             selected.append(column)
@@ -256,6 +272,8 @@ class DatPlotCanvas(QWidget):
         return self.set_y_columns(tuple(selected))
 
     def select_y_series(self) -> None:
+        """打开多选窗口，并确保窗口关闭后释放 Qt 对象。"""
+
         if self.document is None:
             return
         dialog = YSeriesSelectionDialog(
@@ -276,6 +294,8 @@ class DatPlotCanvas(QWidget):
         return self._set_scale("y", scale, notify=notify)
 
     def _set_scale(self, axis: str, scale: str, *, notify: bool) -> bool:
+        """切换线性/对数坐标；坐标语义改变时清除旧缩放范围。"""
+
         normalized = scale.casefold()
         if normalized not in PLOT_SCALES or axis not in {"x", "y"}:
             return False
@@ -291,6 +311,8 @@ class DatPlotCanvas(QWidget):
         return True
 
     def set_layout(self, layout: str, *, notify: bool = True) -> bool:
+        """切换叠加或分图布局，保持已选列。"""
+
         normalized = layout.casefold()
         if normalized not in PLOT_LAYOUTS:
             return False
@@ -302,6 +324,8 @@ class DatPlotCanvas(QWidget):
         return True
 
     def apply_plot_format(self, plot_format: PlotFormat) -> None:
+        """验证 PLT 中所有列都存在后，一次性应用显示和缩放状态。"""
+
         if self.document is None:
             raise PlotFormatError("Load a DAT file before applying a PLT file")
         numeric = self.document.numeric_columns()
@@ -335,6 +359,8 @@ class DatPlotCanvas(QWidget):
         self.update()
 
     def to_plot_format(self, data_file: str) -> PlotFormat:
+        """把当前显示状态转换为经过验证的 PLT 模型。"""
+
         return PlotFormat(
             data_file=data_file,
             layout=self.layout_mode,
@@ -348,6 +374,8 @@ class DatPlotCanvas(QWidget):
         )
 
     def reset_zoom(self, *, notify: bool = True) -> None:
+        """清除叠加和所有分图的手动范围，恢复数据自然范围。"""
+
         changed = self._manual_view or any(
             (
                 self._x_view is not None,
@@ -367,6 +395,8 @@ class DatPlotCanvas(QWidget):
         self.axesChanged.emit(self.x_label, self.y_columns)
 
     def _discard_invalid_views(self) -> None:
+        """文件刷新或列变化后丢弃已不存在曲线的分图范围。"""
+
         self._stacked_y_views = {
             name: value
             for name, value in self._stacked_y_views.items()
@@ -381,6 +411,8 @@ class DatPlotCanvas(QWidget):
         )
 
     def _rebuild_points(self) -> None:
+        """从不可变 DAT 文档重建每条曲线的有限数值点。"""
+
         if self.document is None:
             self.points_by_series = {}
             return
@@ -399,6 +431,8 @@ class DatPlotCanvas(QWidget):
         fraction: float,
         scale: str,
     ) -> tuple[float, float] | None:
+        """为自然数据范围添加留白；对数坐标在 log10 空间计算。"""
+
         if scale == LOG_SCALE:
             values = [value for value in values if value > 0]
         if not values:
@@ -416,6 +450,8 @@ class DatPlotCanvas(QWidget):
         return low, high
 
     def _point_is_plottable(self, point: DatPoint) -> bool:
+        """对数轴下过滤零和负值，线性轴接受所有有限点。"""
+
         return not (
             (self.x_scale == LOG_SCALE and point.x <= 0)
             or (self.y_scale == LOG_SCALE and point.y <= 0)
@@ -447,6 +483,8 @@ class DatPlotCanvas(QWidget):
         return self._padded_range(values, 0.06, self.y_scale)
 
     def _ranges(self, series: str | None = None) -> tuple[float, float, float, float] | None:
+        """合并手动范围与自然范围，得到一个面板的完整数据坐标。"""
+
         x_range = self._x_view or self._natural_x_range()
         if self.layout_mode == OVERLAY_LAYOUT:
             y_range = self._overlay_y_view or self._natural_y_range(None)
@@ -459,6 +497,8 @@ class DatPlotCanvas(QWidget):
         return x_range[0], x_range[1], y_range[0], y_range[1]
 
     def _plot_rects(self) -> list[tuple[str | None, QRectF]]:
+        """按布局和曲线数分配实际绘图面板，所有分图共享 X。"""
+
         frame = QRectF(
             self.rect().adjusted(
                 scaled(84),
@@ -482,7 +522,7 @@ class DatPlotCanvas(QWidget):
         ]
 
     def _plot_rect(self) -> QRectF:
-        """Compatibility helper returning the first/only panel."""
+        """兼容旧调用方：返回第一个或唯一面板。"""
 
         panels = self._plot_rects()
         return panels[0][1] if panels else QRectF()
@@ -500,6 +540,8 @@ class DatPlotCanvas(QWidget):
         plot: QRectF,
         ranges: tuple[float, float, float, float],
     ) -> QPointF | None:
+        """把数据点转换为屏幕坐标；对数轴非法点返回 ``None``。"""
+
         x_min, x_max, y_min, y_max = ranges
         if (self.x_scale == LOG_SCALE and (x <= 0 or x_min <= 0)) or (
             self.y_scale == LOG_SCALE and (y <= 0 or y_min <= 0)
@@ -789,6 +831,8 @@ class DatPlotCanvas(QWidget):
         return next((rect for name, rect in panels if name == series), None)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """左键在面板内开始框选，并记录分图所属曲线。"""
+
         panel = self._panel_at(event.position())
         if event.button() == Qt.MouseButton.LeftButton and panel is not None:
             self._drag_series, _ = panel
@@ -813,6 +857,8 @@ class DatPlotCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """完成足够大的框选，写入共享 X 和对应面板的 Y 范围。"""
+
         if event.button() == Qt.MouseButton.LeftButton and self._drag_origin is not None:
             plot = self._panel_for_series(self._drag_series)
             current = self._drag_current or event.position()
@@ -852,6 +898,8 @@ class DatPlotCanvas(QWidget):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """双击最近点时发出完整行命中结果。"""
+
         if event.button() == Qt.MouseButton.LeftButton:
             hit = self._nearest_point(event.position())
             if hit is not None:
@@ -861,6 +909,8 @@ class DatPlotCanvas(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def _nearest_point(self, position: QPointF) -> PlotHit | None:
+        """在 12 个缩放像素半径内查找当前面板最近的可绘制点。"""
+
         panel = self._panel_at(position)
         if panel is None:
             return None
@@ -885,7 +935,7 @@ class DatPlotCanvas(QWidget):
         return nearest
 
     def build_context_menu(self) -> QMenu:
-        """Build the plot menu separately so its interaction contract is testable."""
+        """单独构造绘图菜单，使完整交互契约可被 UI 测试验证。"""
 
         menu = QMenu(self)
         open_action = menu.addAction("Open DAT...")

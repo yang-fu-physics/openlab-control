@@ -1,3 +1,10 @@
+"""Measurement Module 列表、独立窗口和 Settings/Status 前端协调。
+
+所有模块启动为 Disabled。勾选 Enable 才初始化 worker 并打开不可由用户直接关闭的独立
+窗口；保存或随 SEQ 导入的设置只填入 Settings 页，必须由用户点击 Apply Settings 才送到
+后端。Disable 与应用退出由主窗口统一回收窗口和进程。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

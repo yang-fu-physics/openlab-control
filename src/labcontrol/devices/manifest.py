@@ -1,3 +1,10 @@
+"""发现并严格验证外部 Device Plugin 清单。
+
+每个插件目录必须包含 ``device.toml``，声明稳定 ID、版本、核心兼容范围、支持的设备类型、
+后端入口和仅属于插件的额外依赖。目录指纹由信任层计算；PyVISA 等框架通用依赖不得由插件
+覆盖版本。
+"""
+
 from __future__ import annotations
 
 import re

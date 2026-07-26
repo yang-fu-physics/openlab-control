@@ -1,3 +1,10 @@
+"""与当前测量解耦的 DAT 浏览器、自动刷新和点详情窗口。
+
+浏览器只跟踪用户明确打开或拖入的文件，不会因新 SEQ 启动而自动改绑。750 ms 定时器比较
+修改纳秒和文件大小，仅在签名变化时重新读取；读取器记录实际解析字节数，因此与写入并发时
+会在下一轮补读。重载保留当前坐标视图，切换文件才应用同名 PLT。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -39,6 +46,8 @@ from .scaling import scaled
 
 
 class PointDetailsDialog(QDialog):
+    """显示一个绘图点对应的完整 DAT 行，而不只显示 X/Y。"""
+
     def __init__(
         self,
         document: DatDocument,
@@ -76,7 +85,7 @@ class PointDetailsDialog(QDialog):
 
 
 class DatBrowserWidget(QWidget):
-    """Independent DAT viewer following only the explicitly opened/dropped file."""
+    """只跟踪用户明确打开或拖入文件的独立 DAT 查看器。"""
 
     fileChanged = Signal(str)
 
@@ -138,9 +147,13 @@ class DatBrowserWidget(QWidget):
         self.monitor_timer.start()
 
     def canvas_reset_zoom(self) -> None:
+        """供父窗口菜单转发 Reset Zoom。"""
+
         self.canvas.reset_zoom()
 
     def open_dialog(self) -> None:
+        """从当前文件目录或配置运行目录选择任意 DAT。"""
+
         directory = self.current_path.parent if self.current_path is not None else self.start_directory
         selected, _ = QFileDialog.getOpenFileName(
             self,
@@ -152,6 +165,8 @@ class DatBrowserWidget(QWidget):
             self.load_path(selected, show_errors=True)
 
     def load_path(self, path: str | Path, show_errors: bool = True) -> bool:
+        """读取一个 DAT；刷新同一文件时保留视图，切换文件时加载其 PLT。"""
+
         source = Path(path).resolve()
         try:
             document = read_dat(source)
@@ -200,12 +215,16 @@ class DatBrowserWidget(QWidget):
         return True
 
     def reload(self) -> None:
+        """手动重读当前文件；尚未选择时打开文件对话框。"""
+
         if self.current_path is None:
             self.open_dialog()
         else:
             self.load_path(self.current_path, show_errors=True)
 
     def save_format(self, show_errors: bool = True) -> bool:
+        """保存当前列、布局、坐标类型和缩放范围；自动保存错误只提示一次。"""
+
         if self.current_path is None or not self.canvas.y_columns:
             if show_errors:
                 QMessageBox.information(self, "Save Plot Format", "Open a plottable DAT file first.")
@@ -229,6 +248,8 @@ class DatBrowserWidget(QWidget):
         return True
 
     def reload_format(self) -> None:
+        """重新应用当前 DAT 旁的 PLT，不重新读取数据文件。"""
+
         if self.current_path is None:
             QMessageBox.information(self, "Reload Plot Format", "Open a DAT file first.")
             return
@@ -266,12 +287,16 @@ class DatBrowserWidget(QWidget):
             del blocker
 
     def _display_changed(self) -> None:
+        """响应绘图交互，并在非批量应用阶段自动保存 PLT。"""
+
         self._sync_layout_control()
         if not self._suspend_format_save:
             self.save_format(show_errors=False)
         self._update_status(self.canvas.x_label, self.canvas.y_columns)
 
     def _check_for_updates(self) -> None:
+        """通过文件签名变化触发无弹窗刷新；文件暂时不可用时等待重试。"""
+
         if self.current_path is None:
             return
         try:
@@ -298,6 +323,8 @@ class DatBrowserWidget(QWidget):
         )
 
     def _show_point_details(self, hit: PlotHit) -> None:
+        """用临时模态窗口展示完整行，并在关闭后安排 Qt 对象释放。"""
+
         if self.document is None:
             return
         dialog = PointDetailsDialog(
@@ -313,6 +340,8 @@ class DatBrowserWidget(QWidget):
 
     @staticmethod
     def _first_dat_path(event: QDragEnterEvent | QDropEvent) -> Path | None:
+        """从拖放 URL 中选择第一份现存本地 DAT。"""
+
         if not event.mimeData().hasUrls():
             return None
         for url in event.mimeData().urls():

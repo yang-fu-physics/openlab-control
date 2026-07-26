@@ -1,3 +1,10 @@
+"""插件额外依赖的离线验证与隔离安装。
+
+主框架锁定并提供 PySide6、PyVISA、packaging 等共同依赖。扩展的 ``requirements.lock`` 只
+允许声明额外包，并从本地 wheel 目录安装到“扩展 ID + 内容指纹”对应的私有 site-packages。
+安装过程不访问网络，完成后写入运行时标记并再次核对实际版本。
+"""
+
 from __future__ import annotations
 
 import importlib.metadata

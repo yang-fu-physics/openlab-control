@@ -1,3 +1,10 @@
+"""主窗口、浮动工具窗口及 Qt/运行时消息协调。
+
+主窗口拥有唯一 ``RuntimeService``，通过定时器排空后台消息。手动控制、趋势、Data Browser
+和模块窗口均由明确引用复用或在销毁时移除，避免窗口重建造成重复信号连接。SEQ 加载会导入
+同名模块期望设置，但绝不自动 Enable、连接或 Apply。
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy

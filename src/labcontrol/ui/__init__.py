@@ -1,1 +1,4 @@
-"""PySide6 desktop user interface."""
+"""PySide6 桌面界面。
+
+UI 只提交线程安全请求并显示运行时快照，不直接持有设备、插件 worker 或 DAT 写入句柄。
+"""

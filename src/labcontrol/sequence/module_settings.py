@@ -1,3 +1,10 @@
+"""SEQ 同名 Measurement Module 设置配套文件。
+
+``sample.seq`` 对应 ``sample.modules.toml``。加载只产生“期望设置”快照，不会 Enable、连接
+或 Apply；版本不匹配、格式损坏或超过大小/数量限制时整份拒绝，SEQ 文本仍可独立打开。
+运行快照中的规范 ``sequence.seq`` 还可回退读取同目录 ``module_settings`` 子目录。
+"""
+
 from __future__ import annotations
 
 import math

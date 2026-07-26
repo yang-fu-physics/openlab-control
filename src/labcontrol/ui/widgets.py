@@ -1,3 +1,5 @@
+"""主窗口复用的小型状态控件。"""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -15,7 +17,7 @@ from .scaling import scaled
 
 
 class ElidedLabel(QLabel):
-    """A one-line label whose full value never controls the layout width."""
+    """单行中部省略标签；完整文本只放在 tooltip，不撑大布局。"""
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__("", parent)
@@ -48,6 +50,11 @@ class ElidedLabel(QLabel):
 
 
 class StatusTile(QFrame):
+    """显示一台设备的连接、当前值、目标和稳定性。
+
+    ``controllable`` 单独保存，Monitor 或只读温磁设备不会仅因双击而打开控制路径。
+    """
+
     doubleClicked = Signal(str)
 
     def __init__(
@@ -103,6 +110,8 @@ class StatusTile(QFrame):
         self._set_state_style("disconnected")
 
     def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        """用一次完整快照更新文本与状态颜色。"""
+
         if not snapshot.connected:
             self.value_label.setText("—")
             state_text = {
@@ -150,11 +159,15 @@ class StatusTile(QFrame):
             self._set_state_style("stable")
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """仅对明确可控设备发出双击信号。"""
+
         if event.button() == Qt.MouseButton.LeftButton and self.controllable:
             self.doubleClicked.emit(self.device_id)
         super().mouseDoubleClickEvent(event)
 
     def _set_state_style(self, state: str) -> None:
+        """把运行状态映射为统一边框和背景色。"""
+
         color = {
             "stable": "#2e9d55",
             "settling": "#d08a00",

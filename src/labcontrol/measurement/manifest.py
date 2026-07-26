@@ -1,3 +1,10 @@
+"""发现、校验并描述 Measurement Module 清单。
+
+模块目录通过 ``module.toml`` 声明后端、可选 Qt 前端、固定 DAT 列和额外依赖。发现阶段只
+读取文件和计算指纹，不初始化模块；每次点击 Enable 前服务层仍会重新核对目录内容、信任、
+API 版本和隔离依赖。
+"""
+
 from __future__ import annotations
 
 import re

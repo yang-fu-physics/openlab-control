@@ -1,3 +1,10 @@
+"""SEQ 树形文档的列表编辑器。
+
+控件把命令、End Scan 和 End Sequence 展平成可多选列表，但所有修改仍通过
+``SequenceDocument`` 完成。运行期间只关闭修改动作，列表保持可查看；复制/粘贴会克隆完整
+扫描子树并刷新节点 ID，防止一个命令在模型中出现重复身份。
+"""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QItemSelectionModel, Qt, Signal
@@ -9,6 +16,8 @@ from ..sequence.parser import format_command
 
 
 class SequenceEditorWidget(QWidget):
+    """支持任意嵌套、批量启停、复制粘贴和键盘快捷键的 SEQ 编辑控件。"""
+
     commandDoubleClicked = Signal(object)
     documentChanged = Signal()
 
@@ -32,6 +41,8 @@ class SequenceEditorWidget(QWidget):
         self.rebuild()
 
     def _build_actions(self) -> None:
+        """创建一次性复用的 QAction，避免每次右键菜单重复连接信号。"""
+
         self.disable_action = QAction("Disable", self)
         self.disable_action.setShortcut(QKeySequence("Ctrl+D"))
         self.disable_action.setStatusTip("Disable the selected commands (Ctrl+D)")
@@ -72,16 +83,22 @@ class SequenceEditorWidget(QWidget):
         self._update_action_states()
 
     def set_document(self, document: SequenceDocument) -> None:
+        """切换当前文档并清除旧选择。"""
+
         self.document = document
         self.rebuild(preserve_selection=False)
 
     def set_editable(self, editable: bool) -> None:
+        """控制修改动作是否可用；运行时仍允许滚动和查看列表。"""
+
         self._editable = editable
         self.list.setEnabled(True)
         self._update_action_states()
 
     @staticmethod
     def _row_key(row: FlatRow | None) -> tuple[str | None, bool, bool] | None:
+        """构造重建列表前后可比较的稳定行键。"""
+
         return None if row is None else (row.command_id, row.is_end, row.is_sequence_end)
 
     def rebuild(
@@ -91,6 +108,8 @@ class SequenceEditorWidget(QWidget):
         select_command_ids: set[str] | None = None,
         preserve_selection: bool = True,
     ) -> None:
+        """从文档重新生成列表，并尽可能恢复多选、当前项和水平滚动位置。"""
+
         selected_keys = (
             {self._row_key(row) for row in self.selected_rows()}
             if preserve_selection and select_command_id is None and select_command_ids is None
@@ -158,9 +177,8 @@ class SequenceEditorWidget(QWidget):
             item = self.list.item(self.list.count() - 1)
             item.setSelected(True)
             self.list.setCurrentItem(item, QItemSelectionModel.SelectionFlag.NoUpdate)
-        # Adding or selecting a long command can make QListWidget reveal its
-        # right edge. Always return to column zero so command prefixes remain
-        # visible, especially with larger accessibility fonts.
+        # 添加或选中长命令时 QListWidget 可能自动滚到文本右端；总是回到最左侧，让命令前缀
+        # 在大字体和 4K 缩放下仍然可见。
         self.list.horizontalScrollBar().setValue(0)
         self._update_action_states()
 
@@ -176,6 +194,8 @@ class SequenceEditorWidget(QWidget):
         ]
 
     def selected_commands(self, *, prune_descendants: bool = False) -> list[Command]:
+        """按文档顺序返回选中命令；可去掉已选父扫描下的重复子节点。"""
+
         selected_ids = {
             row.command_id for row in self.selected_rows() if row.command_id is not None
         }
@@ -201,6 +221,8 @@ class SequenceEditorWidget(QWidget):
         return self.document.find(row.command_id)
 
     def insert_command(self, command: Command) -> None:
+        """按当前行的树形语义插入命令并发出一次文档变化信号。"""
+
         if not self._editable:
             return
         self.document.insert(command, self.selected_row())
@@ -208,6 +230,8 @@ class SequenceEditorWidget(QWidget):
         self.documentChanged.emit()
 
     def delete_selected(self) -> None:
+        """批量删除命令；选中扫描时整块删除且不重复处理其子节点。"""
+
         if not self._editable:
             return
         commands = self.selected_commands(prune_descendants=True)
@@ -231,6 +255,8 @@ class SequenceEditorWidget(QWidget):
         self._set_selected_enabled(True)
 
     def _set_selected_enabled(self, enabled: bool) -> None:
+        """批量修改节点自身 T/F 状态，保留后代原始开关。"""
+
         if not self._editable:
             return
         commands = self.selected_commands()
@@ -250,12 +276,16 @@ class SequenceEditorWidget(QWidget):
             self.documentChanged.emit()
 
     def copy_selected(self) -> None:
+        """复制顶层选中子树到控件内剪贴板。"""
+
         commands = self.selected_commands(prune_descendants=True)
         if commands:
             self._clipboard = tuple(command.clone() for command in commands)
         self._update_action_states()
 
     def paste(self) -> None:
+        """连续插入所有剪贴板子树，并一次性选中新副本。"""
+
         if not self._editable or not self._clipboard:
             return
         anchor = self.selected_row()
@@ -290,7 +320,7 @@ class SequenceEditorWidget(QWidget):
         self.paste_action.setEnabled(self._editable and bool(self._clipboard))
 
     def build_context_menu(self) -> QMenu:
-        """Build the SEQ row menu; exposed separately for deterministic UI tests."""
+        """构造 SEQ 行菜单；单独暴露以便确定性 UI 测试。"""
 
         self._update_action_states()
         menu = QMenu(self)

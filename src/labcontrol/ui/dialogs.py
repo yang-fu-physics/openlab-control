@@ -1,3 +1,10 @@
+"""SEQ 参数、手动控制和事件提示对话框。
+
+``CommandDialog`` 与 ``ManualControlDialog`` 都直接读取同一个 ``DeviceConfig`` 的目标上下限
+和最大速率；磁场切换 T/Oe 时先转换当前值再重建范围。UI 限制用于提前阻止误输入，但不是
+最终安全边界，所有写入仍由 ``DeviceManager.validate_target`` 在后台再次校验。
+"""
+
 from __future__ import annotations
 
 import math
@@ -35,6 +42,8 @@ FIELD_COMMANDS = {CommandType.SET_FIELD, CommandType.SCAN_FIELD}
 
 
 def _command_decimals(command: Command, field_name: str) -> int:
+    """按温度、磁场单位和普通数值选择 SEQ 输入精度。"""
+
     if command.type in TEMPERATURE_COMMANDS and field_name in {"target", "start", "stop", "rate"}:
         return 3
     if command.type in FIELD_COMMANDS and field_name in {"target", "start", "stop", "rate"}:
@@ -43,6 +52,8 @@ def _command_decimals(command: Command, field_name: str) -> int:
 
 
 class CommandDialog(QDialog):
+    """根据 ``CommandSpec`` 动态生成参数窗口，并绑定对应设备配置限制。"""
+
     def __init__(
         self,
         command: Command,
@@ -160,12 +171,16 @@ class CommandDialog(QDialog):
             label.setVisible(visible)
 
     def _update_temperature_point_mode(self, point_mode: str) -> None:
+        """在线性起止点和显式温度列表两种扫描输入间切换。"""
+
         is_list = point_mode.casefold() == "list"
         for name in ("start", "stop", "steps"):
             self._set_field_visible(name, not is_list)
         self._set_field_visible("points", is_list)
 
     def accept(self) -> None:
+        """关闭前验证显式温度列表的语法和每个点的设备范围。"""
+
         if self.command.type is CommandType.SCAN_TEMPERATURE:
             point_mode = self.inputs.get("point_mode")
             points_input = self.inputs.get("points")
@@ -186,6 +201,8 @@ class CommandDialog(QDialog):
         super().accept()
 
     def _selected_device_config(self) -> DeviceConfig | None:
+        """返回当前选择且类型匹配的可配置设备。"""
+
         device_input = self.inputs.get("device_id")
         if isinstance(device_input, QLineEdit):
             device_id = device_input.text().strip()
@@ -208,6 +225,8 @@ class CommandDialog(QDialog):
         return unit_input.currentText() if isinstance(unit_input, QComboBox) else self._field_unit
 
     def _reset_control_ranges(self) -> None:
+        """先恢复命令通用范围，再叠加具体设备限制。"""
+
         for field in self.spec.fields:
             widget = self.inputs.get(field.name)
             if not isinstance(widget, QDoubleSpinBox):
@@ -224,6 +243,12 @@ class CommandDialog(QDialog):
         return value if math.isfinite(value) else fallback
 
     def _apply_device_limits(self, *_args: object) -> None:
+        """把主配置中的目标和速率限制实时应用到当前 SEQ 参数控件。
+
+        设备单位与命令单位不同时显式换算。没有匹配配置时仅提示，不能伪造一个宽松安全范围；
+        运行前后台验证仍会拒绝未知或越界设备命令。
+        """
+
         self._reset_control_ranges()
         unit = self._command_unit()
         self._set_control_suffixes(unit)
@@ -279,6 +304,8 @@ class CommandDialog(QDialog):
             rate_input.setSuffix(f" {unit}/min")
 
     def _validate_temperature_points(self, points: tuple[float, ...]) -> None:
+        """逐点验证非线性温度列表，不允许某个中间点越过设备边界。"""
+
         config = self._selected_device_config()
         if config is None:
             return
@@ -295,6 +322,8 @@ class CommandDialog(QDialog):
                 )
 
     def _change_field_unit(self, new_unit: str) -> None:
+        """切换 T/Oe 时换算当前输入值，然后按新单位重新关联配置限制。"""
+
         old_unit = self._field_unit
         if not old_unit or old_unit == new_unit:
             return
@@ -314,6 +343,8 @@ class CommandDialog(QDialog):
                 widget.setValue(value)
 
     def values(self) -> dict[str, Any]:
+        """提取控件值供命令模型更新；本方法本身不执行设备操作。"""
+
         result: dict[str, Any] = {}
         for field in self.spec.fields:
             widget = self.inputs[field.name]
@@ -329,6 +360,12 @@ class CommandDialog(QDialog):
 
 
 class ManualControlDialog(QDialog):
+    """单台可控温度/磁场设备的手动 Set/Hold 窗口。
+
+    数值控件直接采用 ``DeviceConfig`` 的上下限和最大速率。SEQ 持有控制权或设备失联时，
+    主窗口通过 ``set_runtime_editable`` 与快照共同禁用按钮。
+    """
+
     setRequested = Signal(str, float, float, str)
     holdRequested = Signal(str)
 
@@ -383,6 +420,8 @@ class ManualControlDialog(QDialog):
         self._update_control_state()
 
     def _emit_set(self) -> None:
+        """只发出结构化请求；实际校验与 I/O 在后台运行时完成。"""
+
         self.setRequested.emit(
             self.config.id,
             self.target_input.value(),
@@ -391,6 +430,8 @@ class ManualControlDialog(QDialog):
         )
 
     def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        """刷新连接状态和读数；用户正在编辑目标时不覆盖输入。"""
+
         self._connected = snapshot.connected
         self._update_control_state()
         if snapshot.current is not None:
@@ -404,6 +445,8 @@ class ManualControlDialog(QDialog):
             self.target_input.setValue(snapshot.target)
 
     def set_runtime_editable(self, editable: bool) -> None:
+        """设置运行时是否允许手动控制，例如 SEQ 运行期间为假。"""
+
         self._runtime_editable = editable
         self._update_control_state()
 
@@ -414,6 +457,8 @@ class ManualControlDialog(QDialog):
 
 
 class AlertDialog(QDialog):
+    """非模态 Warning/Error 详情窗口；由事件键保证同一故障只保留一个。"""
+
     def __init__(self, event: LabEvent, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)

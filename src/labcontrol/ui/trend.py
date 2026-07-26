@@ -1,3 +1,9 @@
+"""主窗口的轻量实时趋势监视器。
+
+每条曲线保留最近 900 个快照并独立归一化，只用于快速观察变化；它不替代 DAT，也不把曲线
+值反馈到控制逻辑。窗口由主窗口持有并复用，关闭后隐藏，避免反复重建信号和历史缓冲。
+"""
+
 from __future__ import annotations
 
 import time
@@ -12,6 +18,8 @@ from .scaling import scaled
 
 
 class TrendCanvas(QWidget):
+    """直接用 QPainter 绘制最多六条、各自独立量程的实时曲线。"""
+
     COLORS = ("#2d6cdf", "#d64545", "#2a9d55", "#9b51e0", "#e08b24", "#008c99")
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -21,6 +29,8 @@ class TrendCanvas(QWidget):
         self.setAutoFillBackground(True)
 
     def add_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
+        """追加有数值的设备快照，并请求下一次重绘。"""
+
         now = time.monotonic()
         for snapshot in snapshots.values():
             if snapshot.kind in (
@@ -84,6 +94,8 @@ class TrendCanvas(QWidget):
 
 
 class TrendDialog(QDialog):
+    """可重复显示的趋势浮动窗口。"""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Live Trend")
@@ -94,4 +106,6 @@ class TrendDialog(QDialog):
         layout.addWidget(self.canvas, 1)
 
     def add_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
+        """把主窗口收到的快照转交给画布。"""
+
         self.canvas.add_snapshots(snapshots)
