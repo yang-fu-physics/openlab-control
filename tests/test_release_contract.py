@@ -77,6 +77,7 @@ class ReleaseContractTests(unittest.TestCase):
             "examples",
             "docs",
             "plugin_templates",
+            "integrations",
             "modules",
         ):
             self.assertIn(f'"{name}" "dist\\OpenLabControl\\{name}"', build_script)

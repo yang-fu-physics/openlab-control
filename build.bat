@@ -14,6 +14,7 @@ xcopy /E /I /Y "configs" "dist\OpenLabControl\configs" >nul
 xcopy /E /I /Y "examples" "dist\OpenLabControl\examples" >nul
 xcopy /E /I /Y "docs" "dist\OpenLabControl\docs" >nul
 xcopy /E /I /Y "plugin_templates" "dist\OpenLabControl\plugin_templates" >nul
+xcopy /E /I /Y "integrations" "dist\OpenLabControl\integrations" >nul
 xcopy /E /I /Y "modules" "dist\OpenLabControl\modules" >nul
 copy /Y "README.md" "dist\OpenLabControl\README.md" >nul
 copy /Y "CHANGELOG.md" "dist\OpenLabControl\CHANGELOG.md" >nul

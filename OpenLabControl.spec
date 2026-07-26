@@ -66,9 +66,9 @@ a = Analysis(
     ["run.py"],
     pathex=["src"],
     binaries=[],
-    # Mutable configuration, modules, examples, and documentation are staged
-    # beside the EXE by build.bat. Bundling them here would create an unused
-    # second copy under _internal.
+    # Mutable configuration, modules, examples, documentation, and integration
+    # references are staged beside the EXE by build.bat. Bundling them here
+    # would create an unused second copy under _internal.
     datas=[],
     hiddenimports=hiddenimports,
     hookspath=[],
