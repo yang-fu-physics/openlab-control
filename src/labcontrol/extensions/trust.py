@@ -1,3 +1,10 @@
+"""第三方 Device Plugin 与 Measurement Module 共用的内容信任存储。
+
+用户信任的是“类型 + ID + 版本 + 整棵目录的 SHA-256 指纹”，而不是一个长期有效的目录名。
+插件任意文件发生变化后，旧信任自动失效。扫描拒绝符号链接和 Windows junction/reparse
+point，防止被信任目录在校验后跳转到外部内容；信任文件采用落盘刷新后的原子替换。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,16 +24,20 @@ _IGNORED_PARTS = frozenset(
 
 
 class ExtensionTrustError(RuntimeError):
-    pass
+    """扩展内容无法安全扫描，或信任状态文件无法可靠读写。"""
 
 
 class TrustSubject(Protocol):
+    """设备/模块清单参与信任判断所需的最小字段集合。"""
+
     id: str
     version: str
     fingerprint: str
 
 
 def _is_reparse_point(path: Path) -> bool:
+    """同时识别跨平台符号链接与 Windows reparse point/junction。"""
+
     try:
         stat = path.stat(follow_symlinks=False)
     except OSError as exc:
@@ -37,6 +48,8 @@ def _is_reparse_point(path: Path) -> bool:
 
 
 def extension_files(root: Path) -> tuple[Path, ...]:
+    """返回参与指纹计算的稳定文件列表，并拒绝目录中的任何链接。"""
+
     resolved = root.resolve()
     if not resolved.is_dir():
         raise ExtensionTrustError(f"Extension directory does not exist: {root}")
@@ -57,6 +70,8 @@ def extension_files(root: Path) -> tuple[Path, ...]:
 
 
 def extension_tree_digest(root: Path) -> str:
+    """计算包含相对路径、文件大小和全部字节内容的目录 SHA-256。"""
+
     resolved = root.resolve()
     digest = hashlib.sha256()
     for path in extension_files(resolved):
@@ -73,6 +88,8 @@ def extension_tree_digest(root: Path) -> str:
 
 @dataclass(frozen=True, slots=True)
 class TrustRecord:
+    """一次用户确认的扩展版本与内容指纹记录。"""
+
     extension_type: str
     extension_id: str
     version: str
@@ -81,15 +98,23 @@ class TrustRecord:
 
 
 class PluginTrustStore:
+    """读取、判断并原子更新本地插件信任记录。"""
+
     def __init__(self, path: Path) -> None:
+        """加载指定信任文件；损坏文件会报错而不是默认为全部可信。"""
+
         self.path = path.resolve()
         self._records = self._load()
 
     @staticmethod
     def _key(extension_type: str, extension_id: str) -> str:
+        """构造带扩展类型的键，避免同名 Device 与 Module 相互授权。"""
+
         return f"{extension_type.strip().casefold()}:{extension_id.strip()}"
 
     def _load(self) -> dict[str, TrustRecord]:
+        """严格解析信任文件的 schema、键和值。"""
+
         if not self.path.exists():
             return {}
         try:
@@ -118,6 +143,8 @@ class PluginTrustStore:
             ) from exc
 
     def is_trusted(self, extension_type: str, subject: TrustSubject) -> bool:
+        """仅当版本和当前目录指纹都完全一致时返回真。"""
+
         record = self._records.get(self._key(extension_type, subject.id))
         return (
             record is not None
@@ -126,6 +153,8 @@ class PluginTrustStore:
         )
 
     def trust(self, extension_type: str, subject: TrustSubject) -> None:
+        """记录用户刚确认的扩展内容，并立即持久化。"""
+
         record = TrustRecord(
             extension_type=extension_type.strip().casefold(),
             extension_id=subject.id,
@@ -137,10 +166,14 @@ class PluginTrustStore:
         self._save()
 
     def revoke(self, extension_type: str, extension_id: str) -> None:
+        """撤销一个扩展的信任；不存在也保持幂等。"""
+
         self._records.pop(self._key(extension_type, extension_id), None)
         self._save()
 
     def _save(self) -> None:
+        """写入临时文件、刷新到磁盘后原子替换正式信任文件。"""
+
         payload = {
             "schema_version": TRUST_SCHEMA_VERSION,
             "plugins": {

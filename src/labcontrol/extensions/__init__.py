@@ -1,1 +1,1 @@
-"""Shared discovery and trust helpers for external OpenLab extensions."""
+"""外部 OpenLab 扩展共用的加载、依赖验证和信任基础设施。"""

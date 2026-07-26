@@ -1,3 +1,11 @@
+"""外部 Device Plugin 的独立进程、受限 IPC 和异步客户端适配层。
+
+每个真实外部设备默认使用一个 ``spawn`` 子进程。父子进程只交换不超过 1 MiB、禁止 NaN 的
+JSON 对象，并为每个请求核对递增 ID。同步 Pipe 操作由 ``asyncio.to_thread`` 移出 runtime
+event loop；启动、操作和关闭均有独立硬时限，超时后终止整个 worker，避免失控驱动继续占用
+GPIB、串口或网络会话。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +38,8 @@ MAX_DEVICE_MESSAGE_BYTES = 1024 * 1024
 
 
 class DeviceWorkerError(RuntimeError):
+    """父进程侧的 IPC/worker 错误，保留稳定代码、上下文和严重等级。"""
+
     def __init__(
         self,
         message: str,
@@ -45,6 +55,8 @@ class DeviceWorkerError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class DeviceWorkerSpec:
+    """创建一个设备 worker 所需的可序列化配置快照。"""
+
     device_config: DeviceConfig
     simulation_speed: float
     plugin_id: str
@@ -56,10 +68,14 @@ class DeviceWorkerSpec:
 
     @property
     def external(self) -> bool:
+        """是否从受信任的外部插件目录加载，而不是内置包。"""
+
         return bool(self.plugin_directory)
 
 
 def _encode_message(message: dict[str, Any]) -> bytes:
+    """把 IPC 消息编码为严格 JSON，并在发送前限制总大小。"""
+
     try:
         encoded = json.dumps(
             message,
@@ -81,10 +97,14 @@ def _encode_message(message: dict[str, Any]) -> bytes:
 
 
 def _send_message(connection: Connection, message: dict[str, Any]) -> None:
+    """通过 Pipe 发送一条已验证消息。"""
+
     connection.send_bytes(_encode_message(message))
 
 
 def _receive_message(connection: Connection) -> dict[str, Any]:
+    """有上限地接收并解析 JSON 对象，拒绝任意 pickle 对象。"""
+
     try:
         raw = connection.recv_bytes(MAX_DEVICE_MESSAGE_BYTES)
         value = json.loads(raw.decode("utf-8"))
@@ -102,6 +122,8 @@ def _receive_message(connection: Connection) -> dict[str, Any]:
 
 
 def _snapshot_payload(snapshot: DeviceSnapshot) -> dict[str, Any]:
+    """把设备快照转换为仅含 JSON 标量的 IPC 载荷。"""
+
     return {
         "device_id": snapshot.device_id,
         "display_name": snapshot.display_name,
@@ -120,6 +142,8 @@ def _snapshot_payload(snapshot: DeviceSnapshot) -> dict[str, Any]:
 
 
 def snapshot_from_payload(payload: dict[str, Any]) -> DeviceSnapshot:
+    """严格重建父进程使用的设备快照；枚举或必需字段错误即拒绝。"""
+
     try:
         return DeviceSnapshot(
             device_id=str(payload["device_id"]),
@@ -165,6 +189,8 @@ def snapshot_from_payload(payload: dict[str, Any]) -> DeviceSnapshot:
 
 
 def _activate_dependency_directory(path: str) -> None:
+    """把已验证的插件私有 site-packages 放到 worker 导入路径首位。"""
+
     if not path:
         return
     directory = Path(path)
@@ -177,6 +203,8 @@ def _activate_dependency_directory(path: str) -> None:
 
 
 def _load_backend(spec: DeviceWorkerSpec) -> type[DevicePlugin]:
+    """在子进程内再次核对指纹、依赖和 API，再返回后端类。"""
+
     if spec.external:
         directory = Path(spec.plugin_directory)
         current = extension_tree_digest(directory)
@@ -219,6 +247,12 @@ def _load_backend(spec: DeviceWorkerSpec) -> type[DevicePlugin]:
 
 
 def device_worker_main(connection: Connection, spec: DeviceWorkerSpec) -> None:
+    """设备子进程入口：串行分发协议动作，并在退出前清理 event loop。
+
+    子进程不信任父进程载荷的形状；每个动作只提取预定义字段。插件抛出的
+    ``DeviceWarning``/``DeviceError`` 会结构化返回，其他异常统一转换为稳定错误代码。
+    """
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -351,9 +385,11 @@ def device_worker_main(connection: Connection, spec: DeviceWorkerSpec) -> None:
 
 
 class DeviceWorkerClient:
-    """Serialized, bounded IPC client for one independently spawned device."""
+    """一台独立进程设备的串行、有时限同步 IPC 客户端。"""
 
     def __init__(self, spec: DeviceWorkerSpec) -> None:
+        """保存不可变启动规范；真正创建进程推迟到 :meth:`start`。"""
+
         self.spec = spec
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
@@ -363,12 +399,16 @@ class DeviceWorkerClient:
 
     @property
     def pid(self) -> int | None:
+        """返回仍存活 worker 的 PID，否则返回 ``None``。"""
+
         with self._state_lock:
             process = self._process
             return process.pid if process is not None and process.is_alive() else None
 
     @staticmethod
     def _timeout(value: float, operation: str) -> float:
+        """统一拒绝非有限或非正的 worker 时限。"""
+
         timeout = float(value)
         if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError(f"{operation} timeout must be a positive finite number")
@@ -379,6 +419,8 @@ class DeviceWorkerClient:
         process: multiprocessing.Process,
         timeout_seconds: float,
     ) -> None:
+        """先 terminate、必要时 kill，并在总时限内回收进程句柄。"""
+
         timeout = max(0.0, timeout_seconds)
         deadline = time.monotonic() + timeout
         try:
@@ -407,6 +449,8 @@ class DeviceWorkerClient:
         process: multiprocessing.Process | None,
         timeout_seconds: float,
     ) -> None:
+        """仅当句柄仍属于当前客户端时清空状态并强制回收。"""
+
         with self._state_lock:
             owns_connection = self._connection is connection
             owns_process = self._process is process
@@ -423,12 +467,16 @@ class DeviceWorkerClient:
             self._stop_process(process, timeout_seconds)
 
     def force_stop(self, timeout_seconds: float) -> None:
+        """无条件使当前 Pipe 和 worker 失效，供超时与应用关闭兜底。"""
+
         with self._state_lock:
             connection = self._connection
             process = self._process
         self._invalidate(connection, process, timeout_seconds)
 
     def start(self, timeout_seconds: float) -> None:
+        """以 ``spawn`` 创建 worker，并等待明确的 ready 握手。"""
+
         timeout = self._timeout(timeout_seconds, "Device worker startup")
         with self._state_lock:
             if self._process is not None:
@@ -483,6 +531,12 @@ class DeviceWorkerClient:
         payload: dict[str, Any] | None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
+        """串行发送一个动作并在同一总时限内等待匹配 ID 的响应。
+
+        等待锁的时间也计入总时限，避免请求排队后获得额外无限执行时间。任何 Pipe 错误、
+        超时或响应 ID 不匹配都会立即废弃 worker，后续由 ``DeviceManager`` 决定是否重连。
+        """
+
         timeout = self._timeout(timeout_seconds, "Device operation")
         started = time.monotonic()
         deadline = started + timeout
@@ -589,6 +643,8 @@ class DeviceWorkerClient:
             self._lock.release()
 
     def close(self, timeout_seconds: float) -> None:
+        """尝试协议化关闭；锁竞争或无响应时在剩余时限内强制停止。"""
+
         timeout = self._timeout(timeout_seconds, "Device worker shutdown")
         deadline = time.monotonic() + timeout
         acquired = self._lock.acquire(timeout=min(timeout / 2.0, 0.25))
@@ -618,6 +674,8 @@ class DeviceWorkerClient:
 
 
 class IsolatedDeviceClient:
+    """把同步 worker IPC 适配为 ``DeviceManager`` 使用的异步设备接口。"""
+
     enforces_timeouts = True
 
     def __init__(
@@ -635,10 +693,14 @@ class IsolatedDeviceClient:
 
     @property
     def pid(self) -> int | None:
+        """暴露 worker PID，便于诊断和退出测试。"""
+
         return self.worker.pid
 
     @staticmethod
     def _translate(exc: DeviceWorkerError) -> DeviceError | DeviceWarning:
+        """把 IPC 错误恢复为框架统一的 Error/Warning 语义。"""
+
         error_type = DeviceWarning if exc.severity == "warning" else DeviceError
         return error_type(str(exc), exc.code, exc.context)
 
@@ -649,6 +711,8 @@ class IsolatedDeviceClient:
         *,
         shutdown: bool = False,
     ) -> dict[str, Any]:
+        """在线程池执行阻塞 Pipe 请求，保持 runtime event loop 可响应 Stop。"""
+
         timeout = (
             self.shutdown_timeout_seconds
             if shutdown
@@ -710,6 +774,8 @@ class IsolatedDeviceClient:
 
 
 class InProcessDeviceClient:
+    """内置可信设备的轻量适配器；超时由 ``DeviceManager`` 提供。"""
+
     enforces_timeouts = False
     pid: int | None = None
 

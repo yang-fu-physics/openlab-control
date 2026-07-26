@@ -1,3 +1,10 @@
+"""受控加载内置对象或插件目录中的 Python 对象。
+
+内置组件使用普通 ``package.module:Class`` 导入。外部插件则放入根据绝对目录生成的独立
+临时包命名空间，既允许插件内部相对导入，又避免两个同名插件互相污染 ``sys.modules``。
+信任和目录指纹检查必须由调用方在执行本文件前完成。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +17,8 @@ from types import ModuleType
 
 
 def load_import_object(specification: str) -> object:
+    """从已安装包加载 ``package.module:Object``，仅供受信任的内置路径使用。"""
+
     try:
         module_name, object_name = specification.split(":", 1)
     except ValueError as exc:
@@ -23,6 +32,12 @@ def load_source_object(
     specification: str,
     namespace: str,
 ) -> object:
+    """从一个已验证插件目录加载对象，并为该目录建立独立包命名空间。
+
+    每次加载前清除相同命名空间的旧模块，保证禁用后重新启用或插件更新不会继续使用缓存代码。
+    源文件必须直接位于给定目录，不能通过 ``..`` 或绝对路径逃逸。
+    """
+
     module_stem, object_name = specification.split(":", 1)
     source = directory / f"{module_stem}.py"
     if not source.is_file() or source.parent.resolve() != directory.resolve():

@@ -1,3 +1,9 @@
+"""Measurement Module 设置的受限 TOML 读写。
+
+这里只支持 TOML 可安全表达的标量、数组和嵌套表，拒绝 NaN、无穷和非法键。写入先生成同目录
+临时文件，再原子替换正式文件，避免程序中断留下半份设置。
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +19,8 @@ _BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def load_settings(path: Path) -> dict[str, Any]:
+    """读取模块设置；文件尚不存在时返回空映射。"""
+
     if not path.exists():
         return {}
     with path.open("rb") as handle:
@@ -21,6 +29,8 @@ def load_settings(path: Path) -> dict[str, Any]:
 
 
 def _toml_value(value: Any) -> str:
+    """把受支持的 Python 标量或数组编码为 TOML 字面量。"""
+
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int) and not isinstance(value, bool):
@@ -37,12 +47,16 @@ def _toml_value(value: Any) -> str:
 
 
 def _toml_key(value: str) -> str:
+    """编码 TOML 键；仅在必要时添加 JSON 兼容引号。"""
+
     if not value or "\n" in value or "\r" in value:
         raise ValueError(f"Invalid module setting key: {value!r}")
     return value if _BARE_KEY.fullmatch(value) else json.dumps(value, ensure_ascii=False)
 
 
 def _render_table(values: Mapping[str, Any], prefix: tuple[str, ...], lines: list[str]) -> None:
+    """递归展开嵌套映射，并保证父表的标量先于子表输出。"""
+
     scalars = {key: value for key, value in values.items() if not isinstance(value, Mapping)}
     tables = {key: value for key, value in values.items() if isinstance(value, Mapping)}
     if prefix:
@@ -56,6 +70,8 @@ def _render_table(values: Mapping[str, Any], prefix: tuple[str, ...], lines: lis
 
 
 def save_settings(path: Path, settings: Mapping[str, Any]) -> None:
+    """以 UTF-8/LF 和同目录原子替换方式保存模块设置。"""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     _render_table(dict(settings), (), lines)

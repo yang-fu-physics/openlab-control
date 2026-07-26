@@ -1,3 +1,9 @@
+"""内置温度、磁场和只读监视器模拟设备。
+
+模拟器使用与真实插件完全相同的 ``DevicePlugin`` 接口，可验证斜坡、稳定性、SEQ、DAT 和
+关闭流程。随机噪声按设备 ID 固定种子，确保测试可重复；它不代表具体真实仪表。
+"""
+
 from __future__ import annotations
 import asyncio
 import math
@@ -8,6 +14,8 @@ from .base import DeviceError, DevicePlugin
 
 
 class _SimulatedRampController(DevicePlugin):
+    """按目标和每分钟速率推进读数的通用模拟斜坡控制器。"""
+
     expected_kind: DeviceKind
 
     def __init__(self, config, simulation_speed: float = 1.0) -> None:
@@ -76,15 +84,19 @@ class _SimulatedRampController(DevicePlugin):
 
 
 class SimulatedTemperatureController(_SimulatedRampController):
+    """温度主控模拟器。"""
+
     expected_kind = DeviceKind.TEMPERATURE
 
 
 class SimulatedFieldController(_SimulatedRampController):
+    """磁场主控模拟器。"""
+
     expected_kind = DeviceKind.FIELD
 
 
 class SimulatedReadOnlyMonitor(DevicePlugin):
-    """A numerical readback with no target, hold, or measurement command."""
+    """只有数值回读、不支持目标、Hold 或测量命令的显示型设备。"""
 
     def __init__(self, config, simulation_speed: float = 1.0) -> None:
         super().__init__(config, simulation_speed)
