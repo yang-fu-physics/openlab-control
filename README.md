@@ -22,6 +22,8 @@ Measurement Module 提供。
   自动 Apply。
 - 一个 `Measure` 并行等待所有 Enabled 模块；每个模块可以流式返回多行。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
+- 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认
+  关闭且网络失败不阻塞 SEQ。
 - Stop/Error 后温度和磁场保持当前状态；`2nd Stage` 仅显示。
 - 独立 Data Browser 可打开任意 DAT 并追踪文件追加，不与当前 Run 强制绑定。
 
@@ -117,6 +119,7 @@ plugin_runtime/          各扩展隔离且可重建的离线依赖
 plugin_state/            本机扩展信任记录
 wheels/                  可选共享离线 wheels
 plugin_templates/        两个独立扩展仓库模板
+integrations/            NoneBot 报警接收器等外部集成参考
 examples/                 SEQ/DAT/PLT 示例
 runs/                     每次 Run 的数据、日志和快照
 docs/                     操作、格式、架构和测试文档

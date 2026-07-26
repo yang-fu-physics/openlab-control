@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
+import ipaddress
+import re
 import tomllib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .models import DeviceKind, DeviceRole, Severity
 
@@ -69,11 +72,28 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class AlarmReportingConfig:
+    enabled: bool = False
+    endpoint: str = "http://127.0.0.1:3889/alarm/report"
+    token_env: str = "OPENLAB_ALARM_TOKEN"
+    token_file: str = ""
+    timeout_seconds: float = 3.0
+    retry_attempts: int = 3
+    retry_delay_seconds: float = 1.0
+    queue_size: int = 100
+    shutdown_timeout_seconds: float = 2.0
+    allow_insecure_http: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class AlarmConfig:
     stability_timeout: Severity = Severity.ERROR
     stale_reading: Severity = Severity.WARNING
     popup_warnings: bool = True
     popup_errors: bool = True
+    reporting: AlarmReportingConfig = field(
+        default_factory=AlarmReportingConfig
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +198,15 @@ def _positive_int(value: object, key: str) -> int:
         raise ConfigurationError(f"{key} must be a positive integer") from exc
     if result <= 0:
         raise ConfigurationError(f"{key} must be a positive integer")
+    return result
+
+
+def _nonnegative_float(value: object, key: str) -> float:
+    result = _finite_float(value, key)
+    if result < 0:
+        raise ConfigurationError(
+            f"{key} must be greater than or equal to zero"
+        )
     return result
 
 
@@ -389,6 +418,7 @@ def load_config(path: str | Path) -> AppConfig:
     application = raw.get("application", {})
     logging_raw = raw.get("logging", {})
     alarm_raw = raw.get("alarms", {})
+    reporting_raw = alarm_raw.get("reporting", {})
     abort_raw = raw.get("abort", {})
     module_raw = raw.get("modules", {})
     plugin_raw = raw.get("plugins", {})
@@ -478,6 +508,79 @@ def load_config(path: str | Path) -> AppConfig:
         raise ConfigurationError(
             "logging.data_file_name and logging.event_file_name must be different"
         )
+    if not isinstance(reporting_raw, dict):
+        raise ConfigurationError(
+            "alarms.reporting must be a TOML table"
+        )
+    reporting_enabled = _boolean(
+        reporting_raw.get("enabled", False),
+        "alarms.reporting.enabled",
+    )
+    reporting_endpoint = str(
+        reporting_raw.get(
+            "endpoint",
+            "http://127.0.0.1:3889/alarm/report",
+        )
+    ).strip()
+    allow_insecure_http = _boolean(
+        reporting_raw.get("allow_insecure_http", False),
+        "alarms.reporting.allow_insecure_http",
+    )
+    parsed_endpoint = urlsplit(reporting_endpoint)
+    if reporting_enabled:
+        if (
+            parsed_endpoint.scheme not in {"http", "https"}
+            or not parsed_endpoint.hostname
+            or parsed_endpoint.username is not None
+            or parsed_endpoint.password is not None
+            or parsed_endpoint.fragment
+        ):
+            raise ConfigurationError(
+                "alarms.reporting.endpoint must be an http(s) URL "
+                "without credentials or a fragment"
+            )
+        loopback_host = (
+            parsed_endpoint.hostname.casefold() == "localhost"
+        )
+        try:
+            loopback_host = (
+                loopback_host
+                or ipaddress.ip_address(
+                    parsed_endpoint.hostname
+                ).is_loopback
+            )
+        except ValueError:
+            pass
+        if (
+            parsed_endpoint.scheme == "http"
+            and not loopback_host
+            and not allow_insecure_http
+        ):
+            raise ConfigurationError(
+                "alarms.reporting.endpoint must use HTTPS outside "
+                "localhost unless allow_insecure_http=true"
+            )
+    token_env = str(
+        reporting_raw.get(
+            "token_env",
+            "OPENLAB_ALARM_TOKEN",
+        )
+    ).strip()
+    token_file = str(
+        reporting_raw.get("token_file", "")
+    ).strip()
+    if token_env and not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*",
+        token_env,
+    ):
+        raise ConfigurationError(
+            "alarms.reporting.token_env must be an environment "
+            "variable name"
+        )
+    if reporting_enabled and not token_env and not token_file:
+        raise ConfigurationError(
+            "enabled alarm reporting requires token_env or token_file"
+        )
 
     return AppConfig(
         source_path=source,
@@ -501,6 +604,45 @@ def load_config(path: str | Path) -> AppConfig:
             stale_reading=_severity(str(alarm_raw.get("stale_reading", "warning")), "stale_reading"),
             popup_warnings=bool(alarm_raw.get("popup_warnings", True)),
             popup_errors=bool(alarm_raw.get("popup_errors", True)),
+            reporting=AlarmReportingConfig(
+                enabled=reporting_enabled,
+                endpoint=reporting_endpoint,
+                token_env=token_env,
+                token_file=token_file,
+                timeout_seconds=_positive_float(
+                    reporting_raw.get(
+                        "timeout_seconds",
+                        3.0,
+                    ),
+                    "alarms.reporting.timeout_seconds",
+                ),
+                retry_attempts=_positive_int(
+                    reporting_raw.get(
+                        "retry_attempts",
+                        3,
+                    ),
+                    "alarms.reporting.retry_attempts",
+                ),
+                retry_delay_seconds=_nonnegative_float(
+                    reporting_raw.get(
+                        "retry_delay_seconds",
+                        1.0,
+                    ),
+                    "alarms.reporting.retry_delay_seconds",
+                ),
+                queue_size=_positive_int(
+                    reporting_raw.get("queue_size", 100),
+                    "alarms.reporting.queue_size",
+                ),
+                shutdown_timeout_seconds=_positive_float(
+                    reporting_raw.get(
+                        "shutdown_timeout_seconds",
+                        2.0,
+                    ),
+                    "alarms.reporting.shutdown_timeout_seconds",
+                ),
+                allow_insecure_http=allow_insecure_http,
+            ),
         ),
         modules=ModuleConfig(
             directory=str(module_raw.get("directory", "modules")),

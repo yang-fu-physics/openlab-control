@@ -7,6 +7,7 @@ from concurrent.futures import Future
 from copy import deepcopy
 from typing import Any
 
+from .alarm_reporting import AlarmReporter
 from .config import AppConfig
 from .datafile import DatRunLogger
 from .events import EventManager
@@ -40,6 +41,7 @@ class RuntimeService:
         self.logger: DatRunLogger | None = None
         self.engine: SequenceEngine | None = None
         self.modules: MeasurementModuleService | None = None
+        self.alarm_reporter: AlarmReporter | None = None
         self.module_descriptors = (
             discover_modules(config) if module_descriptors is None else module_descriptors
         )
@@ -66,6 +68,15 @@ class RuntimeService:
             popup_errors=self.config.alarms.popup_errors,
         )
         self.events.subscribe(self._on_event)
+        self.alarm_reporter = AlarmReporter(
+            self.config.alarms.reporting,
+            self.config.project_root,
+            self._alarm_delivery_state,
+        )
+        self.events.subscribe(
+            self.alarm_reporter.handle_notice
+        )
+        self.alarm_reporter.start()
         try:
             self.devices = DeviceManager(
                 self.config,
@@ -130,6 +141,45 @@ class RuntimeService:
 
     def _on_module_message(self, kind: str, payload: dict[str, Any]) -> None:
         self.messages.put(RuntimeMessage(kind, payload))
+
+    def _alarm_delivery_state(
+        self,
+        error: str | None,
+    ) -> None:
+        loop = self._loop
+        if (
+            loop is None
+            or loop.is_closed()
+        ):
+            return
+        try:
+            loop.call_soon_threadsafe(
+                self._apply_alarm_delivery_state,
+                error,
+            )
+        except RuntimeError:
+            return
+
+    def _apply_alarm_delivery_state(
+        self,
+        error: str | None,
+    ) -> None:
+        if self.events is None:
+            return
+        if error is None:
+            self.events.resolve(
+                "alarm_reporter",
+                "ALARM_DELIVERY_FAILED",
+                self.config.alarms.reporting.endpoint,
+            )
+            return
+        self.events.report(
+            Severity.WARNING,
+            "alarm_reporter",
+            "ALARM_DELIVERY_FAILED",
+            error,
+            self.config.alarms.reporting.endpoint,
+        )
 
     def drain_messages(self, maximum: int = 500) -> list[RuntimeMessage]:
         result: list[RuntimeMessage] = []
@@ -309,6 +359,13 @@ class RuntimeService:
             await self.modules.shutdown()
         if self.devices is not None:
             await self.devices.disconnect_all()
+        if self.alarm_reporter is not None:
+            reporter = self.alarm_reporter
+            self.alarm_reporter = None
+            await asyncio.to_thread(
+                reporter.close,
+                self.config.alarms.reporting.shutdown_timeout_seconds,
+            )
         if self.logger is not None:
             self.logger.close()
         assert self._loop is not None

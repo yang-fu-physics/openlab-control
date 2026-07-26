@@ -25,6 +25,18 @@ stale_reading = "warning"
 popup_warnings = true
 popup_errors = true
 
+[alarms.reporting]
+enabled = false
+endpoint = "http://127.0.0.1:3889/alarm/report"
+token_env = "OPENLAB_ALARM_TOKEN"
+token_file = ""
+timeout_seconds = 3.0
+retry_attempts = 3
+retry_delay_seconds = 1.0
+queue_size = 100
+shutdown_timeout_seconds = 2.0
+allow_insecure_http = false
+
 [modules]
 directory = "modules"
 data_directory = "module_data"

@@ -52,6 +52,22 @@ run.bat
 Manager 手动启用。无界面模式不会弹信任确认：模块必须已经手动复制、在 GUI 中确认过
 完全相同的内容指纹，并且其离线依赖 runtime 已准备好，否则启动会拒绝。
 
+## 报警报告
+
+1. 把 `integrations/nonebot_alarm_receiver/` 复制到 NoneBot2 插件目录。
+2. 在 NoneBot 环境文件配置随机 `alarm_token`、`alarm_admin_qqs` 和
+   `alarm_tester_qqs`；管理员与测试员列表可重叠，接收器会去重。
+3. 在运行 OpenLab Control 的账户环境中设置同一 Token，例如
+   `OPENLAB_ALARM_TOKEN`；或者创建独立 Token 文件并配置 `token_file`。
+4. 在 `configs/default.toml` 的 `[alarms.reporting]` 中核对地址后设置
+   `enabled = true`，重启程序。
+5. 先用仿真 `Inject Warning`、`Inject Error` 验证：Warning 只到测试员，
+   Error 同时到管理员和测试员，同一活动事件不会反复推送。
+
+接收端不再接受 `target_qq`，避免持有 Token 的发射端任意选择收件人。远程接收器必须
+使用 HTTPS。报警网络故障只产生本地 Warning，不会替代仪表互锁，也不会改变 Error
+中止 SEQ、Stop 后温场 Hold Current 的行为。
+
 ## 主窗口
 
 - 左侧 `Sequence Control`：数据文件、当前 SEQ、运行状态和 Run/Pause/Stop。

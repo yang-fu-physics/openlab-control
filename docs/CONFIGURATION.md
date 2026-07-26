@@ -54,6 +54,37 @@ field = "hold_current"
 
 弹窗开关不影响事件记录或 SEQ 的 Error 中止语义。
 
+### `[alarms.reporting]`
+
+```toml
+[alarms.reporting]
+enabled = false
+endpoint = "http://127.0.0.1:3889/alarm/report"
+token_env = "OPENLAB_ALARM_TOKEN"
+token_file = ""
+timeout_seconds = 3.0
+retry_attempts = 3
+retry_delay_seconds = 1.0
+queue_size = 100
+shutdown_timeout_seconds = 2.0
+allow_insecure_http = false
+```
+
+报警发射默认关闭。开启后只订阅已经去重的 Warning/Error 状态变化，不发送 Info、恢复
+事件或同一 Source/Code/Context 尚未恢复时的重复报告。HTTP 在独立后台线程执行，
+网络失败不会阻塞或改变 SEQ；连续失败在本地记录为 `ALARM_DELIVERY_FAILED` Warning，
+之后任一报警投递成功会解除该 Warning。
+
+发射端只发送 `event_id`、`level` 和 `message`。接收端按服务器配置选择 QQ：
+Warning 仅测试员，Error 为管理员与测试员的并集。`event_id` 在 HTTP 重试期间保持
+不变，配套 NoneBot 接收器可避免成功收件人收到重复消息。
+
+Token 不应直接写进主 TOML，因为每次 Run 会保存配置快照。优先通过
+`token_env` 指定的环境变量提供；也可把单行 Token 放入 `token_file` 指向的独立文件。
+非本机地址默认必须使用 HTTPS；只有明确设置 `allow_insecure_http = true` 才允许远程
+明文 HTTP，此时 Token 和报警正文可能被窃听。配套接收器位于
+`integrations/nonebot_alarm_receiver/`，未配置 Token 时会 fail-closed。
+
 ## `[modules]`
 
 ```toml
