@@ -100,11 +100,28 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn(r".venv\Scripts\pythonw.exe", source_launcher)
 
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
-        self.assertIn("datas=[]", specification)
         self.assertIn(
-            'collect_submodules("pyvisa")',
+            "datas=framework_metadata",
             specification,
         )
+        self.assertIn("copy_metadata", specification)
+        for distribution in (
+            "PySide6",
+            "QtAwesome",
+            "packaging",
+            "PyVISA",
+            "typing_extensions",
+        ):
+            with self.subTest(
+                framework_metadata=distribution
+            ):
+                self.assertIn(
+                    f'"{distribution}"',
+                    specification,
+                )
+        self.assertIn("collect_submodules(", specification)
+        self.assertIn('"pyvisa"', specification)
+        self.assertIn('"pyvisa.testsuite"', specification)
         build_script = (ROOT / "build.bat").read_text(encoding="utf-8")
         for name in (
             "configs",

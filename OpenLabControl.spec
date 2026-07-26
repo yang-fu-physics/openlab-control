@@ -4,7 +4,10 @@ import sys
 from pathlib import Path
 
 from packaging.version import Version
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_submodules,
+    copy_metadata,
+)
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo,
     StringFileInfo,
@@ -25,8 +28,24 @@ hiddenimports = (
     + collect_submodules("labcontrol_plugins")
     # 仪表模块会在独立 worker 中动态 import PyVISA，PyInstaller 静态分析看不到。
     # 由核心统一收集后，所有模块使用同一个 1.16.2 版本，不再各自安装 wheel。
-    + collect_submodules("pyvisa")
+    + collect_submodules(
+        "pyvisa",
+        filter=lambda name: not name.startswith(
+            "pyvisa.testsuite"
+        ),
+    )
 )
+framework_metadata = []
+for distribution in (
+    "PySide6",
+    "QtAwesome",
+    "packaging",
+    "PyVISA",
+    "typing_extensions",
+):
+    # 扩展可用 importlib.metadata 核对实际共享版本；否则 PyInstaller 中
+    # PyVISA.__version__ 会退化为 unknown，无法证明锁定契约。
+    framework_metadata += copy_metadata(distribution)
 parsed_version = Version(__version__)
 release_numbers = list(parsed_version.release[:3])
 release_numbers.extend([0] * (3 - len(release_numbers)))
@@ -75,7 +94,7 @@ a = Analysis(
     # Mutable configuration, modules, examples, documentation, and integration
     # references are staged beside the EXE by build.bat. Bundling them here
     # would create an unused second copy under _internal.
-    datas=[],
+    datas=framework_metadata,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
