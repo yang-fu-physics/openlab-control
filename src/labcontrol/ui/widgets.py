@@ -45,17 +45,29 @@ class ElidedLabel(QLabel):
 class StatusTile(QFrame):
     doubleClicked = Signal(str)
 
-    def __init__(self, device_id: str, title: str, kind: DeviceKind, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        device_id: str,
+        title: str,
+        kind: DeviceKind,
+        controllable: bool | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.device_id = device_id
         self.kind = kind
+        self.controllable = (
+            kind is not DeviceKind.MONITOR
+            if controllable is None
+            else bool(controllable)
+        )
         self.setObjectName("statusTile")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
         self.setMaximumHeight(scaled(105))
         self.setCursor(
             Qt.CursorShape.ArrowCursor
-            if kind is DeviceKind.MONITOR
+            if not self.controllable
             else Qt.CursorShape.PointingHandCursor
         )
 
@@ -77,7 +89,7 @@ class StatusTile(QFrame):
         layout.addWidget(self.value_label)
         self.detail_label = QLabel(
             "Display only · not used for control"
-            if kind is DeviceKind.MONITOR
+            if not self.controllable
             else "Double-click to control"
         )
         self.detail_label.setObjectName("tileDetail")
@@ -97,7 +109,11 @@ class StatusTile(QFrame):
             target = "—" if snapshot.target is None else f"{fixed_number(snapshot.target, precision)} {snapshot.unit}"
             rate = "—" if snapshot.rate_per_minute is None else f"{fixed_number(snapshot.rate_per_minute, precision)} {snapshot.unit}/min"
             self.value_label.setText(current)
-            self.detail_label.setText(f"Target {target}  ·  {rate}")
+            self.detail_label.setText(
+                f"Target {target}  ·  {rate}"
+                if self.controllable
+                else "Display only · not used for control"
+            )
             state_text = {
                 StabilityState.STABLE: "Stable",
                 StabilityState.SETTLING: "Settling",
@@ -115,7 +131,7 @@ class StatusTile(QFrame):
             self._set_state_style("stable")
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton and self.kind is not DeviceKind.MONITOR:
+        if event.button() == Qt.MouseButton.LeftButton and self.controllable:
             self.doubleClicked.emit(self.device_id)
         super().mouseDoubleClickEvent(event)
 

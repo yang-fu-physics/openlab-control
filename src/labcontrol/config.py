@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import math
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .models import DeviceKind, Severity
+from .models import DeviceKind, DeviceRole, Severity
 
 
 class ConfigurationError(ValueError):
@@ -43,6 +43,8 @@ class DeviceConfig:
     display_name: str
     kind: DeviceKind
     plugin: str
+    role: DeviceRole = DeviceRole.SECONDARY
+    control_enabled: bool = False
     unit: str = ""
     initial_value: float = 0.0
     default_rate_per_minute: float = 1.0
@@ -179,6 +181,12 @@ def _positive_int(value: object, key: str) -> int:
     return result
 
 
+def _boolean(value: object, key: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigurationError(f"{key} must be true or false")
+    return value
+
+
 def _windows_file_name(value: object, key: str) -> str:
     result = str(value)
     path = Path(result)
@@ -224,6 +232,39 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
 
     device_id = _device_identifier(raw["id"])
     prefix = f"Device {device_id}"
+    default_role = (
+        DeviceRole.MONITOR
+        if kind is DeviceKind.MONITOR
+        else DeviceRole.SECONDARY
+    )
+    try:
+        role = DeviceRole(str(raw.get("role", default_role.value)).strip().casefold())
+    except ValueError as exc:
+        raise ConfigurationError(
+            f"{prefix} role must be primary, secondary, or monitor"
+        ) from exc
+    control_enabled = _boolean(
+        raw.get("control_enabled", role is DeviceRole.PRIMARY),
+        f"{prefix} control_enabled",
+    )
+    if kind is DeviceKind.MONITOR:
+        if role is not DeviceRole.MONITOR:
+            raise ConfigurationError(
+                f"{prefix} kind=monitor requires role=monitor"
+            )
+        if control_enabled:
+            raise ConfigurationError(
+                f"{prefix} monitor devices cannot enable control"
+            )
+    else:
+        if role is DeviceRole.MONITOR:
+            raise ConfigurationError(
+                f"{prefix} temperature/field devices use primary or secondary role"
+            )
+        if role is DeviceRole.PRIMARY and not control_enabled:
+            raise ConfigurationError(
+                f"{prefix} primary devices must enable control"
+            )
     initial_value = _finite_float(
         raw.get("initial_value", 0.0),
         f"{prefix} initial_value",
@@ -296,7 +337,8 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         )
 
     known = {
-        "id", "display_name", "kind", "plugin", "unit", "initial_value",
+        "id", "display_name", "kind", "plugin", "role", "control_enabled",
+        "unit", "initial_value",
         "default_rate_per_minute", "min_value", "max_value",
         "max_rate_per_minute", "stability_tolerance",
         "stability_max_slope_per_minute", "stability_dwell_seconds",
@@ -309,6 +351,8 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         display_name=str(raw["display_name"]),
         kind=kind,
         plugin=str(raw["plugin"]),
+        role=role,
+        control_enabled=control_enabled,
         unit=str(raw.get("unit", "")),
         initial_value=initial_value,
         default_rate_per_minute=default_rate,
@@ -348,12 +392,50 @@ def load_config(path: str | Path) -> AppConfig:
     abort_raw = raw.get("abort", {})
     module_raw = raw.get("modules", {})
     plugin_raw = raw.get("plugins", {})
-    devices = tuple(_device_config(item) for item in raw.get("devices", []))
+    raw_devices = list(raw.get("devices", []))
+    parsed_devices = [_device_config(item) for item in raw_devices]
+    # Compatibility for pre-0.11 configurations: when no role is declared for
+    # a controlled quantity, the first device of that kind remains primary.
+    for kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        matching_indices = [
+            index
+            for index, device in enumerate(parsed_devices)
+            if device.kind is kind
+        ]
+        if not matching_indices:
+            continue
+        explicit_role = any(
+            "role" in raw_devices[index]
+            for index in matching_indices
+        )
+        has_primary = any(
+            parsed_devices[index].role is DeviceRole.PRIMARY
+            for index in matching_indices
+        )
+        if not explicit_role and not has_primary:
+            first = matching_indices[0]
+            parsed_devices[first] = replace(
+                parsed_devices[first],
+                role=DeviceRole.PRIMARY,
+                control_enabled=True,
+            )
+    devices = tuple(parsed_devices)
     if not devices:
         raise ConfigurationError("Configuration must contain at least one [[devices]] entry")
     ids = [device.id for device in devices]
     if len(ids) != len(set(ids)):
         raise ConfigurationError("Device IDs must be unique")
+    for kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        primary = [
+            device.id
+            for device in devices
+            if device.kind is kind and device.role is DeviceRole.PRIMARY
+        ]
+        if len(primary) > 1:
+            raise ConfigurationError(
+                f"Only one primary {kind.value} device is allowed: "
+                + ", ".join(primary)
+            )
 
     ui_refresh_ms = _positive_int(
         application.get("ui_refresh_ms", 200),

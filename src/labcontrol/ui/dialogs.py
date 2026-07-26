@@ -78,7 +78,7 @@ class CommandDialog(QDialog):
                 candidates = [
                     item.id
                     for item in device_configs
-                    if item.kind is expected_kind
+                    if item.kind is expected_kind and item.control_enabled
                 ]
                 widget.addItems(candidates)
                 requested = str(value).strip()
@@ -343,8 +343,13 @@ class ManualControlDialog(QDialog):
         self.current_label.setObjectName("manualCurrent")
         layout.addWidget(self.current_label)
 
-        if config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        if (
+            config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD)
+            or not config.control_enabled
+        ):
             raise ValueError("Manual control is available only for temperature and field devices")
+        self._runtime_editable = True
+        self._connected = False
         self._precision = control_decimals(config.kind, config.unit)
         form = QFormLayout()
         self.target_input = QDoubleSpinBox()
@@ -364,17 +369,18 @@ class ManualControlDialog(QDialog):
         form.addRow("Mode", self.mode_input)
         layout.addLayout(form)
         buttons = QHBoxLayout()
-        apply_button = QPushButton("Set")
-        hold_button = QPushButton("Hold Current")
+        self.apply_button = QPushButton("Set")
+        self.hold_button = QPushButton("Hold Current")
         close_button = QPushButton("Close")
-        apply_button.clicked.connect(self._emit_set)
-        hold_button.clicked.connect(lambda: self.holdRequested.emit(config.id))
+        self.apply_button.clicked.connect(self._emit_set)
+        self.hold_button.clicked.connect(lambda: self.holdRequested.emit(config.id))
         close_button.clicked.connect(self.hide)
-        buttons.addWidget(apply_button)
-        buttons.addWidget(hold_button)
+        buttons.addWidget(self.apply_button)
+        buttons.addWidget(self.hold_button)
         buttons.addStretch(1)
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
+        self._update_control_state()
 
     def _emit_set(self) -> None:
         self.setRequested.emit(
@@ -385,6 +391,8 @@ class ManualControlDialog(QDialog):
         )
 
     def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
+        self._connected = snapshot.connected
+        self._update_control_state()
         if snapshot.current is not None:
             if snapshot.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
                 precision = control_decimals(snapshot.kind, snapshot.unit)
@@ -394,6 +402,15 @@ class ManualControlDialog(QDialog):
             self.current_label.setText(f"Current: {value} {snapshot.unit}")
         if snapshot.target is not None and not self.target_input.hasFocus():
             self.target_input.setValue(snapshot.target)
+
+    def set_runtime_editable(self, editable: bool) -> None:
+        self._runtime_editable = editable
+        self._update_control_state()
+
+    def _update_control_state(self) -> None:
+        enabled = self._runtime_editable and self._connected
+        self.apply_button.setEnabled(enabled)
+        self.hold_button.setEnabled(enabled)
 
 
 class AlertDialog(QDialog):

@@ -18,6 +18,12 @@ class DeviceKind(str, Enum):
     MONITOR = "monitor"
 
 
+class DeviceRole(str, Enum):
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    MONITOR = "monitor"
+
+
 class DeviceActivity(str, Enum):
     DISCONNECTED = "disconnected"
     IDLE = "idle"

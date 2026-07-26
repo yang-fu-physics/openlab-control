@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
         self.enabled_modules: set[str] = set()
         self._pending_run: tuple[dict[str, dict[str, object]], list[object]] | None = None
         self._minimized_module_windows: set[str] = set()
+        self._pending_manual_operations: list[tuple[object, str]] = []
         self.alert_dialogs: dict[str, AlertDialog] = {}
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
@@ -270,8 +271,13 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         for device in self.config.devices:
-            tile = StatusTile(device.id, device.display_name, device.kind)
-            if device.kind is not DeviceKind.MONITOR:
+            tile = StatusTile(
+                device.id,
+                device.display_name,
+                device.kind,
+                device.control_enabled,
+            )
+            if device.control_enabled:
                 tile.doubleClicked.connect(self._open_manual_control)
             self.status_tiles[device.id] = tile
             layout.addWidget(tile)
@@ -352,6 +358,8 @@ class MainWindow(QMainWindow):
         graph_menu.addActions([self.graph_action, self.data_browser_action])
         instrument_menu = menu.addMenu("Instrument")
         for device in self.config.devices:
+            if not device.control_enabled:
+                continue
             action = instrument_menu.addAction(device.display_name)
             action.triggered.connect(lambda checked=False, device_id=device.id: self._open_manual_control(device_id))
         modules_menu = menu.addMenu("Modules")
@@ -671,6 +679,8 @@ class MainWindow(QMainWindow):
         self.module_manager.set_operations_enabled(editable)
         for window in self.module_windows.values():
             window.set_sequence_running(not editable)
+        for dialog in self.manual_dialogs.values():
+            dialog.set_runtime_editable(editable)
 
     def _drain_runtime_messages(self) -> None:
         for message in self.runtime.drain_messages():
@@ -685,6 +695,30 @@ class MainWindow(QMainWindow):
             elif message.kind == "startup_error":
                 QMessageBox.critical(self, "Runtime Startup Failed", str(message.payload))
         self._check_pending_run()
+        self._check_pending_manual_operations()
+
+    def _check_pending_manual_operations(self) -> None:
+        remaining: list[tuple[object, str]] = []
+        for future, success_message in self._pending_manual_operations:
+            if not future.done():
+                remaining.append((future, success_message))
+                continue
+            exception = future.exception()
+            if exception is not None:
+                self.statusBar().showMessage(
+                    f"Manual operation failed: {exception}",
+                    5000,
+                )
+                continue
+            result = future.result()
+            if result is False:
+                self.statusBar().showMessage(
+                    "Manual request was not confirmed by the device",
+                    5000,
+                )
+            else:
+                self.statusBar().showMessage(success_message, 3000)
+        self._pending_manual_operations = remaining
 
     def _check_pending_run(self) -> None:
         if self._pending_run is None:
@@ -1042,15 +1076,19 @@ class MainWindow(QMainWindow):
 
     def _open_manual_control(self, device_id: str) -> None:
         config = self.config.device(device_id)
-        if config.kind is DeviceKind.MONITOR:
+        if not config.control_enabled:
             self.statusBar().showMessage(f"{config.display_name} is display only", 3000)
             return
         dialog = self.manual_dialogs.get(device_id)
         if dialog is None:
             dialog = ManualControlDialog(config, self)
             dialog.setRequested.connect(self._manual_set_target)
-            dialog.holdRequested.connect(self.runtime.hold_device)
+            dialog.holdRequested.connect(self._manual_hold_device)
             self.manual_dialogs[device_id] = dialog
+        dialog.set_runtime_editable(
+            self.current_run_state in self.TERMINAL_STATES
+            and self._pending_run is None
+        )
         snapshot = self.current_snapshots.get(device_id)
         if snapshot is not None:
             dialog.update_snapshot(snapshot)
@@ -1059,12 +1097,23 @@ class MainWindow(QMainWindow):
         dialog.activateWindow()
 
     def _manual_set_target(self, device_id: str, value: float, rate: float, mode: str) -> None:
-        self.runtime.set_target(device_id, value, rate, mode)
+        future = self.runtime.set_target(device_id, value, rate, mode)
         snapshot = self.current_snapshots.get(device_id)
         precision = control_decimals(snapshot.kind, snapshot.unit) if snapshot is not None else 3
-        self.statusBar().showMessage(
-            f"Requested target {fixed_number(value, precision)} for {device_id}", 3000
+        self._pending_manual_operations.append(
+            (
+                future,
+                f"Confirmed target {fixed_number(value, precision)} for {device_id}",
+            )
         )
+        self.statusBar().showMessage(f"Sending target to {device_id}...")
+
+    def _manual_hold_device(self, device_id: str) -> None:
+        future = self.runtime.hold_device(device_id)
+        self._pending_manual_operations.append(
+            (future, f"Hold Current confirmed for {device_id}")
+        )
+        self.statusBar().showMessage(f"Requesting Hold Current for {device_id}...")
 
     def _show_graph(self) -> None:
         self.trend_dialog.show()

@@ -21,6 +21,7 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     DeviceActivity,
     DeviceKind,
+    DeviceRole,
     DeviceSnapshot,
     LabEvent,
     Severity,
@@ -66,6 +67,44 @@ class StatusTileTests(unittest.TestCase):
         trend.add_snapshots({"second_stage": snapshot})
         self.assertEqual(len(trend.history["2nd Stage"]), 1)
         trend.close()
+        tile.close()
+
+    def test_secondary_temperature_tile_and_dialog_are_display_only(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        secondary = replace(
+            config.device("temperature"),
+            id="temperature_backup",
+            role=DeviceRole.SECONDARY,
+            control_enabled=False,
+        )
+        tile = StatusTile(
+            secondary.id,
+            secondary.display_name,
+            secondary.kind,
+            secondary.control_enabled,
+        )
+        emitted: list[str] = []
+        tile.doubleClicked.connect(emitted.append)
+        tile.update_snapshot(
+            DeviceSnapshot(
+                secondary.id,
+                secondary.display_name,
+                secondary.kind,
+                time.monotonic(),
+                True,
+                secondary.unit,
+                10.0,
+                10.0,
+                1.0,
+            )
+        )
+        tile.show()
+        QTest.mouseDClick(tile, Qt.MouseButton.LeftButton)
+        self.assertEqual(emitted, [])
+        self.assertIn("Display only", tile.detail_label.text())
+        self.assertEqual(tile.cursor().shape(), Qt.CursorShape.ArrowCursor)
+        with self.assertRaises(ValueError):
+            ManualControlDialog(secondary)
         tile.close()
 
     def test_alert_dialog_is_deleted_after_close(self) -> None:
@@ -221,6 +260,8 @@ class StatusTileTests(unittest.TestCase):
             replace(
                 temperature,
                 id="cryostat_backup",
+                role=DeviceRole.SECONDARY,
+                control_enabled=False,
                 min_value=2.0,
                 max_value=350.0,
                 max_rate_per_minute=12.0,
@@ -234,13 +275,9 @@ class StatusTileTests(unittest.TestCase):
         )
         device_input = dialog.inputs["device_id"]
         self.assertEqual(device_input.currentText(), "cryostat_primary")
-        self.assertEqual(device_input.count(), 2)
+        self.assertEqual(device_input.count(), 1)
         self.assertEqual(dialog.inputs["target"].maximum(), 400.0)
-        device_input.setCurrentText("cryostat_backup")
-        self.assertEqual(dialog.inputs["target"].minimum(), 2.0)
-        self.assertEqual(dialog.inputs["target"].maximum(), 350.0)
-        self.assertEqual(dialog.inputs["rate"].maximum(), 12.0)
-        self.assertEqual(dialog.values()["device_id"], "cryostat_backup")
+        self.assertEqual(dialog.values()["device_id"], "cryostat_primary")
         dialog.close()
 
     def test_temperature_list_dialog_rejects_points_outside_configured_limits(self) -> None:

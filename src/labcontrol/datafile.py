@@ -207,7 +207,10 @@ class DatRunLogger:
             for device in self.config.devices:
                 self._data_writer.writerow([
                     "INFO",
-                    f"Device {device.id}: {device.display_name}; kind={device.kind.value}; plugin={device.plugin}",
+                    f"Device {device.id}: {device.display_name}; "
+                    f"kind={device.kind.value}; role={device.role.value}; "
+                    f"control={str(device.control_enabled).lower()}; "
+                    f"plugin={device.plugin}",
                 ])
             for module in self._module_descriptors:
                 self._data_writer.writerow([

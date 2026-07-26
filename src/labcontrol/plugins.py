@@ -22,7 +22,13 @@ from .devices.worker import (
 from .events import EventManager
 from .extensions.loading import load_import_object, load_source_object
 from .extensions.trust import PluginTrustStore, extension_tree_digest
-from .models import DeviceKind, DeviceSnapshot, Severity, StabilityState
+from .models import (
+    DeviceKind,
+    DeviceRole,
+    DeviceSnapshot,
+    Severity,
+    StabilityState,
+)
 from .stability import StabilityEvaluator
 
 
@@ -49,6 +55,7 @@ class DeviceManager:
         self._poll_issues: dict[str, set[tuple[str, str]]] = {}
         self._stale_devices: set[str] = set()
         self._unavailable_after_timeout: dict[str, str] = {}
+        self._control_owner: str | None = None
         self.latest: dict[str, DeviceSnapshot] = {}
         self._load_plugins()
 
@@ -178,6 +185,7 @@ class DeviceManager:
         callback: Callable[[], Awaitable[T]],
         *,
         shutdown: bool = False,
+        origin: str | None = None,
     ) -> T:
         config = self.device_configs[device_id]
         timeout = (
@@ -188,6 +196,12 @@ class DeviceManager:
 
         async def serialized() -> T:
             async with self._locks[device_id]:
+                if origin == "manual" and self._control_owner == "sequence":
+                    raise DeviceWarning(
+                        f"{config.display_name} manual control is blocked while a SEQ owns control",
+                        "MANUAL_CONTROL_BLOCKED",
+                        device_id,
+                    )
                 previous = self._unavailable_after_timeout.get(device_id)
                 if previous is not None and not shutdown:
                     raise DeviceError(
@@ -388,9 +402,17 @@ class DeviceManager:
 
     def first_device_id(self, kind: DeviceKind) -> str:
         for config in self.config.devices:
-            if config.kind is kind:
+            if (
+                config.kind is kind
+                and config.role is DeviceRole.PRIMARY
+                and config.control_enabled
+            ):
                 return config.id
-        raise DeviceError(f"No {kind.value} device is configured", "DEVICE_NOT_CONFIGURED", kind.value)
+        raise DeviceError(
+            f"No controllable primary {kind.value} device is configured",
+            "DEVICE_NOT_CONFIGURED",
+            kind.value,
+        )
 
     def resolve_device_id(
         self,
@@ -415,11 +437,20 @@ class DeviceManager:
                 "DEVICE_KIND_MISMATCH",
                 candidate,
             )
+        if not config.control_enabled:
+            raise DeviceError(
+                f"Device {candidate} is read-only and cannot be used by control commands",
+                "DEVICE_READ_ONLY",
+                candidate,
+            )
         return candidate
 
     def validate_target(self, device_id: str, value: float, rate_per_minute: float) -> None:
         config = self.device_configs[device_id]
-        if config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        if (
+            config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD)
+            or not config.control_enabled
+        ):
             raise DeviceError(
                 f"{config.display_name} is display-only and cannot accept a target",
                 "TARGET_NOT_CONTROLLABLE",
@@ -458,6 +489,8 @@ class DeviceManager:
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
+        *,
+        origin: str = "sequence",
     ) -> bool:
         try:
             self.validate_target(device_id, value, rate_per_minute)
@@ -469,6 +502,7 @@ class DeviceManager:
                     rate_per_minute,
                     mode,
                 ),
+                origin=origin,
             )
         except DeviceWarning as exc:
             self.events.report(Severity.WARNING, device_id, exc.code, str(exc), exc.context)
@@ -495,13 +529,23 @@ class DeviceManager:
         rate_per_minute: float,
         mode: str = "Settle",
         device_id: str | None = None,
+        *,
+        origin: str = "sequence",
     ) -> bool:
         selected = self.resolve_device_id(kind, device_id)
-        return await self.set_target(selected, value, rate_per_minute, mode)
+        return await self.set_target(
+            selected,
+            value,
+            rate_per_minute,
+            mode,
+            origin=origin,
+        )
 
     async def hold_all(self) -> bool:
         async def hold(device_id: str, device: object) -> bool:
             config = self.device_configs[device_id]
+            if not config.control_enabled:
+                return True
             if config.kind is DeviceKind.TEMPERATURE:
                 strategy = self.config.abort_temperature
             elif config.kind is DeviceKind.FIELD:
@@ -534,19 +578,44 @@ class DeviceManager:
         )
         return all(results)
 
-    async def hold_device(self, device_id: str) -> None:
+    async def hold_device(
+        self,
+        device_id: str,
+        *,
+        origin: str = "manual",
+    ) -> None:
         if device_id not in self.devices:
             raise DeviceError(f"Unknown device: {device_id}", "UNKNOWN_DEVICE", device_id)
+        if not self.device_configs[device_id].control_enabled:
+            raise DeviceError(
+                f"{self.device_configs[device_id].display_name} is read-only",
+                "DEVICE_READ_ONLY",
+                device_id,
+            )
         try:
             await self._operate(
                 device_id,
                 "hold",
                 self.devices[device_id].hold,
+                origin=origin,
             )
         except (DeviceError, DeviceWarning) as exc:
             severity = Severity.WARNING if isinstance(exc, DeviceWarning) else Severity.ERROR
             self.events.report(severity, device_id, exc.code, str(exc), exc.context)
             raise
+
+    def acquire_sequence_control(self) -> None:
+        if self._control_owner is not None:
+            raise DeviceError(
+                f"Device control is already owned by {self._control_owner}",
+                "DEVICE_CONTROL_BUSY",
+                self._control_owner,
+            )
+        self._control_owner = "sequence"
+
+    def release_sequence_control(self) -> None:
+        if self._control_owner == "sequence":
+            self._control_owner = None
 
     def snapshots(self) -> dict[str, DeviceSnapshot]:
         return deepcopy(self.latest)

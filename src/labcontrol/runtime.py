@@ -156,11 +156,16 @@ class RuntimeService:
         if self._sequence_task is not None and not self._sequence_task.done():
             raise RuntimeError("A sequence is already running")
         assert self.engine is not None
-        self._sequence_task = asyncio.create_task(self.engine.run(document, module_settings))
+        assert self.devices is not None
+        self.devices.acquire_sequence_control()
+        self._sequence_task = asyncio.create_task(
+            self.engine.run(document, module_settings)
+        )
         try:
             return await self._sequence_task
         finally:
             self._sequence_task = None
+            self.devices.release_sequence_control()
 
     def pause_sequence(self) -> None:
         if self._loop is not None and self.engine is not None:
@@ -182,11 +187,19 @@ class RuntimeService:
         mode: str = "Settle",
     ) -> Future[Any]:
         assert self.devices is not None
-        return self._submit(self.devices.set_target(device_id, value, rate_per_minute, mode))
+        return self._submit(
+            self.devices.set_target(
+                device_id,
+                value,
+                rate_per_minute,
+                mode,
+                origin="manual",
+            )
+        )
 
     def hold_device(self, device_id: str) -> Future[Any]:
         assert self.devices is not None
-        return self._submit(self.devices.hold_device(device_id))
+        return self._submit(self.devices.hold_device(device_id, origin="manual"))
 
     def enable_module(self, module_id: str, settings: dict[str, object]) -> Future[Any]:
         assert self.modules is not None

@@ -16,7 +16,7 @@ from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.devices.base import DeviceError, DeviceWarning, SafetyViolation  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.formatting import fixed_number  # noqa: E402
-from labcontrol.models import DeviceKind, StabilityState  # noqa: E402
+from labcontrol.models import DeviceKind, DeviceRole, StabilityState  # noqa: E402
 from labcontrol.plugins import DeviceManager  # noqa: E402
 from labcontrol.units import UnitConversionError, convert_value  # noqa: E402
 
@@ -90,6 +90,137 @@ class DeviceManagerTests(unittest.TestCase):
         with self.assertRaises(DeviceError) as missing:
             manager.resolve_device_id(DeviceKind.FIELD, "missing")
         self.assertEqual(missing.exception.code, "UNKNOWN_DEVICE")
+
+    def test_secondary_control_is_read_only_by_default(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            primary = config.device("temperature")
+            secondary = replace(
+                primary,
+                id="temperature_backup",
+                display_name="Backup Temperature",
+                role=DeviceRole.SECONDARY,
+                control_enabled=False,
+            )
+            custom = replace(
+                config,
+                devices=(*config.devices, secondary),
+            )
+            events = EventManager()
+            manager = DeviceManager(
+                custom,
+                events,
+                isolate_processes=False,
+            )
+            self.assertEqual(
+                manager.first_device_id(DeviceKind.TEMPERATURE),
+                "temperature",
+            )
+            with self.assertRaises(DeviceError) as read_only:
+                manager.resolve_device_id(
+                    DeviceKind.TEMPERATURE,
+                    "temperature_backup",
+                )
+            self.assertEqual(read_only.exception.code, "DEVICE_READ_ONLY")
+            with self.assertRaises(DeviceError) as target:
+                await manager.set_target("temperature_backup", 10.0, 1.0)
+            self.assertEqual(target.exception.code, "TARGET_NOT_CONTROLLABLE")
+            with self.assertRaises(DeviceError) as hold:
+                await manager.hold_device("temperature_backup")
+            self.assertEqual(hold.exception.code, "DEVICE_READ_ONLY")
+
+        asyncio.run(scenario())
+
+    def test_configuration_roles_are_unique_and_legacy_first_device_is_primary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
+            secondary_block = """
+
+[[devices]]
+id = "temperature_backup"
+display_name = "Backup Temperature"
+kind = "temperature"
+plugin = "labcontrol.devices.simulated:SimulatedTemperatureController"
+role = "secondary"
+unit = "K"
+initial_value = 300.0
+default_rate_per_minute = 5.0
+min_value = 1.8
+max_value = 400.0
+max_rate_per_minute = 10.0
+"""
+            valid_path = root / "valid.toml"
+            valid_path.write_text(source + secondary_block, encoding="utf-8")
+            valid = load_config(valid_path)
+            backup = valid.device("temperature_backup")
+            self.assertEqual(backup.role, DeviceRole.SECONDARY)
+            self.assertFalse(backup.control_enabled)
+
+            duplicate_path = root / "duplicate.toml"
+            duplicate_path.write_text(
+                source + secondary_block.replace(
+                    'role = "secondary"',
+                    'role = "primary"',
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "Only one primary"):
+                load_config(duplicate_path)
+
+            legacy_path = root / "legacy.toml"
+            legacy_path.write_text(
+                "\n".join(
+                    line
+                    for line in source.splitlines()
+                    if not line.startswith("role = ")
+                ),
+                encoding="utf-8",
+            )
+            legacy = load_config(legacy_path)
+            self.assertEqual(
+                legacy.device("temperature").role,
+                DeviceRole.PRIMARY,
+            )
+            self.assertTrue(legacy.device("temperature").control_enabled)
+            self.assertEqual(
+                legacy.device("second_stage").role,
+                DeviceRole.MONITOR,
+            )
+
+    def test_sequence_control_lease_blocks_manual_writes_without_fatal_error(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            events = EventManager()
+            manager = DeviceManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            before = manager.latest["temperature"].target
+            manager.acquire_sequence_control()
+            try:
+                applied = await manager.set_target(
+                    "temperature",
+                    250.0,
+                    5.0,
+                    origin="manual",
+                )
+                self.assertFalse(applied)
+                with self.assertRaises(DeviceWarning) as hold:
+                    await manager.hold_device("temperature", origin="manual")
+                self.assertEqual(hold.exception.code, "MANUAL_CONTROL_BLOCKED")
+            finally:
+                manager.release_sequence_control()
+            self.assertEqual(manager.latest["temperature"].target, before)
+            warnings = [
+                event
+                for event in events.active_events()
+                if event.code == "MANUAL_CONTROL_BLOCKED"
+            ]
+            self.assertTrue(warnings)
+            self.assertTrue(all(event.severity.value == "warning" for event in warnings))
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
 
     def test_configuration_rejects_nonfinite_and_nonpositive_safety_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
