@@ -634,6 +634,119 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
             self.assertIsNone(client._connection)
 
 
+class ModuleWorkerContextTests(unittest.TestCase):
+    @staticmethod
+    def _descriptor(root: Path) -> ModuleDescriptor:
+        (root / "backend.py").write_text(
+            "\n".join([
+                "from labcontrol.measurement.api import ModuleBackend",
+                "",
+                "class Backend(ModuleBackend):",
+                "    def measure(self, context):",
+                "        first = context.sample_system()",
+                "        context.interruptible_sleep(",
+                "            0.02, poll_interval_seconds=0.005",
+                "        )",
+                "        second = context.sample_system()",
+                "        return {",
+                "            'Average': (",
+                "                first['temperature']['current']",
+                "                + second['temperature']['current']",
+                "            ) / 2.0",
+                "        }",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+        return ModuleDescriptor(
+            id="context_module",
+            name="Context Module",
+            version="1.0.0",
+            path=root,
+            api_version="1.0",
+            backend="backend:Backend",
+            columns=(ModuleColumn("Average", "K"),),
+        )
+
+    def test_worker_round_trips_live_snapshots_and_control_state(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            client = ModuleWorkerClient(
+                self._descriptor(Path(temp))
+            )
+            client.start(timeout_seconds=2.0)
+            samples = iter((1.0, 3.0))
+            requests: list[str] = []
+
+            def handle(message):
+                kind = str(message.get("kind", ""))
+                requests.append(kind)
+                if kind == "system":
+                    return {
+                        "system": {
+                            "temperature": {
+                                "kind": "temperature",
+                                "current": next(samples),
+                            }
+                        }
+                    }
+                if kind == "operation_state":
+                    return {"state": "running"}
+                self.fail(f"Unexpected context request: {kind}")
+
+            try:
+                result = client.request(
+                    "measure",
+                    event_handler=handle,
+                    timeout_seconds=2.0,
+                )
+            finally:
+                client.close(timeout_seconds=1.0)
+
+            self.assertEqual(result["Average"], 2.0)
+            self.assertEqual(requests.count("system"), 2)
+            self.assertGreaterEqual(
+                requests.count("operation_state"),
+                2,
+            )
+
+    def test_worker_reports_cooperative_cancellation_separately(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            client = ModuleWorkerClient(
+                self._descriptor(Path(temp))
+            )
+            client.start(timeout_seconds=2.0)
+
+            def handle(message):
+                if message.get("kind") == "operation_state":
+                    return {"state": "stopping"}
+                return {"system": {}}
+
+            try:
+                with self.assertRaises(
+                    WorkerRequestError
+                ) as captured:
+                    client.request(
+                        "measure",
+                        event_handler=handle,
+                        timeout_seconds=2.0,
+                    )
+            finally:
+                client.close(timeout_seconds=1.0)
+
+            self.assertEqual(
+                captured.exception.code,
+                "MODULE_OPERATION_CANCELLED",
+            )
+            self.assertEqual(
+                captured.exception.severity,
+                "cancelled",
+            )
+
+
 class ModuleWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

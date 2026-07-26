@@ -81,7 +81,7 @@ class SimulatedTransportBackend(ModuleBackend):
         threshold = float(settings["warning_threshold_ohm"])
         delay = max(0.0, float(settings["delay_seconds"]))
         for index in range(1, 5):
-            time.sleep(delay)
+            context.interruptible_sleep(delay)
             channel = f"R{index}"
             value = self._resistance(index, context)
             self.last_values[channel] = value

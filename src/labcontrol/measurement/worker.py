@@ -15,11 +15,20 @@ from typing import Any
 
 from ..extensions.dependencies import dependency_runtime_errors
 from ..extensions.trust import extension_tree_digest
-from .api import ModuleBackend, ModuleError, ModuleOperationContext, ModuleWarning
+from .api import (
+    ModuleBackend,
+    ModuleError,
+    ModuleOperationCancelled,
+    ModuleOperationContext,
+    ModuleWarning,
+)
 from .manifest import ModuleDescriptor, load_source_object
 
 
-WorkerEventHandler = Callable[[dict[str, Any]], None]
+WorkerEventHandler = Callable[
+    [dict[str, Any]],
+    Mapping[str, Any] | None,
+]
 _MAX_IPC_BYTES = 1024 * 1024
 
 
@@ -176,7 +185,98 @@ def module_worker_main(
         def emit(kind: str, values: dict[str, Any]) -> None:
             send({"type": kind, "id": request_id, **values})
 
-        context = ModuleOperationContext(dict(payload.get("system", {})), emit)
+        context_request_number = 0
+
+        def request_context(
+            kind: str,
+            timeout_seconds: float,
+        ) -> dict[str, Any]:
+            nonlocal context_request_number
+            context_request_number += 1
+            context_request_id = str(context_request_number)
+            send({
+                "type": "context_request",
+                "id": request_id,
+                "context_request_id": context_request_id,
+                "kind": kind,
+            })
+            try:
+                ready = connection.poll(timeout_seconds)
+            except (EOFError, OSError) as exc:
+                raise ModuleError(
+                    "The core connection closed during a context request",
+                    "MODULE_CONTEXT_REQUEST_FAILED",
+                    kind,
+                ) from exc
+            if not ready:
+                raise ModuleError(
+                    f"Core context request timed out after "
+                    f"{timeout_seconds:g} seconds",
+                    "MODULE_CONTEXT_REQUEST_TIMEOUT",
+                    kind,
+                )
+            try:
+                response = _receive_message(connection)
+            except (EOFError, OSError, WorkerRequestError) as exc:
+                raise ModuleError(
+                    "The core returned an invalid context response",
+                    "MODULE_CONTEXT_REQUEST_FAILED",
+                    kind,
+                ) from exc
+            if (
+                response.get("type") != "context_response"
+                or str(response.get("id", "")) != request_id
+                or str(response.get("context_request_id", ""))
+                != context_request_id
+            ):
+                raise ModuleError(
+                    "The core returned a mismatched context response",
+                    "MODULE_CONTEXT_REQUEST_FAILED",
+                    kind,
+                )
+            if not bool(response.get("ok", False)):
+                raise ModuleError(
+                    str(
+                        response.get(
+                            "message",
+                            "The core rejected a module context request",
+                        )
+                    ),
+                    "MODULE_CONTEXT_REQUEST_FAILED",
+                    kind,
+                )
+            result = response.get("result", {})
+            if not isinstance(result, dict):
+                raise ModuleError(
+                    "The core returned a non-object context result",
+                    "MODULE_CONTEXT_REQUEST_FAILED",
+                    kind,
+                )
+            return dict(result)
+
+        def sample_system(
+            timeout_seconds: float,
+        ) -> Mapping[str, Mapping[str, Any]]:
+            result = request_context("system", timeout_seconds)
+            system = result.get("system", {})
+            if not isinstance(system, dict):
+                raise ModuleError(
+                    "The core returned an invalid system snapshot",
+                    "MODULE_SYSTEM_SNAPSHOT_INVALID",
+                )
+            return dict(system)
+
+        def operation_state(timeout_seconds: float) -> str:
+            result = request_context("operation_state", timeout_seconds)
+            return str(result.get("state", "running"))
+
+        context = ModuleOperationContext(
+            dict(payload.get("system", {})),
+            emit,
+            sample_system,
+            operation_state,
+            float(payload.get("operation_timeout_seconds", 120.0)),
+        )
         try:
             if action == "initialize":
                 result = _invoke(backend.initialize, dict(payload.get("settings", {})), context)
@@ -211,6 +311,16 @@ def module_worker_main(
                 "message": str(exc),
                 "code": exc.code,
                 "context": exc.context,
+            })
+        except ModuleOperationCancelled as exc:
+            send({
+                "type": "response",
+                "id": request_id,
+                "ok": False,
+                "severity": "cancelled",
+                "message": str(exc),
+                "code": "MODULE_OPERATION_CANCELLED",
+                "context": action,
             })
         except ModuleError as exc:
             send({
@@ -455,11 +565,56 @@ class ModuleWorkerClient:
                 if str(message.get("id", "")) != request_id:
                     continue
                 if message.get("type") != "response":
+                    event_result: Mapping[str, Any] | None = None
                     if event_handler is not None:
                         try:
-                            event_handler(dict(message))
+                            event_result = event_handler(dict(message))
                         except Exception as exc:
                             event_error = exc
+                    if message.get("type") == "context_request":
+                        context_response = {
+                            "type": "context_response",
+                            "id": request_id,
+                            "context_request_id": str(
+                                message.get(
+                                    "context_request_id",
+                                    "",
+                                )
+                            ),
+                            "ok": event_error is None
+                            and event_handler is not None,
+                            "result": dict(event_result or {}),
+                        }
+                        if event_error is not None:
+                            context_response["message"] = (
+                                f"{type(event_error).__name__}: "
+                                f"{event_error}"
+                            )
+                        elif event_handler is None:
+                            context_response["message"] = (
+                                "No core context handler is available"
+                            )
+                        try:
+                            _send_message(
+                                connection,
+                                context_response,
+                            )
+                        except (
+                            EOFError,
+                            OSError,
+                            WorkerRequestError,
+                        ) as exc:
+                            self._invalidate(
+                                connection,
+                                process,
+                                min(timeout, 1.0),
+                            )
+                            raise WorkerRequestError(
+                                "Module worker context response "
+                                "could not be sent",
+                                "MODULE_WORKER_DISCONNECTED",
+                                action,
+                            ) from exc
                     continue
                 if not bool(message.get("ok", False)):
                     raise WorkerRequestError(

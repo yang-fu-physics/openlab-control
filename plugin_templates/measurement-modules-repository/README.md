@@ -20,8 +20,10 @@ reference implementation and test fixture.
 
 Never commit `module_data`, acquired DAT files, instrument addresses containing
 secrets, or generated `plugin_runtime` contents. A module owns its measurement
-instruments, runs its backend in one child process, and may only read the
-temperature/field/monitor snapshot supplied by the core.
+instruments, runs its backend in one child process, and may only read
+temperature/field/monitor snapshots supplied by the core. Use
+`context.sample_system()` for a fresh snapshot and
+`context.interruptible_sleep()` for pause/stop-aware timing.
 
 ## Required release checks
 

@@ -252,6 +252,13 @@ class SequenceEngine:
             self.state = RunState.PAUSED
             self._paused_at = time.monotonic()
             self._pause_gate.clear()
+            pause_modules = getattr(
+                self.modules,
+                "pause_operations",
+                None,
+            )
+            if callable(pause_modules):
+                pause_modules()
             self.events.report(Severity.INFO, "sequence", "RUN_PAUSED", "Sequence paused")
             self._publish("Paused")
 
@@ -260,6 +267,13 @@ class SequenceEngine:
             self.state = RunState.RUNNING
             self._finish_pause()
             self._pause_gate.set()
+            resume_modules = getattr(
+                self.modules,
+                "resume_operations",
+                None,
+            )
+            if callable(resume_modules):
+                resume_modules()
             self.events.report(Severity.INFO, "sequence", "RUN_RESUMED", "Sequence resumed")
             self._publish("Resumed")
 
@@ -270,6 +284,13 @@ class SequenceEngine:
         self._fatal_abort = self._fatal_abort or fatal
         self._abort_message = message
         self.state = RunState.STOPPING
+        cancel_modules = getattr(
+            self.modules,
+            "cancel_operations",
+            None,
+        )
+        if callable(cancel_modules):
+            cancel_modules()
         self._finish_pause()
         self._pause_gate.set()
         self._publish(message)
@@ -489,6 +510,7 @@ class SequenceEngine:
     async def _measure(self) -> None:
         await self._checkpoint()
         await self.modules.measure_all(self.logger, self._current_path)
+        await self._checkpoint()
 
     async def _call_sequence(self, requested: str, path: list[str]) -> None:
         source = Path(requested)

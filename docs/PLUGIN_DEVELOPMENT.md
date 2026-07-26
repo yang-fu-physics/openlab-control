@@ -253,11 +253,16 @@ NaN/Infinity/bytes/自定义对象。一次 IPC 消息最大 1 MiB。
 ```python
 def measure(self, context):
     for channel in ("R1", "R2", "R3", "R4"):
+        context.interruptible_sleep(0.1)
+        live_system = context.sample_system()
         context.emit_row({channel: self.read(channel), "Status": "OK"})
 ```
 
 每个 `emit_row` 立即传回中央，并附上当时系统快照后串行写盘。一个 `Measure` 会并行
-调用所有 Enabled 模块，但每个模块内部请求不重入。
+调用所有 Enabled 模块，但每个模块内部请求不重入。模块中的 pause/dwell/settle 等
+等待必须使用 `context.interruptible_sleep()`，不能直接使用 `time.sleep()`；前者会在
+SEQ Pause 时冻结计时，并在 Stop/Error 时协作退出。仪表驱动自身仍必须设置较短、有限
+的 I/O 超时，因为正在阻塞的驱动调用只能在驱动超时后响应 Stop。
 
 ```python
 context.update_status({"Output": "On"})
@@ -266,8 +271,11 @@ context.resolve_warning("OVER_RANGE", "R1")
 context.error("Source interlock opened", "INTERLOCK_OPEN", "source")
 ```
 
-`context.system` 只读，例如
-`context.system["temperature"]["current"]`；它也包含连接状态、target、rate 和 activity。
+`context.system` 是本次生命周期调用开始时的只读快照。需要在较长测量过程中捕获真实
+的新时间点时，调用 `context.sample_system()`；不得把初始快照重复使用后伪装成多次
+取样。每个设备项包含 kind、role、control_enabled、连接状态、current、target、rate
+和 activity。`context.operation_timeout_seconds` 给出本次框架操作的总超时，模块应在
+Apply 时拒绝明显无法在此上限内完成的时序设置。
 
 ### 4.5 Frontend
 

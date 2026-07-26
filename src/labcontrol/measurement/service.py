@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import threading
 import time
 from collections.abc import Callable, Mapping
 from copy import deepcopy
@@ -67,6 +68,8 @@ class MeasurementModuleService:
         self._sequence_modules: tuple[str, ...] = ()
         self._sequence_active = False
         self._row_handlers: dict[str, Callable[[dict[str, Any]], None]] = {}
+        self._operation_state = "idle"
+        self._operation_state_lock = threading.RLock()
 
     def _ensure_sequence_idle(self) -> None:
         if self._sequence_active:
@@ -142,9 +145,22 @@ class MeasurementModuleService:
     def _system_payload(self) -> dict[str, dict[str, Any]]:
         payload: dict[str, dict[str, Any]] = {}
         for device_id, snapshot in self.devices.snapshots().items():
+            device_config = self.devices.device_configs.get(
+                device_id
+            )
             payload[device_id] = {
                 "display_name": snapshot.display_name,
                 "kind": snapshot.kind.value,
+                "role": (
+                    ""
+                    if device_config is None
+                    else device_config.role.value
+                ),
+                "control_enabled": (
+                    False
+                    if device_config is None
+                    else device_config.control_enabled
+                ),
                 "timestamp": snapshot.timestamp,
                 "connected": snapshot.connected,
                 "unit": snapshot.unit,
@@ -158,9 +174,26 @@ class MeasurementModuleService:
             }
         return payload
 
-    async def _worker_event(self, module_id: str, message: dict[str, Any]) -> None:
+    async def _worker_event(
+        self,
+        module_id: str,
+        message: dict[str, Any],
+    ) -> dict[str, Any] | None:
         record = self.records[module_id]
         kind = str(message.get("type", ""))
+        if kind == "context_request":
+            request_kind = str(message.get("kind", ""))
+            if request_kind == "system":
+                return {"system": self._system_payload()}
+            if request_kind == "operation_state":
+                with self._operation_state_lock:
+                    state = self._operation_state
+                return {"state": state}
+            raise WorkerRequestError(
+                f"Unknown module context request: {request_kind}",
+                "MODULE_CONTEXT_REQUEST_UNKNOWN",
+                module_id,
+            )
         if kind == "status":
             values = dict(message.get("values", {}))
             try:
@@ -210,7 +243,9 @@ class MeasurementModuleService:
         )
         deadline = time.monotonic() + timeout
 
-        def on_event(message: dict[str, Any]) -> None:
+        def on_event(
+            message: dict[str, Any],
+        ) -> Mapping[str, Any] | None:
             future = asyncio.run_coroutine_threadsafe(
                 self._worker_event(record.descriptor.id, message), loop
             )
@@ -218,13 +253,14 @@ class MeasurementModuleService:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("Module event processing timed out")
-                future.result(timeout=remaining)
+                return future.result(timeout=remaining)
             except Exception:
                 future.cancel()
                 raise
 
         request_payload = dict(payload or {})
         request_payload["system"] = self._system_payload()
+        request_payload["operation_timeout_seconds"] = timeout
         result = await asyncio.to_thread(
             record.client.request,
             action,
@@ -422,6 +458,7 @@ class MeasurementModuleService:
     ) -> tuple[tuple[ModuleDescriptor, ...], dict[str, dict[str, Any]]]:
         descriptors = self.enabled_descriptors()
         self._sequence_active = True
+        self.resume_operations()
         self._sequence_modules = tuple(item.id for item in descriptors)
         statuses: dict[str, dict[str, Any]] = {}
         for descriptor in descriptors:
@@ -526,6 +563,8 @@ class MeasurementModuleService:
                 if validation_error is not None:
                     return validation_error
             except WorkerRequestError as exc:
+                if exc.severity == "cancelled":
+                    return None
                 return self._operation_error(record, exc, warning_allowed=True)
             except DeviceError as exc:
                 self.events.report(Severity.ERROR, f"module:{module_id}", exc.code, str(exc), exc.context)
@@ -560,11 +599,27 @@ class MeasurementModuleService:
             return True
 
         try:
+            self.resume_operations()
             results = await asyncio.gather(*(end(item) for item in self._sequence_modules))
             return all(results)
         finally:
             self._sequence_modules = ()
             self._sequence_active = False
+            with self._operation_state_lock:
+                self._operation_state = "idle"
+
+    def pause_operations(self) -> None:
+        with self._operation_state_lock:
+            if self._operation_state == "running":
+                self._operation_state = "paused"
+
+    def resume_operations(self) -> None:
+        with self._operation_state_lock:
+            self._operation_state = "running"
+
+    def cancel_operations(self) -> None:
+        with self._operation_state_lock:
+            self._operation_state = "stopping"
 
     async def shutdown(self) -> None:
         async def stop(record: ModuleRuntimeRecord) -> None:

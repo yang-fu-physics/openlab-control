@@ -4,6 +4,7 @@ import asyncio
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -493,6 +494,84 @@ class SequenceEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
             asyncio.run(scenario(config))
+
+    def test_stop_interrupts_an_inflight_module_measurement(self) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            manager = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            logger = DatRunLogger(config, events)
+            modules = MeasurementModuleService(
+                discover_modules(config),
+                events,
+                manager,
+            )
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                logger,
+                modules,
+            )
+            await manager.connect_all()
+            await manager.poll_all()
+            await modules.enable(
+                "simulated_transport",
+                {
+                    "delay_seconds": 5.0,
+                    "noise_ohm": 0.0,
+                    "warning_threshold_ohm": 1e9,
+                },
+            )
+            try:
+                run_task = asyncio.create_task(
+                    engine.run(
+                        SequenceDocument(
+                            [Command(CommandType.MEASURE)],
+                            "stop-module-measure.seq",
+                        )
+                    )
+                )
+                deadline = time.monotonic() + 2.0
+                while (
+                    modules.records[
+                        "simulated_transport"
+                    ].state
+                    != "measuring"
+                    and time.monotonic() < deadline
+                ):
+                    await asyncio.sleep(0.01)
+                self.assertEqual(
+                    modules.records[
+                        "simulated_transport"
+                    ].state,
+                    "measuring",
+                )
+                started = time.monotonic()
+                engine.request_stop(
+                    False,
+                    "Stopped during module measurement",
+                )
+                state = await asyncio.wait_for(
+                    run_task,
+                    timeout=2.0,
+                )
+                self.assertLess(
+                    time.monotonic() - started,
+                    1.0,
+                )
+                self.assertEqual(state, RunState.STOPPED)
+            finally:
+                await modules.shutdown()
+                await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(
+                scenario(self._fast_config(Path(temp)))
+            )
 
     def test_progress_expands_called_sequence_scans(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
