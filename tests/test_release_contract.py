@@ -70,8 +70,56 @@ class ReleaseContractTests(unittest.TestCase):
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
         self.assertIn("datas=[]", specification)
         build_script = (ROOT / "build.bat").read_text(encoding="utf-8")
-        for name in ("configs", "examples", "docs", "plugin_templates", "modules"):
+        for name in (
+            "configs",
+            "examples",
+            "docs",
+            "plugin_templates",
+            "modules",
+        ):
             self.assertIn(f'"{name}" "dist\\OpenLabControl\\{name}"', build_script)
+        self.assertNotIn("module_runtime", build_script)
+        for name in (
+            "device_plugins",
+            "plugin_runtime",
+            "plugin_state",
+        ):
+            self.assertIn(
+                f'dist\\OpenLabControl\\{name}',
+                build_script,
+            )
+
+    def test_current_docs_describe_isolated_offline_extensions(self) -> None:
+        current_documents = "\n".join(
+            (ROOT / relative_path).read_text(encoding="utf-8")
+            for relative_path in (
+                "README.md",
+                "docs/ARCHITECTURE.md",
+                "docs/CONFIGURATION.md",
+                "docs/OPERATIONS.md",
+                "docs/PLUGIN_DEVELOPMENT.md",
+                "docs/TECHNICAL_SPECIFICATION.md",
+                "docs/TEST_PLAN.md",
+            )
+        )
+        for obsolete in (
+            "site_packages_directory",
+            "Online Install",
+            "在线 pip",
+            "module_runtime/site-packages",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, current_documents)
+        for required in (
+            "plugin_runtime",
+            "--no-index",
+            "requirements.lock",
+            "fingerprint",
+            "device-plugins-private-repository",
+            "measurement-modules-repository",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, current_documents)
 
 
 if __name__ == "__main__":

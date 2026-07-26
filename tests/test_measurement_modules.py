@@ -16,6 +16,11 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
+MODULE_REPOSITORY = (
+    ROOT
+    / "plugin_templates"
+    / "measurement-modules-repository"
+)
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt  # noqa: E402
@@ -47,7 +52,10 @@ from labcontrol.ui.scaling import scaled  # noqa: E402
 def copied_project(temp_root: Path):
     (temp_root / "configs").mkdir()
     shutil.copy2(ROOT / "configs" / "default.toml", temp_root / "configs" / "default.toml")
-    shutil.copytree(ROOT / "modules", temp_root / "modules")
+    shutil.copytree(
+        MODULE_REPOSITORY / "modules",
+        temp_root / "modules",
+    )
     config = load_config(temp_root / "configs" / "default.toml")
     store = PluginTrustStore(
         config.resolve_project_path(
@@ -632,34 +640,42 @@ class ModuleWindowTests(unittest.TestCase):
         cls.application = QApplication.instance() or QApplication([])
 
     def test_window_uses_settings_and_status_pages_and_ignores_user_close(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        descriptor = discover_modules(config)[0]
-        owner = QWidget()
-        window = ModuleWindow(descriptor, owner)
-        window.load_settings({"delay_seconds": 0.25})
-        self.assertEqual(window.tabs.tabText(0), "Settings")
-        self.assertEqual(window.tabs.tabText(1), "Status")
-        self.assertEqual(window.tabs.currentIndex(), 0)
-        self.assertAlmostEqual(window.settings()["delay_seconds"], 0.25)
-        window.frontend.delay.setValue(0.5)
-        self.assertTrue(window.has_unapplied_edits())
-        window.show()
-        self.application.processEvents()
-        self.assertTrue(window.apply_button.isVisible())
-        window.tabs.setCurrentIndex(1)
-        self.application.processEvents()
-        self.assertFalse(window.apply_button.isVisible())
-        self.assertGreaterEqual(window.minimumWidth(), scaled(MODULE_WINDOW_MIN_WIDTH))
-        self.assertGreaterEqual(window.minimumHeight(), scaled(MODULE_WINDOW_MIN_HEIGHT))
-        window.resize(1, 1)
-        self.assertGreaterEqual(window.width(), window.minimumWidth())
-        self.assertGreaterEqual(window.height(), window.minimumHeight())
-        window.close()
-        self.application.processEvents()
-        self.assertTrue(window.isVisible())
-        window.allow_application_close()
-        window.close()
-        owner.close()
+        with tempfile.TemporaryDirectory() as temp:
+            descriptor = discover_modules(
+                copied_project(Path(temp))
+            )[0]
+            owner = QWidget()
+            window = ModuleWindow(descriptor, owner)
+            window.load_settings({"delay_seconds": 0.25})
+            self.assertEqual(window.tabs.tabText(0), "Settings")
+            self.assertEqual(window.tabs.tabText(1), "Status")
+            self.assertEqual(window.tabs.currentIndex(), 0)
+            self.assertAlmostEqual(window.settings()["delay_seconds"], 0.25)
+            window.frontend.delay.setValue(0.5)
+            self.assertTrue(window.has_unapplied_edits())
+            window.show()
+            self.application.processEvents()
+            self.assertTrue(window.apply_button.isVisible())
+            window.tabs.setCurrentIndex(1)
+            self.application.processEvents()
+            self.assertFalse(window.apply_button.isVisible())
+            self.assertGreaterEqual(
+                window.minimumWidth(),
+                scaled(MODULE_WINDOW_MIN_WIDTH),
+            )
+            self.assertGreaterEqual(
+                window.minimumHeight(),
+                scaled(MODULE_WINDOW_MIN_HEIGHT),
+            )
+            window.resize(1, 1)
+            self.assertGreaterEqual(window.width(), window.minimumWidth())
+            self.assertGreaterEqual(window.height(), window.minimumHeight())
+            window.close()
+            self.application.processEvents()
+            self.assertTrue(window.isVisible())
+            window.allow_application_close()
+            window.close()
+            owner.close()
 
     def test_window_uses_compact_content_minimum_at_4k_scale(self) -> None:
         previous_scale = self.application.property("openlabUiScale")
@@ -667,15 +683,18 @@ class ModuleWindowTests(unittest.TestCase):
         owner = QWidget()
         window: ModuleWindow | None = None
         try:
-            config = load_config(ROOT / "configs" / "default.toml")
-            window = ModuleWindow(discover_modules(config)[0], owner)
-            self.assertTrue(
-                window.testAttribute(
-                    Qt.WidgetAttribute.WA_DeleteOnClose
+            with tempfile.TemporaryDirectory() as temp:
+                descriptor = discover_modules(
+                    copied_project(Path(temp))
+                )[0]
+                window = ModuleWindow(descriptor, owner)
+                self.assertTrue(
+                    window.testAttribute(
+                        Qt.WidgetAttribute.WA_DeleteOnClose
+                    )
                 )
-            )
-            self.assertLess(window.minimumWidth(), scaled(560))
-            self.assertLess(window.minimumHeight(), scaled(460))
+                self.assertLess(window.minimumWidth(), scaled(560))
+                self.assertLess(window.minimumHeight(), scaled(460))
         finally:
             if window is not None:
                 window.allow_application_close()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Hardware-free reference backend for the extension repository template."""
+
 import random
 import time
 from collections.abc import Mapping

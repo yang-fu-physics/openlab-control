@@ -62,7 +62,7 @@ directory = "modules"
 data_directory = "module_data"
 shared_wheels_directory = "wheels"
 python_executable = ""
-site_packages_directory = "module_runtime/site-packages"
+runtime_directory = "plugin_runtime"
 startup_timeout_seconds = 10.0
 operation_timeout_seconds = 120.0
 shutdown_timeout_seconds = 3.0
@@ -74,16 +74,55 @@ shutdown_timeout_seconds = 3.0
 | `data_directory` | 自动保存 `<module_id>/settings.toml` 的目录，必须与源码分离 |
 | `shared_wheels_directory` | 所有模块共用的离线 wheel 目录 |
 | `python_executable` | 安装依赖时使用的 Python；源码运行留空即使用当前 Python |
-| `site_packages_directory` | pip `--target` 的共享依赖目录，主进程和所有模块工作进程共用 |
+| `runtime_directory` | 每模块隔离依赖 runtime 的根目录 |
 | `startup_timeout_seconds` | 模块工作进程启动并完成源码加载的上限 |
 | `operation_timeout_seconds` | initialize、Apply、Measure 等单次 IPC 操作的上限 |
-| `shutdown_timeout_seconds` | 应用退出/强制关闭时 abort 和工作进程清理各自的上限 |
+| `shutdown_timeout_seconds` | Disable/退出时 abort + close/force-stop 的总上限 |
 
-发布 EXE 不能把自身当作 pip。需要安装额外依赖时，可放置 `runtime/python/python.exe`，或把 `python_executable` 指向便携 Python。依赖始终安装到 `site_packages_directory`，不会为每个模块复制一套环境。
+发布 EXE 不能把自身当作 pip。需要准备额外依赖时，可放置
+`runtime/python/python.exe`，或把 `python_executable` 指向完全离线的便携 Python。
+每个模块安装到：
 
-三个超时必须是大于零的有限秒数。框架超时是防止工作进程永久挂起的最终上限；真实仪表驱动仍须为每次 VISA、串口、TCP 或 SDK 调用设置更短、符合设备特性的协议超时。
+```text
+plugin_runtime/module/<module-id>/<content-fingerprint>/site-packages/
+```
 
-如果不同模块对同一包声明不相容的版本范围，相关模块都禁止 Enable。若依赖缺失，先在 Modules Manager 选择模块并点击 `Install Dependencies`：程序先从共享 `wheels/` 和模块自己的 `wheels/` 离线安装；离线失败后，只有用户再次明确确认才允许在线 pip。
+依赖不进入 GUI/核心进程，也不与其他模块共享，因此不同模块可以使用同一包的不同版本。
+安装只读取模块 `requirements.lock`、模块 `wheels/` 和共享 `wheels/`；lock 中每一项必须
+是精确 `==` 版本并携带 SHA-256。程序固定使用 `--no-index --only-binary=:all:
+--require-hashes`，没有在线安装回退。
+
+三个超时必须是大于零的有限秒数。框架超时是防止工作进程永久挂起的最终上限；真实
+模块仍须为每次 VISA、串口、TCP 或 SDK 调用设置更短的协议超时。
+
+## `[plugins]`
+
+```toml
+[plugins]
+device_directory = "device_plugins"
+state_directory = "plugin_state"
+runtime_directory = "plugin_runtime"
+shared_wheels_directory = "wheels"
+python_executable = ""
+device_startup_timeout_seconds = 10.0
+device_reconnect_timeout_seconds = 60.0
+device_reconnect_interval_seconds = 2.0
+```
+
+| 键 | 说明 |
+|---|---|
+| `device_directory` | 外部 Device Plugin 的手动安装目录 |
+| `state_directory` | 本机扩展内容指纹信任记录；不得作为共享配置提交 |
+| `runtime_directory` | Device/Module 各自隔离依赖的共同根目录 |
+| `shared_wheels_directory` | 可选的离线 wheel 公共池 |
+| `python_executable` | 为扩展准备依赖的 Python；源码运行留空使用当前 Python |
+| `device_startup_timeout_seconds` | 每个设备工作进程启动/首次连接最终上限 |
+| `device_reconnect_timeout_seconds` | 读链路失联后的总恢复窗，默认 60 秒 |
+| `device_reconnect_interval_seconds` | 恢复窗内两次重新连接尝试之间的间隔 |
+
+每个外部设备插件的依赖路径为
+`plugin_runtime/device/<plugin-id>/<content-fingerprint>/site-packages/`。安装、哈希和
+runtime 完整性规则与模块相同。
 
 ## `[[devices]]`
 
@@ -94,16 +133,24 @@ shutdown_timeout_seconds = 3.0
 | `id` | 是 | 全局唯一 ID，SEQ 通过它选择设备；必须是非空可打印文本且不得有首尾空白，内部空格允许 |
 | `display_name` | 是 | 英文 UI 名称 |
 | `kind` | 是 | `temperature`、`field` 或 `monitor` |
-| `plugin` | 是 | `package.module:ClassName` |
+| `plugin` | 是 | 内置仿真使用 `package.module:ClassName`；外部插件使用其 `device.toml` 的 ID |
+| `role` | 是（推荐显式） | temperature/field 使用 `primary` 或 `secondary`；monitor 必须是 `monitor` |
+| `control_enabled` | 否 | primary 必须 `true`；secondary 默认 `false`，显式启用后才允许手动控制 |
 | `unit` | 否 | 原生单位 |
 | `initial_value` | 仿真 | 初始值 |
 | `stale_after_seconds` | 否 | 读数超过该时间未更新视为 Stale，默认 3 秒 |
 | `operation_timeout_seconds` | 否 | Connect/Poll/Set/Hold 的框架最终上限，默认 10 秒 |
 | `shutdown_timeout_seconds` | 否 | Disconnect 的框架最终上限，默认 3 秒 |
 
-旧 `kind = "measurement"` 不再支持。测量仪表应改写为 `modules/<id>/` 下的完整 Measurement Module。
+每个 temperature/field kind 最多一个 primary。SEQ 自动选择该 primary，Run 前要求其
+已 Connected 且有新鲜读回。多个 secondary 可以同时显示；默认只监视。旧
+`kind = "measurement"` 不再支持，测量仪表应写成完整 Measurement Module。
 
-设备超时必须是大于零的有限秒数。一次框架操作超时后，该设备会被隔离并禁止后续 I/O，直到重启程序；这是为了避免仍在底层线程执行的旧调用与新的控制命令并发。真实驱动仍须设置更短的 VISA/串口/TCP/SDK 协议超时，框架最终上限不能替代设备端安全状态和硬件互锁。
+设备超时必须是大于零的有限秒数。Poll/连接读链路失败后，核心终止旧设备进程并在
+`device_reconnect_timeout_seconds` 内重建连接；运行中的主设备恢复期间冻结 SEQ
+活动计时。成功恢复后核对实际 target/rate，不重放写命令。Set/Hold 写超时是歧义
+故障，立即 Faulted，不自动重试。真实驱动仍须设置更短的 VISA/串口/TCP/SDK 协议
+超时；框架最终上限不能替代硬件互锁。
 
 ### 温度/磁场专用键
 
@@ -128,6 +175,7 @@ id = "field"
 display_name = "Magnetic Field"
 kind = "field"
 plugin = "labcontrol.devices.simulated:SimulatedFieldController"
+role = "primary"
 unit = "Oe"
 min_value = -90000.0
 max_value = 90000.0
@@ -155,6 +203,7 @@ id = "second_stage"
 display_name = "2nd Stage"
 kind = "monitor"
 plugin = "labcontrol.devices.simulated:SimulatedReadOnlyMonitor"
+role = "monitor"
 unit = "K"
 initial_value = 4.2
 noise = 0.002
@@ -172,6 +221,7 @@ Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 
 
 - 无设备条目、重复设备 ID，或空白/控制字符导致无法寻址的设备 ID；
 - 未知设备 kind；
+- 同一种类多个 primary、primary 禁用控制、monitor 启用控制或角色/kind 不匹配；
 - `min_value >= max_value`；
 - 非正默认/最大速率；
 - `ui_scale` 越界；

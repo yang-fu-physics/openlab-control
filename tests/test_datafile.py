@@ -11,6 +11,13 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SIMULATED_MODULE = (
+    ROOT
+    / "plugin_templates"
+    / "measurement-modules-repository"
+    / "modules"
+    / "simulated_transport"
+)
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.config import load_config  # noqa: E402
@@ -30,7 +37,7 @@ class DatafileTests(unittest.TestCase):
             config = load_config(config_path)
             events = EventManager()
             logger = DatRunLogger(config, events)
-            module = load_manifest(ROOT / "modules" / "simulated_transport")
+            module = load_manifest(SIMULATED_MODULE)
             paths = logger.open_run(
                 "test.seq",
                 "T Measure\nT End Sequence\n",

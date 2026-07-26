@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -15,7 +17,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
-from labcontrol.measurement.manifest import activate_shared_dependencies  # noqa: E402
+from labcontrol.extensions.trust import PluginTrustStore  # noqa: E402
+from labcontrol.measurement.manifest import discover_modules  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
 
@@ -34,9 +37,29 @@ def main() -> int:
     manager_output = output_directory / f"module-manager-preview{suffix}.png"
     module_output = output_directory / f"module-window-preview{suffix}.png"
     status_output = output_directory / f"module-status-preview{suffix}.png"
+    temporary_project = tempfile.TemporaryDirectory()
+    project_root = Path(temporary_project.name)
+    (project_root / "configs").mkdir()
+    shutil.copy2(
+        ROOT / "configs" / "default.toml",
+        project_root / "configs" / "default.toml",
+    )
+    shutil.copytree(
+        ROOT
+        / "plugin_templates"
+        / "measurement-modules-repository"
+        / "modules",
+        project_root / "modules",
+    )
     application = QApplication([])
-    config = load_config(ROOT / "configs" / "default.toml")
-    activate_shared_dependencies(config)
+    config = load_config(project_root / "configs" / "default.toml")
+    descriptor = discover_modules(config)[0]
+    PluginTrustStore(
+        config.resolve_project_path(
+            config.plugins.state_directory
+        )
+        / "trusted_plugins.json"
+    ).trust("module", descriptor)
     configure_qt_appearance(
         application,
         config.ui_scale if options.scale is None else options.scale,
@@ -68,6 +91,7 @@ def main() -> int:
 
     QTimer.singleShot(100, capture_when_ready)
     application.exec()
+    temporary_project.cleanup()
     if not manager_output.exists() or not module_output.exists() or not status_output.exists():
         return 1
     print(manager_output)

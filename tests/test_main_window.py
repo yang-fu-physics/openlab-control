@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,6 +11,11 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
+MODULE_REPOSITORY = (
+    ROOT
+    / "plugin_templates"
+    / "measurement-modules-repository"
+)
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
@@ -137,7 +144,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_modules_manager_has_only_requested_columns_and_no_measurement_tile(self) -> None:
+    def test_default_modules_directory_is_empty_and_has_no_measurement_tile(self) -> None:
         window = MainWindow(self.config)
         try:
             manager = window.module_manager
@@ -147,21 +154,41 @@ class MainWindowLayoutTests(unittest.TestCase):
                 ["Enabled", "Name", "Version"],
             )
             self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
-            self.assertEqual([item.id for item in window.module_descriptors], ["simulated_transport"])
+            self.assertEqual(window.module_descriptors, ())
             self.assertEqual(window.windowTitle(), self.config.title)
         finally:
             window.close()
 
     def test_dependency_install_requires_selected_module_to_be_disabled(self) -> None:
-        window = MainWindow(self.config)
-        try:
-            window.enabled_modules.add("simulated_transport")
-            with patch("labcontrol.ui.main_window.QMessageBox.warning") as warning:
-                window._install_module_dependencies("simulated_transport")
-            warning.assert_called_once()
-            self.assertIn("Disable this measurement module", warning.call_args.args[2])
-        finally:
-            window.close()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            shutil.copytree(
+                MODULE_REPOSITORY / "modules",
+                root / "modules",
+            )
+            window = MainWindow(
+                load_config(root / "configs" / "default.toml")
+            )
+            try:
+                window.enabled_modules.add("simulated_transport")
+                with patch(
+                    "labcontrol.ui.main_window.QMessageBox.warning"
+                ) as warning:
+                    window._install_module_dependencies(
+                        "simulated_transport"
+                    )
+                warning.assert_called_once()
+                self.assertIn(
+                    "Disable this measurement module",
+                    warning.call_args.args[2],
+                )
+            finally:
+                window.close()
 
     def test_legacy_measure_parameters_block_run(self) -> None:
         window = MainWindow(self.config)

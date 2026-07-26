@@ -15,7 +15,11 @@
 | `test_sequence_parser.py` | 单行语法、任意嵌套、List、T/F、旧命令与越界/非有限参数拒绝 |
 | `test_sequence_editor.py` | 多行右键/键盘、父子去重、运行锁定 |
 | `test_engine.py` | 嵌套 Scan、Pause 时钟、Hold、控制等待上限、运行时参数防绕过与展开进度 |
-| `test_measurement_modules.py` | 清单、依赖冲突、Settings、并行多行测量、IPC/退出超时、完整生命周期 |
+| `test_measurement_modules.py` | 清单、Settings、并行多行测量、信任、IPC/退出超时、完整生命周期 |
+| `test_extension_dependencies.py` | 精确哈希 lock、完全离线安装、runtime 篡改和跨模块版本隔离 |
+| `test_device_plugin_manifest.py` | 外部设备清单、core/API、内容指纹和首次信任 |
+| `test_device_worker.py` | 每设备独立进程、阻塞强杀、依赖只在子进程可见 |
+| `test_device_recovery.py` | 读链路重连、恢复状态核对、写超时不重放、最终故障 |
 | `test_datafile.py` | 动态列、多行结果、追加 Schema、路径限制、原子运行目录与快照 |
 | `test_devices_and_units.py` | 控制/Monitor 插件、竞态、限制、非有限值、设备超时隔离、Hold 与 Oe/T |
 | `test_events_and_stability.py` | 活动事件去重、重复 Error 仍中止、数值判稳与超时 |
@@ -25,6 +29,7 @@
 | `test_status_tile.py` | Monitor 只读、格式精度、参数弹窗 |
 | `test_ui_scaling.py` | 1080p/2K/4K 自动和手动缩放 |
 | `test_release_contract.py` | 版本同步、依赖锁定、源码入口与发布资源布局 |
+| `test_repository_templates.py` | 核心扩展目录默认空、两个独立仓库模板与清单有效性 |
 
 任何发布版本必须 100% 通过。失败不得通过删除测试或扩大安全容差掩盖。
 
@@ -53,6 +58,8 @@
 ```
 
 预期 Completed；3 次 Measure 各流式写入 R1–R4，共 12 行模块数据。`--enable-module` 只用于无界面验收，不改变 GUI 每次启动全部 Disabled 的规则。
+执行前必须从仓库模板复制模块，并通过 GUI 预先信任完全相同的内容指纹；无界面模式不得
+自动信任。声明依赖的模块还必须先完成离线 runtime 准备。
 
 ### 模块视觉预览
 
@@ -78,7 +85,8 @@
 ## Modules Manager 验收
 
 1. 重新启动，确认所有模块 Disabled。
-2. Enable 示例模块；初始化期间行不可操作，成功后才勾选。
+2. 从独立仓库模板复制示例模块，首次 Enable 核对并确认内容指纹；初始化期间行不可操作，
+   成功后才勾选。
 3. 双击 Enabled 行，窗口置前。
 4. 尝试关闭/Alt+F4，窗口仍存在。
 5. 最小化主窗口，模块窗口一起最小化；恢复后恢复。
@@ -87,8 +95,9 @@
 8. Disable 成功，窗口隐藏。
 9. SEQ 运行中 Enable/Disable/Refresh/Install 均不可用。
 10. 所有模块 Disabled 时 Refresh 生效。
-11. 任一模块 Enabled 时 Install Dependencies 被阻止。
+11. 目标模块 Enabled 时 Install Dependencies 被阻止；其他隔离模块 Enabled 不影响目标。
 12. 制造无效 manifest，程序仍启动，该模块禁止 Enable并显示原因。
+13. 修改已信任源码，确认旧信任失效且 Enable 前再次提示。
 
 ## Settings/Status 验收
 
@@ -112,7 +121,7 @@
 | measure Warning | 继续、有效行保留、一次活动弹窗 |
 | measure Error | Run Faulted、其他已到达行保留、end(error)、不 abort |
 | end_sequence(completed) | 原完成改为 Faulted、模块 Enabled、Status 可见、不 abort |
-| abort on Disable | 仍 Enabled、窗口打开/Faulted、Error |
+| abort on Disable | Error、工作进程有界强制关闭、最终 Disabled；提示不代表仪表安全 |
 
 记录每个阶段的调用顺序，确保不会把 Stop/Error 误当 Disable。
 
@@ -158,14 +167,16 @@ build.bat
 检查：
 
 - `dist/OpenLabControl/OpenLabControl.exe`；
-- `configs/`、`examples/`、`docs/`、`modules/`、`plugin_templates/`；
-- 可写 `runs/`、`module_data/`、`module_runtime/site-packages/`、`wheels/`；
+- `configs/`、`examples/`、`docs/`、空 `modules/`、空 `device_plugins/` 和
+  `plugin_templates/` 中两个仓库模板；
+- 可写 `runs/`、`module_data/`、`plugin_runtime/`、`plugin_state/`、`wheels/`；
 - `_internal/` 不重复包含上述外置资源；
 - EXE 文件版本和产品版本与应用版本一致；
 - 记录 Authenticode 签名状态；未签名包必须在发布说明中明确标注；
 - EXE GUI smoke；
-- EXE headless demo（无模块和 `--enable-module simulated_transport` 两种）；
-- 在没有开发仓库/PYTHONPATH 的干净目录仍能发现 `simulated_transport`。
+- EXE headless demo（默认无模块，以及手动复制并预置信任 `simulated_transport` 两种）；
+- 在没有开发仓库/PYTHONPATH 的干净目录中，核心默认发现 0 个模块；复制模板后发现
+  `simulated_transport`。
 
 ## 真实设备上线前
 
@@ -179,15 +190,24 @@ build.bat
 
 ### Device Plugin
 
+- [ ] 从私密共享仓库手动复制，首次内容指纹和离线依赖验证通过。
+- [ ] 每个温度/磁场 kind 只有一个 primary；所有 secondary 默认只读。
 - [ ] 只读 connect/poll 连续运行至少 1 小时。
+- [ ] connect 核对型号/固件且不改变仪表输出或自动 Apply 面板设置。
 - [ ] 温场单位、符号和速率换算与独立仪表核对。
 - [ ] 最小风险 Target；Stable 判定与人工判断对比。
-- [ ] Stop/Error Hold 行为实测。
-- [ ] 断线/重连不会重复下发危险目标。
+- [ ] 主配置、手动弹窗、手写 SEQ、运行时和插件侧上下限均无法绕过。
+- [ ] Stop/Error Hold 使用新鲜读回，不能使用缓存或默认零。
+- [ ] 拔线后进入 Reconnecting，恢复期间 SEQ 计时冻结，60 秒上限后 Fault。
+- [ ] 恢复后读取并核对实际 target/rate，不会重复下发危险目标。
+- [ ] 模拟写超时，确认没有自动重放。
+- [ ] 强制终止设备进程后其他设备仍响应，退出后无残留句柄/子进程。
 
 ### Measurement Module
 
 - [ ] Enable 只初始化，不改变源输出/范围。
+- [ ] 首次信任绑定准确内容；改一字节后旧信任失效。
+- [ ] 离线 lock/wheel 哈希和 runtime 内容篡改都会阻止 Enable。
 - [ ] Settings 与实际 Status 逐项核对。
 - [ ] Apply 顺序、范围、互锁经过低风险测试。
 - [ ] begin/measure/end/abort 每条命令有仪表侧证据。

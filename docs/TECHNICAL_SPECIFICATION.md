@@ -1,7 +1,7 @@
 # OpenLab Control 0.10.3 技术规格
 
-状态：Implemented Baseline
-日期：2026-07-23
+状态：Beta Candidate（仿真验证；未验证真实仪表）
+日期：2026-07-26
 作者：yang-fu-physics `<yfu.physics@gmail.com>`
 
 ## 1. 目的
@@ -20,7 +20,7 @@
 - 并行模块测量与多行流式中央 DAT；
 - Warning/Error 锁存、去重弹窗、事件日志；
 - 独立 DAT Browser 和 `.plt` 显示配置；
-- 仿真设备与 `simulated_transport` 示例模块；
+- 内置仿真设备，以及位于独立仓库模板的 `simulated_transport` 示例模块；
 - 源码与 Windows 文件夹式发布包。
 
 ### 2.2 不包含
@@ -65,18 +65,24 @@
 ### 3.3 设备控制
 
 - DEV-001：Device kind SHALL 仅为 temperature、field、monitor。
-- DEV-002：每个设备的 Poll/Set/Hold SHALL 由同一异步锁串行化。
-- DEV-003：不同设备 MAY 并发轮询。
+- DEV-002：每个配置设备实例 SHALL 在独立 spawn 子进程运行，同一实例请求 SHALL 串行。
+- DEV-003：不同设备 SHALL 可并发轮询、恢复和退出。
 - DEV-004：Target 与 Rate SHALL 同时在 UI 和运行时由同一配置限制。
 - DEV-005：中央 SHALL 使用偏差、窗口斜率、Dwell、Timeout 判稳。
 - DEV-006：模块 SHALL 只能获得设备只读快照，不得获得控制引用。
 - DEV-007：设备 Connect/Poll/Set/Hold/Disconnect SHALL 有配置化有限框架超时。
-- DEV-008：一次设备操作超时后，框架 SHALL 禁止该设备后续 I/O 直到重启，并报告 Error。
+- DEV-008：读链路失败后框架 SHALL 终止旧进程，在配置恢复窗内重建连接并验证实际状态；
+  写超时 SHALL 不重放并立即 Fault。
 - DEV-009：Stop 时任一控制设备未确认 Hold Current，最终运行状态 SHALL 为 Faulted。
 - DEV-010：SEQ 参数窗口 SHALL 按类型列出配置设备 ID，使用对应设备的 Target/Rate 限制。
-- DEV-011：显式 SEQ 设备 ID SHALL 可保存/重载；省略 ID 或旧角色名 SHALL 解析到该类型第一个配置设备。
+- DEV-011：显式 SEQ 设备 ID SHALL 可保存/重载；省略 ID 或旧角色名 SHALL 解析到该类型
+  唯一 primary，而不是目录/配置顺序中的任意设备。
 - DEV-012：Settle 判稳与 Sweep 到达目标 SHALL 均有最终等待上限；无新读数时不得无限等待。
 - DEV-013：设备 ID SHALL 是非空可打印文本且无首尾空白，并与 UI、SEQ 解析和运行时使用同一精确值。
+- DEV-014：每个 temperature/field kind SHALL 最多一个 primary；primary SHALL 可控，
+  secondary 默认 SHALL 只读，monitor SHALL 永远不可控。
+- DEV-015：SEQ 主设备 Reconnecting 时 SHALL 冻结活动计时；恢复上限后 SHALL Error。
+- DEV-016：Run 预检 SHALL 要求所需 primary Connected 且存在新鲜读回。
 
 ### 3.4 Measurement Module 发现与依赖
 
@@ -86,11 +92,16 @@
 - MOD-004：Manager SHALL 只显示 Enabled、Name、Version 三列。
 - MOD-005：Refresh SHALL 仅在 SEQ Idle 且所有模块 Disabled 时允许。
 - MOD-006：清单 SHALL 验证唯一 ID、API、入口、backend type、固定列和依赖。
-- MOD-007：缺失依赖或冲突依赖 SHALL 禁止 Enable。
-- MOD-008：依赖 SHALL 默认共享同一 `module_runtime/site-packages`，不得自动创建逐模块环境。
+- MOD-007：缺失、未哈希、版本不满足或 runtime 完整性失败 SHALL 禁止 Enable。
+- MOD-008：每个 Device/Module SHALL 使用按类型、ID 和内容指纹隔离的依赖目录；依赖
+  SHALL 只注入对应子进程。
 - MOD-009：Install Dependencies SHALL 显式触发；Enable 不得自动安装。
-- MOD-010：修改共享依赖前 SHALL 要求全部模块 Disabled。
-- MOD-010：离线 wheels SHALL 优先；在线 pip SHALL 再次取得用户确认。
+- MOD-010：修改模块隔离依赖前 SHALL 只要求目标模块 Disabled；Refresh 仍要求全部模块
+  Disabled。
+- MOD-011：依赖安装 SHALL 只使用本地 wheels、精确带 SHA-256 的 lock 和 `--no-index
+  --require-hashes`；不得在线回退。
+- MOD-012：首次加载 SHALL 绑定 type/ID/version/content fingerprint 取得用户信任；
+  内容变化 SHALL 使旧信任失效。
 
 ### 3.5 模块进程和界面
 
@@ -100,6 +111,8 @@
 - PROC-004：同一模块 IPC 操作 SHALL 串行。
 - PROC-005：真实驱动 SHALL 自行配置有限协议超时；框架 SHALL 另行提供可配置的启动、IPC 操作和关闭最终超时。
 - PROC-006：模块工作进程超时 SHALL 报告 Error、使该进程失效并在有限时间内回收管道和进程。
+- PROC-007：设备和模块 IPC SHALL 使用受大小限制的 JSON，不得反序列化 pickle。
+- PROC-008：扩展依赖目录 SHALL 在子进程内直接插入，不得处理 `.pth` 或污染主进程。
 - WIN-001：模块窗口 SHALL 是主窗口拥有的独立 modeless Windows 窗口。
 - WIN-002：窗口 SHALL 保持在主窗口之前但不得全局 Always-on-top。
 - WIN-003：窗口 SHALL 可移动/最小化，用户不得关闭。
@@ -172,7 +185,8 @@
 - NFR-003：GUI 线程不得执行阻塞仪表 I/O。
 - NFR-004：默认仿真 SHALL 不控制真实仪器。
 - NFR-005：逐行 Flush SHALL 默认启用。
-- NFR-006：源码、示例、配置、模块和文档 SHALL 随发布包提供。
+- NFR-006：源码、示例、配置、扩展仓库模板和文档 SHALL 随发布包提供；活动扩展目录默认
+  SHALL 为空。
 - NFR-007：模块源码视为受信任；文档 SHALL 明确非安全沙箱。
 - NFR-008：关键生命周期、解析、数据、事件和 UI SHALL 有自动测试。
 - NFR-009：Windows EXE SHALL 写入与应用版本一致的文件/产品版本；外置可维护资源不得在 `_internal/` 重复打包。
@@ -206,7 +220,8 @@ Disabled → Initializing → Enabled ↔ Measuring
 
 任一运行阶段可进入 Faulted，但 Enabled 标志是否保留由操作决定：
 - initialize 失败：Disabled
-- end/abort 失败：Enabled + Faulted
+- end 失败：Enabled + Faulted
+- Disable abort 失败：报告 Error，工作进程有界强制关闭，最终 Disabled；不声明仪表安全
 ```
 
 ## 6. 数据契约
@@ -233,6 +248,8 @@ events.dat
 - SAF-005：设备/模块通信必须配置有限超时。
 - SAF-006：禁止在模块/设备源码中提交秘密。
 - SAF-007：接入真实硬件必须按测试计划分阶段完成。
+- SAF-008：扩展安装 SHALL 完全离线、内容可审查、依赖可复现；信任不得仅绑定路径或名称。
+- SAF-009：软件进程终止不得被解释为仪表已进入安全状态。
 
 ## 8. 验收基线
 
@@ -240,11 +257,13 @@ events.dat
 
 1. 自动测试全部通过。
 2. Source GUI offscreen smoke 通过且截图可读。
-3. 示例模块完成 Enable/Apply/Manual/Measure/End/Disable 独立进程测试。
+3. 从独立仓库模板手动复制的示例模块完成信任、Enable/Apply/Manual/Measure/End/Disable
+   独立进程测试。
 4. 一次 Measure 产生 R1–R4 四个顺序行和每行系统快照。
 5. 无模块 Measure 产生 Warning + 一行系统状态并完成。
 6. 旧 Measure 参数和 Initialize 被解析 Error 拒绝。
-7. Windows 文件夹发布包构建成功，包含 modules/templates/docs，且 `_internal/` 无资源副本。
+7. Windows 文件夹发布包构建成功，包含空 modules/device_plugins、两个仓库模板和 docs，
+   且 `_internal/` 无资源副本。
 8. 发布 EXE GUI smoke 与 headless demo 通过。
 9. EXE 文件版本和产品版本与应用版本一致。
 10. Git 作者唯一为 `yang-fu-physics <yfu.physics@gmail.com>`。

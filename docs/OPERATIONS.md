@@ -10,7 +10,10 @@
 OpenLabControl.exe
 ```
 
-不要只复制 EXE；`configs/`、`modules/`、`docs/` 等目录必须和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，不会恢复上次 Enable 状态。
+不要只复制 EXE；`configs/`、`docs/`、`plugin_templates/`、`modules/`、
+`device_plugins/`、`plugin_runtime/`、`plugin_state/`、`module_data/`、`wheels/` 和
+`runs/` 等目录应和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，
+不会恢复上次 Enable 状态。
 
 ### 源码运行
 
@@ -45,7 +48,9 @@ run.bat
 .venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
 ```
 
-这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules Manager 手动启用。
+这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules
+Manager 手动启用。无界面模式不会弹信任确认：模块必须已经手动复制、在 GUI 中确认过
+完全相同的内容指纹，并且其离线依赖 runtime 已准备好，否则启动会拒绝。
 
 ## 主窗口
 
@@ -56,7 +61,9 @@ run.bat
 - 工具栏 `Modules`：测量模块管理。
 - `Run Log`：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。
 
-温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，不弹控制窗口。
+温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，
+不弹控制窗口。每种 temperature/field 最多一个 primary 供 SEQ 使用；其他 secondary
+默认只读显示。即使 secondary 显式允许手动控制，SEQ 也不会自动选择它。
 
 ## 测量模块
 
@@ -65,8 +72,10 @@ run.bat
 1. 点击工具栏或菜单 `Modules`。
 2. 管理器只有 `Enabled / Name / Version` 三列。
 3. 勾选所需模块。
-4. 程序显示 `Initializing <module>...`；初始化成功后才真正勾选并打开模块窗口。
-5. 初始化失败会弹 Error，仍保持 Disabled。
+4. 首次加载或内容变化时，核对弹窗中的类型、ID、版本、完整路径和 SHA-256 指纹后确认
+   信任；拒绝时不加载任何源码。
+5. 程序显示 `Initializing <module>...`；初始化成功后才真正勾选并打开模块窗口。
+6. 初始化失败会弹 Error，仍保持 Disabled。
 
 模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块可把窗口带到前面。
 
@@ -99,24 +108,28 @@ Settings 在 Apply、Disable、关闭程序和 Run 前自动保存。设置保�
 2. 调用模块 abort；
 3. abort 成功后才取消勾选、关闭工作进程并隐藏窗口。
 
-abort 失败时模块仍显示 Enabled，窗口保持打开并显示 Faulted/Status，程序不会假装已经安全禁用。
+abort 失败时程序报告 Error，并在关闭总上限内强制回收模块工作进程、最终显示 Disabled。
+强制回收只保证本机进程/管道不残留，不代表外部仪表已经安全；此时必须按模块硬件说明
+人工检查输出。
 
 ### Refresh 与依赖
 
 只有 SEQ Idle 且全部模块 Disabled 时可以 `Refresh`。它重新扫描 `modules/`，不做运行中的热替换。
 
-共享依赖安装同样要求全部模块 Disabled，防止工作进程正在导入或使用某个包时替换其文件。
+安装依赖只要求所选模块 Disabled；其他模块的隔离 runtime 不会被替换。Refresh 仍要求
+全部模块 Disabled，因为它会重新建立整个发现列表。
 
 依赖缺失时：
 
-1. 先 Disable 全部模块，再选中目标模块。
+1. Disable 目标模块，再选中它。
 2. 点击 `Install Dependencies`。
-3. 确认安装到共享环境。
-4. 程序先尝试根 `wheels/` 和模块 `wheels/`。
-5. 离线失败后，如确需联网，再确认 Online Install。
-6. 完成后 Refresh。
+3. 核对并确认该模块的内容指纹。
+4. 程序只读取模块 `requirements.lock`、根 `wheels/` 和模块 `wheels/`，使用精确版本和
+   SHA-256 离线安装到该模块自己的 runtime。
+5. 完成后 Refresh。
 
-依赖版本冲突不能靠 Enable 绕过，需要模块开发者统一版本。
+没有在线回退，也不会从主 Python 环境“借用”已安装包。两个模块可安全使用同一依赖的
+不同版本。
 
 ## 编辑 SEQ
 
@@ -184,6 +197,10 @@ Stop 后：
 - 模块执行 `end_sequence("stopped")`；
 - 不执行模块 abort，模块仍 Enabled，窗口保持可用。
 
+如果主温度或磁场设备读链路中断，状态显示 `Reconnecting`。默认每 2 秒重连，最长
+1 分钟；SEQ 在这段时间冻结当前 Wait/Settle 计时。成功后核对仪表实际 target/rate 再
+继续；超时或核对失败进入 Error。写操作超时不会自动重发。
+
 ## 手动温场控制
 
 双击底部 Temperature 或 Magnetic Field：
@@ -195,6 +212,8 @@ Stop 后：
 - `Hold Current`。
 
 弹窗使用配置上下限和最大速率。`2nd Stage` 等 Monitor 没有手动控制。
+`control_enabled = false` 的 secondary 也没有手动控制。运行时仍会再次检查角色、
+连接状态、Target 和 Rate，因此不能通过脚本绕过参数窗口限制。
 
 ## Warning 与 Error
 
@@ -268,11 +287,15 @@ SEQ 运行中关闭主窗口会确认；确认后请求 Stop/Hold/End。随后�
 
 ### 模块无法勾选
 
-选中行查看底部说明。常见原因：清单 Invalid、API 版本不匹配、依赖缺失或模块间依赖冲突。先 Disable 全部模块，再修复并 Refresh。
+选中行查看底部说明。常见原因：清单 Invalid、API/core 版本不匹配、未确认信任、
+依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。Disable 目标模块后重新准备依赖；
+需要重新扫描源码时先 Disable 全部模块再 Refresh。
 
 ### 发布包提示没有 Python Runtime
 
-Install Dependencies 需要配置 `modules.python_executable` 或放置 `runtime/python/python.exe`。程序运行本身不要求该便携 Python；只有安装新依赖需要。
+Install Dependencies 需要配置 `modules.python_executable` /
+`plugins.python_executable`，或放置 `runtime/python/python.exe`。程序运行本身不要求该
+便携 Python；只有离线准备新依赖需要。便携 Python 也必须自带 pip。
 
 ### Enable 后参数没有作用
 
@@ -282,9 +305,10 @@ Install Dependencies 需要配置 `modules.python_executable` 或放置 `runtime
 
 这是安全设计。先在 Modules Manager 取消 Enable；abort 成功后窗口自动隐藏。
 
-### Disable 后仍然 Enabled
+### Disable 报错但已显示 Disabled
 
-abort 失败。查看 Status 和 Error，不要强制假定输出已关闭。处理仪表故障后再次 Disable，必要时按该模块硬件操作说明人工退出输出。
+abort 没有确认完成，但框架已为资源释放强制关闭工作进程。不要把 Disabled 当作输出已
+关闭；查看 Error，并按该模块硬件操作说明人工退出输出、检查仪表状态后再重新 Enable。
 
 ### Measure 没有模块数据
 
@@ -292,7 +316,19 @@ abort 失败。查看 Status 和 Error，不要强制假定输出已关闭。处
 
 ### SEQ 旧 Measure/Initialize 无法运行
 
-0.10.0 不兼容旧写法。删除 Initialize；把 Measure 改为无参数 `T Measure`，并在 Modules Manager Enable 相应测量方案。
+当前版本不兼容旧写法。删除 Initialize；把 Measure 改为无参数 `T Measure`，并在
+Modules Manager Enable 相应测量方案。
+
+### 更换温控仪或磁体电源
+
+从私密 Device Plugin 仓库复制目标插件目录到 `device_plugins/`，在一个配置文件中修改
+对应设备的 `plugin = "<plugin-id>"`、address、上下限、速率和超时，然后重启。不要为
+不同仪表维护核心代码分支。首次启动会要求确认插件内容指纹；修改插件后必须重新确认。
+
+### 设备一直 Reconnecting
+
+不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立设备
+进程并读取实际状态。1 分钟仍失败时会 Fault，不会无限重试或猜测安全状态。
 
 ### 左栏被长文件名撑宽
 

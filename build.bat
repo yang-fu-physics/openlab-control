@@ -21,7 +21,10 @@ copy /Y "SECURITY.md" "dist\OpenLabControl\SECURITY.md" >nul
 if not exist "dist\OpenLabControl\runs" mkdir "dist\OpenLabControl\runs"
 if not exist "dist\OpenLabControl\module_data" mkdir "dist\OpenLabControl\module_data"
 if not exist "dist\OpenLabControl\wheels" mkdir "dist\OpenLabControl\wheels"
-if not exist "dist\OpenLabControl\module_runtime\site-packages" mkdir "dist\OpenLabControl\module_runtime\site-packages"
+if not exist "dist\OpenLabControl\modules" mkdir "dist\OpenLabControl\modules"
+if not exist "dist\OpenLabControl\device_plugins" mkdir "dist\OpenLabControl\device_plugins"
+if not exist "dist\OpenLabControl\plugin_runtime" mkdir "dist\OpenLabControl\plugin_runtime"
+if not exist "dist\OpenLabControl\plugin_state" mkdir "dist\OpenLabControl\plugin_state"
 echo.
 echo Build completed: dist\OpenLabControl\OpenLabControl.exe
 pause

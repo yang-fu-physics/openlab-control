@@ -163,7 +163,11 @@ Scan Temperature 的 List 是用户声明的实验路径，不是待排序的数
 
 状态：Accepted
 
-每次 Run 调用 begin_sequence 和 end_sequence(completed|stopped|error)；abort 只用于 Disable 和应用退出。SEQ Error 不调用 abort，因为模块仍应保持连接供用户检查。end 失败使运行 Faulted 但模块保持 Enabled；abort 失败使 Disable 失败，不能隐藏窗口或伪造 Disabled。
+每次 Run 调用 begin_sequence 和 end_sequence(completed|stopped|error)；abort 只用于
+Disable 和应用退出。SEQ Error 不调用 abort，因为模块仍应保持连接供用户检查。end
+失败使运行 Faulted 但模块保持 Enabled。Disable 的 abort 失败时仍报告 Error，但为避免
+本机管道/进程泄漏会有界强制关闭 worker 并转为 Disabled；Disabled 只表示本机扩展会话
+已结束，不证明外部仪表安全。
 
 ## ADR-023：无参数 Measure 与 Run 级模块锁定
 
@@ -185,9 +189,10 @@ Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 
 
 ## ADR-026：所有模块共享依赖目录
 
-状态：Accepted
+状态：Superseded by ADR-030
 
-模块依赖统一安装到 `module_runtime/site-packages`；离线 wheels 优先，在线安装二次确认；版本范围冲突禁止 Enable。逐模块 venv 会增加包体和启动开销，实验室应协调少量仪表库版本。发布 EXE 安装新依赖时需配置便携 Python，但运行时仍从共享 target 目录加载。
+早期版本将模块依赖统一安装到 `module_runtime/site-packages`，导致版本冲突、主进程污染
+和不可审计的在线回退。该方案不再使用。
 
 ## ADR-027：模块窗口不可由用户直接关闭
 
@@ -199,7 +204,10 @@ Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 
 
 状态：Accepted
 
-配置、模块、示例、模板和文档必须位于 EXE 同级目录，既便于实验室审查和维护，也与冻结运行时的项目根目录解析一致。PyInstaller 不再把这些目录同时复制到 `_internal/`；`build.bat` 是发布目录的唯一资源装配步骤。Windows 版本资源直接读取核心包版本，避免 EXE 属性与应用版本漂移。
+配置、空的扩展安装目录、扩展仓库模板、示例和文档必须位于 EXE 同级目录，既便于实验室
+审查和维护，也与冻结运行时的项目根目录解析一致。PyInstaller 不再把这些目录同时复制到
+`_internal/`；`build.bat` 是发布目录的唯一资源装配步骤。Windows 版本资源直接读取核心
+包版本，避免 EXE 属性与应用版本漂移。
 
 源码入口 `run.bat` 只启动当前源码环境。发布包由 `dist/OpenLabControl/OpenLabControl.exe` 显式启动，避免开发目录存在旧构建时静默运行旧版本。
 
@@ -208,3 +216,40 @@ Enable 只加载 Settings 不 Apply；显式 Apply 才发送。Run 分别保存 
 状态：Accepted
 
 `pyproject.toml` 和 `requirements.txt` 保留兼容范围，供库元数据和受控升级使用；`requirements-lock.txt` 固定经过 Windows 发布验证的直接与传递依赖，`setup.bat` 只安装该锁定集合且不隐式升级 pip。这样日常升级意图与可复现发布环境分离。锁定文件只有在隔离环境完成完整测试、源码冒烟和打包验收后才能更新。
+
+## ADR-030：扩展依赖按内容指纹隔离并完全离线
+
+状态：Accepted
+
+每个 Device Plugin 和 Measurement Module 使用
+`plugin_runtime/<type>/<id>/<fingerprint>/site-packages`。依赖只从扩展/共享 wheels
+安装，lock 必须精确版本加 SHA-256，固定使用 no-index/only-binary/require-hashes。
+staging 验证后原子替换，子进程启动再校验整个 runtime 摘要。依赖只加入该子进程路径，
+不处理 `.pth`，因此允许互不兼容版本共存且不污染 GUI。
+
+## ADR-031：外部扩展按内容信任，核心与两个扩展仓库分离
+
+状态：Accepted
+
+核心 `modules/` 和 `device_plugins/` 默认空。所有 Measurement Module 共用一个独立仓库，
+所有正式 Device Plugin 共用一个私密独立仓库；首阶段手动复制安装，未来可在不改变清单
+契约的前提下增加第三方分发。首次加载绑定 type/ID/version/content fingerprint 确认，
+内容变化必须重新信任。不同仪表通过一个配置文件选择插件并重启，不使用核心分支。
+
+## ADR-032：每设备独立进程与一分钟读链路恢复窗
+
+状态：Accepted
+
+阻塞或崩溃的设备驱动不能拖住其他设备和运行时，因此每个配置设备实例使用独立 spawn
+进程和受限 JSON IPC。Poll/连接读链路失败后终止旧进程，默认每 2 秒重建，最长 60 秒；
+SEQ 主设备恢复期间冻结计时，成功后验证实际 target/rate。写超时不自动重放，因为无法
+判断仪表是否已经执行。
+
+## ADR-033：主控角色显式，其他温场设备默认只读
+
+状态：Accepted
+
+每个 temperature/field kind 最多一个 primary，供 SEQ 默认选择并必须启用控制。
+secondary 默认 `control_enabled = false`，可以同时显示而不会被 SEQ 误控；Monitor 永远
+不可控。旧单设备配置只在没有任何显式 role 时兼容提升第一个设备。参数窗口和执行器都
+使用同一角色、连接状态和安全限制。

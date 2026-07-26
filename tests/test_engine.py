@@ -10,6 +10,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MODULE_REPOSITORY = (
+    ROOT
+    / "plugin_templates"
+    / "measurement-modules-repository"
+)
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.config import load_config  # noqa: E402
@@ -38,7 +43,10 @@ class SequenceEngineTests(unittest.TestCase):
         (temp_root / "configs").mkdir()
         target = temp_root / "configs" / "default.toml"
         shutil.copy2(ROOT / "configs" / "default.toml", target)
-        shutil.copytree(ROOT / "modules", temp_root / "modules")
+        shutil.copytree(
+            MODULE_REPOSITORY / "modules",
+            temp_root / "modules",
+        )
         config = load_config(target)
         trust_store = PluginTrustStore(
             config.resolve_project_path(

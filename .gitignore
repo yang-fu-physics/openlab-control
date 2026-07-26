@@ -18,8 +18,6 @@ runs/*
 !/module_data/.gitkeep
 /wheels/*
 !/wheels/.gitkeep
-/module_runtime/site-packages/*
-!/module_runtime/site-packages/.gitkeep
 /device_plugins/*
 !/device_plugins/.gitkeep
 /plugin_state/*

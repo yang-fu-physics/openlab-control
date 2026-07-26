@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Reference Settings/Status UI for a separately distributed module."""
+
 from collections.abc import Mapping
 from typing import Any
 
