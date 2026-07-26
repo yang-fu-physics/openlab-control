@@ -14,6 +14,7 @@ from ..config import AppConfig
 from ..extensions.dependencies import (
     dependency_runtime_errors,
     missing_dependencies as find_missing_dependencies,
+    partition_extension_dependencies,
     validate_requirements_lock,
 )
 from ..extensions.loading import load_source_object
@@ -51,6 +52,7 @@ class ModuleDescriptor:
     frontend: str = ""
     backend: str = ""
     backend_type: str = "python"
+    framework_dependencies: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     columns: tuple[ModuleColumn, ...] = ()
     fingerprint: str = ""
@@ -95,7 +97,7 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         backend_type = str(
             raw.get("backend_type", "python")
         ).strip().casefold()
-        dependencies = tuple(
+        declared_dependencies = tuple(
             str(item).strip()
             for item in raw.get("dependencies", [])
         )
@@ -118,6 +120,13 @@ def load_manifest(path: Path) -> ModuleDescriptor:
             f"Cannot read module.toml: {exc}",
         )
 
+    (
+        framework_dependencies,
+        dependencies,
+        dependency_compatibility_errors,
+    ) = partition_extension_dependencies(
+        declared_dependencies
+    )
     descriptor = ModuleDescriptor(
         id=module_id,
         name=name,
@@ -128,6 +137,7 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         frontend=frontend,
         backend=backend,
         backend_type=backend_type,
+        framework_dependencies=framework_dependencies,
         dependencies=dependencies,
         columns=columns,
     )
@@ -184,7 +194,8 @@ def load_manifest(path: Path) -> ModuleDescriptor:
                     f"{label} source does not exist: "
                     f"{module_name}.py"
                 )
-    for raw_requirement in dependencies:
+    errors.extend(dependency_compatibility_errors)
+    for raw_requirement in declared_dependencies:
         try:
             requirement = Requirement(raw_requirement)
         except InvalidRequirement:
@@ -197,6 +208,8 @@ def load_manifest(path: Path) -> ModuleDescriptor:
                 f"dependency URLs are not allowed: {raw_requirement}"
             )
     errors.extend(
+        # 只有核心尚未提供的额外依赖才需要扩展自己的锁文件；通用依赖由核心
+        # requirements-lock.txt 统一锁定，禁止模块私下覆盖版本。
         validate_requirements_lock(path, dependencies)
     )
     if not columns:

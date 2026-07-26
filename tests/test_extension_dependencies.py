@@ -12,9 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.extensions.dependencies import (  # noqa: E402
+    FRAMEWORK_DEPENDENCY_VERSIONS,
     dependency_runtime_errors,
     install_offline_dependencies,
     missing_dependencies,
+    partition_extension_dependencies,
     validate_requirements_lock,
 )
 from labcontrol.extensions.trust import extension_tree_digest  # noqa: E402
@@ -88,6 +90,74 @@ def _write_wheel(
 
 
 class ExtensionDependencyTests(unittest.TestCase):
+    def test_framework_dependencies_are_shared_and_version_checked(
+        self,
+    ) -> None:
+        framework, extra, errors = (
+            partition_extension_dependencies(
+                (
+                    "PyVISA>=1.16,<1.17",
+                    "typing_extensions>=4.16,<5",
+                    "module-only-demo==2.0.0",
+                )
+            )
+        )
+        self.assertEqual(
+            framework,
+            (
+                "PyVISA>=1.16,<1.17",
+                "typing_extensions>=4.16,<5",
+            ),
+        )
+        self.assertEqual(
+            extra,
+            ("module-only-demo==2.0.0",),
+        )
+        self.assertEqual(errors, ())
+        self.assertEqual(
+            str(FRAMEWORK_DEPENDENCY_VERSIONS["pyvisa"]),
+            "1.16.2",
+        )
+
+        framework, extra, errors = (
+            partition_extension_dependencies(
+                ("PyVISA>=2",)
+            )
+        )
+        self.assertEqual(framework, ())
+        self.assertEqual(extra, ())
+        self.assertTrue(
+            any(
+                "framework-provided version 1.16.2"
+                in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_missing_runtime_is_reported_as_not_installed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            errors = dependency_runtime_errors(
+                ("module-only-demo==1.0.0",),
+                Path(temporary)
+                / "runtime"
+                / "site-packages",
+                "a" * 64,
+            )
+        self.assertIn(
+            "extra dependency runtime is not installed",
+            errors,
+        )
+        self.assertFalse(
+            any(
+                "invalid isolated runtime marker"
+                in error
+                for error in errors
+            )
+        )
+
     def test_lock_requires_exact_hashed_non_url_requirements(
         self,
     ) -> None:

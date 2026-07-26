@@ -44,6 +44,7 @@ from labcontrol.plugins import DeviceManager  # noqa: E402
 from labcontrol.ui.measurement_modules import (  # noqa: E402
     MODULE_WINDOW_MIN_HEIGHT,
     MODULE_WINDOW_MIN_WIDTH,
+    ModuleManagerDialog,
     ModuleWindow,
 )
 from labcontrol.ui.scaling import scaled  # noqa: E402
@@ -157,6 +158,82 @@ class ManifestAndSettingsTests(unittest.TestCase):
             self.assertNotEqual(
                 module_dependency_directory(config, descriptors[0]),
                 module_dependency_directory(config, descriptors[1]),
+            )
+
+    def test_framework_dependency_needs_no_module_runtime(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            folder = root / "modules" / "shared_visa"
+            folder.mkdir(parents=True)
+            (folder / "module.toml").write_text(
+                "\n".join(
+                    [
+                        'id = "shared_visa"',
+                        'name = "Shared VISA"',
+                        'version = "1.0.0"',
+                        'api_version = "1.0"',
+                        'frontend = "frontend:Frontend"',
+                        'backend = "backend:Backend"',
+                        (
+                            'dependencies = ['
+                            '"PyVISA>=1.16,<1.17", '
+                            '"typing_extensions>=4.16,<5"]'
+                        ),
+                        "[[columns]]",
+                        'name = "Value"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (folder / "frontend.py").write_text(
+                "class Frontend:\n    pass\n",
+                encoding="utf-8",
+            )
+            (folder / "backend.py").write_text(
+                "class Backend:\n    pass\n",
+                encoding="utf-8",
+            )
+            config = load_config(
+                root / "configs" / "default.toml"
+            )
+            descriptor = discover_modules(config)[0]
+            self.assertTrue(
+                descriptor.valid,
+                descriptor.error,
+            )
+            self.assertEqual(descriptor.dependencies, ())
+            self.assertEqual(
+                descriptor.framework_dependencies,
+                (
+                    "PyVISA>=1.16,<1.17",
+                    "typing_extensions>=4.16,<5",
+                ),
+            )
+            self.assertTrue(descriptor.can_enable)
+
+            manifest = (
+                folder / "module.toml"
+            ).read_text(encoding="utf-8")
+            (folder / "module.toml").write_text(
+                manifest.replace(
+                    "PyVISA>=1.16,<1.17",
+                    "PyVISA>=2",
+                ),
+                encoding="utf-8",
+            )
+            incompatible = discover_modules(config)[0]
+            self.assertFalse(incompatible.valid)
+            self.assertIn(
+                "framework-provided version 1.16.2",
+                incompatible.error,
             )
 
 
@@ -751,6 +828,41 @@ class ModuleWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
+
+    def test_dependency_button_only_appears_for_extra_dependencies(
+        self,
+    ) -> None:
+        owner = QWidget()
+        shared = ModuleDescriptor(
+            id="shared",
+            name="Shared",
+            version="1.0.0",
+            path=ROOT,
+            dependencies=(),
+        )
+        extra = ModuleDescriptor(
+            id="extra",
+            name="Extra",
+            version="1.0.0",
+            path=ROOT,
+            dependencies=("module-only-demo==1.0.0",),
+        )
+        dialog = ModuleManagerDialog(
+            (shared, extra),
+            owner,
+        )
+        dialog.table.selectRow(0)
+        self.application.processEvents()
+        self.assertTrue(
+            dialog.install_button.isHidden()
+        )
+        dialog.table.selectRow(1)
+        self.application.processEvents()
+        self.assertFalse(
+            dialog.install_button.isHidden()
+        )
+        dialog.close()
+        owner.close()
 
     def test_window_uses_settings_and_status_pages_and_ignores_user_close(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

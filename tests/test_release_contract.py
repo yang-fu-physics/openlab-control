@@ -5,11 +5,17 @@ import tomllib
 import unittest
 from pathlib import Path
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol import __version__  # noqa: E402
+from labcontrol.extensions.dependencies import (  # noqa: E402
+    FRAMEWORK_DEPENDENCY_VERSIONS,
+)
 
 
 class ReleaseContractTests(unittest.TestCase):
@@ -54,10 +60,34 @@ class ReleaseContractTests(unittest.TestCase):
                 "packaging",
                 "pip",
                 "pyinstaller",
+                "pyvisa",
                 "pyside6",
                 "qtawesome",
                 "setuptools",
+                "typing-extensions",
             }.issubset(names)
+        )
+
+        with (ROOT / "pyproject.toml").open("rb") as handle:
+            project = tomllib.load(handle)
+        declared = {
+            canonicalize_name(requirement.name): next(
+                iter(requirement.specifier)
+            ).version
+            for requirement in (
+                Requirement(item)
+                for item in project["project"][
+                    "dependencies"
+                ]
+            )
+        }
+        self.assertEqual(
+            declared,
+            {
+                name: str(version)
+                for name, version
+                in FRAMEWORK_DEPENDENCY_VERSIONS.items()
+            },
         )
 
         setup_script = (ROOT / "setup.bat").read_text(encoding="utf-8")
@@ -71,6 +101,10 @@ class ReleaseContractTests(unittest.TestCase):
 
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
         self.assertIn("datas=[]", specification)
+        self.assertIn(
+            'collect_submodules("pyvisa")',
+            specification,
+        )
         build_script = (ROOT / "build.bat").read_text(encoding="utf-8")
         for name in (
             "configs",

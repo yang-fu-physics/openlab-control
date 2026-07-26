@@ -9,7 +9,8 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from types import MappingProxyType
+from typing import Iterable, Mapping
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -19,6 +20,23 @@ from .trust import ExtensionTrustError, extension_tree_digest
 
 
 _HASH = re.compile(r"--hash=sha256:([0-9a-fA-F]{64})(?:\s|$)")
+
+# 这些是扩展可以直接使用、并由 OpenLab Control 统一锁定和随正式包携带的依赖。
+# 模块/设备插件即使在 manifest 中声明兼容范围，也不会为它们再创建一份隔离副本。
+# 版本必须与 pyproject.toml、requirements.txt 和 requirements-lock.txt 保持一致。
+FRAMEWORK_DEPENDENCY_VERSIONS: Mapping[str, Version] = (
+    MappingProxyType(
+        {
+            canonicalize_name("PySide6"): Version("6.11.1"),
+            canonicalize_name("QtAwesome"): Version("1.4.2"),
+            canonicalize_name("packaging"): Version("26.2"),
+            canonicalize_name("PyVISA"): Version("1.16.2"),
+            canonicalize_name("typing_extensions"): Version(
+                "4.16.0"
+            ),
+        }
+    )
+)
 
 
 class DependencyInstallError(RuntimeError):
@@ -30,6 +48,60 @@ class OfflineInstallResult:
     target: Path
     stdout: str
     stderr: str
+
+
+def partition_extension_dependencies(
+    dependencies: Iterable[str],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """把扩展依赖分成核心已提供和仍需隔离安装的两组。
+
+    返回 ``(framework, extra, errors)``。核心依赖使用全局锁定版本，所有模块和设备
+    插件看到的是同一份包；只有 ``extra`` 才要求扩展携带 requirements.lock/wheels，
+    并在 Install Dependencies 后加入对应 worker 的 sys.path。
+
+    manifest 可以继续声明 PyVISA 等核心包的兼容范围，便于表达最低要求。若其范围不
+    接受核心锁定版本，扩展会在导入源码前被判为不兼容，不能用私有副本覆盖核心版本。
+    """
+
+    framework: list[str] = []
+    extra: list[str] = []
+    errors: list[str] = []
+    for raw_requirement in dependencies:
+        try:
+            requirement = Requirement(raw_requirement)
+        except InvalidRequirement:
+            # 具体的语法错误仍由 manifest 校验输出；先归到 extra，保证不会误判成
+            # 核心已提供并绕过 requirements.lock 检查。
+            extra.append(raw_requirement)
+            continue
+        if (
+            requirement.marker is not None
+            and not requirement.marker.evaluate()
+        ):
+            framework.append(raw_requirement)
+            continue
+        provided = FRAMEWORK_DEPENDENCY_VERSIONS.get(
+            canonicalize_name(requirement.name)
+        )
+        if provided is None or requirement.url is not None:
+            extra.append(raw_requirement)
+            continue
+        if (
+            requirement.specifier
+            and provided not in requirement.specifier
+        ):
+            errors.append(
+                f"{requirement.name} {requirement.specifier} is "
+                "incompatible with framework-provided version "
+                f"{provided}"
+            )
+            continue
+        framework.append(raw_requirement)
+    return (
+        tuple(framework),
+        tuple(extra),
+        tuple(dict.fromkeys(errors)),
+    )
 
 
 def _logical_lock_lines(path: Path) -> tuple[str, ...]:
@@ -224,6 +296,11 @@ def dependency_runtime_errors(
             "missing dependencies: " + ", ".join(missing)
         )
     marker_path = site_packages.parent / "runtime.json"
+    if not marker_path.is_file():
+        errors.append(
+            "extra dependency runtime is not installed"
+        )
+        return tuple(dict.fromkeys(errors))
     try:
         marker = json.loads(
             marker_path.read_text(encoding="utf-8")

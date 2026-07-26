@@ -11,7 +11,10 @@ from packaging.version import InvalidVersion, Version
 
 from .. import __version__
 from ..config import AppConfig
-from ..extensions.dependencies import validate_requirements_lock
+from ..extensions.dependencies import (
+    partition_extension_dependencies,
+    validate_requirements_lock,
+)
 from ..extensions.trust import ExtensionTrustError, extension_tree_digest
 from ..models import DeviceKind
 
@@ -33,6 +36,7 @@ class DevicePluginDescriptor:
     core_requires: str = ""
     backend: str = ""
     kinds: tuple[DeviceKind, ...] = ()
+    framework_dependencies: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     fingerprint: str = ""
     valid: bool = True
@@ -66,7 +70,10 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
         core_requires = str(raw.get("core_requires", "")).strip()
         backend = str(raw["backend"]).strip()
         kinds = tuple(DeviceKind(str(item).strip().casefold()) for item in raw["kinds"])
-        dependencies = tuple(str(item).strip() for item in raw.get("dependencies", []))
+        declared_dependencies = tuple(
+            str(item).strip()
+            for item in raw.get("dependencies", [])
+        )
     except (
         OSError,
         KeyError,
@@ -76,6 +83,13 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
     ) as exc:
         return _invalid(path, f"Cannot read device.toml: {exc}")
 
+    (
+        framework_dependencies,
+        dependencies,
+        dependency_compatibility_errors,
+    ) = partition_extension_dependencies(
+        declared_dependencies
+    )
     descriptor = DevicePluginDescriptor(
         id=plugin_id,
         name=name,
@@ -85,6 +99,7 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
         core_requires=core_requires,
         backend=backend,
         kinds=kinds,
+        framework_dependencies=framework_dependencies,
         dependencies=dependencies,
     )
     errors: list[str] = []
@@ -122,7 +137,8 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
         errors.append("at least one supported device kind is required")
     if len(kinds) != len(set(kinds)):
         errors.append("supported device kinds must be unique")
-    for raw_requirement in dependencies:
+    errors.extend(dependency_compatibility_errors)
+    for raw_requirement in declared_dependencies:
         try:
             requirement = Requirement(raw_requirement)
         except InvalidRequirement:
@@ -131,6 +147,7 @@ def load_device_manifest(path: Path) -> DevicePluginDescriptor:
         if requirement.url is not None:
             errors.append(f"dependency URLs are not allowed: {raw_requirement}")
     errors.extend(
+        # requirements.lock 只描述扩展自己的额外依赖；PyVISA 等通用包由核心锁定。
         validate_requirements_lock(path, dependencies)
     )
     try:

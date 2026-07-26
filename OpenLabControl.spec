@@ -20,7 +20,13 @@ sys.path.insert(0, str(Path.cwd() / "src"))
 from labcontrol import __version__
 
 
-hiddenimports = ["labcontrol.devices.simulated"] + collect_submodules("labcontrol_plugins")
+hiddenimports = (
+    ["labcontrol.devices.simulated"]
+    + collect_submodules("labcontrol_plugins")
+    # 仪表模块会在独立 worker 中动态 import PyVISA，PyInstaller 静态分析看不到。
+    # 由核心统一收集后，所有模块使用同一个 1.16.2 版本，不再各自安装 wheel。
+    + collect_submodules("pyvisa")
+)
 parsed_version = Version(__version__)
 release_numbers = list(parsed_version.release[:3])
 release_numbers.extend([0] * (3 - len(release_numbers)))

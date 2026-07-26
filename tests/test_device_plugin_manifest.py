@@ -121,6 +121,62 @@ class DevicePluginManifestTests(unittest.TestCase):
             )
             self.assertTrue(any("Duplicate device plugin id" in item.error for item in descriptors))
 
+    def test_framework_dependency_needs_no_plugin_runtime(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_plugin(
+                root,
+                dependencies=(
+                    '"PyVISA>=1.16,<1.17", '
+                    '"typing_extensions>=4.16,<5"'
+                ),
+            )
+            config = replace(
+                self.config,
+                plugins=replace(
+                    self.config.plugins,
+                    device_directory=str(root),
+                ),
+            )
+            descriptor = discover_device_plugins(
+                config
+            )[0]
+            self.assertTrue(
+                descriptor.valid,
+                descriptor.error,
+            )
+            self.assertEqual(descriptor.dependencies, ())
+            self.assertEqual(
+                descriptor.framework_dependencies,
+                (
+                    "PyVISA>=1.16,<1.17",
+                    "typing_extensions>=4.16,<5",
+                ),
+            )
+
+            manifest = (
+                root
+                / "example_temperature"
+                / "device.toml"
+            )
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "PyVISA>=1.16,<1.17",
+                    "PyVISA>=2",
+                ),
+                encoding="utf-8",
+            )
+            incompatible = discover_device_plugins(
+                config
+            )[0]
+            self.assertFalse(incompatible.valid)
+            self.assertIn(
+                "framework-provided version 1.16.2",
+                incompatible.error,
+            )
+
     def test_configured_plugin_must_exist_support_kind_and_be_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
