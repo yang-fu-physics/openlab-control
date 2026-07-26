@@ -3,7 +3,6 @@ from __future__ import annotations
 """Hardware-free reference backend for the extension repository template."""
 
 import random
-import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -33,7 +32,7 @@ class SimulatedTransportBackend(ModuleBackend):
         self, settings: Mapping[str, Any], context: ModuleOperationContext
     ) -> Mapping[str, Any]:
         self.desired_settings = {**self._defaults(), **dict(settings)}
-        time.sleep(0.08)
+        context.interruptible_sleep(0.08)
         self.connected = True
         status = {
             "Connection": "Connected (simulation)",
