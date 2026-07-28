@@ -1,12 +1,14 @@
 # Extension repository templates
 
-These two directories are complete, Git-ready starting points. They are not
-active extensions and are never scanned in place.
+These directories are Git-ready starting points. They are not active
+extensions and are never scanned in place.
 
 - `measurement-modules-repository/`: one shared repository containing all
   Measurement Modules that may be distributed to users.
-- `device-plugins-private-repository/`: one private shared repository
-  containing all real temperature, field, and monitor Device Plugins.
+- The Device Plugin template contains only fail-closed examples. Temperature,
+  field, and monitor devices differ in protocol, safety behavior, and user
+  interface, so the core does not claim to provide ready-to-use drivers for
+  every instrument.
 
 To install an extension without network access, copy one complete folder from
 the repository's `modules/` or `plugins/` directory into the matching

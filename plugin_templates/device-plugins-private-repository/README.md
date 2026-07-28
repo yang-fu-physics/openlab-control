@@ -1,8 +1,10 @@
-# OpenLab Device Plugins private repository
+# OpenLab Device Plugin examples
 
-This is the Git-ready layout for the single private repository that contains
-all formal temperature, magnetic-field, and read-only monitor plugins. Each
-folder under `plugins/` is independently installable and has its own
+Temperature controllers, magnet supplies, and read-only monitors differ in
+protocol, safety behavior, status model, and sometimes user interface.
+Therefore this template provides only fail-closed examples and interface
+patterns, not ready-to-use drivers for every device. Each folder under
+`plugins/` is independently installable and has its own
 `device.toml` and backend source. `requirements.lock` and local `wheels/` are
 only needed for dependencies not supplied by the OpenLab Control framework.
 

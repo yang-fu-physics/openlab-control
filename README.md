@@ -58,15 +58,16 @@ build.bat
 输出位于 `dist\OpenLabControl\`。配置、文档、扩展模板和可写数据目录只放在 EXE
 旁边，不会在 `_internal/` 中重复一份。
 
-## 扩展仓库与离线安装
+## 扩展示例与离线安装
 
-核心仓库的 `modules/` 和 `device_plugins/` 默认为空。发布包内提供两个 Git-ready
-模板：
+核心仓库的 `modules/` 和 `device_plugins/` 默认为空。发布包内提供 Git-ready
+扩展示例：
 
 - `plugin_templates/measurement-modules-repository/`：所有 Measurement Module 共用
   的仓库模板，含硬件无关的 `simulated_transport`。
-- `plugin_templates/device-plugins-private-repository/`：所有正式 Device Plugin 共用的
-  私密仓库模板，含 fail-closed 控制器和只读 Monitor 骨架。
+- Device Plugin 示例：温控、磁场和 Monitor 的协议、安全行为及界面会随具体设备
+  改变，因此核心只提供 fail-closed 控制器和只读 Monitor 骨架，不宣称这些示例可
+  直接控制任意真实仪表。
 
 首阶段不提供在线商店。安装时手动复制一个完整扩展目录：
 
@@ -112,7 +113,8 @@ Apply；模块仍遵守“启动默认 Disabled，用户核对后显式 Apply”
 
 ## 更换温度或磁场设备
 
-正式设备代码放在私密 Device Plugin 仓库中，不使用“每个设备一个核心分支”。部署时：
+不同温控器、磁体电源和 Monitor 使用各自的 Device Plugin，不需要为设备维护核心
+分支。核心仓库只提供接口和 fail-closed 示例。部署实际插件时：
 
 1. 把目标插件目录复制到 `device_plugins/`。
 2. 只修改 `configs/default.toml` 中相应设备的 `plugin = "<plugin-id>"` 及该设备的地址、
