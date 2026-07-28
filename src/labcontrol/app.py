@@ -85,6 +85,7 @@ def _plugin_python_executable(config) -> Path | None:
 def configure_qt_appearance(application, requested_scale: float | None = None) -> float:
     """为正式 GUI 和视觉回归工具应用同一套主题、字体与缩放系数。"""
     from PySide6.QtGui import QColor, QPalette
+    from .ui.input_policy import install_wheel_input_policy
     from .ui.scaling import screen_ui_scale
 
     scale = requested_scale if requested_scale is not None else screen_ui_scale(application.primaryScreen())
@@ -98,6 +99,8 @@ def configure_qt_appearance(application, requested_scale: float | None = None) -
     palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f7f9fa"))
     application.setPalette(palette)
     configure_qt_font(application, 10.0 * scale)
+    # 输入策略安装在 QApplication 上，因此核心界面和按需加载的模块窗口自动保持一致。
+    install_wheel_input_policy(application)
     return scale
 
 
