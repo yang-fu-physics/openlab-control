@@ -340,6 +340,13 @@ class ModuleServiceTests(unittest.TestCase):
                 untrusted.exception.code,
                 "MODULE_NOT_TRUSTED",
             )
+            self.assertEqual(
+                modules.records[descriptor.id].state,
+                "disabled",
+            )
+            self.assertIsNone(
+                modules.records[descriptor.id].client
+            )
             modules.trust_store.trust(
                 "module",
                 descriptor,
@@ -355,6 +362,10 @@ class ModuleServiceTests(unittest.TestCase):
             self.assertEqual(
                 changed.exception.code,
                 "MODULE_CHANGED_AFTER_DISCOVERY",
+            )
+            self.assertEqual(
+                modules.records[descriptor.id].state,
+                "disabled",
             )
 
         with tempfile.TemporaryDirectory() as temp:

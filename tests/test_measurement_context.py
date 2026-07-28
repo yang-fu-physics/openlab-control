@@ -120,6 +120,27 @@ class ModuleOperationContextTests(unittest.TestCase):
             ModuleOperationCancelled,
         )
 
+    def test_sleep_poll_interval_does_not_shorten_context_rpc_timeout(
+        self,
+    ) -> None:
+        timeouts: list[float] = []
+        context = ModuleOperationContext(
+            {},
+            lambda _kind, _values: None,
+            _operation_state=lambda timeout: (
+                timeouts.append(timeout) or "running"
+            ),
+            operation_timeout_seconds=120.0,
+        )
+
+        context.interruptible_sleep(
+            0.002,
+            poll_interval_seconds=0.001,
+        )
+
+        self.assertGreaterEqual(len(timeouts), 2)
+        self.assertEqual(set(timeouts), {1.0})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -142,6 +142,17 @@ class PluginTrustStore:
                 f"Cannot read plugin trust store {self.path}: {exc}"
             ) from exc
 
+    def reload(self) -> None:
+        """从磁盘重新读取记录，使同一应用内的其他存储实例所做修改立即可见。
+
+        UI 与后台运行时有意分属不同线程，并各自持有 ``PluginTrustStore``，避免把
+        可变对象跨线程共享。首次信任模块时，UI 会先原子写入文件；后台必须在执行
+        Enable 安全检查前调用本方法，否则它仍会使用应用启动时的旧内存快照，只有
+        重启应用后才能看见新授权。
+        """
+
+        self._records = self._load()
+
     def is_trusted(self, extension_type: str, subject: TrustSubject) -> bool:
         """仅当版本和当前目录指纹都完全一致时返回真。"""
 

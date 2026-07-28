@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -21,7 +22,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QMessageBox,
+    QSizePolicy,
+)
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
@@ -253,6 +258,138 @@ class MainWindowLayoutTests(unittest.TestCase):
                 self.assertIn(
                     "Disable this measurement module",
                     warning.call_args.args[2],
+                )
+            finally:
+                window.close()
+
+    def test_first_module_trust_enables_without_application_restart(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            shutil.copytree(
+                MODULE_REPOSITORY / "modules",
+                root / "modules",
+            )
+            window = MainWindow(
+                load_config(
+                    root / "configs" / "default.toml"
+                )
+            )
+            try:
+                # RuntimeService 已经在 MainWindow 构造阶段创建了自己的信任存储。
+                # 这里模拟用户随后第一次确认模块，确保后台能立即看见新记录，而
+                # 不是必须关闭并重开应用后才能 Enable。
+                with patch(
+                    "labcontrol.ui.plugin_trust."
+                    "QMessageBox.question",
+                    return_value=(
+                        QMessageBox.StandardButton.Yes
+                    ),
+                ):
+                    window._set_module_enabled(
+                        "simulated_transport",
+                        True,
+                    )
+
+                deadline = time.monotonic() + 5.0
+                while (
+                    "simulated_transport"
+                    not in window.enabled_modules
+                    and time.monotonic() < deadline
+                ):
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+
+                self.assertIn(
+                    "simulated_transport",
+                    window.enabled_modules,
+                    (
+                        f"states={window.module_manager._states!r}; "
+                        f"status={window.statusBar().currentMessage()!r}; "
+                        f"pending={window._pending_module_operations!r}"
+                    ),
+                )
+                self.assertEqual(
+                    window.module_manager.runtime_state(
+                        "simulated_transport"
+                    ),
+                    "enabled",
+                )
+            finally:
+                window.close()
+
+    def test_failed_module_enable_future_restores_disabled_controls(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                root / "configs" / "default.toml",
+            )
+            shutil.copytree(
+                MODULE_REPOSITORY / "modules",
+                root / "modules",
+            )
+            window = MainWindow(
+                load_config(
+                    root / "configs" / "default.toml"
+                )
+            )
+            try:
+                failed: Future[object] = Future()
+                failed.set_exception(
+                    RuntimeError("simulated enable failure")
+                )
+                checkbox = (
+                    window.module_manager._checkboxes[
+                        "simulated_transport"
+                    ]
+                )
+                with (
+                    patch(
+                        "labcontrol.ui.main_window."
+                        "confirm_module_plugin_trust",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        window.runtime,
+                        "enable_module",
+                        return_value=failed,
+                    ),
+                ):
+                    checkbox.click()
+
+                self.assertFalse(checkbox.isEnabled())
+                self.assertIn(
+                    "simulated_transport",
+                    window._pending_module_operations,
+                )
+
+                window._check_pending_module_operations()
+
+                self.assertNotIn(
+                    "simulated_transport",
+                    window._pending_module_operations,
+                )
+                self.assertFalse(checkbox.isChecked())
+                self.assertTrue(checkbox.isEnabled())
+                self.assertEqual(
+                    window.module_manager.runtime_state(
+                        "simulated_transport"
+                    ),
+                    "disabled",
+                )
+                self.assertIn(
+                    "simulated enable failure",
+                    window.statusBar().currentMessage(),
                 )
             finally:
                 window.close()

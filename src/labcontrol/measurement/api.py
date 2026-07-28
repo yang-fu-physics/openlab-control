@@ -170,14 +170,25 @@ class ModuleOperationContext:
             poll_interval_seconds,
             "Module sleep poll interval",
         )
+        # poll_interval 只决定多久检查一次 Stop/Pause，不应同时成为一次跨进程
+        # context RPC 的超时。首次 spawn 或系统短暂繁忙时，Windows 调度很容易超过
+        # 100 ms；若把默认轮询间隔直接传给 Pipe 等待，几十毫秒的普通初始化也会
+        # 随机失败。RPC 最多使用一秒，但仍受本次模块操作的总 deadline 限制。
+        checkpoint_timeout = min(
+            1.0,
+            self._positive_finite(
+                self.operation_timeout_seconds,
+                "Module operation timeout",
+            ),
+        )
         remaining = duration
         while remaining > 0:
-            self.checkpoint(min(1.0, max(poll_interval, 0.05)))
+            self.checkpoint(checkpoint_timeout)
             interval = min(remaining, poll_interval)
             started = time.monotonic()
             time.sleep(interval)
             remaining -= max(0.0, time.monotonic() - started)
-            self.checkpoint(min(1.0, max(poll_interval, 0.05)))
+            self.checkpoint(checkpoint_timeout)
 
     @staticmethod
     def _positive_finite(value: float, label: str) -> float:

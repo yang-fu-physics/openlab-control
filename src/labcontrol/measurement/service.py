@@ -119,6 +119,10 @@ class MeasurementModuleService:
                 "MODULE_CHANGED_AFTER_DISCOVERY",
                 descriptor.id,
             )
+        # UI 的首次信任发生在 RuntimeService 启动之后。UI 与 runtime 各自拥有
+        # 一个信任存储实例，因此这里必须刷新磁盘上的原子记录，不能继续使用
+        # runtime 启动时缓存的空快照。
+        self.trust_store.reload()
         if not self.trust_store.is_trusted(
             "module",
             descriptor,
@@ -352,6 +356,45 @@ class MeasurementModuleService:
             return None
         return DeviceError(str(error), error.code, error.context)
 
+    async def _reset_failed_enable(
+        self,
+        record: ModuleRuntimeRecord,
+        client: ModuleWorkerClient | None,
+        message: str,
+    ) -> None:
+        """回收部分启动的 worker，并保证 UI 一定收到终止状态。
+
+        Enable 包含信任复核、依赖路径解析、spawn、握手和 initialize。任何一步都可能
+        在 worker 正式可用前失败；若只处理预期的 IPC 异常，意外的文件或进程错误会把
+        record 永久留在 ``initializing``。这里集中关闭可能存在的进程并发布 Disabled，
+        使同一应用进程内可以修正问题后重试。
+        """
+
+        if client is not None:
+            try:
+                await asyncio.to_thread(
+                    client.close,
+                    self.config.shutdown_timeout_seconds,
+                )
+            except Exception:
+                # close 自身若异常，仍要强制回收本机进程；这不声称外部仪表已安全。
+                try:
+                    await asyncio.to_thread(
+                        client.force_stop,
+                        min(
+                            self.config.shutdown_timeout_seconds,
+                            1.0,
+                        ),
+                    )
+                except Exception:
+                    # 状态恢复不能再被第二个本机回收异常打断；原始 Enable 错误仍会
+                    # 继续上抛，shutdown 的最终兜底还会检查全部 record。
+                    pass
+        record.client = None
+        record.enabled = False
+        record.state = "disabled"
+        self._publish(record, message)
+
     async def enable(self, module_id: str, settings: Mapping[str, Any]) -> None:
         """启动并初始化模块；不会自动调用 apply_settings。"""
 
@@ -359,32 +402,32 @@ class MeasurementModuleService:
         record = self.records[module_id]
         if record.enabled or record.state == "initializing":
             return
-        self._ensure_descriptor_ready(record.descriptor)
         record.state = "initializing"
         self._publish(record, f"Initializing {record.descriptor.name}...")
-        client = ModuleWorkerClient(
-            record.descriptor,
-            module_dependency_directory(
-                self.app_config,
-                record.descriptor,
-            ),
-        )
-        record.client = client
+        client: ModuleWorkerClient | None = None
         try:
+            self._ensure_descriptor_ready(
+                record.descriptor
+            )
+            client = ModuleWorkerClient(
+                record.descriptor,
+                module_dependency_directory(
+                    self.app_config,
+                    record.descriptor,
+                ),
+            )
+            record.client = client
             await asyncio.to_thread(
                 client.start,
                 self.config.startup_timeout_seconds,
             )
             result = await self._request(record, "initialize", {"settings": dict(settings)})
         except WorkerRequestError as exc:
-            await asyncio.to_thread(
-                client.close,
-                self.config.shutdown_timeout_seconds,
+            await self._reset_failed_enable(
+                record,
+                client,
+                str(exc),
             )
-            record.client = None
-            record.enabled = False
-            record.state = "disabled"
-            self._publish(record, str(exc))
             error = self._operation_error(
                 record,
                 exc,
@@ -392,6 +435,42 @@ class MeasurementModuleService:
             )
             assert error is not None
             raise error from exc
+        except DeviceError as exc:
+            await self._reset_failed_enable(
+                record,
+                client,
+                str(exc),
+            )
+            raise
+        except asyncio.CancelledError:
+            await self._reset_failed_enable(
+                record,
+                client,
+                f"Initializing {record.descriptor.name} was cancelled",
+            )
+            raise
+        except Exception as exc:
+            message = (
+                f"Could not enable {record.descriptor.name}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            await self._reset_failed_enable(
+                record,
+                client,
+                message,
+            )
+            self.events.report(
+                Severity.ERROR,
+                f"module:{module_id}",
+                "MODULE_ENABLE_FAILED",
+                message,
+                module_id,
+            )
+            raise DeviceError(
+                message,
+                "MODULE_ENABLE_FAILED",
+                module_id,
+            ) from exc
         # 只有 start + initialize 全部成功后才发布 Enabled，避免 UI 短暂显示一个无法
         # 使用的模块。
         record.status.update(result)

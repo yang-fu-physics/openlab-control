@@ -326,6 +326,16 @@ class ModuleManagerDialog(QDialog):
                     and state not in {"initializing", "disabling"}
                 )
 
+    def runtime_state(self, module_id: str) -> str:
+        """返回管理器最后收到的运行状态；尚无消息时按 Disabled 处理。"""
+
+        return str(
+            self._states.get(
+                module_id,
+                {},
+            ).get("state", "disabled")
+        )
+
     def _selected_id(self) -> str | None:
         row = self.table.currentRow()
         item = self.table.item(row, 1) if row >= 0 else None

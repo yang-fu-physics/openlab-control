@@ -136,6 +136,13 @@ class MainWindow(QMainWindow):
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
         self._pending_run: tuple[dict[str, dict[str, object]], list[object]] | None = None
+        # Enable/Disable 是提交到后台 event loop 的 Future。必须保留并收取异常，
+        # 否则在后台尚未来得及发布最终 module_state 前失败时，复选框会永久停在
+        # Initializing/Disabling，用户也看不到可重试的状态。
+        self._pending_module_operations: dict[
+            str,
+            tuple[object, bool],
+        ] = {}
         self._minimized_module_windows: set[str] = set()
         self._pending_manual_operations: list[tuple[object, str]] = []
         self.alert_dialogs: dict[str, AlertDialog] = {}
@@ -982,7 +989,64 @@ class MainWindow(QMainWindow):
             elif message.kind == "startup_error":
                 QMessageBox.critical(self, "Runtime Startup Failed", str(message.payload))
         self._check_pending_run()
+        self._check_pending_module_operations()
         self._check_pending_manual_operations()
+
+    def _check_pending_module_operations(self) -> None:
+        """收取 Enable/Disable Future，并为异常路径恢复可操作的终止状态。"""
+
+        for module_id, (
+            future,
+            requested_enabled,
+        ) in tuple(
+            self._pending_module_operations.items()
+        ):
+            if not future.done():
+                continue
+            del self._pending_module_operations[module_id]
+            try:
+                exception = future.exception()
+            except Exception as exc:
+                exception = exc
+            if exception is None:
+                continue
+
+            actual_enabled = (
+                module_id in self.enabled_modules
+            )
+            current_state = (
+                self.module_manager.runtime_state(
+                    module_id
+                )
+            )
+            # 正常 service 错误会先发布 disabled/faulted。这里可为 Disabled 刷新
+            # 最终错误详情，或在消息缺失时结束过渡态，但不覆盖更精确的 Faulted。
+            if current_state in {
+                "disabled",
+                "initializing",
+                "disabling",
+            }:
+                self.module_manager.update_state(
+                    module_id,
+                    actual_enabled,
+                    (
+                        "enabled"
+                        if actual_enabled
+                        else "disabled"
+                    ),
+                    str(exception),
+                )
+            operation = (
+                "enable"
+                if requested_enabled
+                else "disable"
+            )
+            self.statusBar().showMessage(
+                f"Could not {operation} "
+                f"{self._module_descriptor(module_id).name}: "
+                f"{exception}",
+                8000,
+            )
 
     def _check_pending_manual_operations(self) -> None:
         remaining: list[tuple[object, str]] = []
@@ -1231,6 +1295,8 @@ class MainWindow(QMainWindow):
                 "Module changes are unavailable while a SEQ is running",
             )
             return
+        if module_id in self._pending_module_operations:
+            return
         try:
             if enabled:
                 descriptor = self._module_descriptor(module_id)
@@ -1255,11 +1321,22 @@ class MainWindow(QMainWindow):
                     )
                     return
                 settings = self._saved_module_settings(module_id)
-                self.runtime.enable_module(module_id, settings)
+                future = self.runtime.enable_module(
+                    module_id,
+                    settings,
+                )
+                self._pending_module_operations[
+                    module_id
+                ] = (future, True)
                 self.statusBar().showMessage(f"Initializing {self._module_descriptor(module_id).name}...")
             else:
                 self._save_module_window(module_id)
-                self.runtime.disable_module(module_id)
+                future = self.runtime.disable_module(
+                    module_id
+                )
+                self._pending_module_operations[
+                    module_id
+                ] = (future, False)
                 self.statusBar().showMessage(f"Stopping {self._module_descriptor(module_id).name}...")
         except Exception as exc:
             self.module_manager.update_state(
