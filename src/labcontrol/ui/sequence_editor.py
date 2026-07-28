@@ -15,6 +15,20 @@ from ..sequence.model import Command, CommandType, FlatRow, SequenceDocument
 from ..sequence.parser import format_command
 
 
+def _display_command(command: Command) -> str:
+    """生成列表行文本；显式温度点始终使用更易辨认的方括号形式。
+
+    SEQ 保存仍保留未编辑旧文件的原文，但界面不受旧式裸列表语法影响，因此加载旧文件后
+    也会看到 ``[300, 299.9, 20]``。每个点的小数位来自解析时保留的输入文本。
+    """
+
+    is_temperature_list = (
+        command.type is CommandType.SCAN_TEMPERATURE
+        and str(command.params.get("point_mode", "Linear")).casefold() == "list"
+    )
+    return format_command(command, preserve_raw=not is_temperature_list)
+
+
 class SequenceEditorWidget(QWidget):
     """支持任意嵌套、批量启停、复制粘贴和键盘快捷键的 SEQ 编辑控件。"""
 
@@ -133,7 +147,7 @@ class SequenceEditorWidget(QWidget):
             elif row.is_end:
                 text = "    " * row.depth + "End Scan"
             else:
-                body = format_command(command) if command is not None else "Unknown"
+                body = _display_command(command) if command is not None else "Unknown"
                 if command is not None and not command.enabled:
                     body = f"[Disabled] {body}"
                 text = "    " * row.depth + body

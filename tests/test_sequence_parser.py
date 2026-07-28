@@ -102,7 +102,7 @@ class SequenceParserTests(unittest.TestCase):
 
     def test_temperature_list_scan_parses_and_round_trips(self) -> None:
         source = (
-            "T Scan Temperature List 300.000, 250.500, 250.500, 20.000 K at 5.000 K/min, Settle\n"
+            "T Scan Temperature List [300, 250.50, 250.50, 20.000] K at 5.000 K/min, Settle\n"
             "T     Measure\n"
             "T End Scan\n"
             "T End Sequence\n"
@@ -112,6 +112,10 @@ class SequenceParserTests(unittest.TestCase):
         command = result.document.commands[0]
         self.assertEqual(command.type, CommandType.SCAN_TEMPERATURE)
         self.assertEqual(command.params["point_mode"], "List")
+        self.assertEqual(
+            command.params["points"],
+            "[300, 250.50, 250.50, 20.000]",
+        )
         self.assertEqual(
             parse_temperature_points(command.params["points"]),
             (300.0, 250.5, 250.5, 20.0),
@@ -138,7 +142,25 @@ class SequenceParserTests(unittest.TestCase):
         )
         self.assertEqual(
             format_command(command),
-            "Scan Temperature List 300.000, 299.900, 300.000 K at 10.000 K/min, Sweep",
+            "Scan Temperature List [300, 299.9, 300] K at 10.000 K/min, Sweep",
+        )
+
+    def test_legacy_temperature_list_keeps_source_but_uses_new_format_after_edit(self) -> None:
+        source = (
+            "T Scan Temperature List 300.00, 299.9, 20 K at 5 K/min, Settle\n"
+            "T End Scan\n"
+            "T End Sequence\n"
+        )
+        result = parse_sequence(source)
+        self.assertEqual(result.issues, ())
+        command = result.document.commands[0]
+
+        # 未编辑的旧文件继续逐字往返，避免一次 Load/Save 产生无关改动。
+        self.assertEqual(serialize_sequence(result.document), source)
+        command.update_params(command.params)
+        self.assertEqual(
+            format_command(command),
+            "Scan Temperature List [300.00, 299.9, 20] K at 5.000 K/min, Settle",
         )
 
     def test_invalid_temperature_list_is_a_parse_error(self) -> None:
@@ -148,6 +170,13 @@ class SequenceParserTests(unittest.TestCase):
         self.assertTrue(result.has_errors)
         self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
         self.assertIn("point 2 is empty", result.issues[0].message)
+
+        mismatched = parse_sequence(
+            "T Scan Temperature List [300,20 K at 5 K/min, Settle\n"
+            "T End Sequence\n"
+        )
+        self.assertTrue(mismatched.has_errors)
+        self.assertIn("matching square brackets", mismatched.issues[0].message)
 
     def test_custom_datafile_folder_marker_round_trips(self) -> None:
         source = (

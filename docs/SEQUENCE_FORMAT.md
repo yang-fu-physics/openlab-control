@@ -144,12 +144,14 @@ Linear Temperature/Field Scan 的 `steps` 范围为 1 到 100000，Rate 必须�
 ### Scan Temperature — List
 
 ```text
-T Scan Temperature List 300.000, 100.000, 20.000, 20.000, 4.200 K at 5.000 K/min, Settle
+T Scan Temperature List [300, 100, 20, 20, 4.2] K at 5.000 K/min, Settle
 T     Measure
 T End Scan
 ```
 
 - 保留原顺序和重复点，不排序、不去重。
+- 方括号用于清楚标识列表边界；每个点保留输入的小数位，不会自动补成三位小数。
+- 旧版不带方括号的列表仍可读取；未编辑时保存也不会改写原始行。
 - 最多 100000 点。
 - Run 前整表转换并验证；任一点越过温度上下限则在移动第一点前 Error。
 - 仍可嵌套 Field/Time/Temperature Scan 和 Measure。

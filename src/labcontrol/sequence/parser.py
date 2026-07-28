@@ -98,21 +98,36 @@ _DEVICE_COMMAND_PREFIX = re.compile(
 )
 
 
-def parse_temperature_points(value: object) -> tuple[float, ...]:
-    """解析逗号分隔温度列表，并保留输入顺序和重复点。"""
+def _temperature_point_items(value: object) -> list[object]:
+    """拆分温度点，并兼容旧式裸列表和新的方括号列表。"""
+
     if isinstance(value, (list, tuple)):
         raw_points = list(value)
     else:
         text = str(value).strip()
         if not text:
             raise ValueError("Enter at least one temperature point")
+        has_opening_bracket = text.startswith("[")
+        has_closing_bracket = text.endswith("]")
+        if has_opening_bracket != has_closing_bracket:
+            raise ValueError("Temperature list must use matching square brackets")
+        if has_opening_bracket:
+            text = text[1:-1].strip()
+            if not text:
+                raise ValueError("Enter at least one temperature point")
         raw_points = [item.strip() for item in text.split(",")]
 
     if len(raw_points) > MAX_TEMPERATURE_LIST_POINTS:
         raise ValueError(
             f"Temperature lists are limited to {MAX_TEMPERATURE_LIST_POINTS} points"
         )
+    return raw_points
 
+
+def parse_temperature_points(value: object) -> tuple[float, ...]:
+    """解析温度列表，并保留输入顺序和重复点。"""
+
+    raw_points = _temperature_point_items(value)
     points: list[float] = []
     for index, raw_point in enumerate(raw_points, start=1):
         if isinstance(raw_point, str) and not raw_point:
@@ -131,9 +146,19 @@ def parse_temperature_points(value: object) -> tuple[float, ...]:
 
 
 def format_temperature_points(value: object) -> str:
-    """按稳定三位小数格式序列化温度列表。"""
+    """验证并格式化温度列表，同时保留用户输入的每项精度。
 
-    return ", ".join(fixed_number(point, 3) for point in parse_temperature_points(value))
+    这里只统一方括号和逗号后的空格，不把 ``299.9`` 扩写为 ``299.900``。数值列表
+    没有可恢复的原始文本时使用 Python 的稳定字符串形式。
+    """
+
+    raw_points = _temperature_point_items(value)
+    parse_temperature_points(raw_points)
+    tokens = [
+        raw_point.strip() if isinstance(raw_point, str) else str(raw_point)
+        for raw_point in raw_points
+    ]
+    return f"[{', '.join(tokens)}]"
 
 
 def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
@@ -542,10 +567,10 @@ def _device_suffix(params: dict[str, object], default_id: str) -> str:
     return f" using device {json.dumps(device_id, ensure_ascii=False)}"
 
 
-def format_command(command: Command) -> str:
+def format_command(command: Command, *, preserve_raw: bool = True) -> str:
     """把一个命令转为规范文本；未编辑的未知命令保持原文。"""
 
-    if command.raw_text is not None:
+    if preserve_raw and command.raw_text is not None:
         return command.raw_text
     p = command.params
     if command.type is CommandType.SET_DATAFILE:

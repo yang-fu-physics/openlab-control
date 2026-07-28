@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Temperature List Scan 使用方括号显示显式温度点，并保留每个点输入时的小数位；
+  旧版无方括号语法继续兼容且未编辑时保持原文。
+
 ## 0.11.2 - 2026-07-27
 
 - Data Browser 会把可确认来源的绝对时间戳显示为实际日期时间：Quantum Design DAT

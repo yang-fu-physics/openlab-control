@@ -226,6 +226,31 @@ class SequenceEditorTests(unittest.TestCase):
         self.assertEqual(scrollbar.value(), 0)
         editor.close()
 
+    def test_temperature_list_display_uses_brackets_and_input_precision(self) -> None:
+        command = Command(
+            CommandType.SCAN_TEMPERATURE,
+            {
+                "point_mode": "List",
+                "points": "[300, 299.90, 20.000]",
+                "rate": 5.0,
+                "mode": "Settle",
+            },
+            raw_text=(
+                "Scan Temperature List 300, 299.90, 20.000 K "
+                "at 5 K/min, Settle"
+            ),
+        )
+        editor = SequenceEditorWidget(SequenceDocument([command]))
+
+        self.assertEqual(
+            editor.list.item(0).text(),
+            (
+                "Scan Temperature List [300, 299.90, 20.000] K "
+                "at 5.000 K/min, Settle"
+            ),
+        )
+        editor.close()
+
 
 if __name__ == "__main__":
     unittest.main()

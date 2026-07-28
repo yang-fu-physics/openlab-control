@@ -259,7 +259,7 @@ class StatusTileTests(unittest.TestCase):
         dialog.accept()
         values = dialog.values()
         self.assertEqual(values["point_mode"], "List")
-        self.assertEqual(values["points"], "300.000, 299.900, 300.000")
+        self.assertEqual(values["points"], "[300, 299.9, 300]")
         dialog.close()
 
     def test_sequence_dialog_uses_configured_target_and_rate_limits(self) -> None:
