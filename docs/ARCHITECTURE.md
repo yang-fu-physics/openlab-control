@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.11.2 的实际实现边界。Device Plugin 与 Measurement Module
+本文描述 OpenLab Control 0.11.3 的实际实现边界。Device Plugin 与 Measurement Module
 是两套不同的扩展机制；它们分别放在独立共享仓库中，不进入核心源码。
 
 ## 进程与线程模型
