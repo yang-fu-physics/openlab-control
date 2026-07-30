@@ -35,6 +35,7 @@ from .worker import ModuleWorkerClient, WorkerRequestError
 
 
 ModuleMessageCallback = Callable[[str, dict[str, Any]], None]
+_MAX_RAW_VALUES = 32_768
 
 
 @dataclass(slots=True)
@@ -85,7 +86,10 @@ class MeasurementModuleService:
         }
         self._sequence_modules: tuple[str, ...] = ()
         self._sequence_active = False
-        self._row_handlers: dict[str, Callable[[dict[str, Any]], None]] = {}
+        self._row_handlers: dict[
+            str,
+            Callable[[dict[str, Any], object | None], None],
+        ] = {}
         self._operation_state = "idle"
         self._operation_state_lock = threading.RLock()
 
@@ -258,7 +262,10 @@ class MeasurementModuleService:
             # 错误地 emit_row，也不会污染实验 DAT。
             handler = self._row_handlers.get(module_id)
             if handler is not None:
-                handler(dict(message.get("values", {})))
+                handler(
+                    dict(message.get("values", {})),
+                    message.get("raw_values"),
+                )
 
     async def _request(
         self,
@@ -620,6 +627,16 @@ class MeasurementModuleService:
             try:
                 result = await self._request(record, "begin_sequence")
             except WorkerRequestError as exc:
+                if exc.severity == "cancelled":
+                    # Stop 可能恰好发生在模块的 ARM/settle checkpoint。它是正常
+                    # 控制流，不应把模块标成 Faulted 或额外报告 Error；SequenceEngine
+                    # 会在 begin 返回后的统一 checkpoint 转入 stopped/error 收尾。
+                    record.state = "enabled"
+                    self._publish(
+                        record,
+                        "Sequence start cancelled",
+                    )
+                    return None
                 record.state = "faulted"
                 self._publish(record, str(exc))
                 return self._operation_error(record, exc)
@@ -644,6 +661,24 @@ class MeasurementModuleService:
                 "MODULE_SCHEMA_VIOLATION",
                 descriptor.id,
             )
+        if "StatusCode" in allowed:
+            if "StatusCode" not in values:
+                raise DeviceError(
+                    "Module row omitted its declared StatusCode",
+                    "MODULE_STATUS_CODE_MISSING",
+                    descriptor.id,
+                )
+            status_code = values["StatusCode"]
+            if (
+                isinstance(status_code, bool)
+                or not isinstance(status_code, int)
+                or status_code < 0
+            ):
+                raise DeviceError(
+                    "StatusCode must be a non-negative integer",
+                    "MODULE_STATUS_CODE_TYPE_ERROR",
+                    descriptor.id,
+                )
         result: dict[str, Any] = {}
         for key, value in values.items():
             if value is not None and not isinstance(value, (str, int, float, bool)):
@@ -660,6 +695,51 @@ class MeasurementModuleService:
                 )
             result[key] = value
         return result
+
+    @staticmethod
+    def _validated_raw_values(
+        module_id: str,
+        values: object | None,
+    ) -> tuple[float, ...] | None:
+        """验证与一个正式 DAT 行绑定的有限原始数值序列。
+
+        原始序列不进入动态 DAT Schema，但仍通过同一 IPC 和运行日志边界。限制为
+        32,768 点保证即使每个 Python float 都采用最长 JSON 表示，整条事件仍能留在
+        worker 的 1 MiB IPC 上限内，也防止第三方模块借此发送无界对象占满主进程内存。
+        """
+
+        if values is None:
+            return None
+        if not isinstance(values, list):
+            raise DeviceError(
+                "Module raw data must be a JSON array",
+                "MODULE_RAW_DATA_TYPE_ERROR",
+                module_id,
+            )
+        if len(values) > _MAX_RAW_VALUES:
+            raise DeviceError(
+                "Module raw data must contain at most "
+                f"{_MAX_RAW_VALUES} values",
+                "MODULE_RAW_DATA_SIZE_ERROR",
+                module_id,
+            )
+        result: list[float] = []
+        for index, value in enumerate(values, start=1):
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise DeviceError(
+                    f"Raw value {index} is not numeric",
+                    "MODULE_RAW_DATA_TYPE_ERROR",
+                    module_id,
+                )
+            normalized = float(value)
+            if not math.isfinite(normalized):
+                raise DeviceError(
+                    f"Raw value {index} contains NaN or infinity",
+                    "MODULE_RAW_DATA_VALUE_ERROR",
+                    module_id,
+                )
+            result.append(normalized)
+        return tuple(result)
 
     async def measure_all(self, logger: DatRunLogger, sequence_step: str) -> None:
         """并行执行全部模块的一次 Measure，并允许每个模块流式产生多行。
@@ -686,10 +766,17 @@ class MeasurementModuleService:
             descriptor = record.descriptor
             validation_error: DeviceError | None = None
 
-            def write_row(values: dict[str, Any]) -> None:
+            def write_row(
+                values: dict[str, Any],
+                raw_values: object | None = None,
+            ) -> None:
                 nonlocal emitted, validation_error
                 try:
                     validated = self._validated_row(descriptor, values)
+                    validated_raw = self._validated_raw_values(
+                        module_id,
+                        raw_values,
+                    )
                 except DeviceError as exc:
                     validation_error = exc
                     self.events.report(
@@ -703,7 +790,11 @@ class MeasurementModuleService:
                 logger.write_module_row(
                     # 每一行使用写入当时的最新系统快照；不同通道或不同模块的多行结果
                     # 因此可以保留各自行发生时的温场状态。
-                    self.devices.snapshots(), module_id, validated, sequence_step
+                    self.devices.snapshots(),
+                    module_id,
+                    validated,
+                    sequence_step,
+                    raw_values=validated_raw,
                 )
                 emitted += 1
 

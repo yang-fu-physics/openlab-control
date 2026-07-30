@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
 import time
@@ -41,6 +42,7 @@ class RunPaths:
     sequence_snapshot: Path
     configuration_snapshot: Path
     module_settings_directory: Path
+    raw_data_directory: Path
 
 
 class DatRunLogger:
@@ -63,6 +65,8 @@ class DatRunLogger:
         self._columns: list[str] = []
         self._data_file_initialized = False
         self._module_descriptors: tuple[ModuleDescriptor, ...] = ()
+        self._raw_handles: dict[tuple[Path, str], TextIO] = {}
+        self._raw_writers: dict[tuple[Path, str], csv.writer] = {}
         self._pending_events: list[EventNotice] = []
         self.events.subscribe(self.on_event)
 
@@ -105,6 +109,7 @@ class DatRunLogger:
         config_snapshot = directory / "configuration.toml"
         module_settings_directory = directory / "module_settings"
         module_settings_directory.mkdir()
+        raw_data_directory = directory / "rawdata"
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot)
         self._module_descriptors = tuple(module_descriptors)
@@ -128,6 +133,7 @@ class DatRunLogger:
             sequence_snapshot=sequence_snapshot,
             configuration_snapshot=config_snapshot,
             module_settings_directory=module_settings_directory,
+            raw_data_directory=raw_data_directory,
         )
         self._data_file_initialized = False
         self._started_monotonic = time.monotonic()
@@ -185,6 +191,7 @@ class DatRunLogger:
         module_settings_resolved = (
             self.paths.module_settings_directory.resolve()
         )
+        raw_data_resolved = self.paths.raw_data_directory.resolve()
         reserved_paths = {
             self.paths.directory.resolve(),
             self.paths.event_file.resolve(),
@@ -192,11 +199,13 @@ class DatRunLogger:
             self.paths.sequence_snapshot.resolve(),
             self.paths.configuration_snapshot.resolve(),
             module_settings_resolved,
+            raw_data_resolved,
         }
         if (
             destination_resolved in reserved_paths
             or module_settings_resolved
             in destination_resolved.parents
+            or raw_data_resolved in destination_resolved.parents
         ):
             raise ValueError(
                 "Data file path collides with a reserved run artifact"
@@ -208,6 +217,12 @@ class DatRunLogger:
             columns,
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
+        previous_data_file = self.paths.data_file.resolve()
+        self._close_raw_datafile(previous_data_file)
+        if not append:
+            # ``create`` 会截断正式 DAT，因此属于旧内容的 rawdata 也必须在写入
+            # 新一代数据前删除；否则行号会从旧实验继续累计，失去一一对应关系。
+            self._remove_raw_sidecars(destination_resolved)
         self._close_data_file()
         self._open_data_file(
             destination,
@@ -223,6 +238,7 @@ class DatRunLogger:
             sequence_snapshot=self.paths.sequence_snapshot,
             configuration_snapshot=self.paths.configuration_snapshot,
             module_settings_directory=self.paths.module_settings_directory,
+            raw_data_directory=self.paths.raw_data_directory,
         )
         return destination
 
@@ -576,13 +592,111 @@ class DatRunLogger:
         module_id: str,
         values: Mapping[str, Any],
         sequence_step: str,
+        *,
+        raw_values: tuple[float, ...] | None = None,
     ) -> None:
-        """写入一个模块结果行；其他模块的动态列保持为空。"""
+        """写入一个模块结果行及其可选原始序列。
+
+        rawdata 文件无表头、无时间戳、无通道名，每行仅包含该正式 DAT 行对应的原始
+        数值。文件按“当前 DAT 文件 + 模块”拆分，SEQ 中切换 Datafile 时不会把不同
+        正式数据文件的原始行混在一起。
+        """
 
         self.ensure_data_file()
         assert self._data_writer is not None
         self._data_writer.writerow(self._row(snapshots, module_id, values, sequence_step))
+        if raw_values is not None:
+            self._write_raw_row(module_id, raw_values)
         self._flush_data()
+
+    def _write_raw_row(
+        self,
+        module_id: str,
+        values: tuple[float, ...],
+    ) -> None:
+        """把已验证的原始值写入与当前 DAT 对应的模块 sidecar。"""
+
+        if self.paths is None:
+            raise RuntimeError("Run directory has not been created")
+        data_path = self.paths.data_file.resolve()
+        key = (data_path, module_id)
+        writer = self._raw_writers.get(key)
+        if writer is None:
+            self.paths.raw_data_directory.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            path = self._raw_sidecar_path(
+                data_path,
+                module_id,
+            )
+            handle = path.open("a", encoding="utf-8", newline="")
+            writer = csv.writer(handle, lineterminator="\n")
+            self._raw_handles[key] = handle
+            self._raw_writers[key] = writer
+        writer.writerow(f"{value:.17g}" for value in values)
+        if self.config.logging.flush_every_row:
+            self._raw_handles[key].flush()
+
+    def _raw_sidecar_path(
+        self,
+        data_path: Path,
+        module_id: str,
+    ) -> Path:
+        """为一个正式 DAT 生成稳定且不泄露目录名的 rawdata 文件名。
+
+        不同目录可以存在同名 ``sample.dat``。短路径摘要用于消除这种冲突；文件名仍
+        保留 DAT stem 和模块 ID，便于人工识别。
+        """
+
+        if self.paths is None:
+            raise RuntimeError("Run directory has not been created")
+        resolved = data_path.resolve()
+        digest = hashlib.sha256(
+            str(resolved).encode("utf-8")
+        ).hexdigest()[:10]
+        data_stem = self._safe_name(resolved.stem)
+        safe_module_id = self._safe_name(module_id)
+        return (
+            self.paths.raw_data_directory
+            / f"{data_stem}__{digest}__{safe_module_id}.rawdata"
+        )
+
+    def _close_raw_datafile(self, data_path: Path) -> None:
+        """关闭属于一个正式 DAT 的 sidecar，切换回来时再以追加模式打开。"""
+
+        resolved = data_path.resolve()
+        keys = [
+            key
+            for key in self._raw_handles
+            if key[0] == resolved
+        ]
+        first_error: Exception | None = None
+        for key in keys:
+            handle = self._raw_handles.pop(key)
+            self._raw_writers.pop(key, None)
+            failure = self._flush_and_close_handle(handle)
+            first_error = first_error or failure
+        if first_error is not None:
+            raise first_error
+
+    def _remove_raw_sidecars(
+        self,
+        data_path: Path,
+    ) -> None:
+        """删除即将被 ``create`` 重建的 DAT 所对应的本 Run 原始数据。"""
+
+        if self.paths is None:
+            raise RuntimeError("Run directory has not been created")
+        resolved = data_path.resolve()
+        self._close_raw_datafile(resolved)
+        for descriptor in self._module_descriptors:
+            sidecar = self._raw_sidecar_path(
+                resolved,
+                descriptor.id,
+            )
+            if sidecar.exists():
+                sidecar.unlink()
 
     def write_system_row(
         self,
@@ -693,29 +807,66 @@ class DatRunLogger:
     def _close_data_file(self) -> None:
         """刷新并关闭当前 DAT；可在切换 Set Datafile 时重复调用。"""
 
-        if self._data_handle is not None:
-            self._data_handle.flush()
-            self._data_handle.close()
+        handle = self._data_handle
         self._data_handle = None
         self._data_writer = None
+        if handle is not None:
+            failure = self._flush_and_close_handle(handle)
+            if failure is not None:
+                raise failure
 
     def close(self) -> None:
-        """确保至少生成默认 DAT，然后关闭数据、状态和事件句柄。"""
+        """确保至少生成默认 DAT，并在单个 flush 失败时仍释放其余全部句柄。"""
 
-        if self.paths is not None and not self._data_file_initialized:
-            self.ensure_data_file()
-        self._close_data_file()
+        first_error: Exception | None = None
+        try:
+            if (
+                self.paths is not None
+                and not self._data_file_initialized
+            ):
+                self.ensure_data_file()
+            self._close_data_file()
+        except Exception as exc:
+            first_error = exc
+        for handle in tuple(self._raw_handles.values()):
+            failure = self._flush_and_close_handle(handle)
+            first_error = first_error or failure
+        self._raw_handles.clear()
+        self._raw_writers.clear()
         if self._device_status_handle is not None:
-            self._device_status_handle.flush()
-            self._device_status_handle.close()
+            failure = self._flush_and_close_handle(
+                self._device_status_handle
+            )
+            first_error = first_error or failure
         self._device_status_handle = None
         self._device_status_writer = None
         self._last_device_status_monotonic = None
         if self._event_handle is not None:
-            self._event_handle.flush()
-            self._event_handle.close()
+            failure = self._flush_and_close_handle(
+                self._event_handle
+            )
+            first_error = first_error or failure
         self._event_handle = None
         self._event_writer = None
+        if first_error is not None:
+            raise first_error
+
+    @staticmethod
+    def _flush_and_close_handle(
+        handle: TextIO,
+    ) -> Exception | None:
+        """返回首个 I/O 错误，但无论 flush 是否成功都继续尝试 close。"""
+
+        first_error: Exception | None = None
+        try:
+            handle.flush()
+        except Exception as exc:
+            first_error = exc
+        try:
+            handle.close()
+        except Exception as exc:
+            first_error = first_error or exc
+        return first_error
 
     @staticmethod
     def _safe_name(value: str) -> str:

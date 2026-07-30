@@ -186,7 +186,7 @@ class ReleaseContractTests(unittest.TestCase):
             "PyVISA",
             "框架共享",
             "额外依赖",
-            "device-plugins-private-repository",
+            "Device Plugin 示例",
             "measurement-modules-repository",
         ):
             with self.subTest(required=required):

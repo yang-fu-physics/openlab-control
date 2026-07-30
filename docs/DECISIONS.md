@@ -179,7 +179,7 @@ SEQ 只接受 `T Measure`。模块选择在 Run 前通过 Enabled 状态完成�
 
 状态：Accepted
 
-模块声明固定列并通过 emit_row 流式发值。中央为每行捕获最新系统快照、自动加模块 ID 前缀并立即 Flush；模块不能直接写实验 DAT。这样 R1–R4 顺序测量可拥有不同温场，并避免多个进程并发写同一文件。未声明列/复杂值为 Error，模块自行声明 Status/Warning 列。
+模块声明固定列并通过 emit_row 流式发值。中央为每行捕获最新系统快照、自动加模块 ID 前缀并立即 Flush；模块不能直接写实验 DAT。这样 R1–R4 顺序测量可拥有不同温场，并避免多个进程并发写同一文件。未声明列/复杂值为 Error。模块以整数 `StatusCode` 保存数据质量：0 表示正常，非零含义由模块自行定义；可读 Warning/Error 单独写事件日志。
 
 ## ADR-025：Settings desired 与实际 Status 分开保存
 
@@ -234,10 +234,11 @@ runtime 摘要。额外依赖只加入该子进程路径，不处理 `.pth`。
 
 状态：Accepted
 
-核心 `modules/` 和 `device_plugins/` 默认空。所有 Measurement Module 共用一个独立仓库，
-所有正式 Device Plugin 共用一个私密独立仓库；首阶段手动复制安装，未来可在不改变清单
-契约的前提下增加第三方分发。首次加载绑定 type/ID/version/content fingerprint 确认，
-内容变化必须重新信任。不同仪表通过一个配置文件选择插件并重启，不使用核心分支。
+核心 `modules/` 和 `device_plugins/` 默认空。Measurement Module 可共用一个独立仓库；
+Device Plugin 因协议和安全行为随设备变化，核心只提供示例，部署方另行维护已验证实现。
+首阶段手动复制安装，未来可在不改变清单契约的前提下增加第三方分发。首次加载绑定
+type/ID/version/content fingerprint 确认，内容变化必须重新信任。不同仪表通过一个
+配置文件选择插件并重启，不使用核心分支。
 
 ## ADR-032：每设备独立进程与一分钟读链路恢复窗
 

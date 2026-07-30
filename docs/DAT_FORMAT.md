@@ -13,6 +13,8 @@ runs/20260723_120000_nested_scan/
 ├─ module_settings/
 │  ├─ simulated_transport.settings.toml
 │  └─ simulated_transport.status-at-start.json
+├─ rawdata/
+│  └─ experiment__<path-digest>__<module-id>.rawdata
 ├─ experiment.dat
 ├─ device_status.dat
 └─ events.dat
@@ -33,11 +35,11 @@ runs/20260723_120000_nested_scan/
 ```text
 [Header]
 ; OpenLab Control Data File (default extension .dat)
-BYAPP,OpenLab Control,0.11.3
+BYAPP,OpenLab Control,0.11.4.dev0
 INFO,...
 
 [Data]
-Timestamp(s),Time(s),SequenceStep,Temp(K),TempTarget(K),Field(Oe),FieldTarget(Oe),second_stage(K),simulated_transport.R1(Ohm),...,simulated_transport.Status,simulated_transport.Warning
+Timestamp(s),Time(s),SequenceStep,Temp(K),TempTarget(K),Field(Oe),FieldTarget(Oe),second_stage(K),simulated_transport.R1(Ohm),...,simulated_transport.StatusCode
 ...
 ```
 
@@ -76,41 +78,71 @@ name = "R1"
 unit = "Ohm"
 
 [[columns]]
-name = "Status"
+name = "StatusCode"
 ```
 
 运行时自动生成：
 
 ```text
 simulated_transport.R1(Ohm)
-simulated_transport.Status
+simulated_transport.StatusCode
 ```
 
-前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `Status` 也不会冲突。Run 开始后 Schema 固定，直到该 Run 结束。
+前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `StatusCode` 也不会冲突。Run 开始后 Schema 固定，直到该 Run 结束。
 
 模块每次 `emit_row()` 只需提供本行有效值。其他已声明列以及其他模块的全部列留空。例如示例模块一次 Measure 依次写：
 
 ```text
-... R1=<value>, R2=,       R3=,       R4=,       Status=OK, Warning=
-... R1=,       R2=<value>, R3=,       R4=,       Status=OK, Warning=
-... R1=,       R2=,       R3=<value>, R4=,       Status=OK, Warning=
-... R1=,       R2=,       R3=,       R4=<value>, Status=OK, Warning=
+... R1=<value>, R2=,       R3=,       R4=,       StatusCode=0
+... R1=,       R2=<value>, R3=,       R4=,       StatusCode=0
+... R1=,       R2=,       R3=<value>, R4=,       StatusCode=0
+... R1=,       R2=,       R3=,       R4=<value>, StatusCode=0
 ```
 
-模块应自行声明业务状态和告警列。框架不会再添加通用 `Module Status` 或 `Warning Code` 列。
+模块应声明一个整数 `StatusCode`：`0` 固定表示正常，其他非负数值及多故障优先级由
+该模块自行定义并写入自己的 README 和测试。不得在状态列写 `NORMAL`、`ERROR`、
+`OVER_RANGE` 等文字。人类可读 Warning/Error 写入 `events.dat`、运行日志和界面，
+框架不会添加通用 `Module Status` 或 `Warning Code` 列。
+
+当 `StatusCode` 非零时，当前通道的电阻、电压、相位、标准差等正式测量结果必须留空；
+稀疏表中的其他未测通道也保持为空。仍然可信的通道编号、温场快照、设定电流、样本数和
+rawdata 可以按模块文档保留。若结果有效但需要提醒，应写 `StatusCode=0` 并单独报告
+Warning。
+
+### 模块原始序列
+
+需要保留仪表原始采样序列的模块可在正式行之外传入 `raw_values`。中央完成 IPC 与有限
+数值验证后，在运行目录的 `rawdata/` 中写入：
+
+```text
+<dat-stem>__<10位路径摘要>__<module-id>.rawdata
+```
+
+- 无表头、时间戳、通道名或状态字段，每行只包含逗号分隔的原始数值；
+- 每次带 `raw_values` 的正式 DAT 行恰好写一条 rawdata 行，顺序一致；空原始序列写空行；
+- 每行最多 32,768 个有限数值，不能包含 bool、文本、NaN 或 Infinity；
+- 每个模块和每个正式 DAT 分开保存；不同目录中的同名 DAT 由路径摘要区分；
+- `Set Datafile ... create` 重建正式 DAT 时，也删除该 DAT 在本 Run 中的旧 sidecar；
+  `open` / 兼容的 `open|create` 则继续追加。
+
+rawdata 只保存模块明确提交的仪表读数，不改变正式 DAT Schema，也不被 Data Browser
+自动当作 DAT 打开。模块仍不得自行打开或写入运行目录。
 
 ### 空模块与失败行
 
 - Measure 时没有 Enabled 模块：写一行只有系统状态的行，模块列不存在，并产生 Warning。
 - 所有模块都未发出有效行：中央补一行系统状态，避免该 Measure 在 DAT 中完全消失。
-- 某模块 Warning：已经发出的有效值照常写；无效测量值可留空；详细告警写 events.dat。
+- 某模块 Warning：已经发出的有效值照常写；非零 `StatusCode` 行的当前测量结果必须
+  留空；详细告警写 events.dat。
 - 某模块 Error：其他并发模块在 Error 收束前已发出的行保留；若没有任何行则仍保留系统状态行，然后 SEQ Faulted。
 
 ### 值格式
 
 - 温度固定三位；Oe 固定两位；T 固定六位。
 - 模块 float 使用最多 9 位有效数字。
-- 模块可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。
+- 一般模块列可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。
+- 声明了 `StatusCode` 的模块每行都必须提供非负整数；缺失、文本、bool 或负数会触发
+  Schema Error。状态码以外的文本能力不应用来绕过这一约定。
 - CSV 会自动引用含逗号或引号的文本。
 
 ## `events.dat`

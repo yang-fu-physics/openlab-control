@@ -5,8 +5,9 @@ Python/PySide6 控制框架。它不控制 PPMS 本体。温控仪、磁体电�
 Device Plugin 提供；吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的
 Measurement Module 提供。
 
-当前版本：`0.11.3`。核心框架、扩展 API 和仿真流程为稳定版本；默认配置全部使用
-仿真设备。Lake Shore 372A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
+当前开发版本：`0.11.4.dev0`；上一稳定版本为 `0.11.3`。默认配置全部使用仿真设备。
+Lake Shore 372A、Keithley 6221/2182A/7001 等尚未完成真机验证的硬件扩展仍各自保持
+Beta 状态。
 
 ![主窗口](docs/main-window-preview.png)
 
@@ -21,6 +22,7 @@ Measurement Module 提供。
 - 每次启动所有 Measurement Module 都是 Disabled；Enable 只初始化并加载设置，不会
   自动 Apply。
 - 一个 `Measure` 并行等待所有 Enabled 模块；每个模块可以流式返回多行。
+- 模块可为正式结果行附带有限原始采样序列，由中央写入独立无表头 `rawdata` sidecar。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认
   关闭且网络失败不阻塞 SEQ。
@@ -154,6 +156,7 @@ tests/                    核心自动测试
 - [技术规格](docs/TECHNICAL_SPECIFICATION.md)
 - [测试计划](docs/TEST_PLAN.md)
 - [验证报告](docs/VERIFICATION_REPORT.md)
+- [0.11.3 历史验证报告](docs/VERIFICATION_REPORT_0_11_3.md)
 - [Beta 2 历史验证报告](docs/VERIFICATION_REPORT_BETA2.md)
 - [Beta 1 历史验证报告](docs/VERIFICATION_REPORT_BETA1.md)
 - [架构决策](docs/DECISIONS.md)

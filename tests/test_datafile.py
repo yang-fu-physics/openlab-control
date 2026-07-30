@@ -61,10 +61,18 @@ class DatafileTests(unittest.TestCase):
                 logger.write_device_status(snapshots)
             )
             logger.write_module_row(
-                snapshots, module.id, {"R1": 1.2, "Status": "OK"}, "Measure"
+                snapshots,
+                module.id,
+                {"R1": 1.2, "StatusCode": 0},
+                "Measure",
+                raw_values=(1.0e-9, 2.0e-9),
             )
             logger.write_module_row(
-                snapshots, module.id, {"R2": 2.3, "Status": "OK"}, "Measure"
+                snapshots,
+                module.id,
+                {"R2": 2.3, "StatusCode": 0},
+                "Measure",
+                raw_values=(-3.0e-9,),
             )
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
             events.report(Severity.WARNING, "meter", "OVERLOAD", "overload")
@@ -89,6 +97,20 @@ class DatafileTests(unittest.TestCase):
             self.assertEqual(sum(1 for line in data.splitlines() if ",Measure," in line), 2)
             self.assertTrue((paths.module_settings_directory / f"{module.id}.settings.toml").exists())
             self.assertTrue((paths.module_settings_directory / f"{module.id}.status-at-start.json").exists())
+            raw_files = tuple(
+                paths.raw_data_directory.glob("*.rawdata")
+            )
+            self.assertEqual(len(raw_files), 1)
+            self.assertEqual(
+                raw_files[0].read_text(
+                    encoding="utf-8"
+                ).splitlines(),
+                [
+                    "1.0000000000000001e-09,"
+                    "2.0000000000000001e-09",
+                    "-3e-09",
+                ],
+            )
             self.assertIn("RAISED", event_data)
             self.assertIn("RESOLVED", event_data)
             self.assertIn(",2,", event_data)
@@ -128,6 +150,94 @@ class DatafileTests(unittest.TestCase):
             raised_at = datetime.fromisoformat(event_rows[0][1])
             resolved_at = datetime.fromisoformat(event_rows[1][1])
             self.assertGreater(resolved_at, raised_at)
+
+    def test_rawdata_distinguishes_same_stem_and_resets_with_create(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            (temp_root / "configs").mkdir()
+            config_path = (
+                temp_root / "configs" / "default.toml"
+            )
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                config_path,
+            )
+            config = load_config(config_path)
+            module = load_manifest(SIMULATED_MODULE)
+            logger = DatRunLogger(config, EventManager())
+            paths = logger.open_run(
+                "raw-switch.seq",
+                "T End Sequence\n",
+                (module,),
+            )
+            first = temp_root / "first" / "sample.dat"
+            second = temp_root / "second" / "sample.dat"
+
+            logger.set_datafile(
+                str(first),
+                "create",
+                allow_external=True,
+            )
+            logger.write_module_row(
+                {},
+                module.id,
+                {"R1": 1.0},
+                "first",
+                raw_values=(1.0,),
+            )
+            logger.set_datafile(
+                str(second),
+                "create",
+                allow_external=True,
+            )
+            logger.write_module_row(
+                {},
+                module.id,
+                {"R1": 2.0},
+                "second",
+                raw_values=(2.0,),
+            )
+            # 回到同一路径并使用 create 会重建正式 DAT；对应的旧 rawdata 也应
+            # 清空，而另一个同 stem 文件的 sidecar 保持不变。
+            logger.set_datafile(
+                str(first),
+                "create",
+                allow_external=True,
+            )
+            logger.write_module_row(
+                {},
+                module.id,
+                {"R1": 3.0},
+                "first-recreated",
+                raw_values=(3.0,),
+            )
+            logger.close()
+
+            raw_files = tuple(
+                paths.raw_data_directory.glob("*.rawdata")
+            )
+            self.assertEqual(len(raw_files), 2)
+            self.assertEqual(
+                {
+                    path.read_text(
+                        encoding="utf-8"
+                    ).strip()
+                    for path in raw_files
+                },
+                {"2", "3"},
+            )
+            self.assertEqual(
+                len({path.name for path in raw_files}),
+                2,
+            )
+            self.assertTrue(
+                all(
+                    path.name.startswith("sample__")
+                    for path in raw_files
+                )
+            )
 
     def test_explicit_custom_folder_is_allowed_without_weakening_legacy_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -15,8 +15,9 @@ Measurement Module 可以读取温度、磁场和 Monitor 快照，但没有设�
 
 ## 1. 仓库布局
 
-所有 Measurement Module 放在同一个共享仓库；所有正式 Device Plugin 放在另一个私密
-共享仓库。不要为不同仪表维护 OpenLab Control 核心分支。
+所有 Measurement Module 可放在同一个共享仓库。Device Plugin 的协议、状态和安全动作
+随设备变化，核心发布内容只提供示例与接口骨架。不要为不同仪表维护 OpenLab Control
+核心分支。
 
 发布包中的 Git-ready 起点：
 
@@ -25,7 +26,7 @@ plugin_templates/
 ├─ measurement-modules-repository/
 │  ├─ modules/<module-id>/
 │  └─ tests/
-└─ device-plugins-private-repository/
+└─ device-plugin-examples/
    ├─ plugins/<plugin-id>/
    └─ tests/
 ```
@@ -212,12 +213,12 @@ name = "R1"
 unit = "Ohm"
 
 [[columns]]
-name = "Status"
+name = "StatusCode"
 ```
 
 这里的 PyVISA 范围由 OpenLab Control 0.11.1 提供的 1.16.2 满足，因此不需要
 `requirements.lock`、wheel 或安装步骤。列在 Run 开始前固定，名字必须唯一、单行且
-不含逗号。模块应显式声明自己的 Status/Warning 列。中央写盘时自动加
+不含逗号。模块应显式声明自己的整数 `StatusCode` 列。中央写盘时自动加
 `<module_id>.` 前缀。
 
 ### 4.2 仪表所有权
@@ -243,18 +244,24 @@ class DcTransportBackend(ModuleBackend):
     def manual_action(self, action, payload, context): ...
 ```
 
-- `initialize`：Enable 时打开并识别仪表，加载 desired settings，但不得发送这些设置。
-- `apply_settings`：只在 Settings 页由用户确认后发送整组设置。
+- `initialize`：Enable 时加载并规范化 desired settings、发现资源，但不因保存设置而
+  连接主仪表或发送设置。允许为了识别可选附件建立有限、只读的临时连接，但无论成功
+  失败都要关闭，并在模块文档中说明降级行为。
+- `apply_settings`：只在 Settings 页由用户确认后完整验证方案、连接/识别仪表并建立
+  安全基线。应立即生效的设置必须发送并读回；只能在扫描时逐通道生效的参数可以延迟到
+  `measure`，但使用前同样必须发送并读回。
 - `begin_sequence`：第一条 SEQ 前准备模块输出/缓冲。
 - `measure`：每个无参数 `T Measure` 调用一次，可发送多行。
 - `end_sequence(reason)`：对 completed/stopped/error 都关闭模块自身危险输出；普通
-  Run 结束不调用 abort。
+  Run 结束不调用 abort。worker 已超时、退出或 IPC 断开时不能保证此调用成功，核心
+  必须保留 Safety Unconfirmed，而不能把进程回收等同于仪表安全。
 - `abort`：仅 Disable/应用退出，幂等进入模块安全待机并释放资源。
 - `read_status`：只读实际状态；Run 开始前保存为快照。
 - `manual_action`：Idle 时执行 Test/Read/Measure Now，不写实验 DAT。
 
 框架接受同步方法或返回 awaitable 的方法。返回值必须是 JSON object 或 None；禁止
-NaN/Infinity/bytes/自定义对象。一次 IPC 消息最大 1 MiB。
+NaN/Infinity/bytes/自定义对象。一次 IPC 消息最大 1 MiB。`measure` 返回的非空
+Mapping 会额外写一行；多行模块应逐行 `emit_row` 并返回 None。
 
 ### 4.4 多行与事件
 
@@ -263,7 +270,11 @@ def measure(self, context):
     for channel in ("R1", "R2", "R3", "R4"):
         context.interruptible_sleep(0.1)
         live_system = context.sample_system()
-        context.emit_row({channel: self.read(channel), "Status": "OK"})
+        raw = self.read_trace(channel)
+        context.emit_row(
+            {channel: self.reduce_trace(raw), "StatusCode": 0},
+            raw_values=raw,
+        )
 ```
 
 每个 `emit_row` 立即传回中央，并附上当时系统快照后串行写盘。一个 `Measure` 会并行
@@ -272,6 +283,12 @@ def measure(self, context):
 SEQ Pause 时冻结计时，并在 Stop/Error 时协作退出。仪表驱动自身仍必须设置较短、有限
 的 I/O 超时，因为正在阻塞的驱动调用只能在驱动超时后响应 Stop。
 
+`raw_values` 是可选的有限数值序列：最多 32,768 点，不能含 bool、文本、NaN 或
+Infinity，且整条 IPC 仍不能超过 1 MiB。核心按正式 DAT + 模块写入无表头 `rawdata`
+sidecar；每次调用中的正式行和原始行顺序绑定。承诺每个正式行都有 rawdata 的模块在
+没有有效数值时应发送空序列作为空行占位；完全不使用 rawdata 的模块不要发送空序列。
+模块不得把通道名、时间戳或状态混入原始序列，也不得自行写文件。
+
 ```python
 context.update_status({"Output": "On"})
 context.warning("R1 overloaded", "OVER_RANGE", "R1")
@@ -279,11 +296,24 @@ context.resolve_warning("OVER_RANGE", "R1")
 context.error("Source interlock opened", "INTERLOCK_OPEN", "source")
 ```
 
+单点非数字/非有限值、超量程、compliance、样本数不足和单通道统计失败属于测量数据
+问题：模块丢弃不可写值，写本模块定义的非负整数 `StatusCode`，调用
+`context.warning()` 后继续。`0` 固定表示正常；其他数值没有框架统一含义，必须在模块
+README 和测试中逐项定义，不能写 `NORMAL`、`ERROR` 等文字。worker/IPC 故障、通信
+耗尽、身份不符、协议状态不明、设置读回不一致、未知
+路由、触发状态不确定或安全状态无法确认属于系统问题，必须 Error 并中止 SEQ。若数据
+异常已经使当前通道、报文边界、路由或输出状态无法判断，也必须升级为系统 Error。
+
+任何非零 `StatusCode` 行都不得保留当前通道的正式电阻/电压/相位/统计结果，未测通道
+同样留空；只可保留仍可信且已记录语义的通道、温场、设定值、样本数或 rawdata。有效
+数据只是需要提醒时应使用 `StatusCode=0` 加独立 Warning。
+
 `context.system` 是本次生命周期调用开始时的只读快照。需要在较长测量过程中捕获真实
 的新时间点时，调用 `context.sample_system()`；不得把初始快照重复使用后伪装成多次
 取样。每个设备项包含 kind、role、control_enabled、连接状态、current、target、rate
-和 activity。`context.operation_timeout_seconds` 给出本次框架操作的总超时，模块应在
-Apply 时拒绝明显无法在此上限内完成的时序设置。
+和 activity。`context.operation_timeout_seconds` 给出本次生命周期调用的总超时；
+initialize、Apply、begin、Measure、end 分别计时。模块应在 Apply 时验证未来每一种
+调用分别能在上限内完成，不应把互相独立调用的时长机械相加。
 
 ### 4.5 Frontend
 
@@ -293,7 +323,8 @@ Frontend 继承 `ModuleFrontend`，实现 Settings/Status 页面、settings roun
 - Settings 是默认页；变化时发 `settingsChanged`。
 - `load_settings()` 只更新控件，不发送仪表命令。
 - `Apply Settings` 只由框架放在 Settings 页。
-- `set_sequence_running(True)` 禁用 Test/Read/Measure 等手动动作。
+- `set_sequence_running(True)` 禁用全部 backend I/O 按钮，包括资源/Status Refresh、
+  Test、Read、Measure 和安全动作；纯本地界面重绘可以保留。
 - 不打开后台线程或仪表连接，不写 DAT。
 - 用户不能直接关闭模块窗口；Disable 成功后框架隐藏。
 
@@ -316,7 +347,8 @@ Measurement Module 至少覆盖：
 1. manifest、固定列和 Settings round-trip；
 2. initialize 不 Apply、Apply 确认、完整生命周期；
 3. 单次 Measure 多行顺序和多个模块并行；
-4. Warning 去重/恢复、Error 终止；
+4. 测量数据 Warning 写模块自有整数状态码并继续、系统 Error 终止，以及 Warning
+   去重/恢复；
 5. 未知列、NaN/Infinity、非 JSON 和超大消息；
 6. 启动/操作/关闭超时及强制回收；
 7. 框架依赖无需安装、额外 wheel 精确离线安装、篡改和隔离；

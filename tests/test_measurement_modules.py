@@ -98,7 +98,7 @@ class ManifestAndSettingsTests(unittest.TestCase):
             self.assertTrue(descriptor.valid)
             self.assertEqual(
                 [column.name for column in descriptor.columns],
-                ["R1", "R2", "R3", "R4", "Status", "Warning"],
+                ["R1", "R2", "R3", "R4", "StatusCode"],
             )
             path = Path(temp) / "module_data" / descriptor.id / "settings.toml"
             original = {"range": 10.0, "enabled": True, "channels": [1, 2], "nested": {"name": "R1"}}
@@ -239,8 +239,13 @@ class ManifestAndSettingsTests(unittest.TestCase):
 
 class ModuleServiceTests(unittest.TestCase):
     class _FailingClient:
-        def __init__(self, failing_action: str) -> None:
+        def __init__(
+            self,
+            failing_action: str,
+            severity: str = "error",
+        ) -> None:
             self.failing_action = failing_action
+            self.severity = severity
             self.actions: list[str] = []
 
         def request(
@@ -254,7 +259,10 @@ class ModuleServiceTests(unittest.TestCase):
             self.actions.append(action)
             if action == self.failing_action:
                 raise WorkerRequestError(
-                    f"{action} failed", f"{action.upper()}_FAILED", "test"
+                    f"{action} failed",
+                    f"{action.upper()}_FAILED",
+                    "test",
+                    self.severity,
                 )
             return {}
 
@@ -278,7 +286,13 @@ class ModuleServiceTests(unittest.TestCase):
             if action == "measure":
                 self.barrier.wait(timeout=2.0)
                 assert event_handler is not None
-                event_handler({"type": "row", "values": {"Value": self.value}})
+                event_handler(
+                    {
+                        "type": "row",
+                        "values": {"Value": self.value},
+                        "raw_values": [self.value * 1.0e-9],
+                    }
+                )
             return {}
 
         def close(self, timeout_seconds=3.0) -> None:
@@ -402,6 +416,119 @@ class ModuleServiceTests(unittest.TestCase):
                 modules._validated_row(descriptor, {"Value": 1.25}),
                 {"Value": 1.25},
             )
+
+    def test_status_code_is_required_nonnegative_integer(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = copied_project(Path(temp))
+            events = EventManager()
+            devices = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            descriptor = ModuleDescriptor(
+                id="numeric_status",
+                name="Numeric Status",
+                version="1.0.0",
+                path=Path(temp),
+                api_version="1.0",
+                frontend="frontend:Frontend",
+                backend="backend:Backend",
+                columns=(
+                    ModuleColumn("Value", "V"),
+                    ModuleColumn("StatusCode", ""),
+                ),
+            )
+            modules = MeasurementModuleService(
+                (descriptor,),
+                events,
+                devices,
+            )
+            self.assertEqual(
+                modules._validated_row(
+                    descriptor,
+                    {"Value": 1.25, "StatusCode": 0},
+                ),
+                {"Value": 1.25, "StatusCode": 0},
+            )
+            for values, code in (
+                (
+                    {"Value": 1.25},
+                    "MODULE_STATUS_CODE_MISSING",
+                ),
+                (
+                    {"Value": 1.25, "StatusCode": "ERROR"},
+                    "MODULE_STATUS_CODE_TYPE_ERROR",
+                ),
+                (
+                    {"Value": 1.25, "StatusCode": True},
+                    "MODULE_STATUS_CODE_TYPE_ERROR",
+                ),
+                (
+                    {"Value": 1.25, "StatusCode": -1},
+                    "MODULE_STATUS_CODE_TYPE_ERROR",
+                ),
+            ):
+                with self.subTest(values=values):
+                    with self.assertRaises(
+                        DeviceError
+                    ) as captured:
+                        modules._validated_row(
+                            descriptor,
+                            values,
+                        )
+                    self.assertEqual(
+                        captured.exception.code,
+                        code,
+                    )
+
+    def test_measurement_raw_values_are_finite_bounded_numbers(
+        self,
+    ) -> None:
+        self.assertEqual(
+            MeasurementModuleService._validated_raw_values(
+                "meter",
+                [1, -2.5, 3.0e-9],
+            ),
+            (1.0, -2.5, 3.0e-9),
+        )
+        self.assertIsNone(
+            MeasurementModuleService._validated_raw_values(
+                "meter",
+                None,
+            )
+        )
+        self.assertEqual(
+            MeasurementModuleService._validated_raw_values(
+                "meter",
+                [],
+            ),
+            (),
+        )
+        for invalid, code in (
+            ([True], "MODULE_RAW_DATA_TYPE_ERROR"),
+            (["1"], "MODULE_RAW_DATA_TYPE_ERROR"),
+            ([math.nan], "MODULE_RAW_DATA_VALUE_ERROR"),
+            ([math.inf], "MODULE_RAW_DATA_VALUE_ERROR"),
+        ):
+            with self.subTest(value=invalid):
+                with self.assertRaises(DeviceError) as captured:
+                    MeasurementModuleService._validated_raw_values(
+                        "meter",
+                        invalid,
+                    )
+                self.assertEqual(captured.exception.code, code)
+        with self.assertRaises(DeviceError) as captured:
+            MeasurementModuleService._validated_raw_values(
+                "meter",
+                [0.0] * 32_769,
+            )
+        self.assertEqual(
+            captured.exception.code,
+            "MODULE_RAW_DATA_SIZE_ERROR",
+        )
 
     def test_full_lifecycle_streams_four_ordered_rows_and_disables_cleanly(self) -> None:
         async def scenario(temp_root: Path) -> None:
@@ -532,6 +659,62 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
 
+    def test_begin_sequence_cancellation_remains_a_normal_stop(
+        self,
+    ) -> None:
+        async def scenario(temp_root: Path) -> None:
+            config = copied_project(temp_root)
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            devices = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            modules = MeasurementModuleService(
+                discover_modules(config),
+                events,
+                devices,
+            )
+            record = modules.records[
+                "simulated_transport"
+            ]
+            client = self._FailingClient(
+                "begin_sequence",
+                "cancelled",
+            )
+            record.client = client  # type: ignore[assignment]
+            record.enabled = True
+            record.state = "enabled"
+            modules._sequence_modules = (
+                "simulated_transport",
+            )
+            modules._sequence_active = True
+
+            await modules.begin_sequence()
+
+            self.assertTrue(record.enabled)
+            self.assertEqual(record.state, "enabled")
+            self.assertFalse(
+                any(
+                    notice.event.source
+                    == "module:simulated_transport"
+                    and not notice.is_resolution
+                    for notice in notices
+                )
+            )
+            self.assertTrue(
+                await modules.end_sequence("stopped")
+            )
+            self.assertEqual(
+                client.actions,
+                ["begin_sequence", "end_sequence"],
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(Path(temp)))
+
     def test_measure_starts_multiple_enabled_modules_concurrently(self) -> None:
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
@@ -572,6 +755,19 @@ class ModuleServiceTests(unittest.TestCase):
             )
             self.assertIn("module_a.Value(V)", data)
             self.assertIn("module_b.Value(V)", data)
+            raw_files = tuple(
+                paths.raw_data_directory.glob("*.rawdata")
+            )
+            self.assertEqual(len(raw_files), 2)
+            self.assertEqual(
+                {
+                    path.read_text(
+                        encoding="utf-8"
+                    ).strip()
+                    for path in raw_files
+                },
+                {"1.0000000000000001e-09", "2.0000000000000001e-09"},
+            )
             await devices.disconnect_all()
 
         with tempfile.TemporaryDirectory() as temp:

@@ -1,4 +1,4 @@
-# OpenLab Control 0.11.3 技术规格
+# OpenLab Control 0.11.4.dev0 技术规格
 
 状态：Stable Core（仿真验证；未验证真实仪表）
 日期：2026-07-29
@@ -168,9 +168,13 @@
 - DATA-002：列 SHALL 自动加 `<module_id>.` 前缀。
 - DATA-003：模块不得直接写实验 DAT。
 - DATA-004：未声明列、不支持值类型、NaN 或 Infinity SHALL Error。
-- DATA-005：模块 SHALL 自行声明业务 Status/Warning 列；框架不加通用列。
-- DATA-006：Warning/Error 时可用温场/Monitor 数据 SHALL 保留。
+- DATA-005：模块 SHALL 声明每行必填的非负整数 `StatusCode`；0 表示正常，其他数值
+  及故障优先级由模块自行定义。状态列不得含文字，可读 Warning/Error 写事件日志。
+- DATA-006：非零 `StatusCode` 行 SHALL 将当前通道正式测量结果留空；未测通道也
+  SHALL 留空。仍可信的温场、通道和诊断元数据 MAY 保留。
 - DATA-007：默认数据/事件日志 SHALL 使用互不相同的单文件名并限制在原子分配的 Run 目录内。
+- DATA-008：模块 MAY 为正式结果行附带最多 32,768 个有限原始数值；中央 SHALL 按
+  正式 DAT 与模块分开写无表头 sidecar，并保持行顺序对应。
 
 ### 3.9 Data Browser
 
@@ -260,6 +264,7 @@ sequence.seq
 configuration.toml
 module_settings/<id>.settings.toml
 module_settings/<id>.status-at-start.json
+rawdata/<dat-stem>__<path-digest>__<module-id>.rawdata
 experiment.dat
 device_status.dat
 events.dat

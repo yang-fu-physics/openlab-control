@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Measurement Module 的实验 DAT 状态统一使用整数 `StatusCode`：`0` 固定表示正常，
+  其他非负数值及故障优先级由各模块自行定义；人类可读 Warning/Error 只进入界面、
+  运行日志和 `events.dat`，不再写入模块数据列。
+- 中央会拒绝缺失、文本、布尔或负数 `StatusCode`；示例模块同步移除文本
+  `Status`/`Warning` 列并升级到 1.0.2。
+- 所有现有模块在非零 `StatusCode` 行中不再保留当前通道的正式测量结果；故障通道和
+  未测通道都写为空，仅保留状态码以及仍可信的温场、通道或诊断元数据。
+- Measurement Module 的 `emit_row()` 可选携带有限数值 `raw_values`；中央在 Run 的
+  `rawdata/` 中按“正式 DAT + 模块”写无表头 sidecar，并保持每条原始行与正式结果行
+  顺序对应。
+- rawdata 每行最多 32,768 个有限数值，以保证最坏 JSON 表示仍低于 1 MiB IPC
+  上限；同名外部 DAT 使用路径摘要区分，`Set Datafile ... create` 会同步重建对应
+  sidecar，避免旧行残留。
+- Stop 恰好发生在 Measurement Module 的 `begin_sequence`/ARM 等待中时，协作取消
+  现在保持正常 Stop 控制流，不再把模块误标为 Faulted 或额外产生 Error。
+
 ## 0.11.3 - 2026-07-29
 
 - 修复首次信任并 Enable Measurement Module 时，运行时未重新载入信任记录、可能一直

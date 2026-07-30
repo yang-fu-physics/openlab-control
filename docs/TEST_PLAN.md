@@ -225,8 +225,8 @@ build.bat
 
 ### Device Plugin
 
-- [ ] 从私密共享仓库手动复制，首次内容指纹和框架共享依赖范围验证通过；如有额外依赖，
-  再验证离线 runtime。
+- [ ] 审查并手动复制目标 Device Plugin，首次内容指纹和框架共享依赖范围验证通过；
+  如有额外依赖，再验证离线 runtime；核心自带示例不得直接当作真实仪表驱动。
 - [ ] 每个温度/磁场 kind 只有一个 primary；所有 secondary 默认只读。
 - [ ] 只读 connect/poll 连续运行至少 1 小时。
 - [ ] connect 核对型号/固件且不改变仪表输出或自动 Apply 面板设置。

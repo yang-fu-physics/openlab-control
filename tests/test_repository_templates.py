@@ -33,7 +33,7 @@ class RepositoryTemplateTests(unittest.TestCase):
         self.assertEqual(descriptor.id, "simulated_transport")
         self.assertEqual(
             [column.name for column in descriptor.columns],
-            ["R1", "R2", "R3", "R4", "Status", "Warning"],
+            ["R1", "R2", "R3", "R4", "StatusCode"],
         )
 
     def test_device_repository_plugins_are_independently_installable(self) -> None:

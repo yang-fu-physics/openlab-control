@@ -379,9 +379,10 @@ Modules Manager Enable 相应测量方案。
 
 ### 更换温控仪或磁体电源
 
-从私密 Device Plugin 仓库复制目标插件目录到 `device_plugins/`，在一个配置文件中修改
-对应设备的 `plugin = "<plugin-id>"`、address、上下限、速率和超时，然后重启。不要为
-不同仪表维护核心代码分支。首次启动会要求确认插件内容指纹；修改插件后必须重新确认。
+取得并审查与目标设备匹配的 Device Plugin 后，把完整插件目录复制到
+`device_plugins/`，在一个配置文件中修改对应设备的 `plugin = "<plugin-id>"`、
+address、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
+会要求确认插件内容指纹；修改插件后必须重新确认。核心自带内容只作为实现示例。
 
 ### 设备一直 Reconnecting
 

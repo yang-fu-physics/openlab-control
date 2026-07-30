@@ -8,7 +8,7 @@ Pause/Stop；它不能直接持有主进程的 DeviceManager、Qt 对象或 DAT 
 from __future__ import annotations
 
 from abc import ABC
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 import math
@@ -69,10 +69,24 @@ class ModuleOperationContext:
     _operation_state: Callable[[float], str] | None = None
     operation_timeout_seconds: float = 120.0
 
-    def emit_row(self, values: Mapping[str, Any]) -> None:
-        """流式发送一行测量结果；列名必须已在 ``module.toml`` 中声明。"""
+    def emit_row(
+        self,
+        values: Mapping[str, Any],
+        *,
+        raw_values: Sequence[float] | None = None,
+    ) -> None:
+        """流式发送一行测量结果及其可选原始数值序列。
 
-        self._emit("row", {"values": dict(values)})
+        ``values`` 的列名必须已在 ``module.toml`` 中声明。``raw_values`` 只用于需要
+        保留仪表原始采样序列的模块；核心会先验证整条事件，再把正式 DAT 行与无表头
+        rawdata 行按相同顺序写入。原始数据不能携带通道名、时间戳或任意对象，避免把
+        模块私有格式混入核心运行快照；单行最多 32,768 个有限数值，以适配 1 MiB IPC。
+        """
+
+        payload: dict[str, Any] = {"values": dict(values)}
+        if raw_values is not None:
+            payload["raw_values"] = list(raw_values)
+        self._emit("row", payload)
 
     def update_status(self, values: Mapping[str, Any]) -> None:
         """更新模块窗口状态；不得把大对象或不可 JSON 化的驱动对象放入状态。"""

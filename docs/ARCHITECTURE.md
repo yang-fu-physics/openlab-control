@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.11.3 的实际实现边界。Device Plugin 与 Measurement Module
+本文描述 OpenLab Control 0.11.4.dev0 的实际实现边界。Device Plugin 与 Measurement Module
 是两套不同的扩展机制；它们分别放在独立共享仓库中，不进入核心源码。
 
 ## 进程与线程模型
@@ -50,7 +50,7 @@ OpenLab Control core repository
 ├─ plugin_state/               本机信任，不提交
 └─ plugin_templates/
    ├─ measurement-modules-repository/      公共/共享仓库模板
-   └─ device-plugins-private-repository/   私密/共享仓库模板
+   └─ Device Plugin 示例                 随设备协议变化的 fail-closed 骨架
 ```
 
 一个模块或设备插件目录包含清单、源码、可选 `requirements.lock` 和可选 `wheels/`。
@@ -151,6 +151,8 @@ runs/<timestamp>_<sequence>/
 ├─ module_settings/
 │  ├─ <id>.settings.toml
 │  └─ <id>.status-at-start.json
+├─ rawdata/
+│  └─ <dat-stem>__<path-digest>__<module-id>.rawdata
 ├─ experiment.dat
 ├─ device_status.dat
 └─ events.dat
@@ -158,6 +160,8 @@ runs/<timestamp>_<sequence>/
 
 动态列只发生在 Run 开始：系统列 + 每个模块清单列，名称带 `<module_id>.` 前缀。一次
 Measure 的每个模块行都附带当时温度、磁场和 Monitor 快照。写盘可每行 Flush。
+模块还可为一条正式行附带最多 32,768 个有限原始数值；核心把它们写入无表头的模块
+sidecar，模块自身仍不获得文件句柄。
 
 后台 poll 得到同一批快照后还会调用 `DatRunLogger.write_device_status()`。该写入仅在
 Run 已打开时有效，并按独立配置周期节流；SequenceEngine 在创建目录后先强制写初始行。
