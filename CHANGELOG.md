@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.11.4 - 2026-07-31
+
 - Measurement Module 的实验 DAT 状态统一使用整数 `StatusCode`：`0` 固定表示正常，
   其他非负数值及故障优先级由各模块自行定义；人类可读 Warning/Error 只进入界面、
   运行日志和 `events.dat`，不再写入模块数据列。
