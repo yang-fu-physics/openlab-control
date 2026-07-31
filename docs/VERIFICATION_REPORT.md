@@ -1,23 +1,25 @@
-# OpenLab Control 0.11.4 验证报告
+# OpenLab Control 0.11.5 验证报告
 
-- 验证日期：2026-07-31
+- 验证日期：2026-08-01
 - 验证平台：Windows 11 x64
-- 目标版本：v0.11.4 / PEP 440 `0.11.4`
-- 发布结论：核心框架可作为稳定版本发布；真实仪表模块继续保持 Beta
-- 真实仪表：Lake Shore 372A、LR-700、6221、2182A、7001 和 3706A 均未连接、未验证
+- 目标版本：v0.11.5 / PEP 440 `0.11.5`
+- 当前结论：三个源码仓库自动验证和 Windows 打包验收全部通过；核心可作为稳定版发布，
+  真实仪表模块继续保持 Beta
+- 真实仪表：Lake Shore 372A、LR-700、6221、2182A、7001、3706A、2400、6517B 和
+  2614B 均未连接、未验证
 
 ## 发布范围
 
-- Measurement Module 的正式 DAT 状态统一为非负整数 `StatusCode`；`0` 固定表示正常，
-  其他代码和优先级由模块定义。非零状态行的当前测量结果留空，可读告警只写界面和事件
-  日志。
-- 模块可以为正式结果行附带最多 32,768 个有限原始数值。核心按“正式 DAT + 模块”写入
-  无表头 `rawdata` sidecar，并处理同名 DAT、追加和 `create` 重建。
-- Stop 恰好发生在模块 `begin_sequence`/ARM 等待期间时，保持正常 Stop 控制流，不会把
-  模块误标为 Faulted。
-- Measurement Modules 仓库新增 Keithley 6221 + 2182A Delta + 3706A Beta 模块；既有
-  7001 方案同步采用稳定核心 0.11.4 的 rawdata/状态契约。两种方案均支持共享 Armed 和
-  逐通道重新 ARM 模式。
+- Measurement Module API 1.1 增加显式 `aligned_slots` / `once_per_slot` 调度契约；缺省
+  显示 Warning 并按 `once_per_slot` 兼容处理。
+- 一次 `T Measure` 按扫描槽位并集写“每个逻辑通道一行”。同槽位模块并行合入该行，
+  单次模块每行重新测量，Disabled 扫描槽位保持空列。
+- 单次 backend 调用严格只允许一行；无行、多行以及 emit 后又 return 都会 Error。
+- 模块原始数据继续按正式 DAT + 模块写入独立 sidecar；同槽位多模块共享正式行但不共享
+  rawdata 文件。
+- Measurement Modules 仓库同步迁移 372A、LR-700、两种 Delta 和示例模块，并新增
+  `once_per_slot` 的 2400、6517B、2614B Beta 模块。主动输出模块默认每行关闭输出，
+  可选在成功行之间保持；所有结束和异常路径仍强制恢复安全状态。
 
 ## 自动验证
 
@@ -25,38 +27,39 @@
 
 | 仓库 | 结果 |
 | --- | ---: |
-| OpenLab Control 核心 | 195/195 |
-| Measurement Modules | 82/82 |
+| OpenLab Control 核心 | 201/201 |
+| Measurement Modules | 133/133 |
 | Device Plugin 示例 | 1/1 |
-| 合计 | 278/278 |
+| 合计 | 335/335 |
 
-专项测试覆盖 rawdata 的 IPC 验证、写入、DAT 切换和重建，并行模块 sidecar，数值状态码，
-故障稀疏行，ARM 后 3 秒等待，共享/逐通道 ARM，7001 缺失降级，3706A TSP 路由与闭合
-回读，运行期切换失败立即中止，Stop/通信异常安全收尾，异常读数 Warning 继续和 SI 前缀
-输入。完整测试还覆盖既有 SEQ、设备与模块生命周期、DAT/Data Browser、GUI、报警和扩展
-依赖契约。
+专项测试覆盖 mode 缺省 Warning、槽位并集、CH1+CH1 对齐、Disabled 槽位空列、单次模块
+逐行重复、同槽位 DAT 合并、rawdata sidecar、严格单行契约，以及既有 ARM、切换路由、
+Stop/通信异常安全收尾、数据 Warning 和整数状态码。完整测试还覆盖 SEQ、设备/模块
+生命周期、DAT/Data Browser、GUI、报警和扩展依赖契约。
 
 此外，三个仓库的 `compileall`、`git diff --check` 均通过；核心 `pip check` 无损坏依赖，
 4 项发布契约测试通过。
 
 ## Windows 发布包验收
 
-- `build.bat` 再次执行 195 项核心测试，并由 PyInstaller 完成全新构建；
-- `OpenLabControl.exe` 的 `FileVersion` 和 `ProductVersion` 均为 0.11.4；
-- 冻结包共享依赖元数据为 PySide6 6.11.1、QtAwesome 1.4.2、packaging 26.2、
-  PyVISA 1.16.2 和 typing_extensions 4.16.0；
-- 发布目录共 336 个文件、约 132.61 MiB，未发现 `__pycache__`、测试缓存、`.pyc`
-  或 `.pyo`；
-- 源码和复制后的冻结包 GUI 均以退出码 0 完成 1480 x 900 离屏截图并自动关闭，截图经
-  人工检查未见布局截断或异常窗口；
-- 复制后的冻结包运行默认 nested scan，以退出码 0 完成并写入 0.11.4 `BYAPP`、
-  `device_status.dat`、事件日志和运行快照；
-- 手动复制并预置信任 `simulated_transport` 1.0.2 后，冻结包模块 SEQ 以退出码 0 完成，
-  写出 12 行/13 列稀疏 DAT、模块设置和起始状态快照；
-- 所有冒烟进程均正常退出，没有残留 OpenLab Control 进程。
+- `build.bat` 完整重建成功；构建过程再次运行核心 201/201 测试并通过。
+- `OpenLabControl.exe` 的 FileVersion 与 ProductVersion 均为 `0.11.5`；未发现
+  `__pycache__`、`.pyc`、`.pyo` 或重复的 `_internal` 资源目录。
+- 解包目录共 336 个文件、139,073,045 bytes（132.63 MiB）。PyInstaller 缺失模块报告
+  仅包含 Windows 不使用的 POSIX 模块和可选依赖；实际冻结启动未出现缺包错误。
+- 源码版与冻结版 `--gui-smoke` 均退出 0，生成的 1480×900 主窗口截图均为
+  105,527 bytes；菜单、SEQ 树、命令栏和三个设备状态块完整可读。
+- 源码版与冻结版 `nested_scan.seq` 无界面运行均 Completed、退出 0；嵌套温度/磁场/时间
+  扫描和 Disabled 模块 Warning 路径正常，结束后无残留 `OpenLabControl` 进程。
+- 在冻结包副本中复制并信任 API 1.1 `simulated_transport` 后，模块在独立进程中 Enable，
+  `module_measurement.seq` Completed、退出 0。3 个 Measure 各写 4 个逻辑通道行，共 12 行；
+  每行恰有一个 R1–R4 值且 `StatusCode=0`，未发现无行、多行或跨槽位污染，退出后无残留
+  模块/主程序进程。
+- 模块 Manager、Settings 和 Status 三张离屏预览均成功生成；窗口初始宽度无横向滚动条，
+  Apply Settings 仍只出现在 Settings 页。
 
-PyInstaller 只报告跨平台或可选导入缺失，例如 POSIX 模块、PyVISA 可选 NumPy 和旧版
-prettytable 兼容导入；没有发现阻止当前 Windows 路径运行的缺失依赖。
+最终发布 ZIP 的重新解压和哈希核验将在生成发布资产后执行，并单独记录在随 Release 上传的
+验证报告中。
 
 ## 真实仪表边界
 

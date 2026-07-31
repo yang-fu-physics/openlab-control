@@ -196,10 +196,12 @@ T Measure devices=transport repeats=3 interval=1s
 
 执行语义：
 
-1. 锁定本次 Run 开始时所有 Enabled 模块。
-2. 同时调用它们的 `measure()`。
-3. 每个模块可立即发出一行或多行；中央在每行到达时记录最新温度、磁场和 Monitor。
-4. 等所有模块结束后才继续下一条 SEQ。
+1. 锁定本次 Run 开始时所有 Enabled 模块及其设置。
+2. 核心按所有 `aligned_slots` 模块的启用槽位并集展开；每个逻辑通道槽位调用参与模块，
+   每次模块调用恰好产生一行结果。
+3. 同一槽位的参与模块并行，结果合入该通道对应的一行；CH1–CH4 仍是四行，未参与模块列为空，
+   `once_per_slot` 模块每行重新测量。
+4. 等所有槽位结束后才继续下一条 SEQ。
 5. 没有 Enabled 模块时弹一个锁存 Warning，写一行系统状态，继续 SEQ。
 6. 模块 Warning 继续；模块 Error 使运行进入 Faulted，但不调用模块 `abort()`。
 

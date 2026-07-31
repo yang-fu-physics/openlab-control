@@ -15,12 +15,12 @@
 | `test_sequence_parser.py` | 单行语法、任意嵌套、List、T/F、旧命令与越界/非有限参数拒绝 |
 | `test_sequence_editor.py` | 多行右键/键盘、父子去重、运行锁定 |
 | `test_engine.py` | 嵌套 Scan、Pause 时钟、Hold、控制等待上限、运行时参数防绕过与展开进度 |
-| `test_measurement_modules.py` | 清单、Settings、并行多行测量、信任、IPC/退出超时、完整生命周期 |
+| `test_measurement_modules.py` | 清单 mode、逻辑槽位并集、每通道合并行、Settings、信任、IPC/退出超时、完整生命周期 |
 | `test_extension_dependencies.py` | 框架共享版本划分、额外依赖精确哈希 lock、离线安装和 runtime 篡改 |
 | `test_device_plugin_manifest.py` | 外部设备清单、core/API、内容指纹和首次信任 |
 | `test_device_worker.py` | 每设备独立进程、阻塞强杀、依赖只在子进程可见 |
 | `test_device_recovery.py` | 读链路重连、恢复状态核对、写超时不重放、最终故障 |
-| `test_datafile.py` | 动态列、多行结果、追加 Schema、路径限制、原子运行目录与快照 |
+| `test_datafile.py` | 动态列、同槽位多模块合并、追加 Schema、路径限制、原子运行目录与快照 |
 | `test_devices_and_units.py` | 控制/Monitor 插件、竞态、限制、非有限值、设备超时隔离、Hold 与 Oe/T |
 | `test_events_and_stability.py` | 活动事件去重、重复 Error 仍中止、数值判稳与超时 |
 | `test_main_window.py` | MDI、SEQ 重开、长路径、配置限制 |
@@ -57,7 +57,9 @@
 .venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
 ```
 
-预期 Completed；3 次 Measure 各流式写入 R1–R4，共 12 行模块数据。`--enable-module` 只用于无界面验收，不改变 GUI 每次启动全部 Disabled 的规则。
+预期 Completed；示例模块声明四个 `aligned_slots`，3 次 Measure 各按 R1–R4 写四个
+逻辑通道行，共 12 行模块数据。`--enable-module` 只用于无界面验收，不改变 GUI 每次
+启动全部 Disabled 的规则。
 执行前必须从仓库模板复制模块，并通过 GUI 预先信任完全相同的内容指纹；无界面模式不得
 自动信任。只有声明框架未提供额外依赖的模块才必须先完成离线 runtime 准备。
 
@@ -101,6 +103,8 @@
 13. 制造共享依赖范围不兼容或其他无效 manifest，程序仍启动，该模块禁止 Enable 并
     显示原因。
 14. 修改已信任源码，确认旧信任失效且 Enable 前再次提示。
+15. 删除 manifest 的 `measurement_mode`，确认显示 Warning、仍允许 Enable，且按
+    `once_per_slot` 执行；正式示例清单必须显式声明。
 
 ## Settings/Status 验收
 
@@ -137,18 +141,20 @@
 
 记录每个阶段的调用顺序，确保不会把 Stop/Error 误当 Disable。
 
-## 并行与流式数据验收
+## 逻辑槽位、并行与数据验收
 
-1. Enable 两个仿真模块，让延时不同。
-2. 一条 Measure 同时启动两者。
-3. 各模块内部行顺序保持。
-4. 模块间行按实际到达顺序混排。
-5. 中央等待两者完成后才执行下一条 Remark/Set。
-6. 每行温度/场/Monitor 可不同且采样时间合理。
-7. 每个模块列有 ID 前缀，无碰撞。
+1. Enable 两个 `aligned_slots` 模块：A 使用 `[1,3,4]`，B 使用 `[1,2,4]`；再 Enable
+   一个 `once_per_slot` 模块。
+2. 一条 Measure 产生四行；A/B 在同槽位并行，`once_per_slot` 每行调用一次。
+3. 第 2 行 A 为空、第 3 行 B 为空，其他参与模块值出现在同一通道行。
+4. 中央完成四个槽位后才执行下一条 Remark/Set。
+5. 每个逻辑通道行只有一份核心温度/场/Monitor 快照且采样时间合理。
+6. 每个模块列有 ID 前缀，无碰撞；各模块 rawdata 仍写独立 sidecar。
+7. 单次调用无行、两个 emit 或 emit 后 return，确认 Error/Faulted。
 8. 发未声明列，确认 Error/Faulted。
 9. 发复杂对象值，确认类型 Error。
-10. 无模块 Measure 写恰好一行系统状态并继续。
+10. Stop 发生在当前槽位时不写半成品行，前序完整槽位保留。
+11. 无模块 Measure 写恰好一行系统状态并继续。
 
 ## Warning/Error 去重验收
 

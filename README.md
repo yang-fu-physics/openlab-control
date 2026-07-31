@@ -5,7 +5,7 @@ Python/PySide6 控制框架。它不控制 PPMS 本体。温控仪、磁体电�
 Device Plugin 提供；吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的
 Measurement Module 提供。
 
-当前版本：`0.11.4`。核心框架、扩展 API 和仿真流程为稳定版本；默认配置全部使用
+当前版本：`0.11.5`。核心框架、扩展 API 和仿真流程为稳定版本；默认配置全部使用
 仿真设备。Lake Shore 372A、LR-700、Keithley 6221/2182A/7001/3706A 等尚未完成
 真机验证的硬件扩展仍各自保持 Beta 状态。
 
@@ -21,7 +21,10 @@ Measurement Module 提供。
 - 一个温度/磁场种类最多一个主控设备；其他设备默认只读监视。
 - 每次启动所有 Measurement Module 都是 Disabled；Enable 只初始化并加载设置，不会
   自动 Apply。
-- 一个 `Measure` 并行等待所有 Enabled 模块；每个模块可以流式返回多行。
+- 一个 `T Measure` 按扫描模块的逻辑槽位并集展开，每个通道槽位写一行；同一槽位的
+  模块并行测量并合入该行，单次模块在每个槽位重新测量。
+- Measurement Module 必须声明 `once_per_slot` 或 `aligned_slots`；缺失时界面提示并按
+  `once_per_slot` 兼容执行。
 - 模块可为正式结果行附带有限原始采样序列，由中央写入独立无表头 `rawdata` sidecar。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认

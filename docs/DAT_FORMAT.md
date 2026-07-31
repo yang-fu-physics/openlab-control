@@ -35,7 +35,7 @@ runs/20260723_120000_nested_scan/
 ```text
 [Header]
 ; OpenLab Control Data File (default extension .dat)
-BYAPP,OpenLab Control,0.11.4
+BYAPP,OpenLab Control,0.11.5
 INFO,...
 
 [Data]
@@ -89,8 +89,12 @@ simulated_transport.StatusCode
 ```
 
 前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `StatusCode` 也不会冲突。Run 开始后 Schema 固定，直到该 Run 结束。
+Header 的模块 INFO 同时保存版本、API 和实际采用的 `measurement_mode`，包括缺省兼容后
+的 `once_per_slot`，便于脱离运行现场解释行数。
 
-模块每次 `emit_row()` 只需提供本行有效值。其他已声明列以及其他模块的全部列留空。例如示例模块一次 Measure 依次写：
+模块每次 `measure()` 调用必须恰好提供一行：调用一次 `emit_row()` 或返回一个非空
+Mapping。`aligned_slots` 模块由核心按启用槽位分别调用；同一槽位的多个模块结果合入
+该逻辑通道的一行，其他未参与模块列留空。例如示例扫描模块一次 `T Measure` 依次写：
 
 ```text
 ... R1=<value>, R2=,       R3=,       R4=,       StatusCode=0
@@ -99,15 +103,20 @@ simulated_transport.StatusCode
 ... R1=,       R2=,       R3=,       R4=<value>, StatusCode=0
 ```
 
-模块应声明一个整数 `StatusCode`：`0` 固定表示正常，其他非负数值及多故障优先级由
-该模块自行定义并写入自己的 README 和测试。不得在状态列写 `NORMAL`、`ERROR`、
-`OVER_RANGE` 等文字。人类可读 Warning/Error 写入 `events.dat`、运行日志和界面，
-框架不会添加通用 `Module Status` 或 `Warning Code` 列。
+上例仍是四个通道四行。若同时启用另一个四槽位扫描模块，其 CH1 值进入第一行、CH2
+进入第二行；如果对方关闭 CH3，其列只在第三行为空。`once_per_slot` 模块会在四行中
+分别重新测量。没有任何 `aligned_slots` 模块时，一次 `T Measure` 只有槽位 1，因此
+只有一行。
 
-当 `StatusCode` 非零时，当前通道的电阻、电压、相位、标准差等正式测量结果必须留空；
-稀疏表中的其他未测通道也保持为空。仍然可信的通道编号、温场快照、设定电流、样本数和
-rawdata 可以按模块文档保留。若结果有效但需要提醒，应写 `StatusCode=0` 并单独报告
-Warning。
+只有一个结果组的行应声明整数 `StatusCode`。一次调用汇总多个独立内部通道的宽表可以
+声明 `StatusCode1`、`StatusCode2` 等编号列；每个实际测量组必须提供自己的非负整数，
+Disabled 内部通道整组留空。`0` 固定表示正常，其他数值及多故障优先级由模块自行定义并
+写入 README 和测试。不得写 `NORMAL`、`ERROR`、`OVER_RANGE` 等文字。人类可读
+Warning/Error 写入 `events.dat`、运行日志和界面。
+
+某状态码非零时，只将对应结果组的电阻、电压、相位、标准差等正式测量结果留空；同一
+宽表行中的另一正常内部通道仍可保留。仍可信的通道编号、温场快照、设定电流、样本数和
+rawdata 可以按模块文档保留。若结果有效但需要提醒，应写状态码 0 并单独报告 Warning。
 
 ### 模块原始序列
 
@@ -119,7 +128,8 @@ Warning。
 ```
 
 - 无表头、时间戳、通道名或状态字段，每行只包含逗号分隔的原始数值；
-- 每次带 `raw_values` 的正式 DAT 行恰好写一条 rawdata 行，顺序一致；空原始序列写空行；
+- 每个模块在当前逻辑槽位带 `raw_values` 时恰好写一条该模块 rawdata 行，顺序一致；
+  多个模块共用正式 DAT 行时仍使用各自 sidecar；空原始序列写空行；
 - 每行最多 32,768 个有限数值，不能包含 bool、文本、NaN 或 Infinity；
 - 每个模块和每个正式 DAT 分开保存；不同目录中的同名 DAT 由路径摘要区分；
 - `Set Datafile ... create` 重建正式 DAT 时，也删除该 DAT 在本 Run 中的旧 sidecar；
@@ -131,18 +141,23 @@ rawdata 只保存模块明确提交的仪表读数，不改变正式 DAT Schema�
 ### 空模块与失败行
 
 - Measure 时没有 Enabled 模块：写一行只有系统状态的行，模块列不存在，并产生 Warning。
-- 所有模块都未发出有效行：中央补一行系统状态，避免该 Measure 在 DAT 中完全消失。
-- 某模块 Warning：已经发出的有效值照常写；非零 `StatusCode` 行的当前测量结果必须
-  留空；详细告警写 events.dat。
-- 某模块 Error：其他并发模块在 Error 收束前已发出的行保留；若没有任何行则仍保留系统状态行，然后 SEQ Faulted。
+- 某模块对当前槽位抛出 Warning 且不提供状态行：该模块在当前通道行留空，其他模块值
+  正常写入；详细告警写 events.dat，下一槽位继续。
+- 某模块写非零状态码：该状态码对应的正式测量组留空，其他模块或同一宽表中的正常
+  内部通道值正常写入。
+- 某模块 Error：同槽位其他并发模块已经完成的值与该槽位行一同保留，然后 SEQ
+  Faulted。Stop 取消槽位事务时不写该槽位的部分行，已经完成的前序通道行保留。
+- 单次模块调用未产生行、产生多行或同时 emit 与 return：Schema Error，并按当前槽位
+  Error 路径处理。
 
 ### 值格式
 
 - 温度固定三位；Oe 固定两位；T 固定六位。
 - 模块 float 使用最多 9 位有效数字。
 - 一般模块列可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。
-- 声明了 `StatusCode` 的模块每行都必须提供非负整数；缺失、文本、bool 或负数会触发
-  Schema Error。状态码以外的文本能力不应用来绕过这一约定。
+- 声明了单组 `StatusCode` 的模块每行都必须提供；编号 `StatusCodeN` 在该内部通道
+  实际测量时必须提供。核心会拒绝任何已提供状态列中的文本、bool 或负数；模块独立测试
+  还必须核对 Enabled/Disabled 组的必填关系。
 - CSV 会自动引用含逗号或引号的文本。
 
 ## `events.dat`

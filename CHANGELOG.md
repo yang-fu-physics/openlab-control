@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.11.5 - 2026-07-31
+
+- Measurement Module API 升级到 1.1。正式模块通过 manifest 显式声明
+  `aligned_slots` 或 `once_per_slot`；缺少字段时 Modules Manager 显示 Warning，并按
+  `once_per_slot` 兼容执行。
+- 一条 `T Measure` 现在按所有扫描模块的启用逻辑槽位并集展开。CH1–CH4 分别写四行；
+  同一槽位的扫描模块并行并合入该通道行，未启用的模块列留空。
+- 2400 等单次模块会在每个逻辑槽位重新测量；没有扫描模块时使用唯一槽位 1，因此仍
+  只测量并写入一次。
+- 每次模块 `measure()` 调用必须恰好产生一行。无行、多行或同时 `emit_row` 与返回
+  Mapping 都会被拒绝，避免第三方模块改变通道行数或破坏跨模块对齐。
+- 同一逻辑槽位只采一份核心温度、磁场和 Monitor 快照；多个模块仍可把各自原始序列
+  写入独立 rawdata sidecar。Stop 取消当前槽位时不写半成品行，前序通道行保留。
+
 ## 0.11.4 - 2026-07-31
 
 - Measurement Module 的实验 DAT 状态统一使用整数 `StatusCode`：`0` 固定表示正常，

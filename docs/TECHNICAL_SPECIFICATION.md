@@ -1,4 +1,4 @@
-# OpenLab Control 0.11.4 技术规格
+# OpenLab Control 0.11.5 技术规格
 
 状态：Stable Core（仿真验证；未验证真实仪表）
 日期：2026-07-31
@@ -17,7 +17,7 @@
 - 中央数值判稳、目标/速率限制、Hold；
 - 单行 `.seq` 编辑、任意 Scan 嵌套和执行状态机；
 - 源码 Measurement Module 发现、依赖、独立进程和生命周期；
-- 并行模块测量与多行流式中央 DAT；
+- 按逻辑通道槽位调度的并行模块测量与中央 DAT；
 - Warning/Error 锁存、去重弹窗、事件日志；
 - 独立 DAT Browser 和 `.plt` 显示配置；
 - 内置仿真设备，以及位于独立仓库模板的 `simulated_transport` 示例模块；
@@ -104,6 +104,8 @@
   `--no-index --require-hashes`；不得在线回退。
 - MOD-012：首次加载 SHALL 绑定 type/ID/version/content fingerprint 取得用户信任；
   内容变化 SHALL 使旧信任失效。
+- MOD-013：Measurement Module SHALL 显式声明 `once_per_slot` 或 `aligned_slots`；缺失
+  时 SHALL 显示 Warning 并按 `once_per_slot` 兼容执行。
 
 ### 3.5 模块进程和界面
 
@@ -131,7 +133,8 @@
 - LIFE-002：initialize SHALL 加载保存 Settings 但不得自动应用到仪表。
 - LIFE-003：Apply SHALL 明确确认，并调用 apply_settings。
 - LIFE-004：Run SHALL 在第一条指令前调用 begin_sequence。
-- LIFE-005：每条 Measure SHALL 调用本次锁定模块的 measure。
+- LIFE-005：每条 Measure SHALL 按本次冻结逻辑槽位调用参与模块的 measure；每次调用
+  SHALL 只对应一个槽位并恰好产生一行。
 - LIFE-006：最终 SHALL 调用 end_sequence，reason=`completed|stopped|error`。
 - LIFE-007：abort SHALL 只在 Disable 和应用退出调用。
 - LIFE-008：Error 停止 SEQ时不得调用 abort。
@@ -158,20 +161,28 @@
 
 ### 3.8 并行测量与数据
 
-- MEAS-001：一条 Measure SHALL 并行调用所有 Enabled 模块。
-- MEAS-002：中央 SHALL 等全部模块完成后才继续 SEQ。
-- MEAS-003：模块 MAY 在一次 Measure 中按顺序发出多行。
-- MEAS-004：每行到达时 SHALL 捕获最新控制/Monitor 快照并立即写入。
-- MEAS-005：同一模块行顺序 SHALL 保持；模块间 SHALL 按中央到达顺序串行写盘。
+- MEAS-001：`aligned_slots` 模块 SHALL 在 Run 开始返回启用槽位；中央 SHALL 取并集，
+  按正整数升序为一条 `T Measure` 生成每个逻辑通道行。
+- MEAS-002：同一逻辑槽位的参与模块 SHALL 并行；中央 SHALL 等该槽位全部模块收束后
+  合并为一行，再进入下一槽位。
+- MEAS-003：`once_per_slot` 模块 SHALL 在每个逻辑槽位调用一次；没有
+  `aligned_slots` 模块时 SHALL 使用唯一槽位 1。
+- MEAS-004：模块一次 measure 调用 SHALL 恰好发送或返回一行；无行、多行或 emit 后
+  又 return SHALL Error。
+- MEAS-005：每个逻辑槽位 SHALL 捕获一份最新控制/Monitor 快照；未参与该槽位的模块
+  列 SHALL 留空。
 - MEAS-006：无 Enabled 模块 SHALL Warning、写一行系统快照并继续。
+- MEAS-007：Stop 取消当前槽位时 SHALL 不写该槽位的部分结果；前序完整槽位 SHALL
+  保留。
 - DATA-001：模块 SHALL 在清单声明固定列/单位。
 - DATA-002：列 SHALL 自动加 `<module_id>.` 前缀。
 - DATA-003：模块不得直接写实验 DAT。
 - DATA-004：未声明列、不支持值类型、NaN 或 Infinity SHALL Error。
-- DATA-005：模块 SHALL 声明每行必填的非负整数 `StatusCode`；0 表示正常，其他数值
+- DATA-005：单结果组模块 SHALL 声明每行必填的非负整数 `StatusCode`；汇总多个内部
+  通道的宽表 MAY 声明 `StatusCode1`、`StatusCode2` 等每组状态。0 表示正常，其他数值
   及故障优先级由模块自行定义。状态列不得含文字，可读 Warning/Error 写事件日志。
-- DATA-006：非零 `StatusCode` 行 SHALL 将当前通道正式测量结果留空；未测通道也
-  SHALL 留空。仍可信的温场、通道和诊断元数据 MAY 保留。
+- DATA-006：非零状态码 SHALL 将其对应结果组的正式测量值留空；未测组也 SHALL
+  留空。同一宽表中的其他正常组及仍可信的温场、通道和诊断元数据 MAY 保留。
 - DATA-007：默认数据/事件日志 SHALL 使用互不相同的单文件名并限制在原子分配的 Run 目录内。
 - DATA-008：模块 MAY 为正式结果行附带最多 32,768 个有限原始数值；中央 SHALL 按
   正式 DAT 与模块分开写无表头 sidecar，并保持行顺序对应。

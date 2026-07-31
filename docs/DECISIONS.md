@@ -177,7 +177,7 @@ SEQ 只接受 `T Measure`。模块选择在 Run 前通过 Enabled 状态完成�
 
 ## ADR-024：模块流式多行、中央唯一写 DAT
 
-状态：Accepted
+状态：Superseded in scheduling by ADR-035；中央唯一写 DAT 的边界仍保留
 
 模块声明固定列并通过 emit_row 流式发值。中央为每行捕获最新系统快照、自动加模块 ID 前缀并立即 Flush；模块不能直接写实验 DAT。这样 R1–R4 顺序测量可拥有不同温场，并避免多个进程并发写同一文件。未声明列/复杂值为 Error。模块以整数 `StatusCode` 保存数据质量：0 表示正常，非零含义由模块自行定义；可读 Warning/Error 单独写事件日志。
 
@@ -269,3 +269,18 @@ PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是稳定扩展 A
 只有框架尚未提供的包才进入 ADR-030 的扩展隔离 runtime，并显示
 Install Dependencies。这样常见仪表模块手动复制后即可 Enable，同时保留特殊第三方
 SDK 的完全离线、可审计安装，不允许扩展私有副本覆盖框架包。
+
+## ADR-035：逻辑槽位由核心调度，每个通道合并一行
+
+状态：Accepted
+
+Measurement Module API 1.1 要求清单显式选择 `aligned_slots` 或 `once_per_slot`。
+扫描模块在 Run 开始返回启用槽位；核心取并集并按槽位升序调度。同一槽位中的模块并行
+执行并合入该通道的一行，CH1–CH4 因而仍是四行；扫描模块未启用的槽位列留空。
+2400 等单次模块以及一次调用汇总 A/B 的 2614B 在每个槽位重新测量。没有扫描模块时
+使用唯一槽位 1。
+
+每次 backend `measure()` 调用必须恰好产生一行，禁止模块自行流式发出多个通道行。
+这使不同扫描模块能够稳定执行 CH1+CH1、CH2+CH2，并避免模块完成顺序改变 DAT 行数。
+缺少 mode 的第三方模块会得到 Warning 并按 `once_per_slot` 兼容处理，但正式模块必须
+显式声明。中央仍是 DAT/rawdata 的唯一写入者。

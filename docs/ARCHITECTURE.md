@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.11.4 的实际实现边界。Device Plugin 与 Measurement Module
+本文描述 OpenLab Control 0.11.5 的实际实现边界。Device Plugin 与 Measurement Module
 是两套不同的扩展机制；它们分别放在独立共享仓库中，不进入核心源码。
 
 ## 进程与线程模型
@@ -120,7 +120,8 @@ Pause 只在安全检查点停止调度并冻结可中断计时，不主动改�
 initialize(saved settings; do not apply)
 → apply_settings（仅用户在 Settings 页确认，可多次）
 → begin_sequence
-→ measure（可多次、一次可 emit 多行）
+→ measurement_slots（仅 aligned_slots 模块，每个 Run 一次）
+→ measure（按逻辑槽位多次调用，每次恰好一行）
 → end_sequence(completed | stopped | error)
 → abort（仅 Disable 或应用退出）
 → close/force-stop worker
@@ -129,9 +130,21 @@ initialize(saved settings; do not apply)
 框架分别限制启动、单次操作和关闭总时间。请求包含等待同模块前一请求锁的时间；超时后
 连接失效并有界 terminate/kill。应用退出时各模块并行清理，避免总时长随模块数线性增加。
 
-一个 `Measure` 同时请求所有本次 Enabled 模块，并等待全部收束。模块事件：
+模块清单必须显式声明 `measurement_mode`：
 
-- `row`：固定 Schema 的一行，可发送多次；
+- `aligned_slots` 返回本次 Run 启用的正整数槽位；所有扫描模块的槽位并集决定一次
+  `T Measure` 的行数。
+- `once_per_slot` 不返回扫描计划，在并集的每个槽位都重新测量一次；若没有扫描模块，
+  唯一槽位为 1。
+
+核心按槽位升序推进。同一槽位同时请求全部参与模块并等待收束，然后把结果合入该逻辑
+通道对应的一行。因此 CH1–CH4 仍写四行，而不是合成一行；未启用某槽位的扫描模块在
+该行留空。缺少模式字段的第三方清单会显示 Warning，并按 `once_per_slot` 兼容执行。
+
+模块事件：
+
+- `row`：当前调用的固定 Schema 行，只能发送一次；也可以改为返回一个非空 Mapping，
+  但不能两者同时使用；
 - `status`：更新 Status 页面；
 - `warning` / `resolve`：锁存或解除可恢复事件；
 - Response：生命周期调用最终结果。
@@ -159,9 +172,9 @@ runs/<timestamp>_<sequence>/
 ```
 
 动态列只发生在 Run 开始：系统列 + 每个模块清单列，名称带 `<module_id>.` 前缀。一次
-Measure 的每个模块行都附带当时温度、磁场和 Monitor 快照。写盘可每行 Flush。
-模块还可为一条正式行附带最多 32,768 个有限原始数值；核心把它们写入无表头的模块
-sidecar，模块自身仍不获得文件句柄。
+`T Measure` 的每个逻辑槽位行附带一份当时温度、磁场和 Monitor 快照。写盘可每行
+Flush。模块还可为自己在该槽位的结果附带最多 32,768 个有限原始数值；即使多个模块
+共用一条正式 DAT 行，它们仍分别写入各自的无表头 sidecar，模块自身不获得文件句柄。
 
 后台 poll 得到同一批快照后还会调用 `DatRunLogger.write_device_status()`。该写入仅在
 Run 已打开时有效，并按独立配置周期节流；SequenceEngine 在创建目录后先强制写初始行。

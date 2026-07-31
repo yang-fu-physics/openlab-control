@@ -45,7 +45,7 @@ SHA-256 指纹。首次加载要求用户确认类型、ID、版本、路径和�
 - `id`：必须匹配 `[a-z][a-z0-9_]*`。
 - `name`：非空显示名。
 - `version`：有效 PEP 440 版本；内容变化必须提升。
-- `api_version`：当前为 `"1.0"`。
+- `api_version`：Device Plugin 当前为 `"1.0"`；Measurement Module 当前为 `"1.1"`。
 - `core_requires`：可选的 OpenLab Control 版本范围。
 - 入口：只允许 `module_name:ClassName`，对应 `.py` 必须位于扩展根目录。
 - `dependencies`：可选 PEP 508 要求；禁止 URL。
@@ -201,11 +201,12 @@ modules/dc_transport/
 id = "dc_transport"
 name = "DC Transport"
 version = "1.0.0"
-api_version = "1.0"
-core_requires = ">=0.11.1,<0.12"
+api_version = "1.1"
+core_requires = ">=0.11.5,<0.12"
 frontend = "frontend:DcTransportFrontend"
 backend = "backend:DcTransportBackend"
 backend_type = "python"
+measurement_mode = "aligned_slots"
 dependencies = ["pyvisa>=1.14,<2"]
 
 [[columns]]
@@ -218,8 +219,20 @@ name = "StatusCode"
 
 这里的 PyVISA 范围由 OpenLab Control 0.11.1 提供的 1.16.2 满足，因此不需要
 `requirements.lock`、wheel 或安装步骤。列在 Run 开始前固定，名字必须唯一、单行且
-不含逗号。模块应显式声明自己的整数 `StatusCode` 列。中央写盘时自动加
+不含逗号。单结果组模块应显式声明整数 `StatusCode`；宽表汇总多个内部通道时可声明
+`StatusCode1`、`StatusCode2` 等每组状态。中央写盘时自动加
 `<module_id>.` 前缀。
+
+`measurement_mode` 必须由正式模块显式声明：
+
+- `aligned_slots` 用于需要与其他扫描模块按 CH1/CH2… 对齐的模块；在
+  `begin_sequence` 后实现 `measurement_slots(context)` 返回本 Run 启用的唯一正整数
+  槽位。
+- `once_per_slot` 用于 2400 等单次模块，以及 2614B 这种一次调用便可汇总全部内部通道
+  的模块。核心在每个逻辑通道槽位都重新调用一次。
+
+缺少字段时发现界面会提示 Warning，核心为了第三方兼容仍按 `once_per_slot` 执行；新建
+或正式发布的模块不得依赖这个兜底。
 
 ### 4.2 仪表所有权
 
@@ -237,6 +250,7 @@ class DcTransportBackend(ModuleBackend):
     def initialize(self, settings, context): ...
     def apply_settings(self, settings, context): ...
     def begin_sequence(self, context): ...
+    def measurement_slots(self, context): ...  # 仅 aligned_slots
     def measure(self, context): ...
     def end_sequence(self, reason, context): ...
     def abort(self, context): ...
@@ -251,7 +265,10 @@ class DcTransportBackend(ModuleBackend):
   安全基线。应立即生效的设置必须发送并读回；只能在扫描时逐通道生效的参数可以延迟到
   `measure`，但使用前同样必须发送并读回。
 - `begin_sequence`：第一条 SEQ 前准备模块输出/缓冲。
-- `measure`：每个无参数 `T Measure` 调用一次，可发送多行。
+- `measurement_slots`：仅 `aligned_slots` 模块在每次 Run 的 `begin_sequence` 成功后调用
+  一次；返回的槽位计划在本 Run 内冻结。
+- `measure`：针对 `context.measurement_step.logical_slot` 执行一个测量单元，并且恰好
+  产生一行。核心会按槽位多次调用，不允许模块自行循环发多行。
 - `end_sequence(reason)`：对 completed/stopped/error 都关闭模块自身危险输出；普通
   Run 结束不调用 abort。worker 已超时、退出或 IPC 断开时不能保证此调用成功，核心
   必须保留 Safety Unconfirmed，而不能把进程回收等同于仪表安全。
@@ -260,32 +277,37 @@ class DcTransportBackend(ModuleBackend):
 - `manual_action`：Idle 时执行 Test/Read/Measure Now，不写实验 DAT。
 
 框架接受同步方法或返回 awaitable 的方法。返回值必须是 JSON object 或 None；禁止
-NaN/Infinity/bytes/自定义对象。一次 IPC 消息最大 1 MiB。`measure` 返回的非空
-Mapping 会额外写一行；多行模块应逐行 `emit_row` 并返回 None。
+NaN/Infinity/bytes/自定义对象。一次 IPC 消息最大 1 MiB。每次 `measure` 可返回一个
+非空 Mapping，或调用一次 `emit_row` 后返回 None。缺行、多行以及 emit 后又 return
+都会成为 Error。
 
-### 4.4 多行与事件
+### 4.4 逻辑槽位、数据行与事件
 
 ```python
+def measurement_slots(self, context):
+    return [slot for slot in (1, 2, 3, 4) if self.enabled(slot)]
+
 def measure(self, context):
-    for channel in ("R1", "R2", "R3", "R4"):
-        context.interruptible_sleep(0.1)
-        live_system = context.sample_system()
-        raw = self.read_trace(channel)
-        context.emit_row(
-            {channel: self.reduce_trace(raw), "StatusCode": 0},
-            raw_values=raw,
-        )
+    slot = context.measurement_step.logical_slot
+    context.interruptible_sleep(0.1)
+    live_system = context.sample_system()
+    raw = self.read_trace(slot)
+    context.emit_row(
+        {f"R{slot}": self.reduce_trace(raw), "StatusCode": 0},
+        raw_values=raw,
+    )
 ```
 
-每个 `emit_row` 立即传回中央，并附上当时系统快照后串行写盘。一个 `Measure` 会并行
-调用所有 Enabled 模块，但每个模块内部请求不重入。模块中的 pause/dwell/settle 等
-等待必须使用 `context.interruptible_sleep()`，不能直接使用 `time.sleep()`；前者会在
-SEQ Pause 时冻结计时，并在 Stop/Error 时协作退出。仪表驱动自身仍必须设置较短、有限
-的 I/O 超时，因为正在阻塞的驱动调用只能在驱动超时后响应 Stop。
+核心取所有 `aligned_slots` 计划的并集。每个槽位对应一个通道行：同槽位参与模块并行，
+结果在全部收束后合到该行；未启用该槽位的扫描模块留空，`once_per_slot` 模块每行重新
+测量。于是 CH1–CH4 始终写四行，不会合成一行。模块中的 pause/dwell/settle 等等待必须
+使用 `context.interruptible_sleep()`，不能直接使用 `time.sleep()`；前者会在 SEQ Pause
+时冻结计时，并在 Stop/Error 时协作退出。仪表驱动自身仍必须设置较短、有限的 I/O
+超时，因为正在阻塞的驱动调用只能在驱动超时后响应 Stop。
 
 `raw_values` 是可选的有限数值序列：最多 32,768 点，不能含 bool、文本、NaN 或
 Infinity，且整条 IPC 仍不能超过 1 MiB。核心按正式 DAT + 模块写入无表头 `rawdata`
-sidecar；每次调用中的正式行和原始行顺序绑定。承诺每个正式行都有 rawdata 的模块在
+sidecar；每个模块在当前槽位的正式结果与自己的原始行顺序绑定。承诺每个正式行都有 rawdata 的模块在
 没有有效数值时应发送空序列作为空行占位；完全不使用 rawdata 的模块不要发送空序列。
 模块不得把通道名、时间戳或状态混入原始序列，也不得自行写文件。
 
@@ -304,9 +326,9 @@ README 和测试中逐项定义，不能写 `NORMAL`、`ERROR` 等文字。worke
 路由、触发状态不确定或安全状态无法确认属于系统问题，必须 Error 并中止 SEQ。若数据
 异常已经使当前通道、报文边界、路由或输出状态无法判断，也必须升级为系统 Error。
 
-任何非零 `StatusCode` 行都不得保留当前通道的正式电阻/电压/相位/统计结果，未测通道
-同样留空；只可保留仍可信且已记录语义的通道、温场、设定值、样本数或 rawdata。有效
-数据只是需要提醒时应使用 `StatusCode=0` 加独立 Warning。
+任何非零状态码都不得保留其对应结果组的正式电阻/电压/相位/统计结果，未测组同样
+留空；同一宽表中的其他正常组可保留。只可额外保留仍可信且已记录语义的通道、温场、
+设定值、样本数或 rawdata。有效数据只是需要提醒时应使用状态码 0 加独立 Warning。
 
 `context.system` 是本次生命周期调用开始时的只读快照。需要在较长测量过程中捕获真实
 的新时间点时，调用 `context.sample_system()`；不得把初始快照重复使用后伪装成多次
@@ -346,7 +368,8 @@ Measurement Module 至少覆盖：
 
 1. manifest、固定列和 Settings round-trip；
 2. initialize 不 Apply、Apply 确认、完整生命周期；
-3. 单次 Measure 多行顺序和多个模块并行；
+3. 显式 mode、槽位计划与并集、每通道一行、同槽位模块并行，以及 `once_per_slot`
+   在每行重新测量；
 4. 测量数据 Warning 写模块自有整数状态码并继续、系统 Error 终止，以及 Warning
    去重/恢复；
 5. 未知列、NaN/Infinity、非 JSON 和超大消息；

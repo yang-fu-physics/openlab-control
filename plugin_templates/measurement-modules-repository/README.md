@@ -32,7 +32,8 @@ temperature/field/monitor snapshots supplied by the core. Use
 - Validate manifest ID, API/core range, fixed columns, and source entry points.
 - Exercise initialize/apply/begin/measure/end/abort and every error path.
 - Verify Warning deduplication and Error termination.
-- Test multi-row output and parallel execution with another module.
+- Test explicit scheduling mode, one row per logical channel slot, and
+  same-slot parallel execution with another module.
 - Test bounded driver and framework timeouts plus forced worker cleanup.
 - Verify framework dependency ranges, and test any additional offline wheel set
   on the target Windows/Python architecture.
