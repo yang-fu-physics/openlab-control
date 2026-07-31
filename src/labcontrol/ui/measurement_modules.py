@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from ..measurement.frontend_api import ModuleFrontend, ModuleFrontendContext
 from ..measurement.manifest import ModuleDescriptor, load_source_object
 from .scaling import scaled
+from .window_sizing import fit_initial_window_width
 
 
 MODULE_WINDOW_MIN_WIDTH = 360
@@ -98,7 +99,13 @@ class ModuleWindow(QDialog):
             QSize(scaled(MODULE_WINDOW_MIN_WIDTH), scaled(MODULE_WINDOW_MIN_HEIGHT))
         )
         self.setMinimumSize(minimum)
-        self.resize(self.sizeHint().expandedTo(minimum))
+        fit_initial_window_width(
+            self,
+            preferred_height=max(
+                minimum.height(),
+                self.sizeHint().height(),
+            ),
+        )
 
         self.frontend.settingsChanged.connect(self._mark_dirty)
         self.context.manualActionRequested.connect(
@@ -195,7 +202,7 @@ class ModuleManagerDialog(QDialog):
         super().__init__(parent, Qt.WindowType.Window)
         self.setWindowTitle("Measurement Modules")
         self.setModal(False)
-        self.setMinimumSize(scaled(610), scaled(390))
+        self.setMinimumHeight(scaled(390))
         self.descriptors: tuple[ModuleDescriptor, ...] = ()
         self._rows: dict[str, int] = {}
         self._checkboxes: dict[str, QCheckBox] = {}
@@ -216,7 +223,12 @@ class ModuleManagerDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(0, self.table.horizontalHeader().ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, self.table.horizontalHeader().ResizeMode.Stretch)
+        # Name 列按完整内容计算。首次宽度适配器会据此把窗口扩到刚好不需要横向
+        # 滚动条；若用户之后主动缩窄，表格仍可正常出现横向滚动条访问完整名称。
+        self.table.horizontalHeader().setSectionResizeMode(
+            1,
+            self.table.horizontalHeader().ResizeMode.ResizeToContents,
+        )
         self.table.horizontalHeader().setSectionResizeMode(2, self.table.horizontalHeader().ResizeMode.ResizeToContents)
         self.table.cellDoubleClicked.connect(self._double_clicked)
         layout.addWidget(self.table, 1)
@@ -238,6 +250,10 @@ class ModuleManagerDialog(QDialog):
         layout.addLayout(buttons)
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.set_descriptors(descriptors)
+        fit_initial_window_width(
+            self,
+            preferred_height=scaled(390),
+        )
 
     def set_descriptors(self, descriptors: tuple[ModuleDescriptor, ...]) -> None:
         self.descriptors = descriptors

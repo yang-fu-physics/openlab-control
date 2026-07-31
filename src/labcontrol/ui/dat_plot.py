@@ -54,6 +54,7 @@ from ..plot_format import (
     PlotFormatError,
 )
 from .scaling import scaled, scaled_float
+from .window_sizing import fit_initial_window_width
 
 
 ROW_NUMBER_AXIS = "Row Number"
@@ -107,9 +108,12 @@ class YSeriesSelectionDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Select Y Series")
-        self.resize(scaled(430), scaled(470))
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Select one or more numeric columns, then choose OK."))
+        hint = QLabel(
+            "Select one or more numeric columns, then choose OK."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.series_list = QListWidget()
         self.series_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         selected_names = set(selected)
@@ -132,6 +136,10 @@ class YSeriesSelectionDialog(QDialog):
         layout.addWidget(self.buttons)
         self.series_list.itemChanged.connect(self._update_ok_button)
         self._update_ok_button()
+        fit_initial_window_width(
+            self,
+            preferred_height=scaled(470),
+        )
 
     def selected_columns(self) -> tuple[str, ...]:
         """按列表顺序返回所有勾选列。"""

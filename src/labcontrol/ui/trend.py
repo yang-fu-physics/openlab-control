@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 from ..models import DeviceKind, DeviceSnapshot
 from .scaling import scaled
+from .window_sizing import fit_initial_window_width
 
 
 class TrendCanvas(QWidget):
@@ -130,11 +131,19 @@ class TrendDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Live Trend")
-        self.resize(scaled(900), scaled(540))
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Each trace uses its own scale. For monitoring only; the DAT file remains authoritative."))
+        hint = QLabel(
+            "Each trace uses its own scale. For monitoring only; "
+            "the DAT file remains authoritative."
+        )
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
         self.canvas = TrendCanvas()
         layout.addWidget(self.canvas, 1)
+        fit_initial_window_width(
+            self,
+            preferred_height=scaled(540),
+        )
 
     def add_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
         """把主窗口收到的快照转交给画布。"""

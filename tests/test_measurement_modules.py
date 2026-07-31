@@ -1109,6 +1109,40 @@ class ModuleWindowTests(unittest.TestCase):
             window.close()
             owner.close()
 
+    def test_manager_first_width_shows_full_names_without_horizontal_scroll(
+        self,
+    ) -> None:
+        owner = QWidget()
+        descriptor = ModuleDescriptor(
+            id="long_name",
+            name=(
+                "Keithley 6221 + 2182A Delta + 3706A "
+                "Measurement Module"
+            ),
+            version="0.1.0b1",
+            path=ROOT,
+            dependencies=(),
+        )
+        dialog = ModuleManagerDialog(
+            (descriptor,),
+            owner,
+        )
+        dialog.show()
+        for _ in range(12):
+            self.application.processEvents()
+
+        fitted_width = dialog.width()
+        self.assertFalse(
+            dialog.table.horizontalScrollBar().isVisible()
+        )
+        dialog.resize(fitted_width - 1, dialog.height())
+        self.application.processEvents()
+        self.assertTrue(
+            dialog.table.horizontalScrollBar().isVisible()
+        )
+        dialog.close()
+        owner.close()
+
     def test_imported_sequence_settings_are_marked_unapplied(
         self,
     ) -> None:

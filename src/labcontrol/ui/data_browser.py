@@ -43,6 +43,7 @@ from .dat_plot import (
     PlotHit,
 )
 from .scaling import scaled
+from .window_sizing import fit_initial_window_width
 
 
 class PointDetailsDialog(QDialog):
@@ -59,7 +60,6 @@ class PointDetailsDialog(QDialog):
         super().__init__(parent)
         point = hit.point
         self.setWindowTitle(f"Data Point Details - Row {point.row_index + 1}")
-        self.resize(scaled(620), scaled(470))
         layout = QVBoxLayout(self)
         displayed_x = (
             x_value_text
@@ -91,6 +91,10 @@ class PointDetailsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.accept)
         layout.addWidget(buttons)
+        fit_initial_window_width(
+            self,
+            preferred_height=scaled(470),
+        )
 
 
 class DatBrowserWidget(QWidget):

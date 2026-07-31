@@ -37,6 +37,7 @@ from ..sequence.model import Command, CommandSpec, CommandType
 from ..sequence.parser import format_temperature_points, parse_temperature_points
 from ..units import UnitConversionError, convert_value
 from .scaling import scaled
+from .window_sizing import fit_initial_window_width
 
 
 TEMPERATURE_COMMANDS = {CommandType.SET_TEMPERATURE, CommandType.SCAN_TEMPERATURE}
@@ -75,7 +76,6 @@ class CommandDialog(QDialog):
         self.datafile_browse_button: QPushButton | None = None
         self.setWindowTitle(f"Command Parameters - {spec.label}")
         self.setModal(True)
-        self.setMinimumWidth(scaled(430))
         layout = QVBoxLayout(self)
         self.form = QFormLayout()
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
@@ -184,6 +184,7 @@ class CommandDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        fit_initial_window_width(self)
 
     def _browse_datafile(self) -> None:
         """按当前 Mode 调用 Windows 文件窗口并回填绝对 DAT 路径。"""
@@ -442,7 +443,6 @@ class ManualControlDialog(QDialog):
         self.config = config
         self.setWindowTitle(f"{config.display_name} - Manual Control")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.setMinimumWidth(scaled(390))
         layout = QVBoxLayout(self)
         self.current_label = QLabel("Current: —")
         self.current_label.setObjectName("manualCurrent")
@@ -486,6 +486,7 @@ class ManualControlDialog(QDialog):
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
         self._update_control_state()
+        fit_initial_window_width(self)
 
     def _emit_set(self) -> None:
         """只发出结构化请求；实际校验与 I/O 在后台运行时完成。"""
@@ -534,7 +535,6 @@ class AlertDialog(QDialog):
         is_error = event.severity is Severity.ERROR
         self.setWindowTitle("Error" if is_error else "Warning")
         self.setModal(False)
-        self.setMinimumWidth(scaled(460))
         layout = QVBoxLayout(self)
         title = QLabel("Operation Stopped" if is_error else "Operation Continues")
         title.setStyleSheet(
@@ -561,3 +561,4 @@ class AlertDialog(QDialog):
         row.addStretch(1)
         row.addWidget(button)
         layout.addLayout(row)
+        fit_initial_window_width(self)

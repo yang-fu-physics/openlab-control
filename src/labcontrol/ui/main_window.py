@@ -85,6 +85,7 @@ from .scaling import current_ui_scale, scaled
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
 from .widgets import ElidedLabel, StatusTile
+from .window_sizing import fit_initial_window_width
 
 
 class MainWindow(QMainWindow):
@@ -926,6 +927,7 @@ class MainWindow(QMainWindow):
                 "Cancel", QMessageBox.ButtonRole.RejectRole
             )
             message.setDefaultButton(apply_button)
+            fit_initial_window_width(message)
             message.exec()
             if message.clickedButton() is cancel_button:
                 return
