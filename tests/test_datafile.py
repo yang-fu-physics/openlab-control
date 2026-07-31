@@ -90,6 +90,10 @@ class DatafileTests(unittest.TestCase):
                 data,
             )
             self.assertIn("[Data]", data)
+            self.assertIn(
+                "api=1.1; mode=aligned_slots",
+                data,
+            )
             self.assertIn("simulated_transport.R1(Ohm)", data)
             self.assertIn("Field(Oe)", data)
             self.assertIn("second_stage(K)", data)

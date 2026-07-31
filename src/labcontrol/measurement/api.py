@@ -16,6 +16,25 @@ import time
 from typing import Any
 
 
+MEASUREMENT_MODE_ONCE_PER_SLOT = "once_per_slot"
+MEASUREMENT_MODE_ALIGNED_SLOTS = "aligned_slots"
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleMeasurementStep:
+    """核心为一次 ``T Measure`` 展开的当前逻辑测量轮。
+
+    ``logical_slot`` 是跨模块对齐的 1-based 槽位编号，例如 372A 的 R2 与
+    Delta+7001 的 CH2 都使用 2。``index``/``count`` 只描述当前槽位在本次
+    ``T Measure`` 中的执行序号和总槽位数；启用槽位可以不连续，因此不能用
+    ``index`` 代替槽位号。
+    """
+
+    logical_slot: int
+    index: int
+    count: int
+
+
 class ModuleError(RuntimeError):
     """不可恢复的模块或仪表故障。
 
@@ -68,6 +87,7 @@ class ModuleOperationContext:
     ) = None
     _operation_state: Callable[[float], str] | None = None
     operation_timeout_seconds: float = 120.0
+    measurement_step: ModuleMeasurementStep | None = None
 
     def emit_row(
         self,
@@ -245,7 +265,26 @@ class ModuleBackend(ABC):
     ``end_sequence("stopped")``，不会自动 Disable 模块。
     """
 
-    api_version = "1.0"
+    api_version = "1.1"
+
+    def measurement_slots(
+        self,
+        context: ModuleOperationContext,
+    ) -> Sequence[int]:
+        """返回本次 SEQ 中由该模块参与的逻辑槽位。
+
+        只有 ``module.toml`` 声明 ``measurement_mode = "aligned_slots"`` 的模块
+        才会收到此调用。返回值必须是唯一、正整数槽位；核心把所有此类模块的槽位
+        取并集，并让 ``once_per_slot`` 模块在并集的每一轮各测一次。
+
+        扫描模块必须覆盖此方法。默认实现故意报错，避免清单误标后静默退化。
+        """
+
+        del context
+        raise ModuleError(
+            "aligned_slots module did not implement measurement_slots()",
+            "MODULE_MEASUREMENT_SLOTS_NOT_IMPLEMENTED",
+        )
 
     def initialize(
         self, settings: Mapping[str, Any], context: ModuleOperationContext
@@ -273,8 +312,10 @@ class ModuleBackend(ABC):
     def measure(self, context: ModuleOperationContext) -> Mapping[str, Any] | None:
         """执行一次 Measure。
 
-        多行结果应逐行调用 ``context.emit_row``；返回 Mapping 可额外产生一行。一个
-        Measure 会在不同 Enabled 模块之间并行，但同一模块的请求始终串行。
+        每次调用必须且只能产生一行：可调用一次 ``context.emit_row``，也可返回一个
+        非空 Mapping，不能同时使用两者。``once_per_slot`` 模块会在每个逻辑槽位调用一次；
+        ``aligned_slots`` 模块只在自己启用的槽位调用。不同模块在同一槽位并行，同一
+        模块的请求始终串行。
         """
 
         return None

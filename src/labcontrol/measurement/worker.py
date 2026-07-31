@@ -19,7 +19,7 @@ import multiprocessing
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from ..extensions.trust import extension_tree_digest
 from .api import (
     ModuleBackend,
     ModuleError,
+    ModuleMeasurementStep,
     ModuleOperationCancelled,
     ModuleOperationContext,
     ModuleWarning,
@@ -121,6 +122,25 @@ def _invoke(method: Callable[..., Any], *args: Any) -> dict[str, Any]:
     if inspect.isawaitable(value):
         value = asyncio.run(value)
     return _result(value)
+
+
+def _invoke_slots(
+    method: Callable[..., Any],
+    *args: Any,
+) -> list[Any]:
+    """调用槽位声明方法，但把类型/数值校验留给可信的核心服务层。"""
+
+    value = method(*args)
+    if inspect.isawaitable(value):
+        value = asyncio.run(value)
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes, bytearray))
+    ):
+        raise TypeError(
+            "measurement_slots() must return a sequence"
+        )
+    return list(value)
 
 
 def module_worker_main(
@@ -309,13 +329,68 @@ def module_worker_main(
             result = request_context("operation_state", timeout_seconds)
             return str(result.get("state", "running"))
 
-        context = ModuleOperationContext(
-            dict(payload.get("system", {})),
-            emit,
-            sample_system,
-            operation_state,
-            float(payload.get("operation_timeout_seconds", 120.0)),
-        )
+        try:
+            raw_step = payload.get("measurement_step")
+            measurement_step: ModuleMeasurementStep | None = None
+            if raw_step is not None:
+                if not isinstance(raw_step, dict):
+                    raise ModuleError(
+                        "The core supplied an invalid measurement step",
+                        "MODULE_MEASUREMENT_STEP_INVALID",
+                    )
+                measurement_step = ModuleMeasurementStep(
+                    logical_slot=int(raw_step["logical_slot"]),
+                    index=int(raw_step["index"]),
+                    count=int(raw_step["count"]),
+                )
+                if (
+                    measurement_step.logical_slot < 1
+                    or measurement_step.index < 1
+                    or measurement_step.count < measurement_step.index
+                ):
+                    raise ModuleError(
+                        "The core supplied an invalid measurement step",
+                        "MODULE_MEASUREMENT_STEP_INVALID",
+                    )
+        except (KeyError, TypeError, ValueError, ModuleError) as exc:
+            if isinstance(exc, ModuleError):
+                code = exc.code
+                context_value = exc.context
+            else:
+                code = "MODULE_MEASUREMENT_STEP_INVALID"
+                context_value = ""
+            send({
+                "type": "response",
+                "id": request_id,
+                "ok": False,
+                "severity": "error",
+                "message": "The core supplied an invalid measurement step",
+                "code": code,
+                "context": context_value,
+            })
+            continue
+        try:
+            context = ModuleOperationContext(
+                system=dict(payload.get("system", {})),
+                _emit=emit,
+                _sample_system=sample_system,
+                _operation_state=operation_state,
+                operation_timeout_seconds=float(
+                    payload.get("operation_timeout_seconds", 120.0)
+                ),
+                measurement_step=measurement_step,
+            )
+        except (TypeError, ValueError):
+            send({
+                "type": "response",
+                "id": request_id,
+                "ok": False,
+                "severity": "error",
+                "message": "The core supplied an invalid operation context",
+                "code": "MODULE_OPERATION_CONTEXT_INVALID",
+                "context": "",
+            })
+            continue
         try:
             # 一个 worker 同一时刻只执行这一条分派链。并行 Measure 发生在“不同模块
             # 进程之间”，不是在同一 VISA session 上并发调用后端。
@@ -325,6 +400,13 @@ def module_worker_main(
                 result = _invoke(backend.apply_settings, dict(payload.get("settings", {})), context)
             elif action == "begin_sequence":
                 result = _invoke(backend.begin_sequence, context)
+            elif action == "measurement_slots":
+                result = {
+                    "slots": _invoke_slots(
+                        backend.measurement_slots,
+                        context,
+                    )
+                }
             elif action == "measure":
                 result = _invoke(backend.measure, context)
             elif action == "end_sequence":

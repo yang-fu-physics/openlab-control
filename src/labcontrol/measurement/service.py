@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -27,6 +28,7 @@ from ..extensions.trust import (
 from ..models import DeviceSnapshot, Severity
 from ..plugins import DeviceManager
 from .manifest import (
+    MEASUREMENT_MODE_ALIGNED_SLOTS,
     ModuleDescriptor,
     module_dependency_errors,
     module_dependency_directory,
@@ -36,6 +38,8 @@ from .worker import ModuleWorkerClient, WorkerRequestError
 
 ModuleMessageCallback = Callable[[str, dict[str, Any]], None]
 _MAX_RAW_VALUES = 32_768
+_MAX_LOGICAL_SLOTS = 1024
+_STATUS_CODE_COLUMN = re.compile(r"^StatusCode(?:[1-9][0-9]*)?$")
 
 
 @dataclass(slots=True)
@@ -47,6 +51,17 @@ class ModuleRuntimeRecord:
     state: str = "disabled"
     status: dict[str, Any] = field(default_factory=dict)
     client: ModuleWorkerClient | None = None
+
+
+@dataclass(slots=True)
+class _ModuleSlotResult:
+    """一个模块在当前逻辑槽位的已验证结果；仅在核心事件循环内使用。"""
+
+    module_id: str
+    values: dict[str, Any] | None = None
+    raw_values: tuple[float, ...] | None = None
+    error: DeviceError | None = None
+    cancelled: bool = False
 
 
 class MeasurementModuleService:
@@ -85,6 +100,8 @@ class MeasurementModuleService:
             if item.valid
         }
         self._sequence_modules: tuple[str, ...] = ()
+        self._module_slots: dict[str, frozenset[int]] = {}
+        self._logical_slots: tuple[int, ...] = (1,)
         self._sequence_active = False
         self._row_handlers: dict[
             str,
@@ -609,6 +626,8 @@ class MeasurementModuleService:
         self._sequence_active = True
         self.resume_operations()
         self._sequence_modules = tuple(item.id for item in descriptors)
+        self._module_slots = {}
+        self._logical_slots = (1,)
         statuses: dict[str, dict[str, Any]] = {}
         for descriptor in descriptors:
             try:
@@ -622,7 +641,10 @@ class MeasurementModuleService:
     async def begin_sequence(self) -> None:
         """并行调用全部冻结模块的 begin_sequence；任一失败终止 Run。"""
 
+        begin_cancelled = False
+
         async def begin(module_id: str) -> DeviceError | None:
+            nonlocal begin_cancelled
             record = self.records[module_id]
             try:
                 result = await self._request(record, "begin_sequence")
@@ -632,6 +654,7 @@ class MeasurementModuleService:
                     # 控制流，不应把模块标成 Faulted 或额外报告 Error；SequenceEngine
                     # 会在 begin 返回后的统一 checkpoint 转入 stopped/error 收尾。
                     record.state = "enabled"
+                    begin_cancelled = True
                     self._publish(
                         record,
                         "Sequence start cancelled",
@@ -649,6 +672,104 @@ class MeasurementModuleService:
         first = next((item for item in failures if item is not None), None)
         if first is not None:
             raise first
+        if begin_cancelled:
+            return
+        await self._prepare_measurement_slots()
+
+    async def _prepare_measurement_slots(self) -> None:
+        """读取扫描模块的启用槽位并冻结本次 SEQ 的逻辑通道计划。"""
+
+        aligned = tuple(
+            module_id
+            for module_id in self._sequence_modules
+            if self.records[module_id].descriptor.measurement_mode
+            == MEASUREMENT_MODE_ALIGNED_SLOTS
+        )
+        if not aligned:
+            self._module_slots = {}
+            self._logical_slots = (1,)
+            return
+
+        async def read_slots(
+            module_id: str,
+        ) -> tuple[str, frozenset[int], DeviceError | None]:
+            record = self.records[module_id]
+            try:
+                result = await self._request(
+                    record,
+                    "measurement_slots",
+                )
+                raw_slots = result.get("slots")
+                if not isinstance(raw_slots, list):
+                    raise DeviceError(
+                        "measurement_slots() must return a JSON array",
+                        "MODULE_MEASUREMENT_SLOTS_INVALID",
+                        module_id,
+                    )
+                if not raw_slots or len(raw_slots) > _MAX_LOGICAL_SLOTS:
+                    raise DeviceError(
+                        "aligned_slots module must expose 1 to "
+                        f"{_MAX_LOGICAL_SLOTS} logical slots",
+                        "MODULE_MEASUREMENT_SLOTS_INVALID",
+                        module_id,
+                    )
+                normalized: list[int] = []
+                for value in raw_slots:
+                    if (
+                        isinstance(value, bool)
+                        or not isinstance(value, int)
+                        or value < 1
+                    ):
+                        raise DeviceError(
+                            "Logical slots must be positive integers",
+                            "MODULE_MEASUREMENT_SLOTS_INVALID",
+                            module_id,
+                        )
+                    normalized.append(value)
+                if len(normalized) != len(set(normalized)):
+                    raise DeviceError(
+                        "Logical slots must not contain duplicates",
+                        "MODULE_MEASUREMENT_SLOTS_INVALID",
+                        module_id,
+                    )
+                return module_id, frozenset(normalized), None
+            except WorkerRequestError as exc:
+                return module_id, frozenset(), self._operation_error(
+                    record,
+                    exc,
+                )
+            except DeviceError as exc:
+                self.events.report(
+                    Severity.ERROR,
+                    f"module:{module_id}",
+                    exc.code,
+                    str(exc),
+                    exc.context,
+                )
+                return module_id, frozenset(), exc
+
+        results = await asyncio.gather(
+            *(read_slots(module_id) for module_id in aligned)
+        )
+        first = next(
+            (error for _module, _slots, error in results if error),
+            None,
+        )
+        if first is not None:
+            raise first
+        self._module_slots = {
+            module_id: slots
+            for module_id, slots, _error in results
+        }
+        self._logical_slots = tuple(
+            sorted(
+                {
+                    slot
+                    for slots in self._module_slots.values()
+                    for slot in slots
+                }
+            )
+        )
 
     def _validated_row(self, descriptor: ModuleDescriptor, values: Mapping[str, Any]) -> dict[str, Any]:
         """按 manifest 固定 Schema 校验一行，拒绝未知列、复杂对象和 NaN/Infinity。"""
@@ -661,21 +782,30 @@ class MeasurementModuleService:
                 "MODULE_SCHEMA_VIOLATION",
                 descriptor.id,
             )
-        if "StatusCode" in allowed:
-            if "StatusCode" not in values:
+        status_columns = tuple(
+            name for name in allowed if _STATUS_CODE_COLUMN.fullmatch(name)
+        )
+        for status_column in status_columns:
+            if status_column == "StatusCode" and status_column not in values:
                 raise DeviceError(
                     "Module row omitted its declared StatusCode",
                     "MODULE_STATUS_CODE_MISSING",
                     descriptor.id,
                 )
-            status_code = values["StatusCode"]
+            if status_column not in values or values[status_column] is None:
+                # Numbered status groups belong to wide internal-channel rows.
+                # A Disabled internal channel leaves its complete group empty;
+                # the core cannot infer that channel's Enabled state from the
+                # fixed manifest alone, so only supplied codes are validated.
+                continue
+            status_code = values[status_column]
             if (
                 isinstance(status_code, bool)
                 or not isinstance(status_code, int)
                 or status_code < 0
             ):
                 raise DeviceError(
-                    "StatusCode must be a non-negative integer",
+                    f"{status_column} must be a non-negative integer",
                     "MODULE_STATUS_CODE_TYPE_ERROR",
                     descriptor.id,
                 )
@@ -742,10 +872,11 @@ class MeasurementModuleService:
         return tuple(result)
 
     async def measure_all(self, logger: DatRunLogger, sequence_step: str) -> None:
-        """并行执行全部模块的一次 Measure，并允许每个模块流式产生多行。
+        """按逻辑槽位展开一次 ``T Measure``，并把同轮模块结果合为一行。
 
-        如果没有 Enabled 模块，写一行系统状态并去重报告 Warning。若模块都没有产生
-        有效行，也写系统行，确保该 SEQ Measure 在 DAT 中仍有可追踪记录。
+        ``aligned_slots`` 模块的启用槽位并集决定通道行数；``once_per_slot`` 模块在
+        每个槽位都调用一次。一个模块一次调用最多产生一行，因此同一通道槽位不会因
+        完成先后被拆成多个 DAT 行。未参与当前槽位或仅报告 Warning 的模块保持空列。
         """
 
         if not self._sequence_modules:
@@ -758,19 +889,51 @@ class MeasurementModuleService:
             logger.write_system_row(self.devices.snapshots(), sequence_step)
             return
         self.events.resolve("modules", "NO_ENABLED_MODULES")
-        emitted = 0
 
-        async def measure_one(module_id: str) -> DeviceError | None:
-            nonlocal emitted
+        async def wait_for_slot() -> bool:
+            """在相邻槽位之间响应 Pause/Stop，不启动新的仪表事务。"""
+
+            while True:
+                with self._operation_state_lock:
+                    state = self._operation_state
+                if state in {"stopping", "cancelled"}:
+                    return False
+                if state != "paused":
+                    return True
+                await asyncio.sleep(0.05)
+
+        async def measure_one(
+            module_id: str,
+            logical_slot: int,
+            slot_index: int,
+            slot_count: int,
+        ) -> _ModuleSlotResult:
             record = self.records[module_id]
             descriptor = record.descriptor
             validation_error: DeviceError | None = None
+            rows: list[
+                tuple[dict[str, Any], tuple[float, ...] | None]
+            ] = []
 
-            def write_row(
+            def collect_row(
                 values: dict[str, Any],
                 raw_values: object | None = None,
             ) -> None:
-                nonlocal emitted, validation_error
+                nonlocal validation_error
+                if rows:
+                    validation_error = DeviceError(
+                        "Module emitted more than one row for a logical slot",
+                        "MODULE_MEASUREMENT_MULTIPLE_ROWS",
+                        descriptor.id,
+                    )
+                    self.events.report(
+                        Severity.ERROR,
+                        f"module:{module_id}",
+                        validation_error.code,
+                        str(validation_error),
+                        validation_error.context,
+                    )
+                    return
                 try:
                     validated = self._validated_row(descriptor, values)
                     validated_raw = self._validated_raw_values(
@@ -787,47 +950,142 @@ class MeasurementModuleService:
                         exc.context,
                     )
                     return
-                logger.write_module_row(
-                    # 每一行使用写入当时的最新系统快照；不同通道或不同模块的多行结果
-                    # 因此可以保留各自行发生时的温场状态。
-                    self.devices.snapshots(),
-                    module_id,
-                    validated,
-                    sequence_step,
-                    raw_values=validated_raw,
-                )
-                emitted += 1
+                rows.append((validated, validated_raw))
 
-            self._row_handlers[module_id] = write_row
+            self._row_handlers[module_id] = collect_row
             record.state = "measuring"
-            self._publish(record, "Measuring")
+            self._publish(
+                record,
+                f"Measuring logical slot {logical_slot} "
+                f"({slot_index}/{slot_count})",
+            )
             try:
-                result = await self._request(record, "measure")
+                result = await self._request(
+                    record,
+                    "measure",
+                    {
+                        "measurement_step": {
+                            "logical_slot": logical_slot,
+                            "index": slot_index,
+                            "count": slot_count,
+                        }
+                    },
+                )
                 if result:
-                    write_row(result)
+                    collect_row(result)
                 if validation_error is not None:
-                    return validation_error
+                    return _ModuleSlotResult(
+                        module_id,
+                        error=validation_error,
+                    )
+                if len(rows) != 1:
+                    missing = DeviceError(
+                        "Module completed measure() without producing a row",
+                        "MODULE_MEASUREMENT_ROW_MISSING",
+                        module_id,
+                    )
+                    self.events.report(
+                        Severity.ERROR,
+                        f"module:{module_id}",
+                        missing.code,
+                        str(missing),
+                        missing.context,
+                    )
+                    return _ModuleSlotResult(
+                        module_id,
+                        error=missing,
+                    )
+                values, validated_raw = rows[0]
+                return _ModuleSlotResult(
+                    module_id,
+                    values,
+                    validated_raw,
+                )
             except WorkerRequestError as exc:
                 if exc.severity == "cancelled":
-                    return None
-                return self._operation_error(record, exc, warning_allowed=True)
+                    return _ModuleSlotResult(
+                        module_id,
+                        cancelled=True,
+                    )
+                return _ModuleSlotResult(
+                    module_id,
+                    error=self._operation_error(
+                        record,
+                        exc,
+                        warning_allowed=True,
+                    ),
+                )
             except DeviceError as exc:
                 self.events.report(Severity.ERROR, f"module:{module_id}", exc.code, str(exc), exc.context)
-                return exc
+                return _ModuleSlotResult(
+                    module_id,
+                    error=exc,
+                )
             finally:
                 self._row_handlers.pop(module_id, None)
                 if record.state == "measuring":
                     record.state = "enabled"
-                self._publish(record, "Measurement complete")
-            return None
+                self._publish(
+                    record,
+                    f"Logical slot {logical_slot} complete",
+                )
 
-        # gather 让不同模块并行等待；ModuleWorkerClient 仍保证每个模块内部请求串行。
-        failures = await asyncio.gather(*(measure_one(item) for item in self._sequence_modules))
-        if emitted == 0:
-            logger.write_system_row(self.devices.snapshots(), sequence_step)
-        first = next((item for item in failures if item is not None), None)
-        if first is not None:
-            raise first
+        slot_count = len(self._logical_slots)
+        for slot_index, logical_slot in enumerate(
+            self._logical_slots,
+            start=1,
+        ):
+            if not await wait_for_slot():
+                return
+            participants = tuple(
+                module_id
+                for module_id in self._sequence_modules
+                if (
+                    self.records[module_id].descriptor.measurement_mode
+                    != MEASUREMENT_MODE_ALIGNED_SLOTS
+                    or logical_slot
+                    in self._module_slots.get(module_id, frozenset())
+                )
+            )
+            results = await asyncio.gather(
+                *(
+                    measure_one(
+                        module_id,
+                        logical_slot,
+                        slot_index,
+                        slot_count,
+                    )
+                    for module_id in participants
+                )
+            )
+            if any(item.cancelled for item in results):
+                # Stop 期间可能有较快模块先完成，但这一通道槽位不是完整事务；不把部分
+                # 结果写成看似成功的正式行。SequenceEngine 的 checkpoint 负责收尾。
+                return
+            values = {
+                item.module_id: item.values
+                for item in results
+                if item.values is not None
+            }
+            raw_values = {
+                item.module_id: item.raw_values
+                for item in results
+                if item.raw_values is not None
+            }
+            logger.write_measurement_row(
+                # 同一通道槽位只采一次核心系统快照，避免并行模块完成顺序改变 DAT 行数
+                # 或给一行制造多个互相矛盾的温场时间点。
+                self.devices.snapshots(),
+                values,
+                sequence_step,
+                raw_values=raw_values,
+            )
+            first = next(
+                (item.error for item in results if item.error is not None),
+                None,
+            )
+            if first is not None:
+                raise first
 
     async def end_sequence(self, reason: str) -> bool:
         """并行结束本次模块运行，并在任何结果下解除冻结状态。
@@ -857,6 +1115,8 @@ class MeasurementModuleService:
         finally:
             # 即使某个 end 请求异常，也必须允许 UI 之后 Disable/恢复模块。
             self._sequence_modules = ()
+            self._module_slots = {}
+            self._logical_slots = (1,)
             self._sequence_active = False
             with self._operation_state_lock:
                 self._operation_state = "idle"

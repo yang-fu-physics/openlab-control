@@ -1,7 +1,8 @@
 """一次 SEQ 运行的目录、快照、DAT 数据、设备状态和事件日志写入。
 
 运行开始即复制规范化 SEQ、主配置、各模块期望设置和启动状态。DAT 列由全部设备与已启用
-模块清单一次构造；一个模块返回多行时每行独立写入，只有该模块的列填值，其他模块列留空。
+模块清单一次构造；一次 ``T Measure`` 按逻辑通道槽位写多行，同一槽位中各模块的结果
+合并到该槽位对应的一行，未参与该槽位的模块列留空。
 设备状态按独立节流周期写入固定宽表，不受 Measure 数量影响。追加已有 DAT 前必须验证完整
 列结构一致，防止动态列变化造成静默错位。
 """
@@ -300,7 +301,8 @@ class DatRunLogger:
             for module in self._module_descriptors:
                 self._data_writer.writerow([
                     "INFO",
-                    f"Module {module.id}: {module.name}; version={module.version}; api={module.api_version}",
+                    f"Module {module.id}: {module.name}; version={module.version}; "
+                    f"api={module.api_version}; mode={module.measurement_mode}",
                 ])
             self._data_handle.write("\n[Data]\n")
             self._data_writer.writerow(self._columns)
@@ -602,11 +604,42 @@ class DatRunLogger:
         正式数据文件的原始行混在一起。
         """
 
+        self.write_measurement_row(
+            snapshots,
+            {module_id: values},
+            sequence_step,
+            raw_values=(
+                {}
+                if raw_values is None
+                else {module_id: raw_values}
+            ),
+        )
+
+    def write_measurement_row(
+        self,
+        snapshots: dict[str, DeviceSnapshot],
+        module_values: Mapping[str, Mapping[str, Any]],
+        sequence_step: str,
+        *,
+        raw_values: Mapping[str, tuple[float, ...]] | None = None,
+    ) -> None:
+        """把同一逻辑槽位内多个模块的结果合并为一个正式 DAT 行。
+
+        未出现在 ``module_values`` 的模块保持空列。每个模块的 rawdata 仍写入自己的
+        sidecar；同一正式行可以同时对应多个模块各自的一条 rawdata 行。
+        """
+
         self.ensure_data_file()
         assert self._data_writer is not None
-        self._data_writer.writerow(self._row(snapshots, module_id, values, sequence_step))
-        if raw_values is not None:
-            self._write_raw_row(module_id, raw_values)
+        self._data_writer.writerow(
+            self._row(
+                snapshots,
+                module_values,
+                sequence_step,
+            )
+        )
+        for module_id, values in (raw_values or {}).items():
+            self._write_raw_row(module_id, values)
         self._flush_data()
 
     def _write_raw_row(
@@ -707,14 +740,15 @@ class DatRunLogger:
 
         self.ensure_data_file()
         assert self._data_writer is not None
-        self._data_writer.writerow(self._row(snapshots, None, {}, sequence_step))
+        self._data_writer.writerow(
+            self._row(snapshots, {}, sequence_step)
+        )
         self._flush_data()
 
     def _row(
         self,
         snapshots: dict[str, DeviceSnapshot],
-        module_id: str | None,
-        values: Mapping[str, Any],
+        module_values: Mapping[str, Mapping[str, Any]],
         sequence_step: str,
     ) -> list[object]:
         """按固定列结构组装单行，并使用规定精度处理设备和模块数值。"""
@@ -741,8 +775,9 @@ class DatRunLogger:
                     else fixed_number(snapshot.current, 3)
                 )
         for module in self._module_descriptors:
+            values = module_values.get(module.id, {})
             for column in module.columns:
-                value = values.get(column.name) if module.id == module_id else None
+                value = values.get(column.name)
                 if value is None:
                     row.append("")
                 elif isinstance(value, float):

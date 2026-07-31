@@ -421,7 +421,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                         "delay_seconds": 0.375,
                     }
                 },
-                {"simulated_transport": "1.0.2"},
+                {"simulated_transport": "1.1.0"},
             )
             window = MainWindow(
                 load_config(
@@ -602,7 +602,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                     loaded.versions[
                         "simulated_transport"
                     ],
-                    "1.0.2",
+                    "1.1.0",
                 )
             finally:
                 window.enabled_modules.clear()
@@ -634,7 +634,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                     ).document,
                     SequenceModuleSettings(
                         {module_id: imported},
-                        {module_id: "1.0.2"},
+                        {module_id: "1.1.0"},
                     ),
                 )
 

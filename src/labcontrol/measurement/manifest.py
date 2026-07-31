@@ -31,7 +31,15 @@ from ..extensions.trust import (
 )
 
 
-MODULE_API_VERSION = "1.0"
+MODULE_API_VERSION = "1.1"
+MEASUREMENT_MODE_ONCE_PER_SLOT = "once_per_slot"
+MEASUREMENT_MODE_ALIGNED_SLOTS = "aligned_slots"
+MEASUREMENT_MODES = frozenset(
+    {
+        MEASUREMENT_MODE_ONCE_PER_SLOT,
+        MEASUREMENT_MODE_ALIGNED_SLOTS,
+    }
+)
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENTRYPOINT = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$"
@@ -59,6 +67,7 @@ class ModuleDescriptor:
     frontend: str = ""
     backend: str = ""
     backend_type: str = "python"
+    measurement_mode: str = MEASUREMENT_MODE_ONCE_PER_SLOT
     framework_dependencies: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     columns: tuple[ModuleColumn, ...] = ()
@@ -66,6 +75,7 @@ class ModuleDescriptor:
     valid: bool = True
     error: str = ""
     dependency_error: str = ""
+    warning: str = ""
 
     @property
     def can_enable(self) -> bool:
@@ -103,6 +113,13 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         backend = str(raw["backend"]).strip()
         backend_type = str(
             raw.get("backend_type", "python")
+        ).strip().casefold()
+        measurement_mode_declared = "measurement_mode" in raw
+        measurement_mode = str(
+            raw.get(
+                "measurement_mode",
+                MEASUREMENT_MODE_ONCE_PER_SLOT,
+            )
         ).strip().casefold()
         declared_dependencies = tuple(
             str(item).strip()
@@ -144,11 +161,18 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         frontend=frontend,
         backend=backend,
         backend_type=backend_type,
+        measurement_mode=measurement_mode,
         framework_dependencies=framework_dependencies,
         dependencies=dependencies,
         columns=columns,
     )
     errors: list[str] = []
+    warnings: list[str] = []
+    if not measurement_mode_declared:
+        warnings.append(
+            "module.toml does not declare measurement_mode; "
+            "using once_per_slot"
+        )
     if not _IDENTIFIER.fullmatch(module_id):
         errors.append("id must match [a-z][a-z0-9_]*")
     if not name:
@@ -181,6 +205,11 @@ def load_manifest(path: Path) -> ModuleDescriptor:
     if backend_type != "python":
         errors.append(
             "only backend_type='python' is supported in this release"
+        )
+    if measurement_mode not in MEASUREMENT_MODES:
+        errors.append(
+            "measurement_mode must be 'once_per_slot' or "
+            "'aligned_slots'"
         )
     if not _ENTRYPOINT.fullmatch(frontend):
         errors.append(
@@ -243,6 +272,9 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         descriptor.error = "; ".join(
             dict.fromkeys(errors)
         )
+    descriptor.warning = "; ".join(
+        dict.fromkeys(warnings)
+    )
     return descriptor
 
 
@@ -322,6 +354,8 @@ def module_dependency_errors(
 
 __all__ = [
     "MODULE_API_VERSION",
+    "MEASUREMENT_MODE_ALIGNED_SLOTS",
+    "MEASUREMENT_MODE_ONCE_PER_SLOT",
     "ModuleColumn",
     "ModuleDescriptor",
     "discover_modules",

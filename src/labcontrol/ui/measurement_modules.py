@@ -265,7 +265,12 @@ class ModuleManagerDialog(QDialog):
             self.table.insertRow(row)
             self._rows[descriptor.id] = row
             checkbox = QCheckBox()
-            checkbox.setToolTip(descriptor.error or descriptor.dependency_error)
+            descriptor_detail = (
+                descriptor.error
+                or descriptor.dependency_error
+                or descriptor.warning
+            )
+            checkbox.setToolTip(descriptor_detail)
             checkbox.setEnabled(descriptor.can_enable)
             checkbox.toggled.connect(
                 lambda enabled, module_id=descriptor.id: self._toggle(module_id, enabled)
@@ -278,7 +283,7 @@ class ModuleManagerDialog(QDialog):
             self.table.setCellWidget(row, 0, holder)
             name_item = QTableWidgetItem(descriptor.name)
             name_item.setData(Qt.ItemDataRole.UserRole, descriptor.id)
-            name_item.setToolTip(descriptor.error or descriptor.dependency_error)
+            name_item.setToolTip(descriptor_detail)
             self.table.setItem(row, 1, name_item)
             self.table.setItem(row, 2, QTableWidgetItem(descriptor.version))
             self._checkboxes[descriptor.id] = checkbox
@@ -315,7 +320,11 @@ class ModuleManagerDialog(QDialog):
                 and bool(descriptor and descriptor.can_enable)
             )
         if descriptor is not None and self._selected_id() == module_id:
-            self.detail_label.setText(message or state.replace("_", " ").title())
+            self.detail_label.setText(
+                message
+                or descriptor.warning
+                or state.replace("_", " ").title()
+            )
 
     def set_operations_enabled(self, enabled: bool) -> None:
         self.table.setEnabled(enabled)
@@ -366,7 +375,12 @@ class ModuleManagerDialog(QDialog):
             self.install_button.setEnabled(False)
             return
         state = self._states.get(descriptor.id, {})
-        detail = descriptor.error or descriptor.dependency_error or str(state.get("message", ""))
+        detail = (
+            descriptor.error
+            or descriptor.dependency_error
+            or descriptor.warning
+            or str(state.get("message", ""))
+        )
         self.detail_label.setText(detail or "Ready to enable")
         has_extra_dependencies = bool(
             descriptor.dependencies

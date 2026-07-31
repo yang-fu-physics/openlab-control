@@ -118,7 +118,7 @@ class ManifestAndSettingsTests(unittest.TestCase):
                         f'id = "{module_id}"',
                         f'name = "{module_id.title()}"',
                         'version = "1.0.0"',
-                        'api_version = "1.0"',
+                        'api_version = "1.1"',
                         'frontend = "frontend:Frontend"',
                         'backend = "backend:Backend"',
                         f'dependencies = ["{dependency}"]',
@@ -155,6 +155,14 @@ class ManifestAndSettingsTests(unittest.TestCase):
                 all(item.can_enable for item in descriptors),
                 [item.error for item in descriptors],
             )
+            self.assertTrue(
+                all(
+                    item.measurement_mode == "once_per_slot"
+                    and "does not declare measurement_mode"
+                    in item.warning
+                    for item in descriptors
+                )
+            )
             self.assertNotEqual(
                 module_dependency_directory(config, descriptors[0]),
                 module_dependency_directory(config, descriptors[1]),
@@ -178,7 +186,7 @@ class ManifestAndSettingsTests(unittest.TestCase):
                         'id = "shared_visa"',
                         'name = "Shared VISA"',
                         'version = "1.0.0"',
-                        'api_version = "1.0"',
+                        'api_version = "1.1"',
                         'frontend = "frontend:Frontend"',
                         'backend = "backend:Backend"',
                         (
@@ -293,6 +301,73 @@ class ModuleServiceTests(unittest.TestCase):
                         "raw_values": [self.value * 1.0e-9],
                     }
                 )
+            return {}
+
+        def close(self, timeout_seconds=3.0) -> None:
+            del timeout_seconds
+            return None
+
+    class _PlannedClient:
+        def __init__(
+            self,
+            slots: tuple[int, ...] | None,
+            value: float,
+        ) -> None:
+            self.slots = slots
+            self.value = value
+            self.measured_slots: list[int] = []
+            self.actions: list[str] = []
+
+        def request(
+            self,
+            action,
+            payload=None,
+            event_handler=None,
+            timeout_seconds=120.0,
+        ):
+            del timeout_seconds
+            self.actions.append(action)
+            if action == "measurement_slots":
+                return {"slots": list(self.slots or ())}
+            if action == "measure":
+                assert payload is not None
+                step = payload["measurement_step"]
+                slot = int(step["logical_slot"])
+                self.measured_slots.append(slot)
+                assert event_handler is not None
+                event_handler(
+                    {
+                        "type": "row",
+                        "values": {"Value": self.value + slot},
+                    }
+                )
+            return {}
+
+        def close(self, timeout_seconds=3.0) -> None:
+            del timeout_seconds
+            return None
+
+    class _RowContractClient:
+        def __init__(self, behavior: str) -> None:
+            self.behavior = behavior
+
+        def request(
+            self,
+            action,
+            payload=None,
+            event_handler=None,
+            timeout_seconds=120.0,
+        ):
+            del payload, timeout_seconds
+            if action != "measure":
+                return {}
+            assert event_handler is not None
+            if self.behavior in {"two_emits", "emit_and_return"}:
+                event_handler({"type": "row", "values": {"Value": 1.0}})
+            if self.behavior == "two_emits":
+                event_handler({"type": "row", "values": {"Value": 2.0}})
+            if self.behavior == "emit_and_return":
+                return {"Value": 3.0}
             return {}
 
         def close(self, timeout_seconds=3.0) -> None:
@@ -483,6 +558,34 @@ class ModuleServiceTests(unittest.TestCase):
                         captured.exception.code,
                         code,
                     )
+            wide_descriptor = ModuleDescriptor(
+                id="wide_status",
+                name="Wide Status",
+                version="1.0.0",
+                path=Path(temp),
+                columns=(
+                    ModuleColumn("R1", "Ohm"),
+                    ModuleColumn("StatusCode1", ""),
+                    ModuleColumn("R2", "Ohm"),
+                    ModuleColumn("StatusCode2", ""),
+                ),
+            )
+            self.assertEqual(
+                modules._validated_row(
+                    wide_descriptor,
+                    {"R1": 12.5, "StatusCode1": 0},
+                ),
+                {"R1": 12.5, "StatusCode1": 0},
+            )
+            with self.assertRaises(DeviceError) as captured:
+                modules._validated_row(
+                    wide_descriptor,
+                    {"StatusCode1": "NORMAL"},
+                )
+            self.assertEqual(
+                captured.exception.code,
+                "MODULE_STATUS_CODE_TYPE_ERROR",
+            )
 
     def test_measurement_raw_values_are_finite_bounded_numbers(
         self,
@@ -751,7 +854,7 @@ class ModuleServiceTests(unittest.TestCase):
             logger.close()
             data = paths.data_file.read_text(encoding="utf-8")
             self.assertEqual(
-                sum(1 for line in data.splitlines() if ",1:Measure," in line), 2
+                sum(1 for line in data.splitlines() if ",1:Measure," in line), 1
             )
             self.assertIn("module_a.Value(V)", data)
             self.assertIn("module_b.Value(V)", data)
@@ -772,6 +875,179 @@ class ModuleServiceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
+
+    def test_aligned_slot_union_merges_modules_and_repeats_single_modules(self) -> None:
+        async def scenario(temp_root: Path) -> None:
+            config = copied_project(temp_root)
+            events = EventManager()
+            devices = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            descriptors = tuple(
+                ModuleDescriptor(
+                    id=module_id,
+                    name=module_id,
+                    version="1.0.0",
+                    path=temp_root,
+                    api_version="1.1",
+                    frontend="frontend:Frontend",
+                    backend="backend:Backend",
+                    measurement_mode=mode,
+                    columns=(ModuleColumn("Value", "V"),),
+                )
+                for module_id, mode in (
+                    ("scan_a", "aligned_slots"),
+                    ("scan_b", "aligned_slots"),
+                    ("single_meter", "once_per_slot"),
+                )
+            )
+            modules = MeasurementModuleService(
+                descriptors,
+                events,
+                devices,
+            )
+            clients = {
+                "scan_a": self._PlannedClient((1, 3, 4), 10.0),
+                "scan_b": self._PlannedClient((1, 2, 4), 20.0),
+                "single_meter": self._PlannedClient(None, 30.0),
+            }
+            for module_id, client in clients.items():
+                record = modules.records[module_id]
+                record.enabled = True
+                record.state = "enabled"
+                record.client = client  # type: ignore[assignment]
+            logger = DatRunLogger(config, events)
+            await devices.connect_all()
+            await devices.poll_all()
+            discovered, statuses = await modules.prepare_sequence({})
+            paths = logger.open_run(
+                "aligned.seq",
+                "T Measure\n",
+                discovered,
+                {},
+                statuses,
+            )
+
+            await modules.begin_sequence()
+            await modules.measure_all(logger, "1:Measure")
+            self.assertTrue(await modules.end_sequence("completed"))
+            logger.close()
+
+            lines = paths.data_file.read_text(
+                encoding="utf-8"
+            ).splitlines()
+            data_index = lines.index("[Data]")
+            header = next(csv.reader([lines[data_index + 1]]))
+            rows = [
+                next(csv.reader([line]))
+                for line in lines[data_index + 2 :]
+                if ",1:Measure," in line
+            ]
+            self.assertEqual(len(rows), 4)
+            columns = {
+                module_id: header.index(f"{module_id}.Value(V)")
+                for module_id in clients
+            }
+            present = [
+                (True, True, True),
+                (False, True, True),
+                (True, False, True),
+                (True, True, True),
+            ]
+            for row, expected in zip(rows, present, strict=True):
+                self.assertEqual(
+                    tuple(
+                        row[columns[module_id]] != ""
+                        for module_id in clients
+                    ),
+                    expected,
+                )
+            self.assertEqual(clients["scan_a"].measured_slots, [1, 3, 4])
+            self.assertEqual(clients["scan_b"].measured_slots, [1, 2, 4])
+            self.assertEqual(
+                clients["single_meter"].measured_slots,
+                [1, 2, 3, 4],
+            )
+            self.assertNotIn(
+                "measurement_slots",
+                clients["single_meter"].actions,
+            )
+            await devices.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(Path(temp)))
+
+    def test_measure_enforces_exactly_one_row_per_slot_call(self) -> None:
+        async def scenario(
+            temp_root: Path,
+            behavior: str,
+            expected_code: str,
+        ) -> None:
+            config = copied_project(temp_root)
+            events = EventManager()
+            devices = DeviceManager(
+                config,
+                events,
+                isolate_processes=False,
+            )
+            descriptor = ModuleDescriptor(
+                id="row_contract",
+                name="Row Contract",
+                version="1.0.0",
+                path=temp_root,
+                api_version="1.1",
+                frontend="frontend:Frontend",
+                backend="backend:Backend",
+                measurement_mode="once_per_slot",
+                columns=(ModuleColumn("Value", "V"),),
+            )
+            modules = MeasurementModuleService(
+                (descriptor,),
+                events,
+                devices,
+            )
+            record = modules.records[descriptor.id]
+            record.enabled = True
+            record.state = "enabled"
+            record.client = self._RowContractClient(behavior)  # type: ignore[assignment]
+            logger = DatRunLogger(config, events)
+            await devices.connect_all()
+            await devices.poll_all()
+            discovered, statuses = await modules.prepare_sequence({})
+            logger.open_run(
+                "row-contract.seq",
+                "T Measure\n",
+                discovered,
+                {},
+                statuses,
+            )
+            await modules.begin_sequence()
+            with self.assertRaises(DeviceError) as raised:
+                await modules.measure_all(logger, "1:Measure")
+            self.assertEqual(
+                raised.exception.code,
+                expected_code,
+            )
+            self.assertTrue(await modules.end_sequence("error"))
+            logger.close()
+            await devices.disconnect_all()
+
+        for behavior, expected_code in (
+            ("no_row", "MODULE_MEASUREMENT_ROW_MISSING"),
+            ("two_emits", "MODULE_MEASUREMENT_MULTIPLE_ROWS"),
+            ("emit_and_return", "MODULE_MEASUREMENT_MULTIPLE_ROWS"),
+        ):
+            with self.subTest(behavior=behavior):
+                with tempfile.TemporaryDirectory() as temp:
+                    asyncio.run(
+                        scenario(
+                            Path(temp),
+                            behavior,
+                            expected_code,
+                        )
+                    )
 
     def test_shutdown_aborts_and_closes_module_workers_concurrently(self) -> None:
         async def scenario(temp_root: Path) -> None:

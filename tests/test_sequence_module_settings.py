@@ -62,7 +62,7 @@ class SequenceModuleSettingsTests(unittest.TestCase):
                 expected,
                 {
                     "lakeshore_372a": "0.1.0b3",
-                    "simulated_transport": "1.0.2",
+                    "simulated_transport": "1.1.0",
                 },
             )
             loaded = load_sequence_module_settings(
@@ -83,7 +83,7 @@ class SequenceModuleSettingsTests(unittest.TestCase):
                 loaded.versions,
                 {
                     "lakeshore_372a": "0.1.0b3",
-                    "simulated_transport": "1.0.2",
+                    "simulated_transport": "1.1.0",
                 },
             )
             self.assertEqual(loaded.source, sidecar)
@@ -217,7 +217,7 @@ class SequenceModuleSettingsTests(unittest.TestCase):
                         "delay_seconds": 0.5,
                     }
                 },
-                {"simulated_transport": "1.0.2"},
+                {"simulated_transport": "1.1.0"},
             )
 
             loaded = load_sequence_module_settings(
