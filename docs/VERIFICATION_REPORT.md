@@ -45,10 +45,10 @@ Stop/通信异常安全收尾、数据 Warning 和整数状态码。完整测试
 - `build.bat` 完整重建成功；构建过程再次运行核心 201/201 测试并通过。
 - `OpenLabControl.exe` 的 FileVersion 与 ProductVersion 均为 `0.11.5`；未发现
   `__pycache__`、`.pyc`、`.pyo` 或重复的 `_internal` 资源目录。
-- 解包目录共 336 个文件、139,073,045 bytes（132.63 MiB）。PyInstaller 缺失模块报告
+- 解包目录共 336 个文件，约 132.63 MiB。PyInstaller 缺失模块报告
   仅包含 Windows 不使用的 POSIX 模块和可选依赖；实际冻结启动未出现缺包错误。
-- 源码版与冻结版 `--gui-smoke` 均退出 0，生成的 1480×900 主窗口截图均为
-  105,527 bytes；菜单、SEQ 树、命令栏和三个设备状态块完整可读。
+- 源码版与冻结版 `--gui-smoke` 均退出 0，生成的 1480×900 主窗口截图非空；菜单、
+  SEQ 树、命令栏和三个设备状态块完整可读。
 - 源码版与冻结版 `nested_scan.seq` 无界面运行均 Completed、退出 0；嵌套温度/磁场/时间
   扫描和 Disabled 模块 Warning 路径正常，结束后无残留 `OpenLabControl` 进程。
 - 在冻结包副本中复制并信任 API 1.1 `simulated_transport` 后，模块在独立进程中 Enable，
@@ -58,8 +58,11 @@ Stop/通信异常安全收尾、数据 Warning 和整数状态码。完整测试
 - 模块 Manager、Settings 和 Status 三张离屏预览均成功生成；窗口初始宽度无横向滚动条，
   Apply Settings 仍只出现在 Settings 页。
 
-最终发布 ZIP 的重新解压和哈希核验将在生成发布资产后执行，并单独记录在随 Release 上传的
-验证报告中。
+- Windows 目录压缩后在新的空目录重新解压，仍为 336 个发布文件，EXE 文件版本和产品
+  版本均为 0.11.5。解压副本再次完成 GUI smoke，并在手动复制、信任 API 1.1 示例模块后
+  完成 12 行 headless 模块 SEQ；退出码均为 0、无无效数据行且无残留主程序/模块进程。
+- 正式发布资产生成后重新计算 SHA-256；哈希文件与资产一同上传，不把预验证临时包作为
+  Release 资产。
 
 ## 真实仪表边界
 

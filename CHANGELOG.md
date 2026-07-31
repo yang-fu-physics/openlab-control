@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.11.5 - 2026-07-31
+## 0.11.5 - 2026-08-01
 
 - Measurement Module API 升级到 1.1。正式模块通过 manifest 显式声明
   `aligned_slots` 或 `once_per_slot`；缺少字段时 Modules Manager 显示 Warning，并按
