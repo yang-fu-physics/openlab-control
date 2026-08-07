@@ -301,8 +301,7 @@ class DatRunLogger:
             for module in self._module_descriptors:
                 self._data_writer.writerow([
                     "INFO",
-                    f"Module {module.id}: {module.name}; version={module.version}; "
-                    f"api={module.api_version}; mode={module.measurement_mode}",
+                    f"Module {module.id}: {module.name}; version={module.version}",
                 ])
             self._data_handle.write("\n[Data]\n")
             self._data_writer.writerow(self._columns)

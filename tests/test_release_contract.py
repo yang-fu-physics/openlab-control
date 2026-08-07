@@ -28,8 +28,6 @@ class ReleaseContractTests(unittest.TestCase):
             "README.md",
             "docs/ARCHITECTURE.md",
             "docs/DAT_FORMAT.md",
-            "docs/TECHNICAL_SPECIFICATION.md",
-            "docs/VERIFICATION_REPORT.md",
         ):
             with self.subTest(path=relative_path):
                 self.assertIn(
@@ -166,8 +164,6 @@ class ReleaseContractTests(unittest.TestCase):
                 "docs/CONFIGURATION.md",
                 "docs/OPERATIONS.md",
                 "docs/PLUGIN_DEVELOPMENT.md",
-                "docs/TECHNICAL_SPECIFICATION.md",
-                "docs/TEST_PLAN.md",
             )
         )
         for obsolete in (

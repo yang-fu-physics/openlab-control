@@ -47,7 +47,7 @@ field = "hold_current"
 
 - `hold_current`：Stop/Error 后读取并保持当前值。
 
-当前版本只接受 `hold_current`，并同时作用于温度和磁场；其他值会在启动时被拒绝。测量模块在 SEQ 完成、Stop、Error 时调用 `end_sequence(reason)`；只有 Disable 和应用退出调用 `abort()`。
+当前版本只接受 `hold_current`，并同时作用于温度和磁场；其他值会在启动时被拒绝。测量模块在 SEQ 完成、Stop、Error 时收到 `on_event("run_end", {"reason": ...}, api)`；只有 Disable 和应用退出调用 `close(api)`。
 
 ## `[alarms]`
 
@@ -113,8 +113,8 @@ shutdown_timeout_seconds = 3.0
 | `python_executable` | 安装额外依赖时使用的 Python；源码运行留空即使用当前 Python |
 | `runtime_directory` | 每模块额外依赖隔离 runtime 的根目录 |
 | `startup_timeout_seconds` | 模块工作进程启动并完成源码加载的上限 |
-| `operation_timeout_seconds` | initialize、Apply、Measure 等单次 IPC 操作的上限 |
-| `shutdown_timeout_seconds` | Disable/退出时 abort + close/force-stop 的总上限 |
+| `operation_timeout_seconds` | open、configure、measure、event 等单次 IPC 操作的总上限 |
+| `shutdown_timeout_seconds` | Disable/退出时模块 close + worker shutdown 的总上限 |
 
 PySide6 6.11.1、QtAwesome 1.4.2、packaging 26.2、PyVISA 1.16.2 和
 typing_extensions 4.16.0 是框架共享依赖，源码环境和正式 EXE 均直接提供。所有模块

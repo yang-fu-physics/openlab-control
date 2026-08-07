@@ -24,7 +24,7 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import DeviceActivity, DeviceKind, DeviceSnapshot, Severity  # noqa: E402
-from labcontrol.measurement.manifest import load_manifest  # noqa: E402
+from labcontrol.measurement.manifest import ModuleColumn, load_manifest  # noqa: E402
 
 
 class DatafileTests(unittest.TestCase):
@@ -38,6 +38,11 @@ class DatafileTests(unittest.TestCase):
             events = EventManager()
             logger = DatRunLogger(config, events)
             module = load_manifest(SIMULATED_MODULE)
+            module.columns = (
+                ModuleColumn("R1", "Ohm"),
+                ModuleColumn("R2", "Ohm"),
+                ModuleColumn("StatusCode"),
+            )
             paths = logger.open_run(
                 "test.seq",
                 "T Measure\nT End Sequence\n",
@@ -91,7 +96,7 @@ class DatafileTests(unittest.TestCase):
             )
             self.assertIn("[Data]", data)
             self.assertIn(
-                "api=1.1; mode=aligned_slots",
+                "Module simulated_transport: Simulated Transport; version=2.0.0",
                 data,
             )
             self.assertIn("simulated_transport.R1(Ohm)", data)

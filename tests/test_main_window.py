@@ -421,7 +421,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                         "delay_seconds": 0.375,
                     }
                 },
-                {"simulated_transport": "1.1.0"},
+                {"simulated_transport": "2.0.0"},
             )
             window = MainWindow(
                 load_config(
@@ -602,7 +602,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                     loaded.versions[
                         "simulated_transport"
                     ],
-                    "1.1.0",
+                    "2.0.0",
                 )
             finally:
                 window.enabled_modules.clear()

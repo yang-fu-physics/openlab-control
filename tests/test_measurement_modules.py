@@ -96,10 +96,7 @@ class ManifestAndSettingsTests(unittest.TestCase):
             self.assertEqual([item.id for item in descriptors], ["simulated_transport"])
             descriptor = descriptors[0]
             self.assertTrue(descriptor.valid)
-            self.assertEqual(
-                [column.name for column in descriptor.columns],
-                ["R1", "R2", "R3", "R4", "StatusCode"],
-            )
+            self.assertEqual(descriptor.columns, ())
             path = Path(temp) / "module_data" / descriptor.id / "settings.toml"
             original = {"range": 10.0, "enabled": True, "channels": [1, 2], "nested": {"name": "R1"}}
             save_settings(path, original)
@@ -115,15 +112,9 @@ class ManifestAndSettingsTests(unittest.TestCase):
                 folder.mkdir(parents=True)
                 (folder / "module.toml").write_text(
                     "\n".join([
-                        f'id = "{module_id}"',
                         f'name = "{module_id.title()}"',
                         'version = "1.0.0"',
-                        'api_version = "1.1"',
-                        'frontend = "frontend:Frontend"',
-                        'backend = "backend:Backend"',
                         f'dependencies = ["{dependency}"]',
-                        "[[columns]]",
-                        'name = "Value"',
                     ]) + "\n",
                     encoding="utf-8",
                 )
@@ -140,12 +131,8 @@ class ManifestAndSettingsTests(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                (folder / "frontend.py").write_text(
-                    "class Frontend:\n    pass\n",
-                    encoding="utf-8",
-                )
                 (folder / "backend.py").write_text(
-                    "class Backend:\n    pass\n",
+                    "class Module:\n    pass\n",
                     encoding="utf-8",
                 )
             config = load_config(root / "configs" / "default.toml")
@@ -155,20 +142,12 @@ class ManifestAndSettingsTests(unittest.TestCase):
                 all(item.can_enable for item in descriptors),
                 [item.error for item in descriptors],
             )
-            self.assertTrue(
-                all(
-                    item.measurement_mode == "once_per_slot"
-                    and "does not declare measurement_mode"
-                    in item.warning
-                    for item in descriptors
-                )
-            )
             self.assertNotEqual(
                 module_dependency_directory(config, descriptors[0]),
                 module_dependency_directory(config, descriptors[1]),
             )
 
-    def test_framework_dependency_needs_no_module_runtime(
+    def test_framework_dependencies_are_not_redeclared_by_modules(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -183,66 +162,46 @@ class ManifestAndSettingsTests(unittest.TestCase):
             (folder / "module.toml").write_text(
                 "\n".join(
                     [
-                        'id = "shared_visa"',
                         'name = "Shared VISA"',
                         'version = "1.0.0"',
-                        'api_version = "1.1"',
-                        'frontend = "frontend:Frontend"',
-                        'backend = "backend:Backend"',
                         (
                             'dependencies = ['
                             '"PyVISA>=1.16,<1.17", '
                             '"typing_extensions>=4.16,<5"]'
                         ),
-                        "[[columns]]",
-                        'name = "Value"',
                     ]
                 )
                 + "\n",
                 encoding="utf-8",
             )
-            (folder / "frontend.py").write_text(
-                "class Frontend:\n    pass\n",
-                encoding="utf-8",
-            )
             (folder / "backend.py").write_text(
-                "class Backend:\n    pass\n",
+                "class Module:\n    pass\n",
                 encoding="utf-8",
             )
             config = load_config(
                 root / "configs" / "default.toml"
             )
             descriptor = discover_modules(config)[0]
-            self.assertTrue(
-                descriptor.valid,
+            self.assertFalse(descriptor.valid)
+            self.assertEqual(descriptor.dependencies, ())
+            self.assertIn(
+                "already supplied and must not be declared",
                 descriptor.error,
             )
-            self.assertEqual(descriptor.dependencies, ())
-            self.assertEqual(
-                descriptor.framework_dependencies,
-                (
-                    "PyVISA>=1.16,<1.17",
-                    "typing_extensions>=4.16,<5",
-                ),
-            )
-            self.assertTrue(descriptor.can_enable)
 
-            manifest = (
-                folder / "module.toml"
-            ).read_text(encoding="utf-8")
-            (folder / "module.toml").write_text(
-                manifest.replace(
-                    "PyVISA>=1.16,<1.17",
-                    "PyVISA>=2",
-                ),
+    def test_old_manifest_policy_fields_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "backend.py").write_text("class Module:\n    pass\n", encoding="utf-8")
+            (root / "module.toml").write_text(
+                'name = "Old"\nversion = "1.0.0"\nmeasurement_mode = "aligned_slots"\n',
                 encoding="utf-8",
             )
-            incompatible = discover_modules(config)[0]
-            self.assertFalse(incompatible.valid)
-            self.assertIn(
-                "framework-provided version 1.16.2",
-                incompatible.error,
-            )
+            from labcontrol.measurement.manifest import load_manifest
+
+            descriptor = load_manifest(root)
+            self.assertFalse(descriptor.valid)
+            self.assertIn("unknown module.toml fields: measurement_mode", descriptor.error)
 
 
 class ModuleServiceTests(unittest.TestCase):
@@ -251,9 +210,11 @@ class ModuleServiceTests(unittest.TestCase):
             self,
             failing_action: str,
             severity: str = "error",
+            failing_event: str = "",
         ) -> None:
             self.failing_action = failing_action
             self.severity = severity
+            self.failing_event = failing_event
             self.actions: list[str] = []
 
         def request(
@@ -263,9 +224,17 @@ class ModuleServiceTests(unittest.TestCase):
             event_handler=None,
             timeout_seconds=120.0,
         ):
-            del payload, event_handler, timeout_seconds
+            del event_handler, timeout_seconds
             self.actions.append(action)
-            if action == self.failing_action:
+            event_matches = (
+                not self.failing_event
+                or (
+                    action == "event"
+                    and isinstance(payload, dict)
+                    and payload.get("name") == self.failing_event
+                )
+            )
+            if action == self.failing_action and event_matches:
                 raise WorkerRequestError(
                     f"{action} failed",
                     f"{action.upper()}_FAILED",
@@ -290,17 +259,13 @@ class ModuleServiceTests(unittest.TestCase):
             event_handler=None,
             timeout_seconds=120.0,
         ):
-            del payload, timeout_seconds
+            del payload, event_handler, timeout_seconds
             if action == "measure":
                 self.barrier.wait(timeout=2.0)
-                assert event_handler is not None
-                event_handler(
-                    {
-                        "type": "row",
-                        "values": {"Value": self.value},
-                        "raw_values": [self.value * 1.0e-9],
-                    }
-                )
+                return {
+                    "values": {"Value": self.value},
+                    "raw_values": [self.value * 1.0e-9],
+                }
             return {}
 
         def close(self, timeout_seconds=3.0) -> None:
@@ -327,20 +292,15 @@ class ModuleServiceTests(unittest.TestCase):
         ):
             del timeout_seconds
             self.actions.append(action)
-            if action == "measurement_slots":
-                return {"slots": list(self.slots or ())}
+            if action == "slots":
+                return {
+                    "slots": None if self.slots is None else list(self.slots)
+                }
             if action == "measure":
                 assert payload is not None
-                step = payload["measurement_step"]
-                slot = int(step["logical_slot"])
+                slot = int(payload["slot"])
                 self.measured_slots.append(slot)
-                assert event_handler is not None
-                event_handler(
-                    {
-                        "type": "row",
-                        "values": {"Value": self.value + slot},
-                    }
-                )
+                return {"values": {"Value": self.value + slot}}
             return {}
 
         def close(self, timeout_seconds=3.0) -> None:
@@ -358,16 +318,13 @@ class ModuleServiceTests(unittest.TestCase):
             event_handler=None,
             timeout_seconds=120.0,
         ):
-            del payload, timeout_seconds
+            del payload, event_handler, timeout_seconds
             if action != "measure":
                 return {}
-            assert event_handler is not None
-            if self.behavior in {"two_emits", "emit_and_return"}:
-                event_handler({"type": "row", "values": {"Value": 1.0}})
-            if self.behavior == "two_emits":
-                event_handler({"type": "row", "values": {"Value": 2.0}})
-            if self.behavior == "emit_and_return":
-                return {"Value": 3.0}
+            if self.behavior == "wrong_type":
+                return {"values": [1.0]}
+            if self.behavior == "unknown_column":
+                return {"values": {"Other": 1.0}}
             return {}
 
         def close(self, timeout_seconds=3.0) -> None:
@@ -377,10 +334,10 @@ class ModuleServiceTests(unittest.TestCase):
     class _ShutdownClient:
         def __init__(
             self,
-            abort_barrier: threading.Barrier,
+            module_close_barrier: threading.Barrier,
             close_barrier: threading.Barrier,
         ) -> None:
-            self.abort_barrier = abort_barrier
+            self.module_close_barrier = module_close_barrier
             self.close_barrier = close_barrier
             self.actions: list[str] = []
 
@@ -393,8 +350,8 @@ class ModuleServiceTests(unittest.TestCase):
         ):
             del payload, event_handler, timeout_seconds
             self.actions.append(action)
-            if action == "abort":
-                self.abort_barrier.wait(timeout=2.0)
+            if action == "module_close":
+                self.module_close_barrier.wait(timeout=2.0)
             return {}
 
         def close(self, timeout_seconds=3.0) -> None:
@@ -424,7 +381,7 @@ class ModuleServiceTests(unittest.TestCase):
                 descriptor.id,
             )
             with self.assertRaises(DeviceError) as untrusted:
-                await modules.enable(descriptor.id, {})
+                await modules.enable(descriptor.id)
             self.assertEqual(
                 untrusted.exception.code,
                 "MODULE_NOT_TRUSTED",
@@ -447,7 +404,7 @@ class ModuleServiceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaises(DeviceError) as changed:
-                await modules.enable(descriptor.id, {})
+                await modules.enable(descriptor.id)
             self.assertEqual(
                 changed.exception.code,
                 "MODULE_CHANGED_AFTER_DISCOVERY",
@@ -470,9 +427,6 @@ class ModuleServiceTests(unittest.TestCase):
                 name="Finite Values",
                 version="1.0.0",
                 path=Path(temp),
-                api_version="1.0",
-                frontend="frontend:Frontend",
-                backend="backend:Backend",
                 columns=(ModuleColumn("Value", "V"),),
             )
             modules = MeasurementModuleService((descriptor,), events, devices)
@@ -492,7 +446,7 @@ class ModuleServiceTests(unittest.TestCase):
                 {"Value": 1.25},
             )
 
-    def test_status_code_is_required_nonnegative_integer(
+    def test_status_code_semantics_belong_to_the_module(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -508,9 +462,6 @@ class ModuleServiceTests(unittest.TestCase):
                 name="Numeric Status",
                 version="1.0.0",
                 path=Path(temp),
-                api_version="1.0",
-                frontend="frontend:Frontend",
-                backend="backend:Backend",
                 columns=(
                     ModuleColumn("Value", "V"),
                     ModuleColumn("StatusCode", ""),
@@ -528,64 +479,16 @@ class ModuleServiceTests(unittest.TestCase):
                 ),
                 {"Value": 1.25, "StatusCode": 0},
             )
-            for values, code in (
-                (
-                    {"Value": 1.25},
-                    "MODULE_STATUS_CODE_MISSING",
-                ),
-                (
-                    {"Value": 1.25, "StatusCode": "ERROR"},
-                    "MODULE_STATUS_CODE_TYPE_ERROR",
-                ),
-                (
-                    {"Value": 1.25, "StatusCode": True},
-                    "MODULE_STATUS_CODE_TYPE_ERROR",
-                ),
-                (
-                    {"Value": 1.25, "StatusCode": -1},
-                    "MODULE_STATUS_CODE_TYPE_ERROR",
-                ),
+            # 核心只保证列/schema/JSON 边界；状态码是否必填以及每个值的含义由
+            # 模块 README 和模块测试定义。
+            for values in (
+                {"Value": 1.25},
+                {"Value": 1.25, "StatusCode": "module-defined"},
+                {"Value": 1.25, "StatusCode": True},
+                {"Value": 1.25, "StatusCode": -1},
             ):
                 with self.subTest(values=values):
-                    with self.assertRaises(
-                        DeviceError
-                    ) as captured:
-                        modules._validated_row(
-                            descriptor,
-                            values,
-                        )
-                    self.assertEqual(
-                        captured.exception.code,
-                        code,
-                    )
-            wide_descriptor = ModuleDescriptor(
-                id="wide_status",
-                name="Wide Status",
-                version="1.0.0",
-                path=Path(temp),
-                columns=(
-                    ModuleColumn("R1", "Ohm"),
-                    ModuleColumn("StatusCode1", ""),
-                    ModuleColumn("R2", "Ohm"),
-                    ModuleColumn("StatusCode2", ""),
-                ),
-            )
-            self.assertEqual(
-                modules._validated_row(
-                    wide_descriptor,
-                    {"R1": 12.5, "StatusCode1": 0},
-                ),
-                {"R1": 12.5, "StatusCode1": 0},
-            )
-            with self.assertRaises(DeviceError) as captured:
-                modules._validated_row(
-                    wide_descriptor,
-                    {"StatusCode1": "NORMAL"},
-                )
-            self.assertEqual(
-                captured.exception.code,
-                "MODULE_STATUS_CODE_TYPE_ERROR",
-            )
+                    self.assertEqual(modules._validated_row(descriptor, values), values)
 
     def test_measurement_raw_values_are_finite_bounded_numbers(
         self,
@@ -633,7 +536,7 @@ class ModuleServiceTests(unittest.TestCase):
             "MODULE_RAW_DATA_SIZE_ERROR",
         )
 
-    def test_full_lifecycle_streams_four_ordered_rows_and_disables_cleanly(self) -> None:
+    def test_full_lifecycle_writes_four_ordered_rows_and_disables_cleanly(self) -> None:
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
@@ -644,19 +547,18 @@ class ModuleServiceTests(unittest.TestCase):
             logger = DatRunLogger(config, events)
             await devices.connect_all()
             await devices.poll_all()
-            settings = {
-                "delay_seconds": 0.001,
-                "noise_ohm": 0.0,
-                "warning_threshold_ohm": 1e9,
-            }
+            settings = {}
             try:
-                await modules.enable("simulated_transport", settings)
+                await modules.enable("simulated_transport")
                 record = modules.records["simulated_transport"]
                 self.assertTrue(record.enabled)
-                self.assertEqual(record.status["Applied Settings"], "Not applied")
+                self.assertEqual(record.status["State"], "Ready")
+                self.assertEqual(
+                    [column.name for column in record.descriptor.columns],
+                    ["R1", "R2", "R3", "R4", "StatusCode"],
+                )
                 await modules.apply_settings("simulated_transport", settings)
-                await modules.manual_action("simulated_transport", "measure_now", {})
-                descriptors, statuses = await modules.prepare_sequence({"simulated_transport": settings})
+                descriptors, statuses = await modules.prepare_sequence()
                 paths = logger.open_run(
                     "module.seq",
                     "T Measure\nT End Sequence\n",
@@ -665,8 +567,6 @@ class ModuleServiceTests(unittest.TestCase):
                     statuses,
                 )
                 await modules.begin_sequence()
-                with self.assertRaises(DeviceError):
-                    await modules.manual_action("simulated_transport", "measure_now", {})
                 await modules.measure_all(logger, "1:Measure")
                 self.assertTrue(await modules.end_sequence("completed"))
                 logger.close()
@@ -679,7 +579,6 @@ class ModuleServiceTests(unittest.TestCase):
                 for index, row in enumerate(parsed_rows, start=1):
                     column = header.index(f"simulated_transport.R{index}(Ohm)")
                     self.assertNotEqual(row[column], "")
-                self.assertIn("MANUAL_ACTION_COMPLETED", [item.event.code for item in notices])
                 await modules.disable("simulated_transport")
                 self.assertFalse(record.enabled)
                 self.assertIsNone(record.client)
@@ -703,7 +602,7 @@ class ModuleServiceTests(unittest.TestCase):
             await devices.connect_all()
             await devices.poll_all()
             try:
-                descriptors, statuses = await modules.prepare_sequence({})
+                descriptors, statuses = await modules.prepare_sequence()
                 paths = logger.open_run("empty.seq", "T Measure\nT End Sequence\n", descriptors, {}, statuses)
                 await modules.begin_sequence()
                 await modules.measure_all(logger, "1:Measure")
@@ -735,7 +634,10 @@ class ModuleServiceTests(unittest.TestCase):
 
             end_service = MeasurementModuleService(discover_modules(config), events, devices)
             end_record = end_service.records["simulated_transport"]
-            end_client = self._FailingClient("end_sequence")
+            end_client = self._FailingClient(
+                "event",
+                failing_event="run_end",
+            )
             end_record.client = end_client  # type: ignore[assignment]
             end_record.enabled = True
             end_record.state = "enabled"
@@ -744,20 +646,23 @@ class ModuleServiceTests(unittest.TestCase):
             self.assertFalse(await end_service.end_sequence("completed"))
             self.assertTrue(end_record.enabled)
             self.assertEqual(end_record.state, "faulted")
-            self.assertEqual(end_client.actions, ["end_sequence"])
+            self.assertEqual(end_client.actions, ["event"])
 
-            abort_service = MeasurementModuleService(discover_modules(config), events, devices)
-            abort_record = abort_service.records["simulated_transport"]
-            abort_client = self._FailingClient("abort")
-            abort_record.client = abort_client  # type: ignore[assignment]
-            abort_record.enabled = True
-            abort_record.state = "enabled"
+            close_service = MeasurementModuleService(discover_modules(config), events, devices)
+            close_record = close_service.records["simulated_transport"]
+            close_client = self._FailingClient("module_close")
+            close_record.client = close_client  # type: ignore[assignment]
+            close_record.enabled = True
+            close_record.state = "enabled"
             with self.assertRaises(DeviceError):
-                await abort_service.disable("simulated_transport")
-            self.assertFalse(abort_record.enabled)
-            self.assertEqual(abort_record.state, "disabled")
-            self.assertIsNone(abort_record.client)
-            self.assertEqual(abort_client.actions, ["abort", "close"])
+                await close_service.disable("simulated_transport")
+            self.assertFalse(close_record.enabled)
+            self.assertEqual(close_record.state, "disabled")
+            self.assertIsNone(close_record.client)
+            self.assertEqual(
+                close_client.actions,
+                ["module_close", "close"],
+            )
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
@@ -784,8 +689,9 @@ class ModuleServiceTests(unittest.TestCase):
                 "simulated_transport"
             ]
             client = self._FailingClient(
-                "begin_sequence",
+                "event",
                 "cancelled",
+                failing_event="run_start",
             )
             record.client = client  # type: ignore[assignment]
             record.enabled = True
@@ -812,7 +718,7 @@ class ModuleServiceTests(unittest.TestCase):
             )
             self.assertEqual(
                 client.actions,
-                ["begin_sequence", "end_sequence"],
+                ["event", "event"],
             )
 
         with tempfile.TemporaryDirectory() as temp:
@@ -829,9 +735,6 @@ class ModuleServiceTests(unittest.TestCase):
                     name=module_id,
                     version="1.0.0",
                     path=temp_root,
-                    api_version="1.0",
-                    frontend="frontend:Frontend",
-                    backend="backend:Backend",
                     columns=(ModuleColumn("Value", "V"),),
                 )
                 for module_id in ("module_a", "module_b")
@@ -846,7 +749,7 @@ class ModuleServiceTests(unittest.TestCase):
             logger = DatRunLogger(config, events)
             await devices.connect_all()
             await devices.poll_all()
-            discovered, statuses = await modules.prepare_sequence({})
+            discovered, statuses = await modules.prepare_sequence()
             paths = logger.open_run("parallel.seq", "T Measure\n", discovered, {}, statuses)
             await modules.begin_sequence()
             await modules.measure_all(logger, "1:Measure")
@@ -876,7 +779,7 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
 
-    def test_aligned_slot_union_merges_modules_and_repeats_single_modules(self) -> None:
+    def test_optional_slot_union_merges_modules_and_repeats_followers(self) -> None:
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
@@ -891,17 +794,9 @@ class ModuleServiceTests(unittest.TestCase):
                     name=module_id,
                     version="1.0.0",
                     path=temp_root,
-                    api_version="1.1",
-                    frontend="frontend:Frontend",
-                    backend="backend:Backend",
-                    measurement_mode=mode,
                     columns=(ModuleColumn("Value", "V"),),
                 )
-                for module_id, mode in (
-                    ("scan_a", "aligned_slots"),
-                    ("scan_b", "aligned_slots"),
-                    ("single_meter", "once_per_slot"),
-                )
+                for module_id in ("scan_a", "scan_b", "single_meter")
             )
             modules = MeasurementModuleService(
                 descriptors,
@@ -921,7 +816,7 @@ class ModuleServiceTests(unittest.TestCase):
             logger = DatRunLogger(config, events)
             await devices.connect_all()
             await devices.poll_all()
-            discovered, statuses = await modules.prepare_sequence({})
+            discovered, statuses = await modules.prepare_sequence()
             paths = logger.open_run(
                 "aligned.seq",
                 "T Measure\n",
@@ -970,8 +865,8 @@ class ModuleServiceTests(unittest.TestCase):
                 clients["single_meter"].measured_slots,
                 [1, 2, 3, 4],
             )
-            self.assertNotIn(
-                "measurement_slots",
+            self.assertIn(
+                "slots",
                 clients["single_meter"].actions,
             )
             await devices.disconnect_all()
@@ -979,7 +874,7 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
 
-    def test_measure_enforces_exactly_one_row_per_slot_call(self) -> None:
+    def test_measure_requires_one_returned_mapping_per_slot(self) -> None:
         async def scenario(
             temp_root: Path,
             behavior: str,
@@ -997,10 +892,6 @@ class ModuleServiceTests(unittest.TestCase):
                 name="Row Contract",
                 version="1.0.0",
                 path=temp_root,
-                api_version="1.1",
-                frontend="frontend:Frontend",
-                backend="backend:Backend",
-                measurement_mode="once_per_slot",
                 columns=(ModuleColumn("Value", "V"),),
             )
             modules = MeasurementModuleService(
@@ -1015,7 +906,7 @@ class ModuleServiceTests(unittest.TestCase):
             logger = DatRunLogger(config, events)
             await devices.connect_all()
             await devices.poll_all()
-            discovered, statuses = await modules.prepare_sequence({})
+            discovered, statuses = await modules.prepare_sequence()
             logger.open_run(
                 "row-contract.seq",
                 "T Measure\n",
@@ -1036,8 +927,8 @@ class ModuleServiceTests(unittest.TestCase):
 
         for behavior, expected_code in (
             ("no_row", "MODULE_MEASUREMENT_ROW_MISSING"),
-            ("two_emits", "MODULE_MEASUREMENT_MULTIPLE_ROWS"),
-            ("emit_and_return", "MODULE_MEASUREMENT_MULTIPLE_ROWS"),
+            ("wrong_type", "MODULE_MEASUREMENT_ROW_MISSING"),
+            ("unknown_column", "MODULE_SCHEMA_VIOLATION"),
         ):
             with self.subTest(behavior=behavior):
                 with tempfile.TemporaryDirectory() as temp:
@@ -1049,7 +940,7 @@ class ModuleServiceTests(unittest.TestCase):
                         )
                     )
 
-    def test_shutdown_aborts_and_closes_module_workers_concurrently(self) -> None:
+    def test_shutdown_closes_modules_and_reaps_workers_concurrently(self) -> None:
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
@@ -1060,19 +951,16 @@ class ModuleServiceTests(unittest.TestCase):
                     name=module_id,
                     version="1.0.0",
                     path=temp_root,
-                    api_version="1.0",
-                    frontend="frontend:Frontend",
-                    backend="backend:Backend",
                 )
                 for module_id in ("module_a", "module_b")
             )
             modules = MeasurementModuleService(descriptors, events, devices)
-            abort_barrier = threading.Barrier(2)
+            module_close_barrier = threading.Barrier(2)
             close_barrier = threading.Barrier(2)
             clients = []
             for module_id in ("module_a", "module_b"):
                 record = modules.records[module_id]
-                client = self._ShutdownClient(abort_barrier, close_barrier)
+                client = self._ShutdownClient(module_close_barrier, close_barrier)
                 clients.append(client)
                 record.client = client  # type: ignore[assignment]
                 record.enabled = True
@@ -1081,8 +969,8 @@ class ModuleServiceTests(unittest.TestCase):
             await modules.shutdown()
 
             self.assertEqual([client.actions for client in clients], [
-                ["abort", "close"],
-                ["abort", "close"],
+                ["module_close", "close"],
+                ["module_close", "close"],
             ])
             self.assertTrue(
                 all(
@@ -1103,14 +991,23 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
         (root / "backend.py").write_text(
             "\n".join([
                 "import time",
-                "from labcontrol.measurement.api import ModuleBackend",
                 "",
-                "class Backend(ModuleBackend):",
+                "class Module:",
+                "    columns = {'Value': ''}",
                 "    def __init__(self):",
                 f"        time.sleep({startup_delay!r})",
                 "",
-                "    def initialize(self, settings, context):",
+                "    def open(self, api):",
+                "        return {}",
+                "",
+                "    def configure(self, settings, api):",
                 "        time.sleep(float(settings.get('delay_seconds', 0.0)))",
+                "        return {}",
+                "",
+                "    def measure(self, slot, api):",
+                "        return {'Value': 0}",
+                "",
+                "    def close(self, api):",
                 "        return {}",
                 "",
             ]),
@@ -1121,8 +1018,6 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
             name="Timeout Module",
             version="1.0.0",
             path=root,
-            api_version="1.0",
-            backend="backend:Backend",
         )
 
     def test_startup_timeout_terminates_worker(self) -> None:
@@ -1149,7 +1044,7 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
             client.start(timeout_seconds=2.0)
             with self.assertRaises(WorkerRequestError) as captured:
                 client.request(
-                    "initialize",
+                    "configure",
                     {"settings": {"delay_seconds": 5.0}},
                     timeout_seconds=0.05,
                 )
@@ -1157,7 +1052,7 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
             self.assertIsNone(client._process)
             self.assertIsNone(client._connection)
             with self.assertRaises(WorkerRequestError) as reused:
-                client.request("read_status", timeout_seconds=0.05)
+                client.request("event", timeout_seconds=0.05)
             self.assertEqual(reused.exception.code, "MODULE_WORKER_NOT_RUNNING")
             self.assertNotIn(
                 "OpenLabModule-timeout_module",
@@ -1173,7 +1068,7 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
             def request() -> None:
                 try:
                     client.request(
-                        "initialize",
+                        "configure",
                         {"settings": {"delay_seconds": 5.0}},
                         timeout_seconds=5.0,
                     )
@@ -1199,21 +1094,26 @@ class ModuleWorkerContextTests(unittest.TestCase):
     def _descriptor(root: Path) -> ModuleDescriptor:
         (root / "backend.py").write_text(
             "\n".join([
-                "from labcontrol.measurement.api import ModuleBackend",
+                "class Module:",
+                "    columns = {'Average': 'K'}",
+                "    def open(self, api):",
+                "        return {}",
                 "",
-                "class Backend(ModuleBackend):",
-                "    def measure(self, context):",
-                "        first = context.sample_system()",
-                "        context.interruptible_sleep(",
-                "            0.02, poll_interval_seconds=0.005",
+                "    def measure(self, slot, api):",
+                "        first = api.devices()",
+                "        api.sleep(",
+                "            0.02, poll_interval=0.005",
                 "        )",
-                "        second = context.sample_system()",
+                "        second = api.devices()",
                 "        return {",
                 "            'Average': (",
                 "                first['temperature']['current']",
                 "                + second['temperature']['current']",
                 "            ) / 2.0",
                 "        }",
+                "",
+                "    def close(self, api):",
+                "        return {}",
                 "",
             ]),
             encoding="utf-8",
@@ -1223,8 +1123,6 @@ class ModuleWorkerContextTests(unittest.TestCase):
             name="Context Module",
             version="1.0.0",
             path=root,
-            api_version="1.0",
-            backend="backend:Backend",
             columns=(ModuleColumn("Average", "K"),),
         )
 
@@ -1258,13 +1156,14 @@ class ModuleWorkerContextTests(unittest.TestCase):
             try:
                 result = client.request(
                     "measure",
+                    {"slot": 1},
                     event_handler=handle,
                     timeout_seconds=2.0,
                 )
             finally:
                 client.close(timeout_seconds=1.0)
 
-            self.assertEqual(result["Average"], 2.0)
+            self.assertEqual(result["values"]["Average"], 2.0)
             self.assertEqual(requests.count("system"), 2)
             self.assertGreaterEqual(
                 requests.count("operation_state"),
@@ -1291,6 +1190,7 @@ class ModuleWorkerContextTests(unittest.TestCase):
                 ) as captured:
                     client.request(
                         "measure",
+                        {"slot": 1},
                         event_handler=handle,
                         timeout_seconds=2.0,
                     )
@@ -1347,7 +1247,7 @@ class ModuleWindowTests(unittest.TestCase):
         dialog.close()
         owner.close()
 
-    def test_window_uses_settings_and_status_pages_and_ignores_user_close(self) -> None:
+    def test_window_uses_generic_pages_and_ignores_user_close(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             descriptor = discover_modules(
                 copied_project(Path(temp))
@@ -1358,12 +1258,10 @@ class ModuleWindowTests(unittest.TestCase):
             self.assertEqual(window.tabs.tabText(0), "Settings")
             self.assertEqual(window.tabs.tabText(1), "Status")
             self.assertEqual(window.tabs.currentIndex(), 0)
-            self.assertAlmostEqual(window.settings()["delay_seconds"], 0.25)
-            window.frontend.delay.setValue(0.5)
-            self.assertTrue(window.has_unapplied_edits())
+            self.assertEqual(window.settings(), {})
             window.show()
             self.application.processEvents()
-            self.assertTrue(window.apply_button.isVisible())
+            self.assertFalse(window.apply_button.isVisible())
             window.tabs.setCurrentIndex(1)
             self.application.processEvents()
             self.assertFalse(window.apply_button.isVisible())
@@ -1419,6 +1317,38 @@ class ModuleWindowTests(unittest.TestCase):
         dialog.close()
         owner.close()
 
+    def test_custom_frontend_can_implement_only_the_hooks_it_needs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "frontend.py").write_text(
+                "from PySide6.QtWidgets import QWidget\n"
+                "class Frontend(QWidget):\n"
+                "    def __init__(self, api):\n"
+                "        super().__init__()\n"
+                "        self.api = api\n"
+                "        self.values = {'gain': 2}\n"
+                "    def load(self, settings):\n"
+                "        self.values = dict(settings)\n"
+                "    def dump(self):\n"
+                "        return dict(self.values)\n",
+                encoding="utf-8",
+            )
+            descriptor = ModuleDescriptor(
+                id="partial_frontend",
+                name="Partial Frontend",
+                version="1.0.0",
+                path=root,
+            )
+            owner = QWidget()
+            window = ModuleWindow(descriptor, owner)
+            window.load_settings({"gain": 2})
+            self.assertEqual(window.settings(), {"gain": 2})
+            self.assertIsInstance(window.settings_content, QWidget)
+            self.assertIsInstance(window.status_page, QWidget)
+            window.allow_application_close()
+            window.close()
+            owner.close()
+
     def test_imported_sequence_settings_are_marked_unapplied(
         self,
     ) -> None:
@@ -1437,10 +1367,7 @@ class ModuleWindowTests(unittest.TestCase):
                 mark_unapplied=True,
             )
 
-            self.assertAlmostEqual(
-                window.settings()["delay_seconds"],
-                0.75,
-            )
+            self.assertEqual(window.settings(), {})
             self.assertTrue(
                 window.has_unapplied_edits()
             )

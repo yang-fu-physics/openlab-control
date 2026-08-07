@@ -220,7 +220,8 @@ def _headless_demo(
                 else load_settings(settings_path)
             )
             enabled_settings[module_id] = settings
-            runtime.enable_module(
+            runtime.enable_module(module_id).result()
+            runtime.apply_module_settings(
                 module_id,
                 settings,
             ).result()

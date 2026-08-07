@@ -40,7 +40,12 @@ from labcontrol.sequence.model import Command, CommandType, SequenceDocument  # 
 
 
 class SequenceEngineTests(unittest.TestCase):
-    def _fast_config(self, temp_root: Path):
+    def _fast_config(
+        self,
+        temp_root: Path,
+        *,
+        blocking_module: bool = False,
+    ):
         (temp_root / "configs").mkdir()
         target = temp_root / "configs" / "default.toml"
         shutil.copy2(ROOT / "configs" / "default.toml", target)
@@ -48,6 +53,25 @@ class SequenceEngineTests(unittest.TestCase):
             MODULE_REPOSITORY / "modules",
             temp_root / "modules",
         )
+        if blocking_module:
+            module_root = temp_root / "modules" / "blocking_module"
+            module_root.mkdir()
+            (module_root / "module.toml").write_text(
+                'name = "Blocking Test Module"\nversion = "1.0.0"\n',
+                encoding="utf-8",
+            )
+            (module_root / "backend.py").write_text(
+                "class Module:\n"
+                "    columns = {'Value': ''}\n"
+                "    def open(self, api):\n"
+                "        return {}\n"
+                "    def measure(self, slot, api):\n"
+                "        api.sleep(5.0)\n"
+                "        return {'Value': 1.0}\n"
+                "    def close(self, api):\n"
+                "        return {}\n",
+                encoding="utf-8",
+            )
         config = load_config(target)
         trust_store = PluginTrustStore(
             config.resolve_project_path(
@@ -99,11 +123,7 @@ class SequenceEngineTests(unittest.TestCase):
         )
         await manager.connect_all()
         await manager.poll_all()
-        await modules.enable("simulated_transport", {
-            "delay_seconds": 0.001,
-            "noise_ohm": 0.0,
-            "warning_threshold_ohm": 1e9,
-        })
+        await modules.enable("simulated_transport")
 
         async def poll():
             while True:
@@ -533,14 +553,7 @@ class SequenceEngineTests(unittest.TestCase):
             )
             await manager.connect_all()
             await manager.poll_all()
-            await modules.enable(
-                "simulated_transport",
-                {
-                    "delay_seconds": 5.0,
-                    "noise_ohm": 0.0,
-                    "warning_threshold_ohm": 1e9,
-                },
-            )
+            await modules.enable("blocking_module")
             try:
                 run_task = asyncio.create_task(
                     engine.run(
@@ -553,7 +566,7 @@ class SequenceEngineTests(unittest.TestCase):
                 deadline = time.monotonic() + 2.0
                 while (
                     modules.records[
-                        "simulated_transport"
+                        "blocking_module"
                     ].state
                     != "measuring"
                     and time.monotonic() < deadline
@@ -561,7 +574,7 @@ class SequenceEngineTests(unittest.TestCase):
                     await asyncio.sleep(0.01)
                 self.assertEqual(
                     modules.records[
-                        "simulated_transport"
+                        "blocking_module"
                     ].state,
                     "measuring",
                 )
@@ -585,7 +598,12 @@ class SequenceEngineTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(
-                scenario(self._fast_config(Path(temp)))
+                scenario(
+                    self._fast_config(
+                        Path(temp),
+                        blocking_module=True,
+                    )
+                )
             )
 
     def test_progress_expands_called_sequence_scans(self) -> None:
@@ -725,8 +743,7 @@ class SequenceEngineTests(unittest.TestCase):
                 self.end_reasons: list[str] = []
                 self.abort_called = False
 
-            async def prepare_sequence(self, settings):
-                del settings
+            async def prepare_sequence(self):
                 return (), {}
 
             async def begin_sequence(self):

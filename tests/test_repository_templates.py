@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from labcontrol.measurement.manifest import load_manifest  # noqa: E402
 
 TEMPLATES = ROOT / "plugin_templates"
 MODULE_REPOSITORY = TEMPLATES / "measurement-modules-repository"
-DEVICE_REPOSITORY = TEMPLATES / "device-plugins-private-repository"
+DEVICE_REPOSITORY = TEMPLATES / "device-plugins-repository"
 
 
 class RepositoryTemplateTests(unittest.TestCase):
@@ -31,10 +32,9 @@ class RepositoryTemplateTests(unittest.TestCase):
         descriptor = load_manifest(module_path)
         self.assertTrue(descriptor.valid, descriptor.error)
         self.assertEqual(descriptor.id, "simulated_transport")
-        self.assertEqual(
-            [column.name for column in descriptor.columns],
-            ["R1", "R2", "R3", "R4", "StatusCode"],
-        )
+        self.assertEqual(descriptor.columns, ())
+        with (module_path / "module.toml").open("rb") as handle:
+            self.assertEqual(set(tomllib.load(handle)), {"name", "version"})
 
     def test_device_repository_plugins_are_independently_installable(self) -> None:
         paths = sorted(

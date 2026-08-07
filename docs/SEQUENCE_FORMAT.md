@@ -31,7 +31,7 @@ File → Open/Load `experiment.seq` 时会自动读取 `experiment.modules.toml`
 模块 Settings 页的期望值：
 
 - 不自动 Enable 或 Disable 任何模块；
-- 不连接仪表，不调用 `apply_settings`，不发送命令；
+- 不连接仪表，不调用模块 `configure`，不发送命令；
 - 已 Enabled 模块会显示 `SEQ settings imported — not applied`；
 - Disabled 模块以后 Enable 时才看到导入值，仍须人工核对并点击 Apply Settings；
 - 缺少模块或模块版本变化只给 Warning，并保留原始设置供安装/升级后检查；
@@ -197,13 +197,14 @@ T Measure devices=transport repeats=3 interval=1s
 执行语义：
 
 1. 锁定本次 Run 开始时所有 Enabled 模块及其设置。
-2. 核心按所有 `aligned_slots` 模块的启用槽位并集展开；每个逻辑通道槽位调用参与模块，
-   每次模块调用恰好产生一行结果。
+2. 核心按所有可选 `slots` 的并集展开；每个逻辑槽位调用参与模块，每次
+   `measure(slot, api)` 返回一行结果。
 3. 同一槽位的参与模块并行，结果合入该通道对应的一行；CH1–CH4 仍是四行，未参与模块列为空，
-   `once_per_slot` 模块每行重新测量。
+   没有槽位钩子的模块每行重新测量。
 4. 等所有槽位结束后才继续下一条 SEQ。
 5. 没有 Enabled 模块时弹一个锁存 Warning，写一行系统状态，继续 SEQ。
-6. 模块 Warning 继续；模块 Error 使运行进入 Faulted，但不调用模块 `abort()`。
+6. 模块 Warning 继续；模块 Error 使运行进入 Faulted，并以 `reason="error"` 发送
+   `run_end`；`close` 只在 Disable 或应用退出执行。
 
 ### Remark
 

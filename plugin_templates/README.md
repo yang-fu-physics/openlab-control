@@ -5,7 +5,7 @@ extensions and are never scanned in place.
 
 - `measurement-modules-repository/`: one shared repository containing all
   Measurement Modules that may be distributed to users.
-- The Device Plugin template contains only fail-closed examples. Temperature,
+- `device-plugins-repository/` contains only fail-closed examples. Temperature,
   field, and monitor devices differ in protocol, safety behavior, and user
   interface, so the core does not claim to provide ready-to-use drivers for
   every instrument.

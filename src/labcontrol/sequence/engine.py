@@ -165,9 +165,7 @@ class SequenceEngine:
         try:
             # prepare_sequence 冻结 Enabled 模块集合；open_run 同时写入本次实际 SEQ、
             # 配置、模块 desired settings 和 status-at-start。
-            descriptors, module_status = await self.modules.prepare_sequence(
-                module_settings or {}
-            )
+            descriptors, module_status = await self.modules.prepare_sequence()
             run_paths = self.logger.open_run(
                 document.name,
                 serialize_sequence(document),
@@ -264,8 +262,8 @@ class SequenceEngine:
         else:
             self.state = RunState.COMPLETED
         finally:
-            # end_sequence 对 completed/stopped/error 都执行。它不是 abort：Stop 后模块
-            # 保持 Enabled，只有本次运行资源应在这里结束。
+            # run_end 对 completed/stopped/error 都发送。它不是 close：Stop 后模块
+            # 保持 Enabled，只结束本次运行资源。
             reason = {
                 RunState.COMPLETED: "completed",
                 RunState.STOPPED: "stopped",

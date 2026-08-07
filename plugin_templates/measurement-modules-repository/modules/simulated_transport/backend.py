@@ -1,177 +1,38 @@
-from __future__ import annotations
+"""最小四通道 Measurement Module 示例，不需要继承框架基类。"""
 
-"""Hardware-free reference backend for the extension repository template."""
-
-import random
-from collections.abc import Mapping
-from typing import Any
-
-from labcontrol.measurement.api import (
-    ModuleBackend,
-    ModuleError,
-    ModuleOperationContext,
-)
+from labcontrol.module_api import ModuleAPI, ModuleError
 
 
-# DAT 只保存可直接分析的整数状态码。0 是跨模块约定的正常值；1 的含义只属于
-# simulated_transport，用于演示模块如何把可恢复的超阈值数据与人类可读 Warning 分开。
-STATUS_CODE_NORMAL = 0
-STATUS_CODE_OVER_RANGE = 1
+class Module:
+    columns = {
+        "R1": "Ohm",
+        "R2": "Ohm",
+        "R3": "Ohm",
+        "R4": "Ohm",
+        "StatusCode": "",
+    }
+    slots = 4
 
-
-class SimulatedTransportBackend(ModuleBackend):
     def __init__(self) -> None:
-        self.connected = False
-        self.sequence_active = False
-        self.output_enabled = False
-        self.desired_settings: dict[str, Any] = {}
-        self.applied_settings: dict[str, Any] = {}
-        self.last_values: dict[str, float] = {}
-        self.random = random.Random("openlab-simulated-transport")
+        self.ready = False
 
-    @staticmethod
-    def _defaults() -> dict[str, Any]:
-        return {
-            "excitation_current_mA": 1.0,
-            "delay_seconds": 0.04,
-            "noise_ohm": 0.0005,
-            "warning_threshold_ohm": 10.0,
-        }
+    def open(self, api: ModuleAPI):
+        self.ready = True
+        api.status({"State": "Ready"})
+        return {"State": "Ready"}
 
-    def initialize(
-        self, settings: Mapping[str, Any], context: ModuleOperationContext
-    ) -> Mapping[str, Any]:
-        self.desired_settings = {**self._defaults(), **dict(settings)}
-        context.interruptible_sleep(0.08)
-        self.connected = True
-        status = {
-            "Connection": "Connected (simulation)",
-            "Applied Settings": "Not applied",
-            "Sequence": "Idle",
-            "Output": "Off",
-            "Last Channel": "—",
-            "Last Resistance (Ohm)": "—",
-        }
-        context.update_status(status)
-        return status
+    def measure(self, slot: int, api: ModuleAPI):
+        if not self.ready:
+            raise ModuleError("Module is not open", "NOT_READY")
+        if slot not in {1, 2, 3, 4}:
+            raise ModuleError("Invalid logical slot", "INVALID_SLOT", str(slot))
+        api.sleep(0)
+        temperature = float(
+            api.devices().get("temperature", {}).get("current") or 300.0
+        )
+        return {f"R{slot}": 100.0 + slot + temperature / 1000.0, "StatusCode": 0}
 
-    def apply_settings(
-        self, settings: Mapping[str, Any], context: ModuleOperationContext
-    ) -> Mapping[str, Any]:
-        self.desired_settings = {**self._defaults(), **dict(settings)}
-        self.applied_settings = dict(self.desired_settings)
-        status = {
-            "Applied Settings": "Applied",
-            "Excitation (mA)": self.applied_settings["excitation_current_mA"],
-        }
-        context.update_status(status)
-        return status
-
-    def begin_sequence(self, context: ModuleOperationContext) -> Mapping[str, Any]:
-        self.sequence_active = True
-        self.output_enabled = True
-        status = {"Sequence": "Running", "Output": "On"}
-        context.update_status(status)
-        return status
-
-    def _settings(self) -> dict[str, Any]:
-        return self.applied_settings or self.desired_settings or self._defaults()
-
-    def _resistance(self, index: int, context: ModuleOperationContext) -> float:
-        temperature = float(context.system.get("temperature", {}).get("current") or 300.0)
-        field_oe = float(context.system.get("field", {}).get("current") or 0.0)
-        settings = self._settings()
-        base = 0.05 * index + 0.003 * temperature
-        magnetoresistance = 0.01 * index * (field_oe / 10_000.0) ** 2
-        return base + magnetoresistance + self.random.gauss(0.0, float(settings["noise_ohm"]))
-
-    def measurement_slots(
-        self,
-        context: ModuleOperationContext,
-    ) -> tuple[int, ...]:
-        del context
-        return (1, 2, 3, 4)
-
-    def measure(self, context: ModuleOperationContext) -> None:
-        settings = self._settings()
-        threshold = float(settings["warning_threshold_ohm"])
-        delay = max(0.0, float(settings["delay_seconds"]))
-        step = context.measurement_step
-        if step is None or step.logical_slot not in {1, 2, 3, 4}:
-            raise ModuleError(
-                "Simulated Transport received an invalid logical slot",
-                "SIMULATED_LOGICAL_SLOT_INVALID",
-            )
-        index = step.logical_slot
-        context.interruptible_sleep(delay)
-        channel = f"R{index}"
-        value = self._resistance(index, context)
-        self.last_values[channel] = value
-        if abs(value) > threshold:
-            status_code = STATUS_CODE_OVER_RANGE
-            context.warning(
-                f"{channel} exceeded the configured warning threshold",
-                "OVER_RANGE",
-                channel,
-            )
-        else:
-            status_code = STATUS_CODE_NORMAL
-            context.resolve_warning("OVER_RANGE", channel)
-        row: dict[str, float | int] = {
-            "StatusCode": status_code,
-        }
-        if status_code == STATUS_CODE_NORMAL:
-            row[channel] = value
-        context.emit_row(row)
-        context.update_status({
-            "Last Channel": channel,
-            "Last Resistance (Ohm)": (
-                value
-                if status_code == STATUS_CODE_NORMAL
-                else "—"
-            ),
-        })
-
-    def end_sequence(self, reason: str, context: ModuleOperationContext) -> Mapping[str, Any]:
-        self.sequence_active = False
-        self.output_enabled = False
-        status = {"Sequence": reason.title(), "Output": "Off"}
-        context.update_status(status)
-        return status
-
-    def abort(self, context: ModuleOperationContext) -> Mapping[str, Any]:
-        self.sequence_active = False
-        self.output_enabled = False
-        self.connected = False
-        status = {"Connection": "Disconnected", "Sequence": "Idle", "Output": "Off"}
-        context.update_status(status)
-        return status
-
-    def read_status(self, context: ModuleOperationContext) -> Mapping[str, Any]:
-        return {
-            "Connection": "Connected (simulation)" if self.connected else "Disconnected",
-            "Sequence": "Running" if self.sequence_active else "Idle",
-            "Output": "On" if self.output_enabled else "Off",
-        }
-
-    def manual_action(
-        self,
-        action: str,
-        payload: Mapping[str, Any],
-        context: ModuleOperationContext,
-    ) -> Mapping[str, Any]:
-        del payload
-        if action == "test_connection":
-            status = {"Connection": "Connected (simulation)", "Last Action": "Connection test passed"}
-        elif action == "measure_now":
-            value = self._resistance(1, context)
-            self.last_values["R1"] = value
-            status = {
-                "Last Action": "Manual R1 read (not written to DAT)",
-                "Last Channel": "R1",
-                "Last Resistance (Ohm)": value,
-            }
-        else:
-            return super().manual_action(action, {}, context) or {}
-        context.update_status(status)
-        return status
+    def close(self, api: ModuleAPI):
+        self.ready = False
+        api.status({"State": "Disabled"})
+        return {"State": "Disabled"}

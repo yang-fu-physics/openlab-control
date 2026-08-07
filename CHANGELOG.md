@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Measurement Module 改用不兼容的最小约定式接口：清单仅需 name/version，目录名作为
+  ID，入口固定为 `backend.py:Module`，DAT 列由后端 `columns` 提供。
+- 后端无需继承基类，只需 `open(api)`、`measure(slot, api)` 和 `close(api)`；Apply、SEQ
+  开始/结束、Status 和手动动作统一为可选的 `configure` / `on_event`。
+- 删除 manifest 调度模式和入口字段。可选 `slots` 属性声明逻辑槽位，未声明的模块自动
+  跟随每个槽位；`measure` 直接返回一行或 `(row, raw_values)`，核心不解释状态码含义。
+- Frontend 改为只需 `load` / `dump` 的普通 QWidget；精简模块规范和示例，删除重复的
+  设计/验证报告，同时保留进程隔离、协议边界及全部仪表安全测试。
+
 ## 0.11.5 - 2026-08-01
 
 - Measurement Module API 升级到 1.1。正式模块通过 manifest 显式声明

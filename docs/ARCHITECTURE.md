@@ -1,208 +1,132 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.11.5 的实际实现边界。Device Plugin 与 Measurement Module
-是两套不同的扩展机制；它们分别放在独立共享仓库中，不进入核心源码。
+本文描述 OpenLab Control 0.11.5 的当前边界。
 
-## 进程与线程模型
+## 运行模型
 
 ```text
-PySide6 主进程 / GUI 线程
-├─ MainWindow、SEQ Editor、Data Browser
+GUI 主线程
+├─ MainWindow / SEQ Editor / Data Browser
 ├─ Modules Manager
-├─ Measurement Module Frontend（Settings / Status）
+├─ 模块 Frontend（普通 QWidget）
 └─ RuntimeService 线程安全入口
-              │
-              ▼
-主进程 / OpenLabRuntime 后台线程 / asyncio
-├─ DeviceManager：角色、限制、恢复与快照
-├─ SequenceEngine：嵌套 SEQ、Pause、Stop、Error
-├─ MeasurementModuleService：模块生命周期与并行 Measure
-├─ DatRunLogger：实验 DAT / device_status.dat / events.dat 唯一写入者
-├─ EventManager：Warning / Error 锁存与弹窗去重
-└─ AlarmReporter：有界队列中的异步 HTTP Warning/Error 报告
-       │ JSON IPC（每实例独立连接，单消息 ≤ 1 MiB）
-       ├──────────────┬──────────────┬──────────────┐
-       ▼              ▼              ▼              ▼
-温度设备进程      磁场设备进程     Monitor 进程    模块工作进程（每模块一个）
+            │
+            ▼
+后台 asyncio 线程
+├─ DeviceManager：设备角色、限制、恢复和快照
+├─ SequenceEngine：SEQ、Pause、Stop 和 Error
+├─ MeasurementModuleService：模块调度与结果校验
+├─ DatRunLogger：所有运行文件的唯一写入者
+└─ EventManager / AlarmReporter
+            │ 受限 JSON IPC
+            ├─ 每个设备实例一个 spawn 子进程
+            └─ 每个 Enabled 模块一个 spawn 子进程
 ```
 
-关键边界：
+GUI 不直接操作仪表。每个模块内部请求串行，不同模块可并行。IPC 不使用 pickle；单条
+消息限制为 1 MiB，并拒绝 NaN、Infinity、复杂对象和未知 DAT 列。
 
-- GUI 对象只存在于 GUI 线程；模块 Frontend 不得打开仪表连接。
-- 每个配置设备实例独占一个 `spawn` 子进程，阻塞/崩溃不会占住其他设备。
-- 每个 Enabled 模块独占一个 `spawn` 子进程并拥有其测量仪表。
-- 框架依赖由核心统一锁定和加载；只有扩展额外依赖才插入对应子进程的 `sys.path`，
-  不污染核心/GUI，也不执行 `.pth`。
-- 模块只获得系统状态的 JSON 只读副本，没有设置温度或磁场的 API；长测量可请求新快照，
-  并通过协作检查点响应 SEQ Pause/Stop。
-- 报警发射线程不参与 SEQ 判定或仪表安全动作；网络失败只锁存本地 Warning。
-- `DatRunLogger` 是实验 DAT、设备状态和事件文件的唯一写入者。
-- 子进程隔离用于约束阻塞、资源和崩溃影响，不是恶意代码沙箱；Frontend 仍在主进程，
-  所以扩展必须经过人工审查与内容指纹信任。
+进程隔离限制阻塞、崩溃和依赖影响，但不是恶意代码沙箱。模块 Frontend 仍在 GUI
+进程，因此首次加载必须核对来源、版本、路径和内容指纹。
 
-## 扩展仓库与安装边界
+## 扩展边界
+
+Device Plugin 与 Measurement Module 分开：
+
+- Device Plugin 提供温度、磁场或 Monitor；核心负责角色、上下限、速率、失联恢复和
+  Hold 策略。
+- Measurement Module 拥有完成一次测量所需的仪表、切换器、时序、状态码和安全动作；
+  它只能读取温场快照，不能控制温度或磁场。
+
+模块目录最小为 `module.toml + backend.py`。清单只含名称、版本和可选额外依赖；DAT 列
+来自 `Module.columns`。发现阶段不导入模块源码，Enable 前再次验证完整目录指纹和依赖。
+
+PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享依赖。只有额外
+依赖进入 `plugin_runtime/<type>/<id>/<fingerprint>/site-packages`；离线安装固定使用
+`--no-index --only-binary=:all: --require-hashes`，并验证 `requirements.lock`、wheel、
+runtime marker 和依赖树摘要。
+
+## Measurement Module 协议
+
+作者只需实现：
 
 ```text
-OpenLab Control core repository
-├─ modules/                    手动安装目标，默认空
-├─ device_plugins/             手动安装目标，默认空
-├─ plugin_runtime/             生成内容，不提交
-├─ plugin_state/               本机信任，不提交
-└─ plugin_templates/
-   ├─ measurement-modules-repository/      公共/共享仓库模板
-   └─ Device Plugin 示例                 随设备协议变化的 fail-closed 骨架
+open(api)
+measure(slot, api) -> row | (row, raw_values)
+close(api)
 ```
 
-一个模块或设备插件目录包含清单、源码、可选 `requirements.lock` 和可选 `wheels/`。
-发现阶段在导入源码前验证：
-
-- ID、版本、API、`core_requires` 和入口文件；
-- 支持的设备 kind 或固定测量列；
-- 依赖语法、框架共享版本兼容性，以及额外依赖的精确带哈希 lock 和禁止 URL/安装选项；
-- 目录树不能含逃逸链接或不安全内容，并计算 SHA-256 内容指纹。
-
-首次加载必须信任准确的 `type + id + version + fingerprint`。源文件、清单、lock 或 wheel
-发生变化后，旧信任不再匹配。
-
-PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 由主框架提供统一版本。
-manifest 中兼容的声明不生成私有 runtime；不兼容声明在源码导入前拒绝。只有框架没有
-提供的额外依赖才从本地 wheel 安装，命令固定使用 `--no-index --only-binary=:all:
---require-hashes`。安装先进入 staging 目录，验证后原子替换。运行前再次检查扩展指纹、
-额外依赖版本、runtime marker 和整个额外依赖树摘要。
-
-## 设备能力与角色
-
-设备 kind：
-
-- `temperature`：可作为主控或次要读数；只有 `control_enabled = true` 才暴露 Set/Hold。
-- `field`：同上。
-- `monitor`：只读单值，必须 `role = "monitor"` 且不能启用控制。
-
-角色：
-
-- 每个 temperature/field kind 最多一个 `role = "primary"`；SEQ 缺少对应主设备或新鲜
-  读回时拒绝 Run。
-- primary 必须 `control_enabled = true`。
-- 未显式写 role 的新增 temperature/field 设备默认 secondary 且不可控；旧单设备配置
-  仍兼容地把该种类第一个设备提升为 primary。
-- 手动控制和 SEQ 最终都经过 `DeviceManager` 的上下限、最大速率、角色和连接状态检查。
-
-设备插件自身实现 connect/poll/set/hold/disconnect 和厂商协议。核心配置决定安全包络；
-插件还应重复验证仪表特有限制。仪表面板的默认设置目前不由框架自动应用。
-
-## 设备连接恢复
-
-正常状态为 Starting → Connected。读操作失败时：
-
-1. 状态变为 Reconnecting，关闭/终止旧工作进程。
-2. 按 `device_reconnect_interval_seconds` 创建新进程、连接并取得新鲜快照。
-3. 对可控设备核对恢复后的 target/rate 与最后确认状态；不自动重放写命令。
-4. 成功后回到 Connected；超过 `device_reconnect_timeout_seconds`（默认 60 秒）则
-   Faulted。
-
-SEQ 遇到主设备 Reconnecting 时暂停推进，并冻结 Wait/Settle 等活动计时；恢复后继续。
-达到恢复最终上限或状态核对失败产生 Error 并走 Hold/Fault 路径。写操作超时具有歧义，
-不会重试或重放，而是立即 Faulted，防止同一硬件命令执行两次。
-
-## SEQ、Pause、Stop 与状态
-
-SEQ 解析器生成树形文档，Scan 可任意嵌套，Call Sequence 在预检/进度中展开并检查递归。
-Pause 只在安全检查点停止调度并冻结可中断计时，不主动改变输出。Stop、Error、取消和
-应用退出都会尝试对所有可控温场设备执行 Hold Current；保持命令必须基于新鲜当前读回。
-若 Hold 无法确认，最终状态为 Faulted，不能假装安全停止。
-
-## Measurement Module 生命周期
-
-每次启动所有模块 Disabled。Enable 前重新验证内容、依赖 runtime 和信任，然后创建工作
-进程：
+可选：
 
 ```text
-initialize(saved settings; do not apply)
-→ apply_settings（仅用户在 Settings 页确认，可多次）
-→ begin_sequence
-→ measurement_slots（仅 aligned_slots 模块，每个 Run 一次）
-→ measure（按逻辑槽位多次调用，每次恰好一行）
-→ end_sequence(completed | stopped | error)
-→ abort（仅 Disable 或应用退出）
-→ close/force-stop worker
+configure(settings, api)
+on_event(event, data, api)
+slots = N | sequence[int] | property
+frontend.py: Frontend(QWidget) with load()/dump()
 ```
 
-框架分别限制启动、单次操作和关闭总时间。请求包含等待同模块前一请求锁的时间；超时后
-连接失效并有界 terminate/kill。应用退出时各模块并行清理，避免总时长随模块数线性增加。
+核心调用顺序：
 
-模块清单必须显式声明 `measurement_mode`：
+```text
+Enable:  spawn worker → open
+Apply:   configure
+Run:     on_event("status") → on_event("run_start") → read slots
+Measure: 对每个逻辑槽位并行调用参与模块的 measure
+Finish:  on_event("run_end", reason)
+Disable: close → shutdown worker
+```
 
-- `aligned_slots` 返回本次 Run 启用的正整数槽位；所有扫描模块的槽位并集决定一次
-  `T Measure` 的行数。
-- `once_per_slot` 不返回扫描计划，在并集的每个槽位都重新测量一次；若没有扫描模块，
-  唯一槽位为 1。
+保存设置或加载 SEQ 伴随设置只更新 Frontend，不会自动 Enable 或 configure。Run 开始时
+冻结 Enabled 模块、列和槽位。声明 `slots` 的模块只参与这些槽位；未声明的模块跟随所有
+槽位。若没有模块声明槽位，唯一槽位是 1。
 
-核心按槽位升序推进。同一槽位同时请求全部参与模块并等待收束，然后把结果合入该逻辑
-通道对应的一行。因此 CH1–CH4 仍写四行，而不是合成一行；未启用某槽位的扫描模块在
-该行留空。缺少模式字段的第三方清单会显示 Warning，并按 `once_per_slot` 兼容执行。
+同一槽位的模块结果合并为一行；扫描模块未参与的列为空。`measure` 只返回一行，不存在
+流式 `emit_row`。模块可额外返回最多 32,768 个有限 rawdata 数值，由核心写入模块独立
+sidecar。
 
-模块事件：
+`ModuleAPI` 仅提供可中断等待、只读设备快照、Warning、状态更新和本次总 timeout。
+Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O 仍必须由模块
+设置有限 timeout。
 
-- `row`：当前调用的固定 Schema 行，只能发送一次；也可以改为返回一个非空 Mapping，
-  但不能两者同时使用；
-- `status`：更新 Status 页面；
-- `warning` / `resolve`：锁存或解除可恢复事件；
-- Response：生命周期调用最终结果。
+## SEQ 与安全收尾
 
-IPC 使用受大小限制的 UTF-8 JSON，不使用 pickle。NaN、Infinity、复杂对象、未知列和
-超大消息都会被拒绝。一个模块内事件保持发送顺序；不同模块到达中央后由单一 logger
-串行写盘。
+SEQ 解析为树；Scan 可任意嵌套，Call Sequence 在预检时展开并检查递归。Pause 不主动
+改变输出。Stop、Error、任务取消和应用退出都会让可控温场设备尝试 Hold Current；Hold
+必须基于新鲜读回，无法确认时最终状态为 Faulted。
 
-## DAT、快照和 Data Browser
+模块在 `run_end` 中按自身协议完成一次 Run 的输出关闭或状态保持，`close` 只在 Disable
+和应用退出执行。若 `run_end` 或 `close` 失败，核心报告 Error 并有界回收 worker；进程
+被终止不等于外部仪表已安全。
 
-Run 开始固定 Enabled 模块集合及列，保存：
+读链路失联时，DeviceManager 关闭旧 worker 并按配置重连；默认恢复窗为 60 秒。恢复后
+读取实际 target/rate，不自动重放写命令。写命令 timeout 属于“可能已经执行”的歧义
+状态，立即 Faulted，不自动重试。
+
+## 数据与事件
+
+一次 Run 固定保存：
 
 ```text
 runs/<timestamp>_<sequence>/
 ├─ sequence.seq
 ├─ configuration.toml
-├─ module_settings/
-│  ├─ <id>.settings.toml
-│  └─ <id>.status-at-start.json
-├─ rawdata/
-│  └─ <dat-stem>__<path-digest>__<module-id>.rawdata
+├─ module_settings/*.settings.toml
+├─ module_settings/*.status-at-start.json
+├─ rawdata/*.rawdata
 ├─ experiment.dat
 ├─ device_status.dat
 └─ events.dat
 ```
 
-动态列只发生在 Run 开始：系统列 + 每个模块清单列，名称带 `<module_id>.` 前缀。一次
-`T Measure` 的每个逻辑槽位行附带一份当时温度、磁场和 Monitor 快照。写盘可每行
-Flush。模块还可为自己在该槽位的结果附带最多 32,768 个有限原始数值；即使多个模块
-共用一条正式 DAT 行，它们仍分别写入各自的无表头 sidecar，模块自身不获得文件句柄。
+`DatRunLogger` 是唯一写入者。每条测量行只采一份温场快照；设备轮询另行节流写入
+`device_status.dat`。Data Browser 只跟踪用户打开的 DAT，不与当前 Run 绑定。
 
-后台 poll 得到同一批快照后还会调用 `DatRunLogger.write_device_status()`。该写入仅在
-Run 已打开时有效，并按独立配置周期节流；SequenceEngine 在创建目录后先强制写初始行。
-日志 I/O 失败报告 `DEVICE_STATUS_WRITE_FAILED` Error，使运行 fail-closed，同时仍把该批
-快照交给 UI。
+事件键为 `source + code + context`。重复活动 Warning/Error 只增加 Count；resolve 后才可
+再次弹窗。Warning 继续运行，Error 在 Running/Paused 时请求 fatal Stop。报警 HTTP
+失败只形成本地 Warning，不参与仪表安全动作。
 
-Data Browser 与当前 Run 不绑定，只跟踪用户明确打开的 DAT。定时器检查文件大小/修改
-时间并增量刷新；对应 `.plt` 保存显示设置，不改变 DAT。
+## 真实仪表边界
 
-用户保存的顶层 SEQ 可带同目录 `<stem>.modules.toml`。该伴随文件只保存模块 desired
-Settings；Load 后进入 UI 内存覆盖层，Disabled 模块仍不启动，Enabled 模块只显示
-“未 Apply”。运行时的 Call Sequence 只读取指令树，不读取子 SEQ 伴随设置，避免在运行
-途中出现隐式仪表重配置。
-
-## Warning / Error
-
-活动事件键为 `source + code + context`：
-
-- 同一活动键重复只增加 Count，不重复弹窗；
-- resolve 后再次发生才重新弹；
-- Warning 继续 SEQ；
-- Error 在 Running/Paused 时请求 fatal Stop；
-- 事件 Raised/Repeated/Resolved 都写 `events.dat`。
-
-## 已知边界
-
-- 当前只实现 Python 源码扩展，不能抵御恶意插件。
-- 模块 Frontend 在 GUI 进程，错误 UI 代码仍可能影响主界面。
-- 依赖安装在 GUI 操作中同步执行，可能短暂停止界面响应，但不在运行中允许执行。
-- 不支持扩展热替换；Refresh 要求 SEQ Idle 且相关模块 Disabled。
-- 本 Beta 尚未经过真实温控仪、磁体电源或测量仪表验证。
+OpenLab Control 0.11.5 尚未完成真实仪表验证。软件进程隔离不能替代设备限流、限压、
+限温、磁体保护、硬件互锁或人工急停。接入真机前必须保留并通过模块自己的命令顺序、
+读回、量程、timeout、异常清理与协议解析测试，再进行低风险现场验证。

@@ -25,16 +25,15 @@ from pathlib import Path
 from typing import Any
 
 from ..extensions.dependencies import dependency_runtime_errors
+from ..extensions.loading import load_source_object
 from ..extensions.trust import extension_tree_digest
-from .api import (
-    ModuleBackend,
+from ..module_api import (
+    ModuleAPI,
     ModuleError,
-    ModuleMeasurementStep,
-    ModuleOperationCancelled,
-    ModuleOperationContext,
     ModuleWarning,
+    _ModuleOperationCancelled,
 )
-from .manifest import ModuleDescriptor, load_source_object
+from .manifest import ModuleColumn, ModuleDescriptor
 
 
 WorkerEventHandler = Callable[
@@ -124,23 +123,73 @@ def _invoke(method: Callable[..., Any], *args: Any) -> dict[str, Any]:
     return _result(value)
 
 
-def _invoke_slots(
-    method: Callable[..., Any],
-    *args: Any,
-) -> list[Any]:
-    """调用槽位声明方法，但把类型/数值校验留给可信的核心服务层。"""
+def _module_slots(value: object) -> list[Any] | None:
+    """读取紧凑 ``slots`` 属性；具体数值校验仍由 service 负责。"""
 
-    value = method(*args)
-    if inspect.isawaitable(value):
-        value = asyncio.run(value)
+    if value is None:
+        return None
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value < 1:
+            raise TypeError("Module.slots integer must be positive")
+        return list(range(1, value + 1))
     if (
         not isinstance(value, Sequence)
         or isinstance(value, (str, bytes, bytearray))
     ):
-        raise TypeError(
-            "measurement_slots() must return a sequence"
-        )
+        raise TypeError("Module.slots must be a positive integer or sequence")
     return list(value)
+
+
+def _invoke_measure(
+    method: Callable[..., Any],
+    slot: int,
+    api: ModuleAPI,
+) -> dict[str, Any]:
+    """调用一次测量并统一为 ``values`` + 可选 ``raw_values``。"""
+
+    value = method(slot, api)
+    if inspect.isawaitable(value):
+        value = asyncio.run(value)
+    raw_values: object | None = None
+    values: object = value
+    if isinstance(value, tuple):
+        if len(value) != 2:
+            raise TypeError("Module.measure() tuple must be (row, rawdata)")
+        values, raw_values = value
+    if not isinstance(values, Mapping):
+        raise TypeError("Module.measure() must return a row mapping")
+    result: dict[str, Any] = {"values": dict(values)}
+    if raw_values is not None:
+        if (
+            not isinstance(raw_values, Sequence)
+            or isinstance(raw_values, (str, bytes, bytearray))
+        ):
+            raise TypeError("Module rawdata must be a sequence of numbers")
+        result["raw_values"] = list(raw_values)
+    return result
+
+
+def _normalize_columns(value: object) -> tuple[ModuleColumn, ...]:
+    """把后端类中的紧凑 ``{列名: 单位}`` 定义规范化为核心列对象。"""
+
+    if not isinstance(value, Mapping) or not value:
+        raise TypeError("Module.columns must be a non-empty mapping of column names to units")
+    columns: list[ModuleColumn] = []
+    names: set[str] = set()
+    for raw_name, raw_unit in value.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_unit, str):
+            raise TypeError("Module.columns names and units must be strings")
+        name = raw_name.strip()
+        unit = raw_unit.strip()
+        if not name or "," in name or "\n" in name or "\r" in name:
+            raise TypeError("Module column names must be non-empty single-line values without commas")
+        if "\n" in unit or "\r" in unit:
+            raise TypeError("Module column units must be single-line values")
+        if name in names:
+            raise TypeError("Module column names must be unique after trimming")
+        names.add(name)
+        columns.append(ModuleColumn(name, unit))
+    return tuple(columns)
 
 
 def module_worker_main(
@@ -150,7 +199,7 @@ def module_worker_main(
 ) -> None:
     """子进程入口：验证扩展、加载后端并串行执行生命周期请求。"""
 
-    backend: ModuleBackend | None = None
+    backend: Any = None
     # 后端方法和 context 回调可能从不同线程发送消息；Pipe 的多次写必须保持 frame
     # 边界，不能让两个 JSON 字节串互相穿插。
     send_lock = threading.Lock()
@@ -197,25 +246,32 @@ def module_worker_main(
                 )
         backend_class = load_source_object(
             descriptor.path,
-            descriptor.backend,
+            "backend:Module",
             f"backend_{descriptor.id}",
         )
-        if not isinstance(backend_class, type) or not issubclass(backend_class, ModuleBackend):
-            raise TypeError(
-                f"{descriptor.backend} is not a ModuleBackend"
-            )
-        if (
-            str(getattr(backend_class, "api_version", ""))
-            != ModuleBackend.api_version
-        ):
-            raise TypeError(
-                f"{descriptor.backend} uses incompatible module API "
-                f"{getattr(backend_class, 'api_version', '')!r}"
-            )
+        if not isinstance(backend_class, type):
+            raise TypeError("backend:Module is not a class")
         backend = backend_class()
+        missing = [
+            name
+            for name in ("open", "measure", "close")
+            if not callable(getattr(backend, name, None))
+        ]
+        if missing:
+            raise TypeError(
+                "Module must implement open(), measure() and close(); "
+                f"missing: {', '.join(missing)}"
+            )
+        columns = _normalize_columns(getattr(backend, "columns", None))
         # 只有源码、API 和隔离依赖全部验证并成功实例化后才发送 ready。主进程在收到
         # ready 之前不会把模块标记为 Enabled。
-        send({"type": "ready"})
+        send({
+            "type": "ready",
+            "columns": [
+                {"name": column.name, "unit": column.unit}
+                for column in columns
+            ],
+        })
     except Exception as exc:
         send({"type": "boot_error", "message": f"{type(exc).__name__}: {exc}"})
         connection.close()
@@ -229,9 +285,8 @@ def module_worker_main(
         request_id = str(request.get("id", ""))
         action = str(request.get("action", ""))
         payload = dict(request.get("payload", {}))
-        if action == "close":
-            # close 只用于 IPC/进程的正常收尾；仪表安全动作应在此前的 abort 或
-            # end_sequence 中完成，不能把“关闭 Python 进程”当成“关闭仪表输出”。
+        if action == "worker_close":
+            # worker_close 只关闭 IPC/进程；模块安全动作必须先由 module_close 完成。
             send({"type": "response", "id": request_id, "ok": True, "result": {}})
             break
 
@@ -330,55 +385,14 @@ def module_worker_main(
             return str(result.get("state", "running"))
 
         try:
-            raw_step = payload.get("measurement_step")
-            measurement_step: ModuleMeasurementStep | None = None
-            if raw_step is not None:
-                if not isinstance(raw_step, dict):
-                    raise ModuleError(
-                        "The core supplied an invalid measurement step",
-                        "MODULE_MEASUREMENT_STEP_INVALID",
-                    )
-                measurement_step = ModuleMeasurementStep(
-                    logical_slot=int(raw_step["logical_slot"]),
-                    index=int(raw_step["index"]),
-                    count=int(raw_step["count"]),
-                )
-                if (
-                    measurement_step.logical_slot < 1
-                    or measurement_step.index < 1
-                    or measurement_step.count < measurement_step.index
-                ):
-                    raise ModuleError(
-                        "The core supplied an invalid measurement step",
-                        "MODULE_MEASUREMENT_STEP_INVALID",
-                    )
-        except (KeyError, TypeError, ValueError, ModuleError) as exc:
-            if isinstance(exc, ModuleError):
-                code = exc.code
-                context_value = exc.context
-            else:
-                code = "MODULE_MEASUREMENT_STEP_INVALID"
-                context_value = ""
-            send({
-                "type": "response",
-                "id": request_id,
-                "ok": False,
-                "severity": "error",
-                "message": "The core supplied an invalid measurement step",
-                "code": code,
-                "context": context_value,
-            })
-            continue
-        try:
-            context = ModuleOperationContext(
-                system=dict(payload.get("system", {})),
+            api = ModuleAPI(
+                _initial_devices=dict(payload.get("system", {})),
                 _emit=emit,
-                _sample_system=sample_system,
+                _sample_devices=sample_system,
                 _operation_state=operation_state,
-                operation_timeout_seconds=float(
+                _operation_timeout_seconds=float(
                     payload.get("operation_timeout_seconds", 120.0)
                 ),
-                measurement_step=measurement_step,
             )
         except (TypeError, ValueError):
             send({
@@ -394,34 +408,44 @@ def module_worker_main(
         try:
             # 一个 worker 同一时刻只执行这一条分派链。并行 Measure 发生在“不同模块
             # 进程之间”，不是在同一 VISA session 上并发调用后端。
-            if action == "initialize":
-                result = _invoke(backend.initialize, dict(payload.get("settings", {})), context)
-            elif action == "apply_settings":
-                result = _invoke(backend.apply_settings, dict(payload.get("settings", {})), context)
-            elif action == "begin_sequence":
-                result = _invoke(backend.begin_sequence, context)
-            elif action == "measurement_slots":
-                result = {
-                    "slots": _invoke_slots(
-                        backend.measurement_slots,
-                        context,
-                    )
-                }
-            elif action == "measure":
-                result = _invoke(backend.measure, context)
-            elif action == "end_sequence":
-                result = _invoke(backend.end_sequence, str(payload.get("reason", "error")), context)
-            elif action == "abort":
-                result = _invoke(backend.abort, context)
-            elif action == "read_status":
-                result = _invoke(backend.read_status, context)
-            elif action == "manual_action":
-                result = _invoke(
-                    backend.manual_action,
-                    str(payload.get("name", "")),
-                    dict(payload.get("data", {})),
-                    context,
+            if action == "open":
+                result = _invoke(backend.open, api)
+            elif action == "configure":
+                method = getattr(backend, "configure", None)
+                result = (
+                    _invoke(method, dict(payload.get("settings", {})), api)
+                    if callable(method)
+                    else {}
                 )
+            elif action == "event":
+                event = str(payload.get("name", ""))
+                data = payload.get("data", {})
+                if not isinstance(data, dict):
+                    raise TypeError("Module event payload must be an object")
+                method = getattr(backend, "on_event", None)
+                if not callable(method):
+                    if event == "action":
+                        action_name = str(data.get("name", ""))
+                        raise ModuleWarning(
+                            f"Unsupported manual action: {action_name}",
+                            "UNSUPPORTED_ACTION",
+                            action_name,
+                        )
+                    result = {}
+                else:
+                    result = _invoke(method, event, dict(data), api)
+            elif action == "slots":
+                result = {"slots": _module_slots(getattr(backend, "slots", None))}
+            elif action == "measure":
+                slot = int(payload.get("slot", 0))
+                if slot < 1:
+                    raise ModuleError(
+                        "The core supplied an invalid measurement slot",
+                        "MODULE_MEASUREMENT_SLOT_INVALID",
+                    )
+                result = _invoke_measure(backend.measure, slot, api)
+            elif action == "module_close":
+                result = _invoke(backend.close, api)
             else:
                 raise ModuleError(f"Unknown worker action: {action}", "UNKNOWN_MODULE_ACTION", action)
             send({"type": "response", "id": request_id, "ok": True, "result": result})
@@ -436,7 +460,7 @@ def module_worker_main(
                 "code": exc.code,
                 "context": exc.context,
             })
-        except ModuleOperationCancelled as exc:
+        except _ModuleOperationCancelled as exc:
             # Stop 的协作取消单独编码，service 不把它重新报告成 Error/Warning。
             send({
                 "type": "response",
@@ -487,7 +511,7 @@ class ModuleWorkerClient:
         self.dependency_directory = dependency_directory
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
-        # RLock 是有意选择：close() 获得锁后会调用 request("close")，需要同一线程重入。
+        # RLock 是有意选择：close() 获得锁后会调用 request("worker_close")，需要同一线程重入。
         self._lock = threading.RLock()
         self._state_lock = threading.Lock()
         self._request_number = 0
@@ -504,7 +528,7 @@ class ModuleWorkerClient:
         """在总时限内按 terminate → kill 升级并回收进程句柄。
 
         这是本机资源回收的最后手段。terminate/kill 会跳过模块 ``finally``，因此调用者
-        必须在可能时先请求 abort，并在 abort 未确认时向用户保留 Error。
+        必须在可能时先请求模块 close，并在 close 未确认时向用户保留 Error。
         """
 
         timeout = max(0.0, timeout_seconds)
@@ -568,13 +592,13 @@ class ModuleWorkerClient:
         if owns_process:
             self._stop_process(process, timeout_seconds)
 
-    def start(self, timeout_seconds: float = 10.0) -> None:
+    def start(self, timeout_seconds: float = 10.0) -> tuple[ModuleColumn, ...]:
         """使用 spawn 创建干净子进程，并等待经过验证的 ready 握手。"""
 
         timeout = self._timeout(timeout_seconds, "Module startup")
         with self._state_lock:
             if self._process is not None:
-                return
+                return self.descriptor.columns
         # Windows 默认也是 spawn；这里显式指定，使源码测试与打包版都不会继承主进程
         # 已打开的 Qt/VISA/线程状态。
         context = multiprocessing.get_context("spawn")
@@ -636,6 +660,48 @@ class ModuleWorkerClient:
                 "MODULE_WORKER_START_FAILED",
                 self.descriptor.id,
             )
+        raw_columns = hello.get("columns")
+        if not isinstance(raw_columns, list) or not raw_columns:
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise WorkerRequestError(
+                "Module worker returned invalid column metadata",
+                "MODULE_WORKER_START_FAILED",
+                self.descriptor.id,
+            )
+        columns: list[ModuleColumn] = []
+        column_names: set[str] = set()
+        for item in raw_columns:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str)
+                or not isinstance(item.get("unit", ""), str)
+            ):
+                self._invalidate(parent, process, min(timeout, 1.0))
+                raise WorkerRequestError(
+                    "Module worker returned invalid column metadata",
+                    "MODULE_WORKER_START_FAILED",
+                    self.descriptor.id,
+                )
+            name = item["name"]
+            unit = item.get("unit", "")
+            if (
+                not name
+                or "," in name
+                or "\n" in name
+                or "\r" in name
+                or "\n" in unit
+                or "\r" in unit
+                or name in column_names
+            ):
+                self._invalidate(parent, process, min(timeout, 1.0))
+                raise WorkerRequestError(
+                    "Module worker returned invalid column metadata",
+                    "MODULE_WORKER_START_FAILED",
+                    self.descriptor.id,
+                )
+            column_names.add(name)
+            columns.append(ModuleColumn(name, unit))
+        return tuple(columns)
 
     def request(
         self,
@@ -846,7 +912,7 @@ class ModuleWorkerClient:
             if process.is_alive():
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
-                    self.request("close", timeout_seconds=remaining)
+                    self.request("worker_close", timeout_seconds=remaining)
         except Exception:
             pass
         finally:

@@ -5,9 +5,9 @@ Python/PySide6 控制框架。它不控制 PPMS 本体。温控仪、磁体电�
 Device Plugin 提供；吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的
 Measurement Module 提供。
 
-当前版本：`0.11.5`。核心框架、扩展 API 和仿真流程为稳定版本；默认配置全部使用
-仿真设备。Lake Shore 372A、LR-700、Keithley 6221/2182A/7001/3706A 等尚未完成
-真机验证的硬件扩展仍各自保持 Beta 状态。
+最近发布版本：`0.11.5`。当前工作树包含尚未发布、且不兼容旧模块清单的最小模块接口
+重构；默认配置全部使用仿真设备。Lake Shore 372A、LR-700、Keithley
+6221/2182A/7001/3706A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
 
 ![主窗口](docs/main-window-preview.png)
 
@@ -21,10 +21,10 @@ Measurement Module 提供。
 - 一个温度/磁场种类最多一个主控设备；其他设备默认只读监视。
 - 每次启动所有 Measurement Module 都是 Disabled；Enable 只初始化并加载设置，不会
   自动 Apply。
-- 一个 `T Measure` 按扫描模块的逻辑槽位并集展开，每个通道槽位写一行；同一槽位的
-  模块并行测量并合入该行，单次模块在每个槽位重新测量。
-- Measurement Module 必须声明 `once_per_slot` 或 `aligned_slots`；缺失时界面提示并按
-  `once_per_slot` 兼容执行。
+- 一个 `T Measure` 按模块可选的 `slots` 并集展开，每个通道槽位写一行；同一槽位的
+  模块并行，未声明 `slots` 的模块跟随每个槽位测量。
+- Measurement Module 只需 `open(api)`、`measure(slot, api)`、`close(api)`；可选能力仅为
+  `configure(settings, api)`、统一 `on_event(...)` 和 `slots`。
 - 模块可为正式结果行附带有限原始采样序列，由中央写入独立无表头 `rawdata` sidecar。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认
@@ -85,9 +85,8 @@ plugin repository/plugins/<id>/  -> OpenLabControl/device_plugins/<id>/
 任何源码或 wheel 改动都会使旧信任失效。
 
 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是主框架统一提供并锁定
-版本的依赖。模块和设备插件直接使用这同一组版本，不需要各自复制 wheel 或准备
-`plugin_runtime`。manifest 可以声明兼容范围；若范围不接受框架版本，程序会在导入
-扩展源码前拒绝加载。
+版本的依赖。模块和设备插件直接使用这同一组版本，不在各自清单重复声明，也不需要
+复制 wheel 或准备 `plugin_runtime`。
 
 只有声明框架尚未提供的额外第三方依赖时，扩展才需要携带：
 
@@ -106,9 +105,9 @@ worker；不会污染主进程或覆盖框架统一版本。
    完整复制到 `modules/simulated_transport`。
 2. 重启程序并打开 `Modules`。
 3. 勾选 `Simulated Transport`，核对首次信任提示后确认。
-4. 在默认 `Settings` 页检查参数；如需发送设置，点击 `Apply Settings` 并再次确认。
+4. 该最小示例没有自定义设置，通用 `Settings` 页无需 Apply。
 5. 运行含无参数 `T Measure` 的 SEQ。
-6. Disable 成功后模块才会 abort、关闭工作进程并隐藏窗口。
+6. Disable 时核心调用模块 `close(api)`，随后关闭工作进程并隐藏窗口。
 
 保存一个 SEQ 时，程序会把该实验已关联模块和当前 Enabled 模块的界面值保存为同目录
 同名伴随文件，例如 `experiment.seq` + `experiment.modules.toml`。以后 Load
@@ -156,13 +155,6 @@ tests/                    核心自动测试
 - [配置参考](docs/CONFIGURATION.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [插件与模块开发](docs/PLUGIN_DEVELOPMENT.md)
-- [技术规格](docs/TECHNICAL_SPECIFICATION.md)
-- [测试计划](docs/TEST_PLAN.md)
-- [验证报告](docs/VERIFICATION_REPORT.md)
-- [0.11.3 历史验证报告](docs/VERIFICATION_REPORT_0_11_3.md)
-- [Beta 2 历史验证报告](docs/VERIFICATION_REPORT_BETA2.md)
-- [Beta 1 历史验证报告](docs/VERIFICATION_REPORT_BETA1.md)
-- [架构决策](docs/DECISIONS.md)
 
 ## 真实仪表安全门槛
 

@@ -1,14 +1,9 @@
-"""Measurement Module 的发现、进程隔离、生命周期和稳定公共 API。"""
+"""Measurement Module 的核心内部实现；作者只需导入 ``labcontrol.module_api``。"""
 
-from .api import ModuleBackend, ModuleError, ModuleWarning
-from .manifest import MODULE_API_VERSION, ModuleColumn, ModuleDescriptor, discover_modules
+from .manifest import ModuleColumn, ModuleDescriptor, discover_modules
 
 __all__ = [
-    "MODULE_API_VERSION",
-    "ModuleBackend",
     "ModuleColumn",
     "ModuleDescriptor",
-    "ModuleError",
-    "ModuleWarning",
     "discover_modules",
 ]

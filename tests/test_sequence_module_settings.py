@@ -287,7 +287,8 @@ class SequenceModuleSettingsTests(unittest.TestCase):
                             version="1.0.0",
                         ),
                     )
-                    self.enabled: list[
+                    self.enabled: list[str] = []
+                    self.applied: list[
                         tuple[str, dict[str, object]]
                     ] = []
                     self.run_settings: dict[
@@ -310,11 +311,18 @@ class SequenceModuleSettingsTests(unittest.TestCase):
                 def enable_module(
                     self,
                     module_id: str,
+                ) -> Future[None]:
+                    self.enabled.append(module_id)
+                    future: Future[None] = Future()
+                    future.set_result(None)
+                    return future
+
+                def apply_module_settings(
+                    self,
+                    module_id: str,
                     settings: dict[str, object],
                 ) -> Future[None]:
-                    self.enabled.append(
-                        (module_id, dict(settings))
-                    )
+                    self.applied.append((module_id, dict(settings)))
                     future: Future[None] = Future()
                     future.set_result(None)
                     return future
@@ -357,6 +365,10 @@ class SequenceModuleSettingsTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 runtime.enabled,
+                ["requested"],
+            )
+            self.assertEqual(
+                runtime.applied,
                 [
                     (
                         "requested",

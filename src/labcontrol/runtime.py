@@ -298,9 +298,9 @@ class RuntimeService:
         assert self.devices is not None
         return self._submit(self.devices.hold_device(device_id, origin="manual"))
 
-    def enable_module(self, module_id: str, settings: dict[str, object]) -> Future[Any]:
+    def enable_module(self, module_id: str) -> Future[Any]:
         assert self.modules is not None
-        return self._submit(self.modules.enable(module_id, settings))
+        return self._submit(self.modules.enable(module_id))
 
     def disable_module(self, module_id: str) -> Future[Any]:
         assert self.modules is not None
@@ -316,11 +316,11 @@ class RuntimeService:
         assert self.modules is not None
         return self._submit(self.modules.refresh_status(module_id))
 
-    def module_manual_action(
+    def module_action(
         self, module_id: str, name: str, payload: dict[str, object]
     ) -> Future[Any]:
         assert self.modules is not None
-        return self._submit(self.modules.manual_action(module_id, name, payload))
+        return self._submit(self.modules.action(module_id, name, payload))
 
     def replace_module_descriptors(
         self, descriptors: tuple[ModuleDescriptor, ...]
@@ -372,10 +372,10 @@ class RuntimeService:
     async def _shutdown_async(self) -> None:
         """按安全依赖顺序关闭运行时。
 
-        1. 请求 SEQ Stop，使正常路径有机会 Hold 并调用模块 end_sequence；
+        1. 请求 SEQ Stop，使正常路径有机会 Hold 并发送模块 run_end；
         2. 最多等待 3 秒，超时才取消 task；
         3. 停止轮询，避免清理期间又产生新设备请求；
-        4. 模块 abort/回收 worker；
+        4. 调用模块 close 并回收 worker；
         5. 断开温场和 Monitor；
         6. 有界关闭非关键报警线程，最后关闭日志和 event loop。
         """
@@ -412,7 +412,7 @@ class RuntimeService:
             self._poll_task.cancel()
             await asyncio.gather(self._poll_task, return_exceptions=True)
         if self.modules is not None:
-            # 模块先于设备断开，因为模块 abort 可能仍需要自己的仪表连接；二者都在设备
+            # 模块先于设备断开，因为模块 close 仍需要自己的仪表连接；二者都在设备
             # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
             await self.modules.shutdown()
         if self.devices is not None:

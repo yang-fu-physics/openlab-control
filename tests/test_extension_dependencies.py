@@ -320,11 +320,14 @@ class ExtensionDependencyTests(unittest.TestCase):
                     module_root.mkdir()
                     (module_root / "backend.py").write_text(
                         "from isolated_demo import VERSION\n"
-                        "from labcontrol.measurement.api "
-                        "import ModuleBackend\n"
-                        "class Backend(ModuleBackend):\n"
-                        "    def initialize(self, settings, context):\n"
-                        "        return {'version': VERSION}\n",
+                        "class Module:\n"
+                        "    columns = {'Value': ''}\n"
+                        "    def open(self, api):\n"
+                        "        return {'version': VERSION}\n"
+                        "    def measure(self, slot, api):\n"
+                        "        return {'Value': 0}\n"
+                        "    def close(self, api):\n"
+                        "        return {}\n",
                         encoding="utf-8",
                     )
                     dependency_root = (
@@ -340,8 +343,6 @@ class ExtensionDependencyTests(unittest.TestCase):
                         name=module_id,
                         version="1.0.0",
                         path=module_root,
-                        api_version="1.0",
-                        backend="backend:Backend",
                         fingerprint=extension_tree_digest(
                             module_root
                         ),
@@ -354,8 +355,7 @@ class ExtensionDependencyTests(unittest.TestCase):
                     clients.append(client)
                     self.assertEqual(
                         client.request(
-                            "initialize",
-                            {"settings": {}},
+                            "open",
                             timeout_seconds=2.0,
                         )["version"],
                         version,

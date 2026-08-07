@@ -70,15 +70,11 @@ main_magnet.FieldTarget(Oe)
 
 ### 模块列
 
-模块在 `module.toml` 中声明固定列：
+模块后端在 `Module.columns` 中声明固定列：
 
-```toml
-[[columns]]
-name = "R1"
-unit = "Ohm"
-
-[[columns]]
-name = "StatusCode"
+```python
+class Module:
+    columns = {"R1": "Ohm", "StatusCode": ""}
 ```
 
 运行时自动生成：
@@ -89,11 +85,10 @@ simulated_transport.StatusCode
 ```
 
 前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `StatusCode` 也不会冲突。Run 开始后 Schema 固定，直到该 Run 结束。
-Header 的模块 INFO 同时保存版本、API 和实际采用的 `measurement_mode`，包括缺省兼容后
-的 `once_per_slot`，便于脱离运行现场解释行数。
+Header 的模块 INFO 保存模块 ID、显示名和版本。
 
-模块每次 `measure()` 调用必须恰好提供一行：调用一次 `emit_row()` 或返回一个非空
-Mapping。`aligned_slots` 模块由核心按启用槽位分别调用；同一槽位的多个模块结果合入
+模块每次 `measure(slot, api)` 必须返回一行 Mapping；需要保存原始序列时返回
+`(row, raw_values)`。声明 `slots` 的模块由核心按启用槽位分别调用；同一槽位的多个模块结果合入
 该逻辑通道的一行，其他未参与模块列留空。例如示例扫描模块一次 `T Measure` 依次写：
 
 ```text
@@ -104,19 +99,17 @@ Mapping。`aligned_slots` 模块由核心按启用槽位分别调用；同一槽
 ```
 
 上例仍是四个通道四行。若同时启用另一个四槽位扫描模块，其 CH1 值进入第一行、CH2
-进入第二行；如果对方关闭 CH3，其列只在第三行为空。`once_per_slot` 模块会在四行中
-分别重新测量。没有任何 `aligned_slots` 模块时，一次 `T Measure` 只有槽位 1，因此
+进入第二行；如果对方关闭 CH3，其列只在第三行为空。没有槽位钩子的模块会在四行中
+分别重新测量。没有任何模块声明 `slots` 时，一次 `T Measure` 只有槽位 1，因此
 只有一行。
 
-只有一个结果组的行应声明整数 `StatusCode`。一次调用汇总多个独立内部通道的宽表可以
-声明 `StatusCode1`、`StatusCode2` 等编号列；每个实际测量组必须提供自己的非负整数，
-Disabled 内部通道整组留空。`0` 固定表示正常，其他数值及多故障优先级由模块自行定义并
-写入 README 和测试。不得写 `NORMAL`、`ERROR`、`OVER_RANGE` 等文字。人类可读
-Warning/Error 写入 `events.dat`、运行日志和界面。
+`StatusCode`、`StatusCode1` 等只是模块可以选择使用的普通列。其是否必填、值类型、正常
+值和故障优先级均由模块自己的 README 与测试定义；核心不解释状态语义。人类可读
+Warning/Error 应写入 `events.dat`、运行日志和界面。
 
-某状态码非零时，只将对应结果组的电阻、电压、相位、标准差等正式测量结果留空；同一
-宽表行中的另一正常内部通道仍可保留。仍可信的通道编号、温场快照、设定电流、样本数和
-rawdata 可以按模块文档保留。若结果有效但需要提醒，应写状态码 0 并单独报告 Warning。
+若模块自身规定某状态码表示结果无效，应按该模块文档将对应测量值留空；核心不会自动
+替模块清空或保留字段。同一宽表行中的其他通道、温场、设定值、样本数和 rawdata 的
+处理同样由模块契约决定。
 
 ### 模块原始序列
 
@@ -147,7 +140,7 @@ rawdata 只保存模块明确提交的仪表读数，不改变正式 DAT Schema�
   内部通道值正常写入。
 - 某模块 Error：同槽位其他并发模块已经完成的值与该槽位行一同保留，然后 SEQ
   Faulted。Stop 取消槽位事务时不写该槽位的部分行，已经完成的前序通道行保留。
-- 单次模块调用未产生行、产生多行或同时 emit 与 return：Schema Error，并按当前槽位
+- 单次模块调用没有返回 Mapping、返回未知列或非法值：Schema Error，并按当前槽位
   Error 路径处理。
 
 ### 值格式
@@ -155,9 +148,8 @@ rawdata 只保存模块明确提交的仪表读数，不改变正式 DAT Schema�
 - 温度固定三位；Oe 固定两位；T 固定六位。
 - 模块 float 使用最多 9 位有效数字。
 - 一般模块列可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。
-- 声明了单组 `StatusCode` 的模块每行都必须提供；编号 `StatusCodeN` 在该内部通道
-  实际测量时必须提供。核心会拒绝任何已提供状态列中的文本、bool 或负数；模块独立测试
-  还必须核对 Enabled/Disabled 组的必填关系。
+- `StatusCode` 与其他列一样由模块定义。核心只校验 JSON/有限数值边界；数值编码、
+  必填关系以及异常时应清空哪些测量值，必须由模块 README 和模块安全测试约束。
 - CSV 会自动引用含逗号或引号的文本。
 
 ## `events.dat`
@@ -219,7 +211,7 @@ Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Ra
 - 多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。
 - 设备轮询仍按 `poll_interval_seconds` 运行；状态日志按自己的周期节流，不会为了写日志
   增加仪表查询。
-- Error/Stop/完成都会在 `end_sequence()` 结束后关闭文件。
+- Error/Stop/完成都会在模块 `run_end` 收束后关闭文件。
 - 异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。
 
 ## Data Browser 读取规则

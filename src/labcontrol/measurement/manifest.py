@@ -1,8 +1,9 @@
-"""发现、校验并描述 Measurement Module 清单。
+"""发现 Measurement Module 的最小清单。
 
-模块目录通过 ``module.toml`` 声明后端、可选 Qt 前端、固定 DAT 列和额外依赖。发现阶段只
-读取文件和计算指纹，不初始化模块；每次点击 Enable 前服务层仍会重新核对目录内容、信任、
-API 版本和隔离依赖。
+模块作者只需在 ``module.toml`` 中填写 ``name`` 和 ``version``。目录名就是模块 ID，
+后端固定从 ``backend.py`` 的 ``Module`` 类加载；存在 ``frontend.py`` 时，可选界面固定
+从其中的 ``Frontend`` 类加载。DAT 列由后端类的 ``columns`` 属性提供，避免同一信息在
+清单和代码中维护两份。
 """
 
 from __future__ import annotations
@@ -13,10 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
-from .. import __version__
 from ..config import AppConfig
 from ..extensions.dependencies import (
     dependency_runtime_errors,
@@ -24,26 +23,10 @@ from ..extensions.dependencies import (
     partition_extension_dependencies,
     validate_requirements_lock,
 )
-from ..extensions.loading import load_source_object
-from ..extensions.trust import (
-    ExtensionTrustError,
-    extension_tree_digest,
-)
+from ..extensions.trust import ExtensionTrustError, extension_tree_digest
 
 
-MODULE_API_VERSION = "1.1"
-MEASUREMENT_MODE_ONCE_PER_SLOT = "once_per_slot"
-MEASUREMENT_MODE_ALIGNED_SLOTS = "aligned_slots"
-MEASUREMENT_MODES = frozenset(
-    {
-        MEASUREMENT_MODE_ONCE_PER_SLOT,
-        MEASUREMENT_MODE_ALIGNED_SLOTS,
-    }
-)
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
-_ENTRYPOINT = re.compile(
-    r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,28 +45,16 @@ class ModuleDescriptor:
     name: str
     version: str
     path: Path
-    api_version: str = ""
-    core_requires: str = ""
-    frontend: str = ""
-    backend: str = ""
-    backend_type: str = "python"
-    measurement_mode: str = MEASUREMENT_MODE_ONCE_PER_SLOT
-    framework_dependencies: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     columns: tuple[ModuleColumn, ...] = ()
     fingerprint: str = ""
     valid: bool = True
     error: str = ""
     dependency_error: str = ""
-    warning: str = ""
 
     @property
     def can_enable(self) -> bool:
-        return (
-            self.valid
-            and bool(self.fingerprint)
-            and not self.dependency_error
-        )
+        return self.valid and bool(self.fingerprint) and not self.dependency_error
 
 
 def _invalid(path: Path, message: str) -> ModuleDescriptor:
@@ -98,39 +69,20 @@ def _invalid(path: Path, message: str) -> ModuleDescriptor:
 
 
 def load_manifest(path: Path) -> ModuleDescriptor:
+    """读取最小清单；仪表策略和生命周期细节均不属于清单。"""
+
     manifest_path = path / "module.toml"
     try:
         with manifest_path.open("rb") as handle:
             raw = tomllib.load(handle)
-        module_id = str(raw["id"]).strip()
+        module_id = path.name.casefold()
         name = str(raw["name"]).strip()
         version = str(raw["version"]).strip()
-        api_version = str(raw["api_version"]).strip()
-        core_requires = str(
-            raw.get("core_requires", "")
-        ).strip()
-        frontend = str(raw["frontend"]).strip()
-        backend = str(raw["backend"]).strip()
-        backend_type = str(
-            raw.get("backend_type", "python")
-        ).strip().casefold()
-        measurement_mode_declared = "measurement_mode" in raw
-        measurement_mode = str(
-            raw.get(
-                "measurement_mode",
-                MEASUREMENT_MODE_ONCE_PER_SLOT,
-            )
-        ).strip().casefold()
+        dependency_values = raw.get("dependencies", [])
+        if not isinstance(dependency_values, list):
+            raise TypeError("dependencies must be an array")
         declared_dependencies = tuple(
-            str(item).strip()
-            for item in raw.get("dependencies", [])
-        )
-        columns = tuple(
-            ModuleColumn(
-                str(item["name"]).strip(),
-                str(item.get("unit", "")).strip(),
-            )
-            for item in raw.get("columns", [])
+            str(item).strip() for item in dependency_values
         )
     except (
         OSError,
@@ -139,160 +91,68 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         ValueError,
         tomllib.TOMLDecodeError,
     ) as exc:
-        return _invalid(
-            path,
-            f"Cannot read module.toml: {exc}",
-        )
+        return _invalid(path, f"Cannot read module.toml: {exc}")
 
     (
         framework_dependencies,
         dependencies,
         dependency_compatibility_errors,
-    ) = partition_extension_dependencies(
-        declared_dependencies
-    )
+    ) = partition_extension_dependencies(declared_dependencies)
     descriptor = ModuleDescriptor(
         id=module_id,
         name=name,
         version=version,
         path=path.resolve(),
-        api_version=api_version,
-        core_requires=core_requires,
-        frontend=frontend,
-        backend=backend,
-        backend_type=backend_type,
-        measurement_mode=measurement_mode,
-        framework_dependencies=framework_dependencies,
         dependencies=dependencies,
-        columns=columns,
     )
     errors: list[str] = []
-    warnings: list[str] = []
-    if not measurement_mode_declared:
-        warnings.append(
-            "module.toml does not declare measurement_mode; "
-            "using once_per_slot"
+    unknown_fields = sorted(set(raw) - {"name", "version", "dependencies"})
+    if unknown_fields:
+        errors.append(
+            "unknown module.toml fields: " + ", ".join(unknown_fields)
         )
-    if not _IDENTIFIER.fullmatch(module_id):
-        errors.append("id must match [a-z][a-z0-9_]*")
+    if path.name != module_id or not _IDENTIFIER.fullmatch(module_id):
+        errors.append("module directory name must match [a-z][a-z0-9_]*")
     if not name:
         errors.append("name must not be empty")
     try:
         Version(version)
     except InvalidVersion:
         errors.append(f"version {version!r} is invalid")
-    if api_version != MODULE_API_VERSION:
-        errors.append(
-            f"API {api_version!r} is incompatible with "
-            f"{MODULE_API_VERSION}"
-        )
-    if core_requires:
-        try:
-            compatible = (
-                Version(__version__)
-                in SpecifierSet(core_requires)
-            )
-        except (InvalidSpecifier, InvalidVersion):
-            errors.append(
-                f"core_requires {core_requires!r} is invalid"
-            )
-        else:
-            if not compatible:
-                errors.append(
-                    f"OpenLab Control {__version__} does not "
-                    f"satisfy {core_requires}"
-                )
-    if backend_type != "python":
-        errors.append(
-            "only backend_type='python' is supported in this release"
-        )
-    if measurement_mode not in MEASUREMENT_MODES:
-        errors.append(
-            "measurement_mode must be 'once_per_slot' or "
-            "'aligned_slots'"
-        )
-    if not _ENTRYPOINT.fullmatch(frontend):
-        errors.append(
-            "frontend must use module:ClassName without a path"
-        )
-    if not _ENTRYPOINT.fullmatch(backend):
-        errors.append(
-            "backend must use module:ClassName without a path"
-        )
-    for label, entrypoint in (
-        ("frontend", frontend),
-        ("backend", backend),
-    ):
-        if _ENTRYPOINT.fullmatch(entrypoint):
-            module_name = entrypoint.split(":", 1)[0]
-            if not (path / f"{module_name}.py").is_file():
-                errors.append(
-                    f"{label} source does not exist: "
-                    f"{module_name}.py"
-                )
+    if not (path / "backend.py").is_file():
+        errors.append("backend.py does not exist")
     errors.extend(dependency_compatibility_errors)
+    if framework_dependencies:
+        errors.append(
+            "framework dependencies are already supplied and must not be declared: "
+            + ", ".join(framework_dependencies)
+        )
     for raw_requirement in declared_dependencies:
         try:
             requirement = Requirement(raw_requirement)
         except InvalidRequirement:
-            errors.append(
-                f"invalid dependency: {raw_requirement}"
-            )
+            errors.append(f"invalid dependency: {raw_requirement}")
             continue
         if requirement.url is not None:
-            errors.append(
-                f"dependency URLs are not allowed: {raw_requirement}"
-            )
-    errors.extend(
-        # 只有核心尚未提供的额外依赖才需要扩展自己的锁文件；通用依赖由核心
-        # requirements-lock.txt 统一锁定，禁止模块私下覆盖版本。
-        validate_requirements_lock(path, dependencies)
-    )
-    if not columns:
-        errors.append(
-            "at least one [[columns]] entry is required"
-        )
-    column_names = [item.name for item in columns]
-    if any(
-        not column or "," in column or "\n" in column
-        for column in column_names
-    ):
-        errors.append(
-            "column names must be non-empty single-line values "
-            "without commas"
-        )
-    if len(column_names) != len(set(column_names)):
-        errors.append("column names must be unique")
+            errors.append(f"dependency URLs are not allowed: {raw_requirement}")
+    errors.extend(validate_requirements_lock(path, dependencies))
     try:
         descriptor.fingerprint = extension_tree_digest(path)
     except ExtensionTrustError as exc:
         errors.append(str(exc))
     if errors:
         descriptor.valid = False
-        descriptor.error = "; ".join(
-            dict.fromkeys(errors)
-        )
-    descriptor.warning = "; ".join(
-        dict.fromkeys(warnings)
-    )
+        descriptor.error = "; ".join(dict.fromkeys(errors))
     return descriptor
 
 
-def discover_modules(
-    config: AppConfig,
-) -> tuple[ModuleDescriptor, ...]:
-    root = config.resolve_project_path(
-        config.modules.directory
-    )
+def discover_modules(config: AppConfig) -> tuple[ModuleDescriptor, ...]:
+    root = config.resolve_project_path(config.modules.directory)
     root.mkdir(parents=True, exist_ok=True)
     descriptors = [
         load_manifest(path)
-        for path in sorted(
-            root.iterdir(),
-            key=lambda item: item.name.casefold(),
-        )
-        if path.is_dir()
-        and (path / "module.toml").exists()
+        for path in sorted(root.iterdir(), key=lambda item: item.name.casefold())
+        if path.is_dir() and (path / "module.toml").exists()
     ]
     seen: dict[str, ModuleDescriptor] = {}
     for descriptor in descriptors:
@@ -301,18 +161,9 @@ def discover_modules(
             seen[descriptor.id] = descriptor
             continue
         message = f"Duplicate module id: {descriptor.id}"
-        descriptor.valid = False
-        descriptor.error = "; ".join(
-            item
-            for item in (descriptor.error, message)
-            if item
-        )
-        duplicate.valid = False
-        duplicate.error = "; ".join(
-            item
-            for item in (duplicate.error, message)
-            if item
-        )
+        for item in (duplicate, descriptor):
+            item.valid = False
+            item.error = "; ".join(part for part in (item.error, message) if part)
     return tuple(descriptors)
 
 
@@ -321,9 +172,7 @@ def module_dependency_directory(
     descriptor: ModuleDescriptor,
 ) -> Path:
     return (
-        config.resolve_project_path(
-            config.modules.runtime_directory
-        )
+        config.resolve_project_path(config.modules.runtime_directory)
         / "module"
         / descriptor.id
         / descriptor.fingerprint[:16]
@@ -353,14 +202,10 @@ def module_dependency_errors(
 
 
 __all__ = [
-    "MODULE_API_VERSION",
-    "MEASUREMENT_MODE_ALIGNED_SLOTS",
-    "MEASUREMENT_MODE_ONCE_PER_SLOT",
     "ModuleColumn",
     "ModuleDescriptor",
     "discover_modules",
     "load_manifest",
-    "load_source_object",
     "missing_dependencies",
     "module_dependency_errors",
     "module_dependency_directory",

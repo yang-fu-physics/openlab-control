@@ -1,40 +1,24 @@
-# OpenLab Measurement Modules repository
+# OpenLab Measurement Module 模板
 
-This is the Git-ready layout for the single shared Measurement Module
-repository. Keep every independently installable module under `modules/<id>/`.
-The included `simulated_transport` module is hardware-free and serves as the
-reference implementation and test fixture.
+每个 `modules/<id>/` 可独立复制和发布。最小模块只有 `module.toml` 与 `backend.py`：
 
-## Manual offline installation
+```toml
+name = "My Meter"
+version = "0.1.0"
+```
 
-1. Review the module source and `module.toml`. Review `requirements.lock` and
-   wheels only when the module has dependencies not supplied by the framework.
-2. Copy one complete module folder to `OpenLabControl/modules/<id>/`.
-3. PySide6, QtAwesome, packaging, PyVISA, and typing_extensions use the exact
-   versions supplied by OpenLab Control. Do not duplicate those wheels.
-4. For additional dependencies only, include every required Windows wheel
-   under the module's `wheels/` folder (or the application's shared `wheels/`
-   folder). Restart OpenLab Control and use `Install Dependencies` when shown.
-   Network fallback is intentionally unavailable.
-5. Enable the module and approve the first-load trust prompt.
-6. Verify that saved settings are loaded but not applied until the operator
-   chooses `Apply Settings`.
+```python
+class Module:
+    columns = {"Value": "V"}
 
-Never commit `module_data`, acquired DAT files, instrument addresses containing
-secrets, or generated `plugin_runtime` contents. A module owns its measurement
-instruments, runs its backend in one child process, and may only read
-temperature/field/monitor snapshots supplied by the core. Use
-`context.sample_system()` for a fresh snapshot and
-`context.interruptible_sleep()` for pause/stop-aware timing.
+    def open(self, api): ...
+    def measure(self, slot, api): return {"Value": 1.0}
+    def close(self, api): ...
+```
 
-## Required release checks
+可选接口只有 `configure(settings, api)`、`on_event(event, data, api)` 和 `slots`。
+完整规范见 OpenLab Control 的 `docs/PLUGIN_DEVELOPMENT.md`；本模板中的
+`simulated_transport` 是无硬件示例。
 
-- Validate manifest ID, API/core range, fixed columns, and source entry points.
-- Exercise initialize/apply/begin/measure/end/abort and every error path.
-- Verify Warning deduplication and Error termination.
-- Test explicit scheduling mode, one row per logical channel slot, and
-  same-slot parallel execution with another module.
-- Test bounded driver and framework timeouts plus forced worker cleanup.
-- Verify framework dependency ranges, and test any additional offline wheel set
-  on the target Windows/Python architecture.
-- Increment `version` whenever shipped content or dependencies change.
+框架统一提供 PySide6、PyVISA、QtAwesome、packaging 和 typing_extensions。只有额外
+依赖才写入清单，并携带离线 wheel 与带哈希锁文件。

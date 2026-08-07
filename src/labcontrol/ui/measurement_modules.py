@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+import json
 from typing import Any
 
 from PySide6.QtCore import QSize, Qt, Signal
@@ -27,8 +28,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..measurement.frontend_api import ModuleFrontend, ModuleFrontendContext
-from ..measurement.manifest import ModuleDescriptor, load_source_object
+from ..extensions.loading import load_source_object
+from ..measurement.frontend_api import ModuleUIAPI
+from ..measurement.manifest import ModuleDescriptor
 from .scaling import scaled
 from .window_sizing import fit_initial_window_width
 
@@ -37,11 +39,37 @@ MODULE_WINDOW_MIN_WIDTH = 360
 MODULE_WINDOW_MIN_HEIGHT = 260
 
 
+class _GenericFrontend(QWidget):
+    """没有自定义界面时使用的核心占位页；不是第三方扩展 API。"""
+
+    def __init__(self, _api: ModuleUIAPI) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        label = QLabel("This module has no settings.")
+        label.setObjectName("mutedLabel")
+        layout.addWidget(label)
+        layout.addStretch(1)
+        self.status_widget = QLabel("No status reported")
+        self.status_widget.setWordWrap(True)
+
+    def load(self, _settings: Mapping[str, Any]) -> None:
+        return
+
+    def dump(self) -> dict[str, Any]:
+        return {}
+
+    def show_status(self, status: Mapping[str, Any]) -> None:
+        self.status_widget.setText(
+            json.dumps(dict(status), ensure_ascii=False, indent=2)
+            if status
+            else "No status reported"
+        )
+
+
 class ModuleWindow(QDialog):
     applyRequested = Signal(str)
-    manualActionRequested = Signal(str, str, dict)
+    actionRequested = Signal(str, str, dict)
     statusRefreshRequested = Signal(str)
-    moduleSettingsChanged = Signal(str)
 
     def __init__(self, descriptor: ModuleDescriptor, parent: QWidget) -> None:
         super().__init__(parent, Qt.WindowType.Window)
@@ -49,14 +77,27 @@ class ModuleWindow(QDialog):
         self.descriptor = descriptor
         self._allow_close = False
         self._dirty = False
-        self._last_applied: dict[str, Any] | None = None
-        self.context = ModuleFrontendContext(self)
-        frontend_class = load_source_object(
-            descriptor.path, descriptor.frontend, f"frontend_{descriptor.id}"
-        )
-        if not isinstance(frontend_class, type) or not issubclass(frontend_class, ModuleFrontend):
-            raise TypeError(f"{descriptor.frontend} is not a ModuleFrontend")
-        self.frontend: ModuleFrontend = frontend_class(self.context)
+        self.ui_api = ModuleUIAPI(self)
+        self._has_frontend = (descriptor.path / "frontend.py").is_file()
+        frontend_class: type[Any] = _GenericFrontend
+        if self._has_frontend:
+            loaded = load_source_object(
+                descriptor.path,
+                "frontend:Frontend",
+                f"frontend_{descriptor.id}",
+            )
+            if not isinstance(loaded, type):
+                raise TypeError("frontend:Frontend is not a class")
+            frontend_class = loaded
+        self.frontend: Any = frontend_class(self.ui_api)
+        if not isinstance(self.frontend, QWidget):
+            raise TypeError("Frontend must be a QWidget")
+        for method_name in ("load", "dump"):
+            if not callable(getattr(self.frontend, method_name, None)):
+                raise TypeError(
+                    f"Frontend must implement {method_name}()"
+                )
+        self._baseline_settings: dict[str, Any] = {}
 
         flags = self.windowFlags()
         flags &= ~Qt.WindowType.WindowCloseButtonHint
@@ -78,17 +119,23 @@ class ModuleWindow(QDialog):
         self.settings_page = QWidget(self.tabs)
         settings_layout = QVBoxLayout(self.settings_page)
         settings_layout.setContentsMargins(0, 0, 0, 0)
-        self.settings_content = self.frontend.create_settings_page(self.settings_page)
+        self.settings_content = self.frontend
         settings_layout.addWidget(self.settings_content, 1)
 
         footer = QHBoxLayout()
         self.apply_button = QPushButton("Apply Settings")
         self.apply_button.clicked.connect(lambda: self.applyRequested.emit(descriptor.id))
+        self.apply_button.setVisible(self._has_frontend)
         footer.addStretch(1)
         footer.addWidget(self.apply_button)
         settings_layout.addLayout(footer)
 
-        self.status_page = self.frontend.create_status_page(self.tabs)
+        self.status_page = getattr(self.frontend, "status_widget", None)
+        if self.status_page is None:
+            self.status_page = QLabel("No status reported", self.tabs)
+            self.status_page.setWordWrap(True)
+        if not isinstance(self.status_page, QWidget):
+            raise TypeError("Frontend.status_widget must be a QWidget")
         self.tabs.addTab(self.settings_page, "Settings")
         self.tabs.addTab(self.status_page, "Status")
         self.tabs.setCurrentIndex(0)
@@ -107,13 +154,12 @@ class ModuleWindow(QDialog):
             ),
         )
 
-        self.frontend.settingsChanged.connect(self._mark_dirty)
-        self.context.manualActionRequested.connect(
-            lambda name, payload: self.manualActionRequested.emit(
+        self.ui_api.actionRequested.connect(
+            lambda name, payload: self.actionRequested.emit(
                 descriptor.id, name, payload
             )
         )
-        self.context.statusRefreshRequested.connect(
+        self.ui_api.refreshRequested.connect(
             lambda: self.statusRefreshRequested.emit(descriptor.id)
         )
 
@@ -129,7 +175,8 @@ class ModuleWindow(QDialog):
         ``mark_unapplied`` 会明确标记为待 Apply，避免窗口仍显示上一组设置已应用。
         """
 
-        self.frontend.load_settings(deepcopy(dict(settings)))
+        self.frontend.load(deepcopy(dict(settings)))
+        self._baseline_settings = self.settings()
         self._dirty = mark_unapplied
         if mark_unapplied:
             self.message_label.setText(
@@ -137,22 +184,18 @@ class ModuleWindow(QDialog):
             )
 
     def settings(self) -> dict[str, Any]:
-        return deepcopy(self.frontend.settings())
+        values = self.frontend.dump()
+        if not isinstance(values, Mapping):
+            raise TypeError("Frontend.dump() must return a mapping")
+        return deepcopy(dict(values))
 
     def has_unapplied_edits(self) -> bool:
-        return self._dirty
+        return self._dirty or self.settings() != self._baseline_settings
 
     def mark_applied(self) -> None:
-        self._last_applied = self.settings()
+        self._baseline_settings = self.settings()
         self._dirty = False
         self.message_label.setText("Settings applied")
-
-    def _mark_dirty(self) -> None:
-        self._dirty = True
-        self.message_label.setText("Unapplied changes")
-        self.moduleSettingsChanged.emit(
-            self.descriptor.id
-        )
 
     def update_runtime(
         self,
@@ -162,14 +205,15 @@ class ModuleWindow(QDialog):
     ) -> None:
         self.state_label.setText(state.replace("_", " ").title())
         self.message_label.setText(message)
-        self.frontend.update_status(dict(status))
+        update = getattr(self.frontend, "show_status", None)
+        if callable(update):
+            update(dict(status))
         if message == "Settings applied":
             self.mark_applied()
 
     def set_sequence_running(self, running: bool) -> None:
         self.settings_page.setEnabled(not running)
-        self.apply_button.setEnabled(not running)
-        self.frontend.set_sequence_running(running)
+        self.apply_button.setEnabled(not running and self._has_frontend)
 
     def show_in_front(self) -> None:
         if self.isMinimized():
@@ -268,7 +312,6 @@ class ModuleManagerDialog(QDialog):
             descriptor_detail = (
                 descriptor.error
                 or descriptor.dependency_error
-                or descriptor.warning
             )
             checkbox.setToolTip(descriptor_detail)
             checkbox.setEnabled(descriptor.can_enable)
@@ -322,7 +365,6 @@ class ModuleManagerDialog(QDialog):
         if descriptor is not None and self._selected_id() == module_id:
             self.detail_label.setText(
                 message
-                or descriptor.warning
                 or state.replace("_", " ").title()
             )
 
@@ -378,7 +420,6 @@ class ModuleManagerDialog(QDialog):
         detail = (
             descriptor.error
             or descriptor.dependency_error
-            or descriptor.warning
             or str(state.get("message", ""))
         )
         self.detail_label.setText(detail or "Ready to enable")

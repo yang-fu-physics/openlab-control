@@ -141,10 +141,10 @@ File → Save 同时保存 `<SEQ 文件名去掉 .seq>.modules.toml`。文件包
 取消勾选时：
 
 1. 先保存 Settings；
-2. 调用模块 abort；
-3. abort 成功后才取消勾选、关闭工作进程并隐藏窗口。
+2. 调用模块 `close(api)`；
+3. close 完成后取消勾选、关闭工作进程并隐藏窗口。
 
-abort 失败时程序报告 Error，并在关闭总上限内强制回收模块工作进程、最终显示 Disabled。
+close 失败时程序报告 Error，并在关闭总上限内强制回收模块工作进程、最终显示 Disabled。
 强制回收只保证本机进程/管道不残留，不代表外部仪表已经安全；此时必须按模块硬件说明
 人工检查输出。
 
@@ -221,9 +221,9 @@ Run 开始后：
 
 - SEQ、模块 Enable/Disable/Refresh、Settings/Apply 和手动动作锁定；
 - 所有 Enabled 模块成为本次固定 Schema；
-- `begin_sequence()` 在第一条指令前执行；
-- 每个 Measure 并行调用所有模块并等待全部结束；
-- 最终按 completed/stopped/error 调用每个模块的 `end_sequence()`。
+- 第一条指令前发送模块 `run_start` 事件并冻结 `slots`；
+- 每个 Measure 按逻辑槽位并行调用参与模块的 `measure(slot, api)`；
+- 最终按 completed/stopped/error 发送每个模块的 `run_end` 事件。
 
 ### Pause
 
@@ -234,8 +234,8 @@ Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也
 Stop 后：
 
 - 温度和磁场执行 Hold Current；
-- 模块执行 `end_sequence("stopped")`；
-- 不执行模块 abort，模块仍 Enabled，窗口保持可用。
+- 模块收到 `run_end`，reason 为 `stopped`；
+- 不执行模块 close，模块仍 Enabled，窗口保持可用。
 
 如果主温度或磁场设备读链路中断，状态显示 `Reconnecting`。默认每 2 秒重连，最长
 1 分钟；SEQ 在这段时间冻结当前 Wait/Settle 计时。成功后核对仪表实际 target/rate 再
@@ -272,7 +272,7 @@ Stop 后：
 - 弹窗标题 `Error / Operation Stopped`；
 - Running/Paused SEQ 进入 Faulted；
 - 温场执行 Hold；
-- 模块执行 `end_sequence("error")`，不调用 abort；
+- 模块收到 reason 为 `error` 的 `run_end`，不调用 close；
 - 已写数据保留。
 
 典型：设备掉线、互锁、二级冷头过温、源表硬件报警、模块 Schema 违规。
@@ -333,7 +333,7 @@ Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，
 SEQ 运行中关闭主窗口会确认；确认后请求 Stop/Hold/End。随后：
 
 1. 保存所有 Enabled 模块 Settings；
-2. 对每个 Enabled 模块调用 abort；
+2. 对每个 Enabled 模块调用 `close(api)`；
 3. 断开温场/Monitor；
 4. 关闭日志与应用。
 
@@ -343,7 +343,7 @@ SEQ 运行中关闭主窗口会确认；确认后请求 Stop/Hold/End。随后�
 
 ### 模块无法勾选
 
-选中行查看底部说明。常见原因：清单 Invalid、API/core 版本不匹配、未确认信任、
+选中行查看底部说明。常见原因：清单 Invalid、未确认信任、
 框架共享依赖范围不兼容、额外依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。
 Disable 目标模块后重新准备额外依赖；需要重新扫描源码时先 Disable 全部模块再
 Refresh。
@@ -361,11 +361,11 @@ Python；只有离线准备额外依赖需要，且便携 Python 必须自带 pi
 
 ### 模块窗口关不掉
 
-这是安全设计。先在 Modules Manager 取消 Enable；abort 成功后窗口自动隐藏。
+这是安全设计。先在 Modules Manager 取消 Enable；close 完成后窗口自动隐藏。
 
 ### Disable 报错但已显示 Disabled
 
-abort 没有确认完成，但框架已为资源释放强制关闭工作进程。不要把 Disabled 当作输出已
+close 没有确认完成，但框架已为资源释放强制关闭工作进程。不要把 Disabled 当作输出已
 关闭；查看 Error，并按该模块硬件操作说明人工退出输出、检查仪表状态后再重新 Enable。
 
 ### Measure 没有模块数据

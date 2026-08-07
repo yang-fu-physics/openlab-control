@@ -1322,11 +1322,7 @@ class MainWindow(QMainWindow):
                         "Module was not trusted",
                     )
                     return
-                settings = self._saved_module_settings(module_id)
-                future = self.runtime.enable_module(
-                    module_id,
-                    settings,
-                )
+                future = self.runtime.enable_module(module_id)
                 self._pending_module_operations[
                     module_id
                 ] = (future, True)
@@ -1374,11 +1370,8 @@ class MainWindow(QMainWindow):
             ),
         )
         window.applyRequested.connect(self._apply_module_settings)
-        window.manualActionRequested.connect(self._module_manual_action)
+        window.actionRequested.connect(self._module_action)
         window.statusRefreshRequested.connect(self._refresh_module_status)
-        window.moduleSettingsChanged.connect(
-            lambda _module_id: self._mark_dirty()
-        )
         self.module_windows[module_id] = window
         return window
 
@@ -1466,7 +1459,7 @@ class MainWindow(QMainWindow):
         self.runtime.apply_module_settings(module_id, settings)
         window.message_label.setText("Applying settings...")
 
-    def _module_manual_action(
+    def _module_action(
         self, module_id: str, action: str, payload: dict[str, object]
     ) -> None:
         if self.current_run_state not in self.TERMINAL_STATES or self._pending_run is not None:
@@ -1476,7 +1469,7 @@ class MainWindow(QMainWindow):
                 "Manual module actions are available only while the SEQ is idle.",
             )
             return
-        self.runtime.module_manual_action(module_id, action, payload)
+        self.runtime.module_action(module_id, action, payload)
 
     def _refresh_module_status(self, module_id: str) -> None:
         if self.current_run_state in self.TERMINAL_STATES and self._pending_run is None:
