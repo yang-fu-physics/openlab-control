@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-08-08
+
 - Measurement Module 改用不兼容的最小约定式接口：清单仅需 name/version，目录名作为
   ID，入口固定为 `backend.py:Module`，DAT 列由后端 `columns` 提供。
 - 后端无需继承基类，只需 `open(api)`、`measure(slot, api)` 和 `close(api)`；Apply、SEQ
