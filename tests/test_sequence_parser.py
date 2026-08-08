@@ -80,10 +80,48 @@ class SequenceParserTests(unittest.TestCase):
     def test_new_field_commands_default_to_oe_with_two_decimals(self) -> None:
         command = SPECS_BY_TYPE[CommandType.SCAN_FIELD].create()
         self.assertEqual(command.params["unit"], "Oe")
+        self.assertFalse(command.params["nearest_polarity"])
         self.assertEqual(
             format_command(command),
             "Scan Field 0.00 Oe to 10000.00 Oe in 11 steps at 5000.00 Oe/min, Settle",
         )
+
+    def test_field_scan_nearest_polarity_round_trips_with_device_suffix(self) -> None:
+        source = (
+            "T Scan Field 9.000000 T to 3.000000 T in 4 steps at "
+            "1.000000 T/min, Settle, Nearest +/- Polarity "
+            'using device "magnet A"\n'
+            "T     Measure\n"
+            "T End Scan\n"
+            "T End Sequence\n"
+        )
+        result = parse_sequence(source, "nearest-polarity.seq")
+        self.assertEqual(result.issues, ())
+        command = result.document.commands[0]
+        self.assertTrue(command.params["nearest_polarity"])
+        self.assertEqual(command.params["device_id"], "magnet A")
+        self.assertEqual(serialize_sequence(result.document), source)
+
+        command.update_params(dict(command.params))
+        self.assertEqual(
+            format_command(command),
+            "Scan Field 9.000000 T to 3.000000 T in 4 steps at "
+            "1.000000 T/min, Settle, Nearest +/- Polarity "
+            'using device "magnet A"',
+        )
+
+    def test_field_scan_accepts_unicode_plus_minus_alias(self) -> None:
+        result = parse_sequence(
+            "T Scan Field 9 T to 3 T in 2 steps at 1 T/min, "
+            "Sweep, Nearest ± Polarity\n"
+            "T End Scan\n"
+            "T End Sequence\n"
+        )
+        self.assertEqual(result.issues, ())
+        command = result.document.commands[0]
+        self.assertTrue(command.params["nearest_polarity"])
+        command.update_params(dict(command.params))
+        self.assertIn("Nearest +/- Polarity", format_command(command))
 
     def test_temperature_and_legacy_t_command_precision(self) -> None:
         temperature = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE].create()

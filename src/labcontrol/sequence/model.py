@@ -282,6 +282,12 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         FieldSpec("steps", "Points", "int", 11, 1, 100000),
         FieldSpec("rate", "Rate per minute", "float", 5000.0, 0.000001),
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
+        FieldSpec(
+            "nearest_polarity",
+            "Choose nearer start or its negative",
+            "bool",
+            False,
+        ),
     )),
     CommandSpec(CommandType.SCAN_TEMPERATURE, "Scan Temperature", "System Commands", (
         FieldSpec("device_id", "Temperature device", "text", "temperature"),
@@ -375,4 +381,6 @@ def validate_command_parameters(command: Command) -> tuple[str, ...]:
                     f"{field_spec.label} must be one of "
                     + ", ".join(field_spec.choices)
                 )
+        elif field_spec.field_type == "bool" and not isinstance(value, bool):
+            issues.append(f"{field_spec.label} must be true or false")
     return tuple(issues)

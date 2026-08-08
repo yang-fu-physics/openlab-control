@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QCheckBox  # noqa: E402
 
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.models import (  # noqa: E402
@@ -237,6 +237,11 @@ class StatusTileTests(unittest.TestCase):
         self.assertAlmostEqual(scan_dialog.inputs["start"].value(), 0.0)
         self.assertAlmostEqual(scan_dialog.inputs["stop"].value(), 1.0)
         self.assertAlmostEqual(scan_dialog.inputs["rate"].value(), 0.5)
+        polarity = scan_dialog.inputs["nearest_polarity"]
+        self.assertIsInstance(polarity, QCheckBox)
+        self.assertFalse(polarity.isChecked())
+        polarity.setChecked(True)
+        self.assertTrue(scan_dialog.values()["nearest_polarity"])
         temperature_dialog.close()
         field_dialog.close()
         command_dialog.close()

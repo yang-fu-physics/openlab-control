@@ -189,6 +189,9 @@ close 失败时程序报告 Error，并在关闭总上限内强制回收模块�
   `create` / `open|create` 可选或新建文件。
 - 插入在 Scan/End Scan 上时会进入该 Scan；否则插在所选命令之后。
 - 所有温场弹窗直接显示配置中的上下限和最大速率。
+- `Scan Field` 可选 `Choose nearer start or its negative`。它在该命令实际执行时取得已通过
+  新鲜度检查的当前场读回，选择输入路径或整条反号路径；选择结果写入 Run Log。开关默认关闭。
+
 ### 模块自定义指令
 
 模块完成 Enable 后，可在右侧直接出现例如：

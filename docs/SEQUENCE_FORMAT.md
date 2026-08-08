@@ -166,6 +166,19 @@ T End Scan
 
 起点、终点和速率必须使用同一单位。所有点在移动前整体验证。
 
+参数窗口中的 `Choose nearer start or its negative` 默认关闭。开启后保存为：
+
+```text
+T Scan Field 9.000000 T to 3.000000 T in 7 steps at 1.000000 T/min, Settle, Nearest +/- Polarity
+T     Measure
+T End Scan
+```
+
+运行到该 Scan 时，框架会取得所选磁场设备已通过新鲜度检查的当前实际场读回，并比较它
+到输入起点和输入起点负值的距离。更靠近负值时，整条路径同时反号；例如实际场为 `-6 T`，上例执行
+`-9 T` 到 `-3 T`。距离相同时保留输入路径。无法取得有限的实际场会 Error，且不会移动
+到第一个点；反号后的全部点仍会在首次写入前经过配置上下限和速率检查。
+
 ### Scan Time
 
 ```text

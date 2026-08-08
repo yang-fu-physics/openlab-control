@@ -187,6 +187,151 @@ class SequenceEngineTests(unittest.TestCase):
                 )
             )
 
+    def test_field_scan_nearest_polarity_uses_runtime_actual_field(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = replace(
+                self._fast_config(Path(temp)),
+                simulation_speed=100000.0,
+            )
+            document = SequenceDocument(
+                [
+                    Command(
+                        CommandType.SET_FIELD,
+                        {
+                            "device_id": "field",
+                            "target": -6.0,
+                            "unit": "T",
+                            "rate": 1.0,
+                            "mode": "Settle",
+                        },
+                    ),
+                    Command(
+                        CommandType.SCAN_FIELD,
+                        {
+                            "device_id": "field",
+                            "start": 9.0,
+                            "stop": 3.0,
+                            "unit": "T",
+                            "steps": 2,
+                            "rate": 1.0,
+                            "mode": "Settle",
+                            "nearest_polarity": True,
+                        },
+                    ),
+                ],
+                "nearest-polarity.seq",
+            )
+            notices = []
+            state, snapshots, _ = asyncio.run(
+                self._run(config, document, notices)
+            )
+
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertAlmostEqual(
+                snapshots["field"].current or 0.0,
+                -30000.0,
+                places=2,
+            )
+            selections = [
+                notice.event
+                for notice in notices
+                if notice.event.code == "FIELD_SCAN_POLARITY_SELECTED"
+            ]
+            self.assertEqual(len(selections), 1)
+            self.assertIn("actual field -60000.00 Oe", selections[0].message)
+            self.assertIn(
+                "selected sign-inverted path -90000.00 to -30000.00 Oe",
+                selections[0].message,
+            )
+
+    def test_field_scan_nearest_polarity_tie_keeps_entered_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = replace(
+                self._fast_config(Path(temp)),
+                simulation_speed=100000.0,
+            )
+            scan = Command(
+                CommandType.SCAN_FIELD,
+                {
+                    "device_id": "field",
+                    "start": 1.0,
+                    "stop": 0.5,
+                    "unit": "T",
+                    "steps": 2,
+                    "rate": 1.0,
+                    "mode": "Settle",
+                    "nearest_polarity": True,
+                },
+            )
+            notices = []
+            state, snapshots, _ = asyncio.run(
+                self._run(
+                    config,
+                    SequenceDocument([scan], "polarity-tie.seq"),
+                    notices,
+                )
+            )
+
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertAlmostEqual(
+                snapshots["field"].current or 0.0,
+                5000.0,
+                places=2,
+            )
+            selection = next(
+                notice.event
+                for notice in notices
+                if notice.event.code == "FIELD_SCAN_POLARITY_SELECTED"
+            )
+            self.assertIn("selected entered path", selection.message)
+
+    def test_field_scan_nearest_polarity_refuses_missing_actual_field(self) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            manager = DeviceManager(config, events, isolate_processes=False)
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+            )
+            await manager.connect_all()
+            await manager.poll_all()
+            before = manager.latest["field"].target
+            manager.latest["field"].current = None
+            engine.state = RunState.RUNNING
+            scan = Command(
+                CommandType.SCAN_FIELD,
+                {
+                    "device_id": "field",
+                    "start": 9.0,
+                    "stop": 3.0,
+                    "unit": "T",
+                    "steps": 2,
+                    "rate": 1.0,
+                    "mode": "Settle",
+                    "nearest_polarity": True,
+                },
+            )
+            try:
+                with self.assertRaises(DeviceError) as raised:
+                    await engine._scan_controlled(
+                        scan,
+                        DeviceKind.FIELD,
+                        ["1:Scan Field"],
+                    )
+                self.assertEqual(
+                    raised.exception.code,
+                    "FIELD_SCAN_CURRENT_UNAVAILABLE",
+                )
+                self.assertEqual(manager.latest["field"].target, before)
+            finally:
+                await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
+
     def test_duplicate_warning_continues_and_only_notifies_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
@@ -465,6 +610,19 @@ class SequenceEngineTests(unittest.TestCase):
                     "steps": 2,
                     "rate": 0.0,
                     "mode": "Settle",
+                },
+            ),
+            Command(
+                CommandType.SCAN_FIELD,
+                {
+                    "device_id": "field",
+                    "start": 0.0,
+                    "stop": 1.0,
+                    "unit": "Oe",
+                    "steps": 2,
+                    "rate": 1.0,
+                    "mode": "Settle",
+                    "nearest_polarity": "yes",
                 },
             ),
         )

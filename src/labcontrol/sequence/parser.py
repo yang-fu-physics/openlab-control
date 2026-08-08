@@ -75,7 +75,8 @@ _SCAN_TEMPERATURE_LIST = re.compile(
 _SCAN_FIELD = re.compile(
     rf"^Scan\s+Field\s+(?:from\s+)?(?P<start>{NUMBER})\s*(?P<unit>T|Oe)\s+(?:to|through)\s+"
     rf"(?P<stop>{NUMBER})\s*(?P<stop_unit>T|Oe)\s+in\s+(?P<steps>\d+)\s+steps\s+at\s+"
-    rf"(?P<rate>{NUMBER})\s*(?P<rate_unit>T|Oe)/min\s*,?\s*(?P<mode>Settle|Sweep)$",
+    rf"(?P<rate>{NUMBER})\s*(?P<rate_unit>T|Oe)/min\s*,?\s*(?P<mode>Settle|Sweep)"
+    r"(?:\s*,\s*(?P<nearest_polarity>Nearest\s+(?:\+/-|±)\s+Polarity))?$",
     re.IGNORECASE,
 )
 _SCAN_TIME = re.compile(
@@ -371,6 +372,7 @@ def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceI
                 "steps": int(match.group("steps")),
                 "rate": float(match.group("rate")),
                 "mode": match.group("mode").title(),
+                "nearest_polarity": bool(match.group("nearest_polarity")),
             },
             raw_text=text,
             source_line=line_number,
@@ -716,10 +718,16 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
     if command.type is CommandType.SCAN_FIELD:
         unit = p.get("unit", "Oe")
         decimals = field_decimals(unit)
+        polarity_suffix = (
+            ", Nearest +/- Polarity"
+            if p.get("nearest_polarity", False) is True
+            else ""
+        )
         return (
             f"Scan Field {_format_number(p.get('start', 0.0), decimals)} {unit} to "
             f"{_format_number(p.get('stop', 10000.0), decimals)} {unit} in {int(p.get('steps', 11))} steps at "
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min, {p.get('mode', 'Settle')}"
+            f"{polarity_suffix}"
             f"{_device_suffix(p, 'field')}"
         )
     if command.type is CommandType.SCAN_TIME:

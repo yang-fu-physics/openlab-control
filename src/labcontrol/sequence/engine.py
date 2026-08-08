@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -559,6 +560,55 @@ class SequenceEngine:
             stop = convert_value(float(p.get("stop", 0.0)), source_unit, config.unit)
             steps = int(p.get("steps", 1))
             points = self._linspace(start, stop, steps)
+
+        if (
+            kind is DeviceKind.FIELD
+            and p.get("nearest_polarity", False) is True
+        ):
+            # 极性必须在这条 Scan 真正运行到时决定。先经过统一 Pause/Stop/恢复检查，
+            # 再取得后台设备轮询刚发布的实际场；不能使用加载 SEQ 或启动 Run 时的值。
+            # _checkpoint 已保证 primary 读数未超过配置的新鲜度期限，这里仍复核快照，
+            # 防止自定义 DeviceManager 或极短竞态把空值带入极性判断。
+            await self._checkpoint()
+            snapshot = self.devices.snapshots().get(device_id)
+            current = None if snapshot is None else snapshot.current
+            snapshot_age = (
+                math.inf
+                if snapshot is None
+                else max(0.0, time.monotonic() - snapshot.timestamp)
+            )
+            if (
+                snapshot is None
+                or not snapshot.connected
+                or snapshot_age > config.stale_after_seconds
+                or current is None
+                or not math.isfinite(current)
+            ):
+                raise DeviceError(
+                    f"{config.display_name} has no fresh finite current field for "
+                    "nearest-polarity scan",
+                    "FIELD_SCAN_CURRENT_UNAVAILABLE",
+                    device_id,
+                )
+            entered_start = points[0]
+            inverted_start = -entered_start
+            invert = abs(current - inverted_start) < abs(current - entered_start)
+            if invert:
+                # 整条扫描路径一起反号，不能只改变起点；显式消除 -0.0，避免日志和
+                # 数据路径出现容易误读的负零。
+                points = [0.0 if point == 0.0 else -point for point in points]
+            decimals = control_decimals(DeviceKind.FIELD, config.unit)
+            chosen = "sign-inverted" if invert else "entered"
+            self.events.report(
+                Severity.INFO,
+                "sequence",
+                "FIELD_SCAN_POLARITY_SELECTED",
+                f"{config.display_name} actual field "
+                f"{fixed_number(current, decimals)} {config.unit}; selected "
+                f"{chosen} path {fixed_number(points[0], decimals)} to "
+                f"{fixed_number(points[-1], decimals)} {config.unit}",
+                self._current_path,
+            )
 
         # 在移动第一个设定点之前验证完整路径。后面的坏点不能让实验停在“已执行一半”
         # 的中间状态。
