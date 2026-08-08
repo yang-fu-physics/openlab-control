@@ -96,6 +96,103 @@ _DEVICE_COMMAND_PREFIX = re.compile(
     r"^(?:Set|Scan)\s+(?:Temperature|Field)\b",
     re.IGNORECASE,
 )
+_MODULE_COMMAND_PREFIX = re.compile(
+    r"^Module\s+(?P<kind>Command|Scan)\s+",
+    re.IGNORECASE,
+)
+_MODULE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _reject_json_constant(value: str) -> object:
+    """JSON 标准不含 NaN/Infinity；显式拒绝 Python 解码器的宽松扩展。"""
+
+    raise ValueError(f"invalid JSON constant {value}")
+
+
+_STRICT_JSON_DECODER = json.JSONDecoder(parse_constant=_reject_json_constant)
+
+
+def _parse_module_command(
+    text: str,
+    line_number: int,
+) -> tuple[Command, SequenceIssue | None] | None:
+    """解析可在模块缺失时仍完整保存的通用 Module Command/Scan 信封。"""
+
+    prefix = _MODULE_COMMAND_PREFIX.match(text)
+    if prefix is None:
+        if re.match(r"^Module\s+(?:Command|Scan)\b", text, re.IGNORECASE):
+            command = Command(
+                CommandType.UNKNOWN,
+                {"text": text},
+                raw_text=text,
+                source_line=line_number,
+            )
+            return command, SequenceIssue(
+                line_number,
+                "error",
+                "Invalid module command; expected quoted module ID, quoted command ID, and a JSON object",
+                text,
+            )
+        return None
+    remainder = text[prefix.end():]
+    values: list[object] = []
+    try:
+        for _ in range(3):
+            remainder = remainder.lstrip()
+            value, end = _STRICT_JSON_DECODER.raw_decode(remainder)
+            values.append(value)
+            remainder = remainder[end:]
+        if remainder.strip():
+            raise ValueError("unexpected text after parameter object")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        command = Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        )
+        return command, SequenceIssue(
+            line_number,
+            "error",
+            f"Invalid module command syntax or JSON: {exc}",
+            text,
+        )
+    module_id, command_id, parameters = values
+    if (
+        not isinstance(module_id, str)
+        or not _MODULE_IDENTIFIER.fullmatch(module_id)
+    ):
+        issue = "Module ID must match [a-z][a-z0-9_]*"
+    elif (
+        not isinstance(command_id, str)
+        or not _MODULE_IDENTIFIER.fullmatch(command_id)
+    ):
+        issue = "Module command ID must match [a-z][a-z0-9_]*"
+    elif not isinstance(parameters, dict):
+        issue = "Module command parameters must be a JSON object"
+    else:
+        issue = ""
+    if issue:
+        command = Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        )
+        return command, SequenceIssue(line_number, "error", issue, text)
+    command_type = (
+        CommandType.MODULE_SCAN
+        if prefix.group("kind").casefold() == "scan"
+        else CommandType.MODULE_COMMAND
+    )
+    return Command(
+        command_type,
+        dict(parameters),
+        raw_text=text,
+        source_line=line_number,
+        module_id=module_id,
+        module_command_id=command_id,
+    ), None
 
 
 def _temperature_point_items(value: object) -> list[object]:
@@ -163,6 +260,10 @@ def format_temperature_points(value: object) -> str:
 
 def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
     """解析不含 ``using device`` 后缀的一条规范命令。"""
+
+    module_result = _parse_module_command(text, line_number)
+    if module_result is not None:
+        return module_result
 
     lowered = text.lower()
     match = _SET_TEMPERATURE.match(text)
@@ -636,6 +737,25 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
         return f"Inject Warning {p.get('code', 'SIM_WARNING')} {p.get('message', 'Simulated Warning')}"
     if command.type is CommandType.INJECT_ERROR:
         return f"Inject Error {p.get('code', 'SIM_ERROR')} {p.get('message', 'Simulated Error')}"
+    if command.type in {
+        CommandType.MODULE_COMMAND,
+        CommandType.MODULE_SCAN,
+    }:
+        kind = "Scan" if command.type is CommandType.MODULE_SCAN else "Command"
+        # 非 JSON 或非有限值必须让保存/运行显式失败，不能用空 object 替换后悄悄改变
+        # 将要发送给真实仪表的参数。
+        parameters = json.dumps(
+            p,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+        return (
+            f"Module {kind} "
+            f"{json.dumps(command.module_id, ensure_ascii=False)} "
+            f"{json.dumps(command.module_command_id, ensure_ascii=False)} "
+            f"{parameters}"
+        )
     return str(p.get("text", command.raw_text or "Unknown"))
 
 

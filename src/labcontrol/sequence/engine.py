@@ -11,6 +11,7 @@ Stop/Error 都沿协作路径退出当前命令，再尝试温度和磁场 Hold 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -136,6 +137,28 @@ class SequenceEngine:
             if self._call_stack
             else self.config.project_root
         )
+        invalid_module_command = self._find_invalid_module_command(
+            document.commands,
+            base_directory,
+            frozenset(self._call_stack),
+        )
+        if invalid_module_command is not None:
+            command, issues = invalid_module_command
+            self.state = RunState.FAULTED
+            self._fatal_abort = True
+            self._abort_message = (
+                "Invalid module sequence command: "
+                + "; ".join(issues)
+            )
+            self.events.report(
+                Severity.ERROR,
+                "sequence",
+                "MODULE_SEQUENCE_COMMAND_INVALID",
+                self._abort_message,
+                format_command(command, preserve_raw=False),
+            )
+            self._publish(self._abort_message)
+            return self.state
         self._total_steps = max(
             self._estimate_execution_steps(
                 document.commands,
@@ -466,6 +489,12 @@ class SequenceEngine:
         if command.type is CommandType.SCAN_TIME:
             await self._scan_time(command, path)
             return
+        if command.type is CommandType.MODULE_COMMAND:
+            await self._execute_module_command(command)
+            return
+        if command.type is CommandType.MODULE_SCAN:
+            await self._scan_module(command, path)
+            return
         if command.type is CommandType.MEASURE:
             await self._measure()
             return
@@ -560,6 +589,57 @@ class SequenceEngine:
             point_path = path + [f"time {index}/{steps}={offset:g} s"]
             await self._execute_commands(command.children, point_path)
 
+    async def _execute_module_command(self, command: Command) -> bool:
+        """执行一个不写 DAT 的模块动作，并在调用前后保留统一控制检查点。"""
+
+        await self._checkpoint()
+        completed = await self.modules.execute_sequence_command(command)
+        await self._checkpoint()
+        return completed
+
+    async def _scan_module(self, command: Command, path: list[str]) -> None:
+        """逐点调用模块动作；只有该点设置成功后才执行扫描子树。"""
+
+        spec = self.modules.sequence_command_spec(
+            command.module_id,
+            command.module_command_id,
+        )
+        if spec is None or spec.kind != "scan":
+            raise DeviceError(
+                f"Module scan is unavailable: {command.module_id}.{command.module_command_id}",
+                "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
+                f"{command.module_id}.{command.module_command_id}",
+            )
+        points = command.params.get(spec.points_field)
+        if not isinstance(points, list) or not points:
+            raise DeviceError(
+                f"Module scan field {spec.points_field!r} must contain at least one point",
+                "MODULE_SEQUENCE_COMMAND_INVALID",
+                f"{command.module_id}.{command.module_command_id}",
+            )
+        total = len(points)
+        for index, point in enumerate(points, start=1):
+            await self._checkpoint()
+            parameters = dict(command.params)
+            parameters[spec.point_parameter] = point
+            completed = await self.modules.execute_sequence_command(
+                command,
+                parameters,
+            )
+            await self._checkpoint()
+            if not completed:
+                continue
+            point_text = json.dumps(
+                point,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
+            await self._execute_commands(
+                command.children,
+                path + [f"point {index}/{total}={point_text}"],
+            )
+
     async def _measure(self) -> None:
         # 前一个 checkpoint 防止 Pause 后启动新测量；后一个 checkpoint 让测量期间到达
         # 的 Stop/Error 在进入下一条 SEQ 命令前立即生效。
@@ -599,7 +679,17 @@ class SequenceEngine:
             total += 1
             if command.type.is_container:
                 try:
-                    if (
+                    if command.type is CommandType.MODULE_SCAN:
+                        spec = self.modules.sequence_command_spec(
+                            command.module_id,
+                            command.module_command_id,
+                        )
+                        iterations = (
+                            0
+                            if spec is None
+                            else len(command.params.get(spec.points_field, []))
+                        )
+                    elif (
                         command.type is CommandType.SCAN_TEMPERATURE
                         and str(
                             command.params.get("point_mode", "Linear")
@@ -642,6 +732,57 @@ class SequenceEngine:
                     call_stack | {source},
                 )
         return total
+
+    def _find_invalid_module_command(
+        self,
+        commands: list[Command],
+        base_directory: Path,
+        call_stack: frozenset[Path],
+        *,
+        parent_enabled: bool = True,
+    ) -> tuple[Command, tuple[str, ...]] | None:
+        """在产生运行目录或移动仪表前递归验证所有会执行的模块指令。"""
+
+        for command in commands:
+            effective_enabled = parent_enabled and command.enabled
+            if not effective_enabled:
+                continue
+            if command.type in {
+                CommandType.MODULE_COMMAND,
+                CommandType.MODULE_SCAN,
+            }:
+                issues = self.modules.sequence_command_issues(command)
+                if issues:
+                    return command, issues
+            invalid_child = self._find_invalid_module_command(
+                command.children,
+                base_directory,
+                call_stack,
+                parent_enabled=effective_enabled,
+            )
+            if invalid_child is not None:
+                return invalid_child
+            if command.type is not CommandType.CALL_SEQUENCE:
+                continue
+            source = Path(str(command.params.get("path", "")))
+            if not source.is_absolute():
+                source = (base_directory / source).resolve()
+            if source in call_stack or not source.exists():
+                continue
+            try:
+                result = load_sequence(source)
+            except OSError:
+                continue
+            if result.has_errors:
+                continue
+            invalid_called = self._find_invalid_module_command(
+                result.document.commands,
+                source.parent,
+                call_stack | {source},
+            )
+            if invalid_called is not None:
+                return invalid_called
+        return None
 
     def _find_invalid_parameter(
         self,

@@ -31,6 +31,8 @@ class CommandType(str, Enum):
     CALL_SEQUENCE = "call_sequence"
     INJECT_WARNING = "inject_warning"
     INJECT_ERROR = "inject_error"
+    MODULE_COMMAND = "module_command"
+    MODULE_SCAN = "module_scan"
     UNKNOWN = "unknown"
 
     @property
@@ -41,6 +43,7 @@ class CommandType(str, Enum):
             CommandType.SCAN_TEMPERATURE,
             CommandType.SCAN_FIELD,
             CommandType.SCAN_TIME,
+            CommandType.MODULE_SCAN,
         }
 
 
@@ -55,6 +58,10 @@ class Command:
     source_line: int | None = None
     id: str = field(default_factory=lambda: uuid4().hex)
     enabled: bool = True
+    # 模块 ID 与其稳定指令 ID 是通用 SEQ 信封的一部分，不混入作者自己的参数名，
+    # 因而模块可以自由使用 ``module_id`` 等普通字段而不会与核心保留键冲突。
+    module_id: str = ""
+    module_command_id: str = ""
 
     def update_params(self, values: dict[str, Any]) -> None:
         """替换编辑后的参数，并丢弃不再可信的原始文本缓存。"""
@@ -235,6 +242,8 @@ class FieldSpec:
     minimum: float | None = None
     maximum: float | None = None
     choices: tuple[str, ...] = ()
+    unit: str = ""
+    decimals: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

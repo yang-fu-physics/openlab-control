@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -33,6 +35,7 @@ from PySide6.QtWidgets import (
 from ..config import DeviceConfig
 from ..formatting import control_decimals, field_decimals, fixed_number
 from ..models import DeviceKind, DeviceSnapshot, LabEvent, Severity
+from ..module_commands import ModuleCommandSpec
 from ..sequence.model import Command, CommandSpec, CommandType
 from ..sequence.parser import format_temperature_points, parse_temperature_points
 from ..units import UnitConversionError, convert_value
@@ -60,7 +63,7 @@ class CommandDialog(QDialog):
     def __init__(
         self,
         command: Command,
-        spec: CommandSpec,
+        spec: CommandSpec | ModuleCommandSpec,
         parent: QWidget | None = None,
         *,
         device_configs: tuple[DeviceConfig, ...] = (),
@@ -77,6 +80,11 @@ class CommandDialog(QDialog):
         self.setWindowTitle(f"Command Parameters - {spec.label}")
         self.setModal(True)
         layout = QVBoxLayout(self)
+        if isinstance(spec, ModuleCommandSpec) and spec.description:
+            description = QLabel(spec.description)
+            description.setWordWrap(True)
+            description.setObjectName("mutedLabel")
+            layout.addWidget(description)
         self.form = QFormLayout()
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         for field in spec.fields:
@@ -118,9 +126,15 @@ class CommandDialog(QDialog):
                 widget = QSpinBox()
                 widget.setRange(int(field.minimum if field.minimum is not None else -2_000_000_000), int(field.maximum if field.maximum is not None else 2_000_000_000))
                 widget.setValue(int(value))
+                if field.unit:
+                    widget.setSuffix(f" {field.unit}")
             elif field.field_type == "float":
                 widget = QDoubleSpinBox()
-                decimals = _command_decimals(command, field.name)
+                decimals = (
+                    field.decimals
+                    if field.decimals is not None
+                    else _command_decimals(command, field.name)
+                )
                 widget.setDecimals(decimals)
                 minimum = field.minimum if field.minimum is not None else -1e12
                 if field.name == "rate" and command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS:
@@ -131,6 +145,20 @@ class CommandDialog(QDialog):
                 )
                 widget.setValue(float(value))
                 widget.setStepType(QDoubleSpinBox.StepType.AdaptiveDecimalStepType)
+                if field.unit:
+                    widget.setSuffix(f" {field.unit}")
+            elif field.field_type == "bool":
+                widget = QCheckBox()
+                widget.setChecked(bool(value))
+            elif field.field_type == "list":
+                widget = QLineEdit(
+                    json.dumps(
+                        value,
+                        ensure_ascii=False,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                    )
+                )
             else:
                 widget = QLineEdit(str(value))
             self.inputs[field.name] = widget
@@ -248,7 +276,35 @@ class CommandDialog(QDialog):
         self._set_field_visible("points", is_list)
 
     def accept(self) -> None:
-        """关闭前验证显式温度列表的语法和每个点的设备范围。"""
+        """关闭前验证列表语法，以及温度列表的设备范围。"""
+
+        for field in self.spec.fields:
+            if field.field_type != "list":
+                continue
+            list_input = self.inputs.get(field.name)
+            if not isinstance(list_input, QLineEdit):
+                continue
+            try:
+                value = json.loads(list_input.text())
+                if not isinstance(value, list):
+                    raise ValueError("value must be a JSON array")
+                # 重新编码可同时拒绝模块参数中的 NaN/Infinity 等非标准值。
+                canonical = json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                QMessageBox.warning(
+                    self,
+                    "Invalid List",
+                    f"{field.label}: {exc}",
+                )
+                list_input.setFocus()
+                list_input.selectAll()
+                return
+            list_input.setText(canonical)
 
         if self.command.type is CommandType.SCAN_TEMPERATURE:
             point_mode = self.inputs.get("point_mode")
@@ -423,8 +479,13 @@ class CommandDialog(QDialog):
                 result[field.name] = widget.value()
             elif isinstance(widget, QDoubleSpinBox):
                 result[field.name] = widget.value()
+            elif isinstance(widget, QCheckBox):
+                result[field.name] = widget.isChecked()
             elif isinstance(widget, QLineEdit):
-                result[field.name] = widget.text().strip()
+                if field.field_type == "list":
+                    result[field.name] = json.loads(widget.text())
+                else:
+                    result[field.name] = widget.text().strip()
         return result
 
 

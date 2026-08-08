@@ -38,6 +38,9 @@ class SequenceEditorWidget(QWidget):
     def __init__(self, document: SequenceDocument, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.document = document
+        self._available_module_commands: set[
+            tuple[str, str]
+        ] = set()
         self._clipboard: tuple[Command, ...] = ()
         self._editable = True
         layout = QVBoxLayout(self)
@@ -102,6 +105,21 @@ class SequenceEditorWidget(QWidget):
         self.document = document
         self.rebuild(preserve_selection=False)
 
+    def set_available_module_commands(
+        self,
+        commands: set[tuple[str, str]],
+    ) -> None:
+        """更新 Enabled 模块注册表，并立即重绘缺失指令而不改动文档。"""
+
+        normalized = {
+            (str(module_id), str(command_id))
+            for module_id, command_id in commands
+        }
+        if normalized == self._available_module_commands:
+            return
+        self._available_module_commands = normalized
+        self.rebuild()
+
     def set_editable(self, editable: bool) -> None:
         """控制修改动作是否可用；运行时仍允许滚动和查看列表。"""
 
@@ -156,7 +174,25 @@ class SequenceEditorWidget(QWidget):
             if row.is_end or row.is_sequence_end:
                 item.setForeground(QColor("#6b7280"))
             else:
-                if command is not None and command.type is CommandType.UNKNOWN:
+                unavailable_module_command = (
+                    command is not None
+                    and command.type
+                    in {
+                        CommandType.MODULE_COMMAND,
+                        CommandType.MODULE_SCAN,
+                    }
+                    and (
+                        command.module_id,
+                        command.module_command_id,
+                    )
+                    not in self._available_module_commands
+                )
+                if unavailable_module_command:
+                    item.setBackground(QColor("#ffd8d8"))
+                    item.setToolTip(
+                        "Module command unavailable: enable the matching module and command ID before Run"
+                    )
+                elif command is not None and command.type is CommandType.UNKNOWN:
                     item.setBackground(QColor("#fff4cc"))
             if not row.effective_enabled:
                 item.setForeground(QColor("#8a9099"))

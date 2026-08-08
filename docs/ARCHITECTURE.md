@@ -62,19 +62,31 @@ close(api)
 configure(settings, api)
 on_event(event, data, api)
 slots = N | sequence[int] | property
+sequence_commands = sequence[dict]
+execute_sequence_command(command_id, parameters, api)
 frontend.py: Frontend(QWidget) with load()/dump()
 ```
 
 核心调用顺序：
 
 ```text
-Enable:  spawn worker → open
+Enable:  spawn worker → 验证可选指令声明 → open → 向 UI 注册指令
 Apply:   configure
 Run:     on_event("status") → on_event("run_start") → read slots
 Measure: 对每个逻辑槽位并行调用参与模块的 measure
 Finish:  on_event("run_end", reason)
 Disable: close → shutdown worker
 ```
+
+模块指令元数据只由隔离 worker 读取并转换为受限 JSON；主进程不会为发现菜单而提前导入
+`backend.py`。只有 `open` 完成后的 Enabled 消息携带注册表，Frontend 创建成功后才加入
+右侧顶层组。Disable、worker timeout 或 IPC 失效会移除注册表。SEQ 文档保存通用模块 ID、
+稳定指令 ID 和 JSON 参数，因而模块缺失时仍能解析、标红和原样保存，但执行预检失败。
+
+`Module Scan` 的点列表由核心展开。每点通过同一模块串行 worker 调用
+`execute_sequence_command`，成功后才递归执行子树；指令自身不进入 DAT。模块 Warning
+跳过失败点的子树并继续，Error 中止 SEQ。参数弹窗验证、运行时元数据验证和模块后端的
+真实仪表验证是三层不同边界，核心不提供任意 SCPI 直通指令。
 
 保存设置或加载 SEQ 伴随设置只更新 Frontend，不会自动 Enable 或 configure。Run 开始时
 冻结 Enabled 模块、列和槽位。声明 `slots` 的模块只参与这些槽位；未声明的模块跟随所有
@@ -84,9 +96,9 @@ Disable: close → shutdown worker
 流式 `emit_row`。模块可额外返回最多 32,768 个有限 rawdata 数值，由核心写入模块独立
 sidecar。
 
-`ModuleAPI` 仅提供可中断等待、只读设备快照、Warning、状态更新和本次总 timeout。
-Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O 仍必须由模块
-设置有限 timeout。
+`ModuleAPI` 仅提供可中断等待/`checkpoint()`、只读设备快照、Warning、状态更新和本次
+总 timeout。Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O
+仍必须由模块设置有限 timeout。
 
 ## SEQ 与安全收尾
 

@@ -33,6 +33,7 @@ from ..module_api import (
     ModuleWarning,
     _ModuleOperationCancelled,
 )
+from ..module_commands import ModuleCommandSpec, normalize_module_commands
 from .manifest import ModuleColumn, ModuleDescriptor
 
 
@@ -200,6 +201,7 @@ def module_worker_main(
     """子进程入口：验证扩展、加载后端并串行执行生命周期请求。"""
 
     backend: Any = None
+    sequence_commands: tuple[ModuleCommandSpec, ...] = ()
     # 后端方法和 context 回调可能从不同线程发送消息；Pipe 的多次写必须保持 frame
     # 边界，不能让两个 JSON 字节串互相穿插。
     send_lock = threading.Lock()
@@ -263,6 +265,17 @@ def module_worker_main(
                 f"missing: {', '.join(missing)}"
             )
         columns = _normalize_columns(getattr(backend, "columns", None))
+        sequence_commands = normalize_module_commands(
+            descriptor.id,
+            getattr(backend, "sequence_commands", ()),
+        )
+        if sequence_commands and not callable(
+            getattr(backend, "execute_sequence_command", None)
+        ):
+            raise TypeError(
+                "Module declares sequence_commands but does not implement "
+                "execute_sequence_command(command_id, parameters, api)"
+            )
         # 只有源码、API 和隔离依赖全部验证并成功实例化后才发送 ready。主进程在收到
         # ready 之前不会把模块标记为 Enabled。
         send({
@@ -270,6 +283,10 @@ def module_worker_main(
             "columns": [
                 {"name": column.name, "unit": column.unit}
                 for column in columns
+            ],
+            "sequence_commands": [
+                command.to_payload()
+                for command in sequence_commands
             ],
         })
     except Exception as exc:
@@ -444,6 +461,42 @@ def module_worker_main(
                         "MODULE_MEASUREMENT_SLOT_INVALID",
                     )
                 result = _invoke_measure(backend.measure, slot, api)
+            elif action == "sequence_command":
+                command_id = str(payload.get("command_id", ""))
+                parameters = payload.get("parameters", {})
+                if not isinstance(parameters, dict):
+                    raise ModuleError(
+                        "The core supplied invalid module command parameters",
+                        "MODULE_SEQUENCE_COMMAND_INVALID",
+                        command_id,
+                    )
+                known = {
+                    command.command_id
+                    for command in sequence_commands
+                }
+                if command_id not in known:
+                    raise ModuleError(
+                        f"Unknown module sequence command: {command_id}",
+                        "MODULE_SEQUENCE_COMMAND_UNKNOWN",
+                        command_id,
+                    )
+                method = getattr(
+                    backend,
+                    "execute_sequence_command",
+                    None,
+                )
+                if not callable(method):
+                    raise ModuleError(
+                        "Module sequence command handler is unavailable",
+                        "MODULE_SEQUENCE_COMMAND_HANDLER_MISSING",
+                        command_id,
+                    )
+                result = _invoke(
+                    method,
+                    command_id,
+                    dict(parameters),
+                    api,
+                )
             elif action == "module_close":
                 result = _invoke(backend.close, api)
             else:
@@ -515,6 +568,7 @@ class ModuleWorkerClient:
         self._lock = threading.RLock()
         self._state_lock = threading.Lock()
         self._request_number = 0
+        self.sequence_commands: tuple[ModuleCommandSpec, ...] = ()
 
     @staticmethod
     def _timeout(value: float, operation: str) -> float:
@@ -701,6 +755,19 @@ class ModuleWorkerClient:
                 )
             column_names.add(name)
             columns.append(ModuleColumn(name, unit))
+        try:
+            sequence_commands = normalize_module_commands(
+                self.descriptor.id,
+                hello.get("sequence_commands", []),
+            )
+        except (TypeError, ValueError) as exc:
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise WorkerRequestError(
+                f"Module worker returned invalid sequence command metadata: {exc}",
+                "MODULE_WORKER_START_FAILED",
+                self.descriptor.id,
+            ) from exc
+        self.sequence_commands = sequence_commands
         return tuple(columns)
 
     def request(

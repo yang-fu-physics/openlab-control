@@ -25,7 +25,13 @@ from ..extensions.trust import (
     extension_tree_digest,
 )
 from ..models import DeviceSnapshot, Severity
+from ..module_commands import (
+    ModuleCommandSpec,
+    module_command_key,
+    validate_module_command_parameters,
+)
 from ..plugins import DeviceManager
+from ..sequence.model import Command, CommandType
 from .manifest import ModuleDescriptor, module_dependency_errors, module_dependency_directory
 from .worker import ModuleWorkerClient, WorkerRequestError
 
@@ -44,6 +50,7 @@ class ModuleRuntimeRecord:
     state: str = "disabled"
     status: dict[str, Any] = field(default_factory=dict)
     client: ModuleWorkerClient | None = None
+    sequence_commands: tuple[ModuleCommandSpec, ...] = ()
 
 
 @dataclass(slots=True)
@@ -177,6 +184,13 @@ class MeasurementModuleService:
             "state": record.state,
             "status": deepcopy(record.status),
             "message": message,
+            # 只有 Enabled 状态才允许 UI 注册这些指令。初始化和 Disabled 消息始终
+            # 发送空列表，避免 open 尚未成功时出现一个实际不可执行的菜单项。
+            "sequence_commands": (
+                [command.to_payload() for command in record.sequence_commands]
+                if record.enabled
+                else []
+            ),
         })
 
     def _system_payload(self) -> dict[str, dict[str, Any]]:
@@ -355,6 +369,7 @@ class MeasurementModuleService:
             record.client = None
             record.enabled = False
             record.state = "faulted"
+            record.sequence_commands = ()
             self._publish(record, str(error))
         if warning_allowed and severity is Severity.WARNING:
             return None
@@ -397,6 +412,7 @@ class MeasurementModuleService:
         record.client = None
         record.enabled = False
         record.state = "disabled"
+        record.sequence_commands = ()
         self._publish(record, message)
 
     async def enable(self, module_id: str) -> None:
@@ -428,6 +444,7 @@ class MeasurementModuleService:
             # DAT schema 由已验证 worker 返回。只有握手成功才写入 descriptor，避免
             # 发现阶段 import 第三方代码，也避免清单和实际输出维护两份列定义。
             record.descriptor.columns = columns
+            record.sequence_commands = client.sequence_commands
             result = await self._request(record, "open")
         except WorkerRequestError as exc:
             await self._reset_failed_enable(
@@ -524,6 +541,7 @@ class MeasurementModuleService:
         record.client = None
         record.enabled = False
         record.state = "disabled"
+        record.sequence_commands = ()
         if failure is None:
             self.events.resolve_source(f"module:{module_id}")
             self._publish(record, f"{record.descriptor.name} disabled")
@@ -606,6 +624,150 @@ class MeasurementModuleService:
         return tuple(
             record.descriptor for record in self.records.values() if record.enabled
         )
+
+    def sequence_command_spec(
+        self,
+        module_id: str,
+        command_id: str,
+    ) -> ModuleCommandSpec | None:
+        """返回当前 Enabled 模块声明的指令；Disabled 模块不形成可执行注册表。"""
+
+        record = self.records.get(module_id)
+        if record is None or not record.enabled:
+            return None
+        return next(
+            (
+                spec
+                for spec in record.sequence_commands
+                if spec.command_id == command_id
+            ),
+            None,
+        )
+
+    def sequence_command_issues(self, command: Command) -> tuple[str, ...]:
+        """执行前按当前 Enabled 注册表验证通用 SEQ 信封和模块参数。"""
+
+        key = module_command_key(command)
+        if key is None:
+            return ()
+        module_id, command_id = key
+        record = self.records.get(module_id)
+        if record is None:
+            return (f"Measurement module {module_id!r} is not installed",)
+        if not record.enabled:
+            return (f"Measurement module {module_id!r} must be Enabled",)
+        spec = self.sequence_command_spec(module_id, command_id)
+        if spec is None:
+            return (
+                f"Enabled module {module_id!r} does not declare sequence command {command_id!r}",
+            )
+        if command.type is not spec.command_type:
+            expected = "Module Scan" if spec.kind == "scan" else "Module Command"
+            return (
+                f"Module command {module_id}.{command_id} must use {expected}",
+            )
+        return validate_module_command_parameters(spec, command.params)
+
+    async def execute_sequence_command(
+        self,
+        command: Command,
+        parameters: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """在冻结模块自己的串行 worker 中执行一次模块指令。
+
+        返回 False 表示模块以 Warning 中止了当前调用；SEQ 继续，但扫描不会在未成功
+        设置该点时执行其子命令。Error/IPC 故障继续抛给 SequenceEngine 中止整次运行。
+        """
+
+        key = module_command_key(command)
+        if key is None:
+            raise DeviceError(
+                "The core supplied a non-module sequence command",
+                "MODULE_SEQUENCE_COMMAND_INVALID",
+            )
+        module_id, command_id = key
+        if not self._sequence_active or module_id not in self._sequence_modules:
+            raise DeviceError(
+                f"Module sequence command requires the Enabled run snapshot: {module_id}",
+                "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
+                module_id,
+            )
+        record = self.records[module_id]
+        spec = self.sequence_command_spec(module_id, command_id)
+        if spec is None:
+            raise DeviceError(
+                f"Module sequence command is unavailable: {module_id}.{command_id}",
+                "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
+                f"{module_id}.{command_id}",
+            )
+        values = dict(command.params if parameters is None else parameters)
+        allowed_names = {field.name for field in spec.fields}
+        if spec.kind == "scan":
+            allowed_names.add(spec.point_parameter)
+        extra_names = sorted(
+            str(name)
+            for name in values
+            if str(name) not in allowed_names
+        )
+        if extra_names:
+            raise DeviceError(
+                "Invalid module sequence command parameters: Unknown parameters: "
+                + ", ".join(extra_names),
+                "MODULE_SEQUENCE_COMMAND_INVALID",
+                f"{module_id}.{command_id}",
+            )
+        if (
+            spec.kind == "scan"
+            and spec.point_parameter not in values
+        ):
+            raise DeviceError(
+                "Invalid module sequence command parameters: Missing scan point parameter "
+                f"{spec.point_parameter}",
+                "MODULE_SEQUENCE_COMMAND_INVALID",
+                f"{module_id}.{command_id}",
+            )
+        # 扫描执行时会额外注入 point_parameter；先只验证 SEQ 中作者声明的字段。
+        declared_values = {
+            field.name: values[field.name]
+            for field in spec.fields
+            if field.name in values
+        }
+        issues = validate_module_command_parameters(spec, declared_values)
+        if issues:
+            raise DeviceError(
+                "Invalid module sequence command parameters: " + "; ".join(issues),
+                "MODULE_SEQUENCE_COMMAND_INVALID",
+                f"{module_id}.{command_id}",
+            )
+        try:
+            result = await self._request(
+                record,
+                "sequence_command",
+                {
+                    "command_id": command_id,
+                    "parameters": values,
+                },
+            )
+        except WorkerRequestError as exc:
+            if exc.severity == "cancelled":
+                return False
+            error = self._operation_error(
+                record,
+                exc,
+                warning_allowed=True,
+            )
+            if error is not None:
+                raise error from exc
+            record.state = "enabled"
+            self._publish(
+                record,
+                f"Module command warning: {command_id}",
+            )
+            return False
+        record.status.update(result)
+        record.state = "enabled"
+        self._publish(record, f"Module command completed: {command_id}")
+        return True
 
     async def prepare_sequence(
         self,
@@ -1089,6 +1251,7 @@ class MeasurementModuleService:
             record.client = None
             record.enabled = False
             record.state = "disabled"
+            record.sequence_commands = ()
             self._publish(record, "Application closing")
 
         await asyncio.gather(*(stop(record) for record in self.records.values()))

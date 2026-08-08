@@ -50,7 +50,8 @@ class _ModuleOperationCancelled(RuntimeError):
 class ModuleAPI:
     """一次模块调用可使用的四项能力。
 
-    - :meth:`sleep`：Pause 不计时、Stop 可打断的等待；传入 ``0`` 即只检查一次。
+    - :meth:`sleep`：Pause 不计时、Stop 可打断的等待。
+    - :meth:`checkpoint`：在长循环或两次仪表 I/O 之间响应 Pause/Stop。
     - :meth:`devices`：读取最新温度、磁场和 Monitor 快照。
     - :meth:`warn`：报告或解除可恢复告警。
     - :meth:`status`：更新模块窗口中的只读状态。
@@ -109,6 +110,22 @@ class ModuleAPI:
             time.sleep(chunk)
             remaining -= max(0.0, time.monotonic() - started)
             self._checkpoint(request_timeout)
+
+    def checkpoint(self) -> None:
+        """立即执行一次 Pause/Stop 检查，不引入人为等待。
+
+        它不能中断已经进入厂商驱动的阻塞调用，因此真实仪表仍须配置有限 I/O timeout。
+        ``sleep(0)`` 保持相同效果；显式方法更适合表达长循环中的安全检查点。
+        """
+
+        request_timeout = min(
+            1.0,
+            self._positive_finite(
+                self._operation_timeout_seconds,
+                "Module operation timeout",
+            ),
+        )
+        self._checkpoint(request_timeout)
 
     def devices(
         self,

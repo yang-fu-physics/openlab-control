@@ -96,6 +96,10 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 5. 程序显示 `Initializing <module>...`；初始化成功后才真正勾选并打开模块窗口。
 6. 初始化失败会弹 Error，仍保持 Disabled。
 
+如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 `Sequence Command Bar` 会新增一个
+直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
+worker 通信失效后立即移除，不会留下一个无法执行的菜单项。
+
 模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块可把窗口带到前面。
 
 ### Settings 与 Status
@@ -185,6 +189,28 @@ close 失败时程序报告 Error，并在关闭总上限内强制回收模块�
   `create` / `open|create` 可选或新建文件。
 - 插入在 Scan/End Scan 上时会进入该 Scan；否则插在所选命令之后。
 - 所有温场弹窗直接显示配置中的上下限和最大速率。
+### 模块自定义指令
+
+模块完成 Enable 后，可在右侧直接出现例如：
+
+```text
+Keithley 2400
+├─ Set Current
+└─ Scan Current
+```
+
+- `Set Current` 一类普通指令完成模块动作后继续下一行，不产生 DAT 行。
+- `Scan Current` 一类扫描指令与温场 Scan 一样可任意嵌套；每个点先由该模块设置成功，
+  再执行该点下面的全部子命令。
+- 子命令是 `Measure` 时，仍按当前所有 Enabled 模块和逻辑槽位规则测量；模块扫描不会
+  暗中替用户增加一次测量。
+- 同一模块的自定义指令、`measure`、`run_start/run_end` 共用一个串行 worker，不会
+  同时访问同一 VISA/GPIB session；不同模块在 `Measure` 中仍可并行。
+- 自定义指令对仪表的改变只属于本次运行状态，不修改 Settings 页或持久设置。
+
+SEQ 使用通用 `Module Command/Module Scan` 文本，因此即使相关模块未安装也不会丢失
+原始行。此时行显示红色；Load 只给 Warning，Run 则要求对应模块已 Enable 且仍声明同一
+稳定指令 ID。框架不会自动 Enable、Apply、安装模块或把未知指令当成其他指令执行。
 
 ### 多行操作
 
@@ -222,12 +248,15 @@ Run 开始后：
 - SEQ、模块 Enable/Disable/Refresh、Settings/Apply 和手动动作锁定；
 - 所有 Enabled 模块成为本次固定 Schema；
 - 第一条指令前发送模块 `run_start` 事件并冻结 `slots`；
+- 模块自定义指令在同一冻结模块集合和同一串行 IPC 中执行；
 - 每个 Measure 按逻辑槽位并行调用参与模块的 `measure(slot, api)`；
 - 最终按 completed/stopped/error 发送每个模块的 `run_end` 事件。
 
 ### Pause
 
-Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也不会断开设备。Resume 继续。
+Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也不会断开设备。模块自定义
+长循环须调用 `api.checkpoint()` 或 `api.sleep()` 才能在循环中响应；已经进入厂商驱动的
+阻塞调用只能等待其有限 I/O timeout。Resume 从原位置继续。
 
 ### Stop
 

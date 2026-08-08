@@ -189,6 +189,39 @@ class ModuleWindow(QDialog):
             raise TypeError("Frontend.dump() must return a mapping")
         return deepcopy(dict(values))
 
+    def edit_sequence_command(
+        self,
+        command_id: str,
+        parameters: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """委托可选 Frontend 打开模块自定义参数窗口。
+
+        ``None`` 表示用户取消；接受时只能返回普通 Mapping。方法运行在 GUI 线程，只能
+        编辑参数，不能借此访问 worker、VISA 或温场控制。
+        """
+
+        editor = getattr(
+            self.frontend,
+            "edit_sequence_command",
+            None,
+        )
+        if not callable(editor):
+            raise TypeError(
+                "Command declares custom_editor but Frontend does not implement "
+                "edit_sequence_command(command_id, parameters)"
+            )
+        result = editor(
+            str(command_id),
+            deepcopy(dict(parameters)),
+        )
+        if result is None:
+            return None
+        if not isinstance(result, Mapping):
+            raise TypeError(
+                "Frontend.edit_sequence_command() must return a mapping or None"
+            )
+        return deepcopy(dict(result))
+
     def has_unapplied_edits(self) -> bool:
         return self._dirty or self.settings() != self._baseline_settings
 

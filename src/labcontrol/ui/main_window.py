@@ -60,6 +60,12 @@ from ..models import (
     Severity,
     StabilityState,
 )
+from ..module_commands import (
+    ModuleCommandSpec,
+    module_command_key,
+    normalize_module_commands,
+    validate_module_command_parameters,
+)
 from ..measurement.manifest import (
     ModuleDescriptor,
     discover_modules,
@@ -69,7 +75,14 @@ from ..measurement.manifest import (
 )
 from ..measurement.settings import load_settings, save_settings
 from ..runtime import RuntimeService
-from ..sequence.model import COMMAND_SPECS, SPECS_BY_TYPE, Command, CommandType, SequenceDocument
+from ..sequence.model import (
+    COMMAND_SPECS,
+    SPECS_BY_TYPE,
+    Command,
+    CommandSpec,
+    CommandType,
+    SequenceDocument,
+)
 from ..sequence.module_settings import (
     SequenceModuleSettings,
     load_sequence_module_settings,
@@ -136,6 +149,16 @@ class MainWindow(QMainWindow):
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
+        # 这份注册表只包含 open 已成功的 Enabled 模块。Disable 或 worker 故障会立即
+        # 从右侧指令树移除对应顶层组，但文档中的通用 Module 行仍原样保留。
+        self._module_command_specs: dict[
+            tuple[str, str],
+            ModuleCommandSpec,
+        ] = {}
+        self._module_command_groups: dict[
+            str,
+            QTreeWidgetItem,
+        ] = {}
         self._pending_run: tuple[dict[str, dict[str, object]], list[object]] | None = None
         # Enable/Disable 是提交到后台 event loop 的 Future。必须保留并收取异常，
         # 否则在后台尚未来得及发布最终 module_state 前失败时，复选框会永久停在
@@ -322,7 +345,11 @@ class MainWindow(QMainWindow):
                 groups[spec.category] = group
                 self.command_tree.addTopLevelItem(group)
             child = QTreeWidgetItem([spec.label])
-            child.setData(0, Qt.ItemDataRole.UserRole, spec.command_type.value)
+            child.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                ("core", spec.command_type.value),
+            )
             group.addChild(child)
         self.command_tree.expandAll()
         self.command_tree.itemDoubleClicked.connect(self._insert_palette_command)
@@ -330,6 +357,84 @@ class MainWindow(QMainWindow):
         dock.setWidget(panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self.command_dock = dock
+
+    def _set_module_command_palette(
+        self,
+        module_id: str,
+        declarations: object,
+    ) -> None:
+        """原子替换一个 Enabled 模块的顶层指令组。"""
+
+        try:
+            specs = normalize_module_commands(
+                module_id,
+                declarations,
+            )
+        except (TypeError, ValueError) as exc:
+            # worker 和 runtime 已验证过一次；若跨线程消息仍损坏，宁可不注册，也不能
+            # 让一个不可信参数描述进入 GUI 或随后发送给仪表。
+            specs = ()
+            QMessageBox.critical(
+                self,
+                "Module Command Metadata Failed",
+                f"{module_id}: {exc}",
+            )
+        current = tuple(
+            spec
+            for (registered_module, _), spec
+            in self._module_command_specs.items()
+            if registered_module == module_id
+        )
+        if current == specs:
+            self.editor.set_available_module_commands(
+                set(self._module_command_specs)
+            )
+            return
+        group = self._module_command_groups.pop(
+            module_id,
+            None,
+        )
+        if group is not None:
+            index = self.command_tree.indexOfTopLevelItem(group)
+            if index >= 0:
+                self.command_tree.takeTopLevelItem(index)
+        for key in tuple(self._module_command_specs):
+            if key[0] == module_id:
+                self._module_command_specs.pop(key, None)
+        if specs:
+            descriptor = next(
+                (
+                    item
+                    for item in self.module_descriptors
+                    if item.id == module_id
+                ),
+                None,
+            )
+            group = QTreeWidgetItem(
+                [descriptor.name if descriptor is not None else module_id]
+            )
+            group.setFlags(
+                group.flags()
+                & ~Qt.ItemFlag.ItemIsSelectable
+            )
+            for spec in specs:
+                self._module_command_specs[
+                    (module_id, spec.command_id)
+                ] = spec
+                child = QTreeWidgetItem([spec.label])
+                child.setToolTip(0, spec.description)
+                child.setData(
+                    0,
+                    Qt.ItemDataRole.UserRole,
+                    ("module", module_id, spec.command_id),
+                )
+                group.addChild(child)
+            self.command_tree.addTopLevelItem(group)
+            group.setExpanded(True)
+            self._module_command_groups[module_id] = group
+        self.editor.set_available_module_commands(
+            set(self._module_command_specs)
+        )
 
     def _build_status_dock(self) -> None:
         dock = QDockWidget("Device Status", self)
@@ -494,6 +599,15 @@ class MainWindow(QMainWindow):
             )
             for issue in result.issues:
                 self._append_log(issue.level.upper(), "sequence", "PARSE", f"Line {issue.line_number}: {issue.message}")
+            for issue in self._module_command_document_issues(
+                result.document
+            ):
+                self._append_log(
+                    "WARNING",
+                    "sequence",
+                    "MODULE_COMMAND_IMPORT",
+                    issue,
+                )
             for issue in (
                 self._module_settings_import_issues(
                     module_settings
@@ -544,6 +658,9 @@ class MainWindow(QMainWindow):
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
+        self.editor.set_available_module_commands(
+            set(self._module_command_specs)
+        )
         self.sequence_label.setFullText(document.name)
         self.sequence_window.setWindowTitle(document.name)
         # 对已经 Enabled 的模块只替换 Settings 页显示值并标为未 Apply；不会调用
@@ -613,6 +730,70 @@ class MainWindow(QMainWindow):
                 )
         return issues
 
+    def _module_command_document_issues(
+        self,
+        document: SequenceDocument,
+        *,
+        runnable_only: bool = False,
+    ) -> list[str]:
+        """说明文档中的模块指令为何尚不可执行；绝不删除或改写原参数。"""
+
+        installed = {
+            descriptor.id
+            for descriptor in self.module_descriptors
+            if descriptor.valid
+        }
+        issues: list[str] = []
+
+        def visit(
+            commands: list[Command],
+            parent_enabled: bool,
+        ) -> None:
+            for command in commands:
+                effective_enabled = parent_enabled and command.enabled
+                if runnable_only and not effective_enabled:
+                    continue
+                key = module_command_key(command)
+                if key is not None:
+                    module_id, command_id = key
+                    spec = self._module_command_specs.get(key)
+                    prefix = f"{module_id}.{command_id}"
+                    if module_id not in installed:
+                        issues.append(
+                            f"{prefix}: measurement module is not installed"
+                        )
+                    elif module_id not in self.enabled_modules:
+                        issues.append(
+                            f"{prefix}: module must be Enabled before Run or editing"
+                        )
+                    elif spec is None:
+                        issues.append(
+                            f"{prefix}: the Enabled module does not declare this command ID"
+                        )
+                    elif command.type is not spec.command_type:
+                        expected = (
+                            "Module Scan"
+                            if spec.kind == "scan"
+                            else "Module Command"
+                        )
+                        issues.append(
+                            f"{prefix}: command kind must be {expected}"
+                        )
+                    else:
+                        parameter_issues = validate_module_command_parameters(
+                            spec,
+                            command.params,
+                        )
+                        if parameter_issues:
+                            issues.append(
+                                f"{prefix}: "
+                                + "; ".join(parameter_issues)
+                            )
+                visit(command.children, effective_enabled)
+
+        visit(document.commands, True)
+        return list(dict.fromkeys(issues))
+
     def _sync_datafile_label(self) -> None:
         for command in self.document.commands:
             if command.type is CommandType.SET_DATAFILE:
@@ -662,6 +843,11 @@ class MainWindow(QMainWindow):
             )
             for item in result.issues
         ]
+        messages.extend(
+            self._module_command_document_issues(
+                result.document
+            )
+        )
         messages.extend(
             self._module_settings_import_issues(
                 imported
@@ -783,27 +969,28 @@ class MainWindow(QMainWindow):
         value = item.data(0, Qt.ItemDataRole.UserRole)
         if not value or self.current_run_state not in self.TERMINAL_STATES:
             return
-        command_type = CommandType(value)
-        spec = SPECS_BY_TYPE[command_type]
+        if not isinstance(value, tuple) or not value:
+            return
+        if value[0] == "core" and len(value) == 2:
+            command_type = CommandType(value[1])
+            spec: CommandSpec | ModuleCommandSpec = SPECS_BY_TYPE[command_type]
+        elif value[0] == "module" and len(value) == 3:
+            spec = self._module_command_specs.get(
+                (str(value[1]), str(value[2]))
+            )
+            if spec is None:
+                return
+        else:
+            return
         command = spec.create()
-        dialog = CommandDialog(
-            command,
-            spec,
-            self,
-            device_configs=self.config.devices,
-            data_directory=self._last_data_directory,
-        )
-        try:
-            if dialog.exec() == CommandDialog.DialogCode.Accepted:
-                command.update_params(dialog.values())
-                self._remember_datafile_directory(command)
+        if isinstance(spec, ModuleCommandSpec) and spec.custom_editor:
+            values = self._edit_custom_module_command(
+                command,
+                spec,
+            )
+            if values is not None:
+                command.update_params(values)
                 self.editor.insert_command(command)
-        finally:
-            dialog.deleteLater()
-
-    def _edit_command(self, command: Command) -> None:
-        spec = SPECS_BY_TYPE.get(command.type)
-        if spec is None:
             return
         dialog = CommandDialog(
             command,
@@ -814,12 +1001,123 @@ class MainWindow(QMainWindow):
         )
         try:
             if dialog.exec() == CommandDialog.DialogCode.Accepted:
-                command.update_params(dialog.values())
+                values = dialog.values()
+                if isinstance(spec, ModuleCommandSpec):
+                    issues = validate_module_command_parameters(
+                        spec,
+                        values,
+                    )
+                    if issues:
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Module Command",
+                            "\n".join(issues),
+                        )
+                        return
+                command.update_params(values)
+                self._remember_datafile_directory(command)
+                self.editor.insert_command(command)
+        finally:
+            dialog.deleteLater()
+
+    def _edit_command(self, command: Command) -> None:
+        key = module_command_key(command)
+        spec: CommandSpec | ModuleCommandSpec | None = (
+            self._module_command_specs.get(key)
+            if key is not None
+            else SPECS_BY_TYPE.get(command.type)
+        )
+        if spec is None:
+            if key is not None:
+                QMessageBox.warning(
+                    self,
+                    "Module Command Unavailable",
+                    (
+                        f"Enable module {command.module_id!r} with command "
+                        f"{command.module_command_id!r} before editing this line."
+                    ),
+                )
+            return
+        if isinstance(spec, ModuleCommandSpec) and spec.custom_editor:
+            values = self._edit_custom_module_command(
+                command,
+                spec,
+            )
+            if values is not None:
+                command.update_params(values)
+                self.editor.rebuild(command.id)
+                self._mark_dirty()
+            return
+        dialog = CommandDialog(
+            command,
+            spec,
+            self,
+            device_configs=self.config.devices,
+            data_directory=self._last_data_directory,
+        )
+        try:
+            if dialog.exec() == CommandDialog.DialogCode.Accepted:
+                values = dialog.values()
+                if isinstance(spec, ModuleCommandSpec):
+                    issues = validate_module_command_parameters(
+                        spec,
+                        values,
+                    )
+                    if issues:
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Module Command",
+                            "\n".join(issues),
+                        )
+                        return
+                command.update_params(values)
                 self._remember_datafile_directory(command)
                 self.editor.rebuild(command.id)
                 self._mark_dirty()
         finally:
             dialog.deleteLater()
+
+    def _edit_custom_module_command(
+        self,
+        command: Command,
+        spec: ModuleCommandSpec,
+    ) -> dict[str, object] | None:
+        """调用 Enabled 模块 Frontend 的可选自定义参数窗口并验证返回值。"""
+
+        window = self.module_windows.get(spec.module_id)
+        if window is None or spec.module_id not in self.enabled_modules:
+            QMessageBox.warning(
+                self,
+                "Module Command Unavailable",
+                f"Enable module {spec.module_id!r} before editing this command.",
+            )
+            return None
+        try:
+            values = window.edit_sequence_command(
+                spec.command_id,
+                command.params,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Module Command Editor Failed",
+                f"{spec.module_id}.{spec.command_id}: {exc}",
+            )
+            return None
+        if values is None:
+            return None
+        issues = validate_module_command_parameters(
+            spec,
+            values,
+        )
+        if issues:
+            QMessageBox.warning(
+                self,
+                "Invalid Module Command",
+                "\n".join(issues),
+            )
+            return None
+        return dict(values)
 
     def _remember_datafile_directory(self, command: Command) -> None:
         """记住参数窗口明确选择的目录，供下一次系统文件窗口使用。"""
@@ -882,6 +1180,17 @@ class MainWindow(QMainWindow):
 
     def _run_sequence(self) -> None:
         if self.current_run_state not in self.TERMINAL_STATES:
+            return
+        module_command_issues = self._module_command_document_issues(
+            self.document,
+            runnable_only=True,
+        )
+        if module_command_issues:
+            QMessageBox.critical(
+                self,
+                "Module Command Validation Failed",
+                "\n".join(module_command_issues[:12]),
+            )
             return
         validation = parse_sequence(serialize_sequence(self.document), self.document.name)
         errors = [item for item in validation.issues if item.level == "error"]
@@ -1381,6 +1690,10 @@ class MainWindow(QMainWindow):
         state = str(payload.get("state", "disabled"))
         status = dict(payload.get("status", {}))
         message = str(payload.get("message", ""))
+        sequence_commands = payload.get(
+            "sequence_commands",
+            [],
+        )
         was_enabled = module_id in self.enabled_modules
         if enabled:
             self.enabled_modules.add(module_id)
@@ -1400,6 +1713,10 @@ class MainWindow(QMainWindow):
                 self.runtime.disable_module(module_id)
                 return
             window.update_runtime(state, status, message)
+            self._set_module_command_palette(
+                module_id,
+                sequence_commands,
+            )
             if not was_enabled:
                 window.load_settings(
                     self._saved_module_settings(
@@ -1417,6 +1734,9 @@ class MainWindow(QMainWindow):
         elif window is not None and state == "disabled":
             window.update_runtime(state, status, message)
             window.hide()
+            self._set_module_command_palette(module_id, [])
+        elif not enabled:
+            self._set_module_command_palette(module_id, [])
         self.measure_status_label.setText(
             f"{len(self.enabled_modules)} of {len(self.module_descriptors)} measurement modules enabled"
         )
@@ -1489,6 +1809,8 @@ class MainWindow(QMainWindow):
             window.allow_application_close()
             window.close()
         self.module_windows.clear()
+        for module_id in tuple(self._module_command_groups):
+            self._set_module_command_palette(module_id, [])
         self.module_descriptors = descriptors
         self.module_manager.set_descriptors(descriptors)
         self.measure_status_label.setText(

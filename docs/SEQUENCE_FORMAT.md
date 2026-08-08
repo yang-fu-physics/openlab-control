@@ -178,6 +178,36 @@ T End Scan
 duration 范围为 0 到 31536000 秒，`steps` 范围为 1 到 1000000。
 解析器和执行器都会验证这些边界，不会把非法值静默截断为零或一点。
 
+### Measurement Module 自定义指令
+
+模块完成 Enable 后，可以在右侧以自己的名称注册普通指令和扫描指令。SEQ 使用固定的
+通用信封，而不是把每家仪表语法写入核心解析器：
+
+```text
+T Module Command "keithley_2400" "set_current" {"current":0.001,"output":true}
+T Module Scan "keithley_2400" "scan_current" {"points":["1 mA","2 mA"],"settle_seconds":0}
+T     Measure
+T End Scan
+```
+
+- 第一个 JSON 字符串是模块目录 ID，第二个是模块声明的稳定指令 ID，最后必须是标准
+  JSON object；不接受 NaN、Infinity、注释或尾随文本。
+- `Module Command` 完成一次模块动作后继续，不拥有子树。
+- `Module Scan` 的点字段由模块声明。核心按列表原顺序逐点调用模块；该点成功后才执行
+  全部子指令，因此可以继续任意嵌套温场、时间或其他模块 Scan。
+- 模块指令本身不写 DAT。只有显式 `Measure` 按 Enabled 模块和逻辑槽位规则写测量行。
+- 普通动作发生 Warning 时跳到下一条指令；扫描点发生 Warning 时不执行该点子树，随后
+  继续下一点。Error 仍中止整个 SEQ。
+- 指令只改变当前运行中的模块/仪表状态，不修改 Settings 页或持久设置；最终输出保持或
+  关闭仍由模块 `run_end(reason)` 决定。
+- 模块未安装、Disabled 或不再声明该 ID 时，Load 保留完整文本并给 Warning，编辑器把
+  行标红；Run 预检阻止执行，不会自动 Enable、Apply、安装或把它降级为可跳过未知行。
+- 模块 Disable 后，右侧对应指令组立即移除；SEQ 中已经存在的行不会被删除。
+
+参数的字段、默认值、范围和可选自定义窗口由模块声明。参数窗口只是提前检查；模块后端
+必须在发送真实仪表指令前再次验证单位、范围、compliance、输出状态和通信 timeout。
+框架不提供任意 SCPI 直通命令。
+
 ### Measure
 
 唯一有效格式：

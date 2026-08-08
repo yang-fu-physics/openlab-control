@@ -13,7 +13,7 @@ Measurement Module 提供。
 
 ## 主要能力
 
-- MultiVu 风格的浮动 SEQ 编辑器和可任意嵌套的 Temperature/Field/Time Scan。
+- MultiVu 风格的浮动 SEQ 编辑器和可任意嵌套的 Temperature/Field/Time/模块自定义 Scan。
 - Pause、Stop、Call Sequence、Set Datafile、Remark 和无参数 `Measure`。
 - 配置中的温场上下限与最大速率同时约束手动控制、SEQ 参数窗口和运行时执行。
 - 每个设备实例、每个 Measurement Module 分别运行在独立子进程中。
@@ -23,8 +23,8 @@ Measurement Module 提供。
   自动 Apply。
 - 一个 `T Measure` 按模块可选的 `slots` 并集展开，每个通道槽位写一行；同一槽位的
   模块并行，未声明 `slots` 的模块跟随每个槽位测量。
-- Measurement Module 只需 `open(api)`、`measure(slot, api)`、`close(api)`；可选能力仅为
-  `configure(settings, api)`、统一 `on_event(...)` 和 `slots`。
+- Measurement Module 只需 `open(api)`、`measure(slot, api)`、`close(api)`；按需增加
+  `configure`、`on_event`、`slots`，也可声明自己的 SEQ 指令而不修改核心解析器。
 - 模块可为正式结果行附带有限原始采样序列，由中央写入独立无表头 `rawdata` sidecar。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认
@@ -114,6 +114,14 @@ worker；不会污染主进程或覆盖框架统一版本。
 `experiment.seq` 会同时导入这些设置。导入过程不自动 Enable、不连接仪表，也不
 Apply；模块仍遵守“启动默认 Disabled，用户核对后显式 Apply”的安全规则。没有伴随文件
 的旧 SEQ 保持原行为。
+
+模块可以在 `backend.py` 中声明可选 `sequence_commands`。只有模块完成 Enable 后，右侧
+`Sequence Command Bar` 才会直接出现以该模块名称为标题的指令组；Disable 或 worker
+失效时立即移除。普通模块指令只改变该模块的运行状态，模块扫描会逐点调用后端并在每点
+成功后执行其嵌套子命令。它们本身不写 DAT；需要记录测量结果时仍显式插入 `Measure`。
+包含未安装、Disabled 或已删除指令 ID 的 SEQ 仍可打开和原样保存，但相应行标红且 Run
+预检会拒绝执行。完整声明格式、安全边界和自定义参数窗口接口见
+[插件与模块开发](docs/PLUGIN_DEVELOPMENT.md)。
 
 ## 更换温度或磁场设备
 
