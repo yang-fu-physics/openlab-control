@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.13.0 - 2026-08-08
+
+- Enabled Measurement Module 可按需声明自己的普通 SEQ 指令和扫描指令；完成 Enable 后
+  才加入 Sequence Command Bar，Disable 或 worker 失效后立即移除。
+- 模块指令使用稳定模块 ID、指令 ID 和受限 JSON 参数保存；模块缺失时仍可原样读取，
+  但编辑器标红且 Run 预检拒绝执行，不会自动 Enable、Apply 或静默跳过。
+- 模块 Scan 可与 Temperature、Field、Time 及其他模块 Scan 任意嵌套；核心逐点串行调用
+  模块动作，成功后才运行子树，动作本身不生成 DAT 行。
+- `Scan Field` 新增可选的近极性模式：运行到该命令时根据当前实际场选择输入路径或整条
+  反号路径；距离相同时保留输入方向，选定路径在首个设定点前完成全部安全限制验证。
+- 配套 Measurement Module 仓库将仪表协议指令拆分到每台仪表的独立 Python 文件，并把
+  6221/2182A 的 7001 与 3706A 路由实现合并为一个按配置选择的 Delta 模块。
+
 ## 0.12.0 - 2026-08-08
 
 - Measurement Module 改用不兼容的最小约定式接口：清单仅需 name/version，目录名作为
