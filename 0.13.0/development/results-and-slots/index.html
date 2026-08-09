@@ -27,7 +27,7 @@
     
     
       
-        <title>多通道与测量结果 - OpenLab Control</title>
+        <title>多通道数据 - OpenLab Control</title>
       
     
     
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              多通道与测量结果
+              多通道数据
             
           </span>
         </div>
@@ -734,7 +734,7 @@
   <span class="md-ellipsis">
     
   
-    多通道与测量结果
+    多通道数据
   
 
     
@@ -752,7 +752,7 @@
   <span class="md-ellipsis">
     
   
-    多通道与测量结果
+    多通道数据
   
 
     
@@ -778,21 +778,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#slot" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Slot 合并规则
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        稀疏行，而不是填文字
+        四通道模块
       
     </span>
   </a>
@@ -803,7 +792,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        数据异常和系统异常不同
+        没测量的列保持空白
       
     </span>
   </a>
@@ -814,7 +803,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        原始样本
+        同时启用多个模块
       
     </span>
   </a>
@@ -825,7 +814,18 @@
   <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        温度和磁场快照
+        状态只写数字
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        需要保存仪表原始读数时
       
     </span>
   </a>
@@ -855,7 +855,7 @@
   <span class="md-ellipsis">
     
   
-    Settings 与 Status
+    设置与状态窗口
   
 
     
@@ -883,7 +883,7 @@
   <span class="md-ellipsis">
     
   
-    自定义 SEQ 指令
+    模块自己的 SEQ 指令
   
 
     
@@ -911,7 +911,7 @@
   <span class="md-ellipsis">
     
   
-    仪表驱动分层
+    一台仪表一个文件
   
 
     
@@ -1002,7 +1002,7 @@
   <span class="md-ellipsis">
     
   
-    开发温场设备插件
+    更换温度或磁场设备
   
 
     
@@ -1101,7 +1101,7 @@
   <span class="md-ellipsis">
     
   
-    测试策略
+    怎样检查模块
   
 
     
@@ -1532,21 +1532,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#slot" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Slot 合并规则
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        稀疏行，而不是填文字
+        四通道模块
       
     </span>
   </a>
@@ -1557,7 +1546,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        数据异常和系统异常不同
+        没测量的列保持空白
       
     </span>
   </a>
@@ -1568,7 +1557,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        原始样本
+        同时启用多个模块
       
     </span>
   </a>
@@ -1579,7 +1568,18 @@
   <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        温度和磁场快照
+        状态只写数字
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        需要保存仪表原始读数时
       
     </span>
   </a>
@@ -1606,94 +1606,74 @@
   
 
 
-<h1 id="_1">多通道、测量结果与状态<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>一次 <code>Measure</code> 不等于固定一行。核心先收集所有 Enabled 模块声明的逻辑 slot，再按 slot
-逐行调度。</p>
-<h2 id="slot">Slot 合并规则<a class="headerlink" href="#slot" title="Permanent link">&para;</a></h2>
-<p>假设同时启用三个模块：</p>
+<h1 id="_1">让每个通道各写一行<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>程序把“第几行、也是第几个通道”叫作 <code>slot</code>。这个名字只会出现在代码中；把它理解成通道号
+即可。</p>
+<h2 id="_2">四通道模块<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Module</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">slots</span> <span class="o">=</span> <span class="mi">4</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="n">resistance</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read_channel</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="k">return</span> <span class="p">{</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            <span class="sa">f</span><span class="s2">&quot;R</span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">resistance</span><span class="p">,</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>            <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="p">}</span>
+</span></code></pre></div>
+<p>一次 <code>Measure</code> 会调用四次：通道 1、2、3、4 各一次，并写成四行。模块不用在
+<code>measure</code> 里面再循环四次。</p>
+<h2 id="_3">没测量的列保持空白<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>测量通道 2 时，只返回 R2：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">return</span> <span class="p">{</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">&quot;R2&quot;</span><span class="p">:</span> <span class="n">resistance</span><span class="p">,</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>不要给 R1、R3、R4 填 <code>0</code>、<code>None</code>、<code>"N/A"</code> 或 <code>"Error"</code>。不返回这些列，DAT 会自然
+留下空白。</p>
+<h2 id="_4">同时启用多个模块<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>假设同时启用一个四通道模块和一台独立 2400：</p>
 <table>
 <thead>
 <tr>
-<th>模块</th>
-<th>声明</th>
-<th>参与方式</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>四通道电桥</td>
-<td><code>slots = 4</code></td>
-<td>slot 1–4</td>
-</tr>
-<tr>
-<td>只启用奇数通道的模块</td>
-<td><code>slots = (1, 3)</code></td>
-<td>只参与 slot 1、3</td>
-</tr>
-<tr>
-<td>独立 2400</td>
-<td>不声明 <code>slots</code></td>
-<td>跟随每个现有 slot 调用一次</td>
-</tr>
-</tbody>
-</table>
-<p>逻辑 slot 的并集是 1、2、3、4，因此一次 <code>Measure</code> 写四行：</p>
-<table>
-<thead>
-<tr>
-<th>行</th>
-<th>电桥</th>
-<th>奇数通道模块</th>
+<th>DAT 行</th>
+<th>四通道模块</th>
 <th>独立 2400</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>slot 1</td>
-<td>测量</td>
-<td>测量</td>
+<td>通道 1</td>
+<td>测通道 1</td>
 <td>测量一次</td>
 </tr>
 <tr>
-<td>slot 2</td>
-<td>测量</td>
-<td>空列</td>
-<td>测量一次</td>
+<td>通道 2</td>
+<td>测通道 2</td>
+<td>再测量一次</td>
 </tr>
 <tr>
-<td>slot 3</td>
-<td>测量</td>
-<td>测量</td>
-<td>测量一次</td>
+<td>通道 3</td>
+<td>测通道 3</td>
+<td>再测量一次</td>
 </tr>
 <tr>
-<td>slot 4</td>
-<td>测量</td>
-<td>空列</td>
-<td>测量一次</td>
+<td>通道 4</td>
+<td>测通道 4</td>
+<td>再测量一次</td>
 </tr>
 </tbody>
 </table>
-<p>同一 slot 的不同模块并行等待；同一个模块内部仍严格串行。若所有模块都不声明 <code>slots</code>，
-一次 Measure 只有 slot 1。</p>
-<h2 id="_2">稀疏行，而不是填文字<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>每个通道只返回自己的列：</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">slot</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">resistance</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">read_channel</span><span class="p">(</span><span class="n">slot</span><span class="p">)</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="k">return</span> <span class="p">{</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        <span class="sa">f</span><span class="s2">&quot;R</span><span class="si">{</span><span class="n">slot</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">resistance</span><span class="p">,</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="p">}</span>
-</span></code></pre></div>
-<p>不要给未测量通道返回 <code>0</code>、<code>None</code>、<code>"N/A"</code> 或 <code>"Error"</code>。直接省略键，中央 DAT 写入器
-会保持该列为空。</p>
-<h2 id="_3">数据异常和系统异常不同<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>状态码由每个模块定义，不存在强行统一的全局含义。常见约定可以是：</p>
+<p>不声明 <code>slots</code> 的模块会跟随每一行测量。两个四通道模块同时启用时，则按通道号对齐：
+通道 1 和通道 1 写在同一行，通道 2 和通道 2 写在同一行。</p>
+<p>如果某个模块没有启用某一通道，它在那一行的列保持空白，其他模块仍然正常写入。</p>
+<h2 id="_5">状态只写数字<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>每个模块可以自己规定数字含义。例如：</p>
 <table>
 <thead>
 <tr>
 <th>数值</th>
-<th>某个模块中的含义示例</th>
+<th>示例含义</th>
 </tr>
 </thead>
 <tbody>
@@ -1707,46 +1687,35 @@
 </tr>
 <tr>
 <td><code>2</code></td>
-<td>超 compliance</td>
+<td>触发仪表的保护限制（手册中常写 compliance）</td>
 </tr>
 <tr>
-<td><code>3+</code></td>
-<td>作者定义的其他数据状态</td>
+<td><code>3</code> 及以上</td>
+<td>模块自己定义</td>
 </tr>
 </tbody>
 </table>
-<p>如果某次电阻无效：</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">return</span> <span class="p">{</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">&quot;ExcitationCurrent&quot;</span><span class="p">:</span> <span class="n">current</span><span class="p">,</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="n">STATUS_OVER_RANGE</span><span class="p">,</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">}</span>
+<p>测量值无效时，不返回电阻列，只返回状态：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">api</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span><span class="s2">&quot;OVER_RANGE&quot;</span><span class="p">,</span> <span class="s2">&quot;R2 超量程&quot;</span><span class="p">,</span> <span class="s2">&quot;R2&quot;</span><span class="p">)</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">return</span> <span class="p">{</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>电阻列被省略，同时用 <code>api.warn(...)</code> 报告可恢复数据问题。SEQ 继续，Warning 按
-<code>source/code/context</code> 去重。</p>
-<p>如果通讯、输出状态、联锁或安全状态无法确认，应抛 <code>ModuleError</code> 或普通异常，使整个 SEQ
-进入 Error。不要用一个普通状态码掩盖系统故障。</p>
-<h2 id="_4">原始样本<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<p>需要保存仪表原始读数时返回二元组：</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">row</span> <span class="o">=</span> <span class="p">{</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="sa">f</span><span class="s2">&quot;R</span><span class="si">{</span><span class="n">slot</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">mean_resistance</span><span class="p">,</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="s2">&quot;ResistanceStdDev&quot;</span><span class="p">:</span> <span class="n">stddev</span><span class="p">,</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="s2">&quot;SampleCount&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">raw_values</span><span class="p">),</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">}</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="k">return</span> <span class="n">row</span><span class="p">,</span> <span class="n">raw_values</span>
+<p>这种情况只表示本次数据不可用，SEQ 可以继续。如果仪表断线、输出状态无法确认或安全状态
+不明，则应该报 Error 并停止 SEQ，不能只写一个状态码继续运行。</p>
+<h2 id="_6">需要保存仪表原始读数时<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>这一步是可选的。返回“正式数据 + 原始数字列表”即可：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">row</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="sa">f</span><span class="s2">&quot;R</span><span class="si">{</span><span class="n">channel</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">:</span> <span class="n">mean_resistance</span><span class="p">,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="s2">&quot;ResistanceStdDev&quot;</span><span class="p">:</span> <span class="n">stddev</span><span class="p">,</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="s2">&quot;SampleCount&quot;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">raw_values</span><span class="p">),</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">}</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="k">return</span> <span class="n">row</span><span class="p">,</span> <span class="n">raw_values</span>
 </span></code></pre></div>
-<p>核心把每个模块的有限数值序列写到独立无表头 rawdata sidecar，每一行与正式 DAT 行对应。
-模块不能自行写主 DAT，也没有 <code>emit_row</code>。</p>
-<p>边界要求：</p>
-<ul>
-<li>rawdata 只能是有限数字；</li>
-<li>单次最多 32,768 个值；</li>
-<li>Mapping 只能包含 <code>columns</code> 已声明的键；</li>
-<li>NaN、Infinity、复杂对象和过大 IPC 消息都会被拒绝。</li>
-</ul>
-<h2 id="_5">温度和磁场快照<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
-<p>核心在一条正式测量行中只取一份温场快照。模块需要在切换前后读取实际环境时，可在自己的
-测量流程里调用 <code>api.devices()</code> 两次并自行求平均；不要修改核心 DAT 的系统列。</p>
+<p>主程序会把原始数字写进单独的 rawdata 文件。模块不要自己写 DAT，也不要在原始数据中放
+文字、<code>NaN</code> 或 <code>Infinity</code>。</p>
+<p>公共数据列由主程序写入。测量模块只返回自己声明的测量列。</p>
 
 
 
@@ -1801,13 +1770,13 @@
         
         
           
-          <a href="../frontend/" class="md-footer__link md-footer__link--next" aria-label="下一页: Settings 与 Status">
+          <a href="../frontend/" class="md-footer__link md-footer__link--next" aria-label="下一页: 设置与状态窗口">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 下一页
               </span>
               <div class="md-ellipsis">
-                Settings 与 Status
+                设置与状态窗口
               </div>
             </div>
             <div class="md-footer__button md-icon">
