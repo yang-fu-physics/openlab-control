@@ -15,6 +15,7 @@ runs/*
 /gui_smoke.png
 /source-gui-smoke.png
 /docs/source-gui-smoke.png
+/configs/*.local.toml
 /module_data/*
 !/module_data/.gitkeep
 /wheels/*

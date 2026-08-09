@@ -96,6 +96,9 @@ class ReleaseContractTests(unittest.TestCase):
         source_launcher = (ROOT / "run.bat").read_text(encoding="utf-8")
         self.assertNotIn(r"dist\OpenLabControl", source_launcher)
         self.assertIn(r".venv\Scripts\pythonw.exe", source_launcher)
+        self.assertEqual(source_launcher.count("run.py %*"), 2)
+        source_ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("/configs/*.local.toml", source_ignore)
 
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
         self.assertIn(
