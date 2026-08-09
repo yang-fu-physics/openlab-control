@@ -78,17 +78,17 @@ jobs:
 
           if [[ "$EVENT_NAME" == "release" ]]; then
             version="${RELEASE_TAG#v}"
-            mike deploy --push --update-aliases "$version" stable
+            mike deploy --push --update-aliases --alias-type redirect "$version" stable
             mike set-default --push stable
           elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$INPUT_CHANNEL" == "stable" ]]; then
             version="${INPUT_VERSION:-$(project_version)}"
-            mike deploy --push --update-aliases "$version" stable
+            mike deploy --push --update-aliases --alias-type redirect "$version" stable
             mike set-default --push stable
           elif git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            mike deploy --push --update-aliases dev
+            mike deploy --push --update-aliases --alias-type redirect dev
           else
             version="$(project_version)"
-            mike deploy --push --update-aliases "$version" stable
+            mike deploy --push --update-aliases --alias-type redirect "$version" stable
             mike set-default --push stable
-            mike deploy --push --update-aliases dev
+            mike deploy --push --update-aliases --alias-type redirect dev
           fi
