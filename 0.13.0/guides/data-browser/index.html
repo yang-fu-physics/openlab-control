@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://yang-fu-physics.github.io/openlab-control/0.13.0/guides/safety-checklist/">
+        <link rel="canonical" href="https://yang-fu-physics.github.io/openlab-control/0.13.0/guides/data-browser/">
       
       
-        <link rel="prev" href="../offline-packaging/">
+        <link rel="prev" href="../../OPERATIONS/">
       
       
-        <link rel="next" href="../contributing/">
+        <link rel="next" href="../troubleshooting/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>仪表安全清单 - OpenLab Control</title>
+        <title>Data Browser - OpenLab Control</title>
       
     
     
@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#_1" class="md-skip">
+        <a href="#data-browser-dat" class="md-skip">
           跳转至
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              仪表安全清单
+              Data Browser
             
           </span>
         </div>
@@ -275,10 +275,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../../getting-started/first-sequence/" class="md-tabs__link">
           
   
@@ -341,12 +343,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../../development/testing/" class="md-tabs__link">
           
   
@@ -593,8 +593,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -610,19 +612,22 @@
     
     
       
+        
+        
+      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -640,7 +645,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -711,10 +716,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../data-browser/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Browser
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -730,6 +762,70 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        打开文件
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        选择曲线
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        时间与刻度
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        保存显示方式
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1089,10 +1185,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -1108,22 +1202,19 @@
     
     
       
-        
-        
-      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1141,7 +1232,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1212,37 +1303,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    仪表安全清单
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../safety-checklist/" class="md-nav__link">
         
   
   
@@ -1258,103 +1322,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        连接前
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#connect-open" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        connect / open
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        设置与写命令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        测量
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pause-stop-error" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pause / Stop / Error
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#device-plugin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Device Plugin 特别检查
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        真机放行
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1663,10 +1630,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        连接前
+        打开文件
       
     </span>
   </a>
@@ -1674,10 +1641,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#connect-open" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        connect / open
+        选择曲线
       
     </span>
   </a>
@@ -1688,7 +1655,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        设置与写命令
+        时间与刻度
       
     </span>
   </a>
@@ -1699,40 +1666,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        测量
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pause-stop-error" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pause / Stop / Error
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#device-plugin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Device Plugin 特别检查
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        真机放行
+        保存显示方式
       
     </span>
   </a>
@@ -1759,74 +1693,34 @@
   
 
 
-<h1 id="_1">真实仪表安全清单<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>这份清单是进入真实仪表测试前的最低门槛，不是免责条款。任何一项无法确认，都应停止自动
-控制并回到只读或仿真模式。</p>
-<h2 id="_2">连接前<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核对仪表完整型号、选件、固件和接口类型。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 仪表本机限流、限压、限温、磁体保护和联锁已经人工设置。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 明确人工急停位置和断电后的设备行为。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 样品与测试负载能承受最坏输出。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 软件配置的地址和上下限不包含实验室秘密或误连其他设备的风险。</li>
+<h1 id="data-browser-dat">用 Data Browser 查看 DAT<a class="headerlink" href="#data-browser-dat" title="Permanent link">&para;</a></h1>
+<p>Data Browser 可以打开任意 DAT，不要求它属于当前 SEQ，也不会改变正在运行的实验文件。</p>
+<h2 id="_1">打开文件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ol>
+<li>点击 <strong>Graph → Data Browser</strong>。</li>
+<li>点击 <strong>Open DAT</strong>。程序会直接打开 Windows 文件选择窗口。</li>
+<li>选择任意 <code>.dat</code> 文件；也可以把 DAT 拖到主窗口。</li>
+</ol>
+<p>窗口只跟踪你明确打开的文件。文件继续追加时会自动刷新；临时无法读取时会等待并重试，
+不会因此增加仪表查询次数。需要立即重新读取时点击 <strong>Reload</strong>。</p>
+<h2 id="_2">选择曲线<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>在图区域右键可以：</p>
+<ul>
+<li>选择 X 列；</li>
+<li>勾选一个或多个 Y 列；</li>
+<li>选择 Overlay（多条曲线放在同一图）或 Stacked（分图、共用 X）；</li>
+<li>切换 X/Y 对数坐标；</li>
+<li>Reset Zoom。</li>
 </ul>
-<h2 id="connect-open">connect / open<a class="headerlink" href="#connect-open" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 导入和构造阶段没有 I/O。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 会话使用有限 timeout。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 第一条操作是身份/状态读取，而不是配置写入。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 型号或固件不匹配时 fail-closed。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 保存设置只加载到界面，不自动 Apply。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 部分初始化失败后仍能安全 close/disconnect。</li>
-</ul>
-<h2 id="_3">设置与写命令<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核心、插件/模块和仪表本机三层都有限制。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 后端再次验证单位、有限数、符号、量程和当前状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Apply 后读取关键配置并比较。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 写 timeout 被视为结果不确定，不自动重放。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 多条设置命令失败时能识别仪表可能处于部分配置状态。</li>
-</ul>
-<h2 id="_4">测量<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 每个通道切换、pause、dwell、arm 和 trigger 顺序来自对应手册。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 每个 I/O timeout 为总操作超时预留安全清理时间。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 超量程、compliance、坏状态字和损坏响应分别测试。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 数据异常留空测量值并写模块数字状态码。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 通讯、输出或联锁状态无法确认时抛 Error，而不是仅写状态码。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> rawdata 只含有限测量值，行与正式 DAT 对齐。</li>
-</ul>
-<h2 id="pause-stop-error">Pause / Stop / Error<a class="headerlink" href="#pause-stop-error" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 长循环和相邻 I/O 之间调用 <code>api.checkpoint()</code>。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 人工验证 Pause 不会造成意外输出变化。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> completed、stopped、error 三种 <code>run_end</code> 都执行模块定义的收尾。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Stop/Error 后温度和磁场保持当前状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>close</code> 可重复调用，并在部分初始化后工作。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 即使一个仪表关闭失败，也继续释放其他会话。</li>
-</ul>
-<h2 id="device-plugin">Device Plugin 特别检查<a class="headerlink" href="#device-plugin" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>poll()</code> 返回当前值、目标、速率和活动状态，时间戳使用单调时钟。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>hold()</code> 使用新鲜读回，绝不代入缓存零或猜测值。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 读链路重连后读取真实 target/rate，不自动重放旧写命令。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 恢复窗结束后进入 Faulted，并阻止后续控制。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 同类设备只有一个 primary，其余保持只读。</li>
-</ul>
-<h2 id="_5">真机放行<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 先以只读方式测试身份和状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 再用最低风险输出和测试负载执行单次命令。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 人工制造 timeout、断线、Stop 和 Error。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 对照仪表面板确认软件报告与真实输出一致。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 保存脱敏命令顺序、读回和测试结果。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 未完成验证时继续标注 Beta，并禁止无人值守。</li>
-</ul>
-<div class="admonition danger">
-<p class="admonition-title">进程退出不等于仪表安全</p>
-<p>worker 被终止只能证明本机进程结束，不能证明外部仪表已关闭输出。最终安全必须由仪表
-本机保护、联锁和人工急停保证。</p>
-</div>
+<p>鼠标拖框可以放大。双击离鼠标最近的数据点，会显示该行的完整字段。</p>
+<h2 id="_3">时间与刻度<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>能确认来源的 <code>Timestamp(s)</code> 或 <code>Time Stamp (sec)</code> 会显示成实际日期和时间。老 DAT 若没有
+足够信息判断时间起点，则保留原始秒值，避免显示错误日期。</p>
+<p>普通数值轴使用 <code>1 / 2 / 5 × 10ⁿ</code> 一类整齐刻度；时间轴按毫秒、秒、分钟、小时或日期
+对齐。缩放只改变显示范围，不修改 DAT。</p>
+<h2 id="_4">保存显示方式<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>点击 <strong>Save PLT</strong> 会在 DAT 旁保存同名 <code>.plt</code>，记录 X/Y、布局和坐标类型。以后再次打开
+该 DAT 时会自动恢复；<code>.plt</code> 不包含测量数据，可以删除后重新设置。</p>
 
 
 
@@ -1864,7 +1758,7 @@
       <nav class="md-footer__inner md-grid" aria-label="页脚" >
         
           
-          <a href="../offline-packaging/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 离线安装与发布">
+          <a href="../../OPERATIONS/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 操作手册">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1874,20 +1768,20 @@
                 上一页
               </span>
               <div class="md-ellipsis">
-                离线安装与发布
+                操作手册
               </div>
             </div>
           </a>
         
         
           
-          <a href="../contributing/" class="md-footer__link md-footer__link--next" aria-label="下一页: 参与核心开发">
+          <a href="../troubleshooting/" class="md-footer__link md-footer__link--next" aria-label="下一页: 常见问题">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 下一页
               </span>
               <div class="md-ellipsis">
-                参与核心开发
+                常见问题
               </div>
             </div>
             <div class="md-footer__button md-icon">
