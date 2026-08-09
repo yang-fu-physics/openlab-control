@@ -2,11 +2,13 @@
 
 ## Unreleased
 
+- 开发者网站暂时只发布一个稳定入口；移除开发版菜单和 `dev` 发布目录，主分支文档检查
+  通过后直接更新稳定站点。
 - 重写开发者网站的初学者路线，用日常语言解释模块文件、通道、设置和测试；Measurement
   Module 与温度/磁场 Device Plugin 改为两条独立教程，不再在模块章节混讲。
 - 新增基于 MkDocs Material 的中文开发者网站，包含首页、快速开始、Measurement Module、
   Device Plugin、仪表驱动分层、离线发布、排错、安全清单和自动公共 API 页面。
-- 网站使用 `dev` / `stable` 版本通道、站内搜索、代码复制和 GitHub Pages 自动发布；
+- 网站提供站内搜索、代码复制和 GitHub Pages 自动发布；
   严格构建会在链接、代码片段或 API 文档失效时阻止部署。
 - 新增无硬件 `tutorial_resistance` 四通道教程模块及测试，展示 Settings/Status、稀疏
   测量行、数字状态码、rawdata、SI 电流写法和模块自定义普通/扫描 SEQ 指令。

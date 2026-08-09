@@ -17,16 +17,8 @@ on:
     types: [published]
   workflow_dispatch:
     inputs:
-      channel:
-        description: Documentation channel to publish
-        required: true
-        default: dev
-        type: choice
-        options:
-          - dev
-          - stable
       version:
-        description: Stable version label; empty uses pyproject.toml
+        description: Version label; empty uses pyproject.toml
         required: false
         type: string
 
@@ -67,7 +59,6 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_CHANNEL: ${{ inputs.channel }}
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
@@ -78,17 +69,16 @@ jobs:
 
           if [[ "$EVENT_NAME" == "release" ]]; then
             version="${RELEASE_TAG#v}"
-            mike deploy --push --update-aliases --alias-type redirect "$version" stable
-            mike set-default --push stable
-          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$INPUT_CHANNEL" == "stable" ]]; then
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             version="${INPUT_VERSION:-$(project_version)}"
-            mike deploy --push --update-aliases --alias-type redirect "$version" stable
-            mike set-default --push stable
-          elif git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
-            mike deploy --push --update-aliases --alias-type redirect dev
           else
             version="$(project_version)"
-            mike deploy --push --update-aliases --alias-type redirect "$version" stable
-            mike set-default --push stable
-            mike deploy --push --update-aliases --alias-type redirect dev
           fi
+
+          # 当前只发布一个稳定站点。若旧的 dev 目录仍存在，发布时一并删除。
+          if mike list -j dev >/dev/null 2>&1; then
+            mike delete --push dev
+          fi
+
+          mike deploy --push --update-aliases --alias-type redirect "$version" stable
+          mike set-default --push stable

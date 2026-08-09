@@ -10,8 +10,8 @@ Measurement Module 提供。
 6221/2182A/7001/3706A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站提供可搜索的中文
-快速开始、Measurement Module、Device Plugin、测试、安全清单和公共 API 教程；`dev` 与
-`stable` 文档通过版本菜单切换。
+快速开始、Measurement Module、Device Plugin、测试、安全清单和公共 API 教程。目前只
+发布稳定版文档，不显示开发版入口。
 
 ![主窗口](docs/main-window-preview.png)
 

@@ -63,9 +63,6 @@ plugins:
             show_root_full_path: false
             show_signature_annotations: true
             show_source: true
-  - mike:
-      canonical_version: stable
-
 markdown_extensions:
   - abbr
   - admonition
@@ -92,10 +89,6 @@ markdown_extensions:
       custom_checkbox: true
 
 extra:
-  version:
-    provider: mike
-    default: stable
-    alias: true
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/yang-fu-physics/openlab-control
