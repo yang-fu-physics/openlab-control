@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.13.1 - 2026-08-10
+
+- Keithley 2400、2614B 和 6517B Measurement Module 增加默认勾选的
+  `Output OFF at SEQ end`。同时取消逐行关闭与 SEQ-end 关闭后，成功测量留下的连续偏置
+  可跨 completed、Stop 或 Error 保持，下一次 `run_start` 不会制造短暂掉电。
+- 连续偏置只在输出状态及全部关键设置读回一致时保留；前面板改值、读回失败、Measure
+  异常、重新 Apply、Disable 或应用退出仍会强制进入各模块定义的安全关闭状态。
+- 2614B 额外禁止 Disabled 通道保留输出；6517B 只接受完整的
+  operate + zero-check OFF 或 standby + zero-check ON 状态组合。
+- 修正 Lake Shore 372A、LR-700 与 Delta 模块的重新 Apply、部分连接失败、关闭失败等
+  清理路径，避免旧会话、旧 Applied 状态或未确认的激励状态残留。
+- 将开发规范改为“`run_end` 默认关闭；只有明确选择且读回确认后才可保持”，并补充连续
+  偏置的测试要求和初学者说明。
 - 开发者网站暂时只发布一个稳定入口；移除开发版菜单和 `dev` 发布目录，主分支文档检查
   通过后直接更新稳定站点。
 - 重写开发者网站的初学者路线，用日常语言解释模块文件、通道、设置和测试；Measurement
