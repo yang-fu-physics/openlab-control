@@ -19,22 +19,29 @@ hide:
     </div>
   </div>
   <div class="olc-terminal" aria-label="最小测量模块示例">
-    <pre><code><span class="olc-keyword">class</span> Module:
+    <pre><code># 一行生命周期骨架；四通道完整例子见教程
+<span class="olc-keyword">class</span> Module:
     columns = {<span class="olc-string">"Resistance"</span>: <span class="olc-string">"Ohm"</span>}
 
     <span class="olc-keyword">def</span> <span class="olc-method">open</span>(self, api):
         self.ready = <span class="olc-keyword">True</span>
+        self.output_enabled = <span class="olc-keyword">False</span>
 
     <span class="olc-keyword">def</span> <span class="olc-method">measure</span>(self, channel, api):
         <span class="olc-keyword">return</span> {<span class="olc-string">"Resistance"</span>: 100.0}
 
+    <span class="olc-keyword">def</span> <span class="olc-method">on_event</span>(self, event, data, api):
+        <span class="olc-keyword">if</span> event == <span class="olc-string">"run_end"</span>:
+            self.output_enabled = <span class="olc-keyword">False</span>
+
     <span class="olc-keyword">def</span> <span class="olc-method">close</span>(self, api):
+        self.output_enabled = <span class="olc-keyword">False</span>
         self.ready = <span class="olc-keyword">False</span></code></pre>
   </div>
 </section>
 
 <div class="olc-statbar">
-  <div class="olc-stat"><strong>3 步</strong><span>启动、测量、关闭</span></div>
+  <div class="olc-stat"><strong>每次收尾</strong><span>Run 结束关闭输出</span></div>
   <div class="olc-stat"><strong>4 通道</strong><span>现成教学例子</span></div>
   <div class="olc-stat"><strong>可选</strong><span>设置和状态窗口</span></div>
   <div class="olc-stat"><strong>无需仪表</strong><span>先在电脑上练习</span></div>
@@ -83,6 +90,7 @@ Measurement Module 是“完成一次测量”的小程序，例如读取电阻�
 
 <div class="olc-screenshot">
   <img src="main-window-preview.png" alt="OpenLab Control 主窗口与 Sequence Command Bar" loading="lazy">
+  <p>v0.13.0 主窗口；已安装一个示例模块，但仍保持 Disabled。</p>
 </div>
 
 !!! warning "连接真实仪表前仍要现场检查"

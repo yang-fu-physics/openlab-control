@@ -12,7 +12,8 @@
 - 用户点击 Apply Settings 后，应用量程、电流、等待时间等设置；
 - 收到测量请求后，按顺序完成一次测量；
 - 返回数字结果和状态码；
-- Disable、程序退出或出错时，关闭自己的输出并释放连接。
+- 每次 SEQ 完成、Stop 或 Error 时，关闭本次 Run 打开的输出；
+- Disable 或程序退出时，再释放仪表连接。
 
 一个测量需要多台仪表时，把它们放进同一个模块。例如 6221、2182A 和 7001 一起完成
 Delta 测量，就应该是一个模块，而不是三个模块。
@@ -47,16 +48,25 @@ open：连接仪表
         ↓
 configure：应用设置（如果模块有设置）
         ↓
-SEQ 执行 Measure
+SEQ 开始 → run_start
+        ↓
+SEQ 执行 Measure（可执行多次）
         ↓
 measure：逐通道测量
         ↓
+SEQ 完成 / Stop / Error
+        ↓
+run_end：关闭本次 Run 的输出
+        ↓
 用户点击 Disable 或程序退出
         ↓
-close：关闭输出并释放连接
+close：再次确认输出关闭并释放连接
 ```
 
-第一次学习时只要记住 `open`、`measure`、`close` 三个名字。其余功能都可以以后再加。
+最小仿真模块只需 `open`、`measure`、`close`。只要真实模块可能在两次 `Measure` 之间
+保持电流、电压或其他输出，就必须实现 `on_event`：在 `run_start` 准备本次运行，在
+`run_end` 关闭输出。`run_end` 的 reason 是 `completed`、`stopped` 或 `error`；三种情况
+都要执行同一安全收尾。`close` 只在 Disable 或应用退出时调用，不能代替 `run_end`。
 
 ## 推荐阅读顺序
 

@@ -1,6 +1,19 @@
 # 配置参考
 
-默认配置是 `configs/default.toml`。相对路径以配置文件所在项目的根目录解析：默认配置位于 `configs/`，因此项目根目录是它的上一级。修改真实设备前先复制配置并纳入版本管理。
+`configs/default.toml` 是可提交的仿真模板，不要把真实仪表地址、报警 Token 或实验室路径
+直接写进去。部署真实设备时先复制一份本机配置：
+
+```powershell
+Copy-Item .\configs\default.toml .\configs\site.local.toml
+.\run.bat --config configs\site.local.toml
+```
+
+发布包使用 `OpenLabControl.exe --config configs\site.local.toml`。`configs/*.local.toml` 已被
+Git 忽略；若团队需要共享模板，另存为脱敏的 `site.example.toml` 再提交。相对路径以配置
+文件所在项目的根目录解析：配置位于 `configs/` 时，项目根目录是它的上一级。
+
+每次 Run 会把实际使用的配置完整复制为运行目录中的 `configuration.toml`。它有助于复现
+实验，但也可能包含仪表地址和本机路径；分享、上传或提交整个运行目录前必须检查并脱敏。
 
 ## `[application]`
 

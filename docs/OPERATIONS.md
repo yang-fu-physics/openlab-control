@@ -1,5 +1,15 @@
 # 操作手册
 
+## 日常运行的最短流程
+
+1. 启动后检查温度、磁场和 Monitor 的实际状态。
+2. 打开 SEQ；需要测量模块时再 Enable，并核对 Status 和 Settings。
+3. 有未 Apply 的设置时优先选择 **Apply and Run**；真机首跑不要跳过 Apply。
+4. 核对数据文件位置，点击 Run；结束后检查 DAT、`events.dat` 和 `device_status.dat`。
+5. 分享运行目录前检查 `configuration.toml`，其中可能含真实仪表地址和本机路径。
+
+下面各节再解释安装、模块管理、异常和维护操作。
+
 ## 安装与启动
 
 ### Windows 发布包
@@ -35,8 +45,11 @@ run.bat
 指定配置/SEQ：
 
 ```text
-.venv\Scripts\python.exe run.py --config configs\default.toml --sequence examples\nested_scan.seq
+.venv\Scripts\python.exe run.py --config configs\site.local.toml --sequence examples\nested_scan.seq
 ```
+
+`default.toml` 保持为可提交的仿真模板；真实地址和现场限制写入 Git 已忽略的
+`site.local.toml`。`run.bat` 也会转发相同参数。
 
 单独打开 DAT Browser：
 
@@ -61,7 +74,7 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
    `alarm_tester_qqs`；管理员与测试员列表可重叠，接收器会去重。
 3. 在运行 OpenLab Control 的账户环境中设置同一 Token，例如
    `OPENLAB_ALARM_TOKEN`；或者创建独立 Token 文件并配置 `token_file`。
-4. 在 `configs/default.toml` 的 `[alarms.reporting]` 中核对地址后设置
+4. 在 `configs/site.local.toml` 的 `[alarms.reporting]` 中核对地址后设置
    `enabled = true`，重启程序。
 5. 先用仿真 `Inject Warning`、`Inject Error` 验证：Warning 只到测试员，
    Error 同时到管理员和测试员，同一活动事件不会反复推送。
@@ -95,6 +108,10 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
    信任；拒绝时不加载任何源码。
 5. 程序显示 `Initializing <module>...`；初始化成功后才真正勾选并打开模块窗口。
 6. 初始化失败会弹 Error，仍保持 Disabled。
+
+首次指纹用于建立这台电脑上的信任基线。发布包自带模板的来源由整个 ZIP 的 SHA-256
+校验保证；单独取得的第三方扩展，应与发布者提供的摘要或签名比较。内容变化后必须重新
+确认，不能只因为名称相同就继续信任。
 
 如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 `Sequence Command Bar` 会新增一个
 直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
@@ -139,6 +156,10 @@ File → Save 同时保存 `<SEQ 文件名去掉 .seq>.modules.toml`。文件包
 - `Apply and Run`：先等待所有修改成功 Apply，再启动。
 - `Run Without Applying`：仪表保持现状，但把当前界面值作为 desired settings 保存到运行目录。
 - `Cancel`：不运行。
+
+`Run Without Applying` 是高级选项：只有已经人工读回并确认仪表实际状态，而且理解快照中
+desired settings 可能与实际状态不同时才使用。真机首跑或状态不确定时选择 Cancel，核对后
+再 Apply；不要为了省去确认直接跳过。
 
 ### Disable
 
@@ -356,6 +377,9 @@ events.dat
 Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，但不会自动发送到
 仪表。
 
+运行目录中的 `configuration.toml` 是本次主配置的完整副本，可能含真实仪表地址和本机
+路径。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。
+
 `device_status.dat` 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
 稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
 记录频率或增加仪表查询。
@@ -427,8 +451,10 @@ address、上下限、速率和超时，然后重启。不要为不同仪表维�
 
 ### 4K 字体不合适
 
-使用 `ui_scale = "auto"`；也可在 `configs/default.toml` 设置 0.75–2.0 的手动倍率后重启。
+使用 `ui_scale = "auto"`；也可在当前启动配置（现场通常是
+`configs/site.local.toml`）设置 0.75–2.0 的手动倍率后重启。
 
 ### DAT 图不刷新
 
-确认 Data Browser 打开的正是目标文件。它不会自动切换到当前 Run DAT；需要 View/Open/拖入一次。
+确认 Data Browser 打开的正是目标文件。它不会自动切换到当前 Run DAT；请使用
+**Graph → Data Browser → Open DAT**，或把 DAT 拖入主窗口一次。

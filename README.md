@@ -15,6 +15,8 @@ Measurement Module 提供。
 
 ![主窗口](docs/main-window-preview.png)
 
+截图为 v0.13.0；已安装一个示例模块，但仍保持 Disabled。
+
 ## 主要能力
 
 - MultiVu 风格的浮动 SEQ 编辑器和可任意嵌套的 Temperature/Field/Time/模块自定义 Scan。
@@ -27,8 +29,9 @@ Measurement Module 提供。
   自动 Apply。
 - 一个 `T Measure` 按模块可选的 `slots` 并集展开，每个通道槽位写一行；同一槽位的
   模块并行，未声明 `slots` 的模块跟随每个槽位测量。
-- Measurement Module 只需 `open(api)`、`measure(slot, api)`、`close(api)`；按需增加
-  `configure`、`on_event`、`slots`，也可声明自己的 SEQ 指令而不修改核心解析器。
+- Measurement Module 最小只需 `open(api)`、`measure(slot, api)`、`close(api)`；会维持
+  输出的模块还要用 `on_event` 在每次 `run_end` 安全关闭输出。按需增加 `configure`、
+  `slots` 和自己的 SEQ 指令，不需要修改核心解析器。
 - 模块可为正式结果行附带有限原始采样序列，由中央写入独立无表头 `rawdata` sidecar。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员；默认
@@ -133,9 +136,12 @@ Apply；模块仍遵守“启动默认 Disabled，用户核对后显式 Apply”
 分支。核心仓库只提供接口和 fail-closed 示例。部署实际插件时：
 
 1. 把目标插件目录复制到 `device_plugins/`。
-2. 只修改 `configs/default.toml` 中相应设备的 `plugin = "<plugin-id>"` 及该设备的地址、
-   安全上下限、速率和超时。
-3. 重启并确认插件信任。
+2. 把 `configs/default.toml` 复制为 `configs/site.local.toml`，只在副本中修改
+   `plugin = "<plugin-id>"`、地址、安全上下限、速率和超时。
+3. 用 `run.bat --config configs\site.local.toml` 启动并确认插件信任。发布包则使用
+   `OpenLabControl.exe --config configs\site.local.toml`。
+
+`*.local.toml` 默认不进入 Git；可提交的 `default.toml` 应继续保持仿真地址和脱敏内容。
 
 协议连接、读取、设定和 Hold 由插件实现；主配置仍是安全限制的权威来源。仪表自身的
 面板设置暂不由 OpenLab Control 自动配置。

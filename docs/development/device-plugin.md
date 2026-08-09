@@ -10,8 +10,12 @@ OpenLab Control 不控制 PPMS。这里的插件用于连接程序自己管理�
 
 ## 更换设备时需要改什么
 
-每种设备准备一个插件。设备确定后，只需在主配置中写入插件名称、通讯地址和允许范围，然后
-重启程序。通常不需要为不同仪表维护不同的主程序分支。
+每种协议实现准备一个插件。设备确定后，只需在本机配置中写入插件名称、通讯地址和允许
+范围，然后重启程序。通常不需要为不同仪表维护不同的主程序分支。
+
+“插件”和“设备实例”不是一回事：一个插件目录保存一份驱动代码；主配置中的每个
+`[[devices]]` 是一个实际设备实例。同一插件可以被多个实例复用，只要它们的地址、角色和
+限制分别配置。
 
 ```text
 device_plugins/my_controller/
@@ -37,6 +41,10 @@ dependencies = []
 - `temperature`：主温度或温度监视；
 - `field`：主磁场或磁场监视；
 - `monitor`：只读显示，例如 2nd Stage。
+
+需要标准 Temperature/Field 状态和数据列、但不参与 SEQ 控制时，使用
+`role = "secondary"` 且默认 `control_enabled = false`。一般辅助读数使用 `kind = "monitor"`；
+Monitor 永远只读，也不参与标准温度控制。
 
 ## 后台代码需要做的事情
 
@@ -82,6 +90,7 @@ id = "temperature"
 display_name = "Temperature"
 kind = "temperature"
 role = "primary"
+control_enabled = true
 plugin = "my_controller"
 unit = "K"
 min_value = 1.8
@@ -90,8 +99,11 @@ max_rate_per_minute = 20.0
 address = "GPIB0::12::INSTR"
 ```
 
-`primary` 表示主设备。同一种类最多只有一个主设备；其他同类设备默认只监视。更换仪表时，
-通常只需要更换 `plugin`、`address` 和允许范围，然后重启。
+`primary` 表示主设备，`control_enabled = true` 明确允许手动与 SEQ 控制。同一种类最多
+只有一个主设备；其他同类设备默认只监视。更换仪表时，通常只需要更换 `plugin`、
+`address` 和允许范围，然后重启。
+
+实际地址应放在 `configs/site.local.toml`，不要直接写入可提交的 `default.toml`。
 
 ## 安全检查不能只做一次
 

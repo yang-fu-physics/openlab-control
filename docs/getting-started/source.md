@@ -6,7 +6,7 @@
 ## 安装运行依赖
 
 ```powershell
-git clone https://github.com/yang-fu-physics/openlab-control.git
+git clone --branch v0.13.0 https://github.com/yang-fu-physics/openlab-control.git
 cd openlab-control
 .\setup.bat
 .\run.bat
@@ -14,6 +14,20 @@ cd openlab-control
 
 `setup.bat` 创建 `.venv`，并安装 `requirements-lock.txt` 中经过验证的应用依赖。
 `run.bat` 始终启动当前源码，不会误用 `dist/` 里的旧程序。
+
+上面固定到与本网站一致的稳定版。准备参与核心开发时，才改为克隆或切换到 `main`。
+
+## 使用本机配置
+
+默认配置只用于仿真。接入真实设备时先创建不会进入 Git 的本机副本：
+
+```powershell
+Copy-Item .\configs\default.toml .\configs\site.local.toml
+.\run.bat --config configs\site.local.toml
+```
+
+只在 `site.local.toml` 中填写仪表地址和现场安全范围。需要给团队一个起点时，提交删去真实
+地址和秘密的 `site.example.toml`，不要提交本机文件。
 
 ## 运行完整测试
 
@@ -49,4 +63,5 @@ cd openlab-control
 !!! danger "不要提交实验室秘密"
 
     仪表地址、令牌、私钥、真实实验 DAT、`module_data/`、`plugin_state/` 和本机 runtime
-    都不应进入 Git。
+    都不应进入 Git。每次 Run 保存的 `runs/**/configuration.toml` 是本机配置的完整快照，
+    也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。

@@ -31,9 +31,16 @@ from labcontrol.module_api import ModuleAPI, ModuleError
 class Module:
     columns = {"Resistance": "Ohm", "StatusCode": ""}
 
+    def __init__(self):
+        self.instrument = None
+
     def open(self, api: ModuleAPI):
-        self.instrument = open_instrument(timeout=3.0)
-        api.status({"State": "Ready"})
+        try:
+            self.instrument = open_instrument(timeout=3.0)
+            api.status({"State": "Ready"})
+        except Exception:
+            self._release()
+            raise
 
     def measure(self, slot: int, api: ModuleAPI):
         api.sleep(0)  # 检查 Pause/Stop
@@ -41,8 +48,17 @@ class Module:
         return {"Resistance": value, "StatusCode": 0}
 
     def close(self, api: ModuleAPI):
-        self.instrument.output_off()
-        self.instrument.close()
+        self._release()
+
+    def _release(self):
+        instrument = self.instrument
+        self.instrument = None
+        if instrument is None:
+            return
+        try:
+            instrument.output_off()
+        finally:
+            instrument.close()
 ```
 
 无需继承框架基类。三个方法可为普通函数，也可返回 awaitable：
@@ -50,6 +66,10 @@ class Module:
 - `open(api)`：Enable 时调用；只建立安全的初始状态，不会收到保存设置。
 - `measure(slot, api)`：每次返回一行 Mapping。
 - `close(api)`：Disable 和应用退出时调用；必须幂等，并尽力进入仪表安全状态后释放资源。
+
+`open_instrument` 自己也必须清理“连接过程中尚未返回就失败”的内部资源。上面的 `_release`
+先断开对象引用，再用 `finally` 保证即使关闭输出失败也尝试释放连接，因此重复 `close` 不会
+再次操作同一对象。
 
 `columns` 是有序的 `{列名: 单位}`。核心校验列名、JSON 标量、有限数值和消息大小，
 不解释模块状态码。
@@ -59,14 +79,26 @@ class Module:
 只在需要时添加：
 
 ```python
-def configure(self, settings, api):
-    """用户明确点击 Apply Settings 时调用。"""
+class Module:
+    slots = 4  # 也可以是 (1, 2, 4) 或动态 property
 
-def on_event(self, event, data, api):
-    """处理 run_start、run_end、status 或 action。"""
+    def configure(self, settings, api):
+        """用户明确点击 Apply Settings 时调用。"""
 
-slots = 4  # 也可以是 (1, 2, 4) 或动态 property
+    def on_event(self, event, data, api):
+        """处理 run_start、run_end、status 或 action。"""
+
+        if event == "run_end":
+            self.instrument.output_off()
+            return {
+                "Output": "Off",
+                "Last Run": data.get("reason", "—"),
+            }
+        return {}
 ```
+
+`on_event` 是可选方法，但只要模块可能在两次 `Measure` 之间保持输出，就必须处理
+`run_end`。每次 SEQ 结束不会调用 `close`；`close` 只是 Disable/退出时的重复保障。
 
 `on_event` 的输入固定为：
 

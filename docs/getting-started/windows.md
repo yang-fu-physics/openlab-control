@@ -1,7 +1,8 @@
 # 使用 Windows 发布包
 
 Windows 文件夹发布包已经包含 Python、PySide6、PyVISA 和框架统一依赖，不需要另装
-Python。它仍需要与你的 GPIB/VISA 硬件匹配的厂商 VISA Runtime，例如 NI-VISA。
+Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时，才需要安装与接口
+匹配的厂商 Runtime，例如 NI-VISA。
 
 ## 下载与校验
 
@@ -23,9 +24,10 @@ Get-Content .\OpenLabControl-v0.13.0-windows-x64.zip.sha256
 
 1. 双击 `OpenLabControl.exe`。
 2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
-3. 打开 **Modules**，确认所有模块均未勾选。
-4. 打开 `examples/nested_scan.seq`。
-5. 点击 Run，完成后检查 `runs/<时间>_nested_scan/`。
+3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。
+4. 保持列表为空，打开 `examples/nested_scan.seq`。
+5. 点击 Run，完成后检查 `runs/<时间>_nested_scan/`。无模块 Warning 是预期结果。
+6. 再按下一节安装 `simulated_transport`，练习 Enable/Disable 和模块数据写入。
 
 !!! note "VISA 资源发现"
 
@@ -44,6 +46,22 @@ modules/simulated_transport/
 
 重启后打开 Modules，勾选模块并核对首次信任提示。Enable 会初始化并打开独立窗口；它会
 读取保存的界面值，但不会自动 Apply。
+
+这里的模板来自刚刚校验过 SHA-256 的发布 ZIP；弹窗指纹用于建立这台电脑上的首次信任
+基线。单独下载第三方模块时，应与作者发布的摘要或签名比较。
+
+`simulated_transport` 用于体验最小 Enable/Measure/Disable 流程，没有自定义设置。开发者
+教程中的 `tutorial_resistance` 是另一个示例，用来学习设置窗口、四行结果和扩展功能。
+
+需要现场配置时，把 `configs/default.toml` 复制为 `configs/site.local.toml`，然后用
+`OpenLabControl.exe --config configs\site.local.toml` 启动。不要把含真实地址的配置上传到
+公开仓库。
+
+!!! danger "改地址不等于可以控制真机"
+
+    先取得与实际型号、固件和接线匹配的 [Device Plugin](../development/device-plugin.md)，
+    审查其命令与安全行为，并完成 [仪表安全清单](../guides/safety-checklist.md)。之后才进行
+    有人在场的低风险真机测试；示例插件不能直接用于任意仪表。
 
 ## Windows 包不会改变的规则
 

@@ -27,7 +27,7 @@ experiment.seq
 experiment.modules.toml
 ```
 
-File → Open/Load `experiment.seq` 时会自动读取 `experiment.modules.toml`。导入只改变
+File → Open `experiment.seq` 时会自动读取 `experiment.modules.toml`。导入只改变
 模块 Settings 页的期望值：
 
 - 不自动 Enable 或 Disable 任何模块；

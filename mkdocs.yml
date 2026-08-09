@@ -99,11 +99,15 @@ extra_css:
 
 nav:
   - 首页: index.md
-  - 快速开始:
+  - 开始使用:
       - 路线图: getting-started/index.md
       - Windows 发布包: getting-started/windows.md
       - 源码环境: getting-started/source.md
+  - 使用软件:
       - 第一条 SEQ: getting-started/first-sequence.md
+      - 操作手册: OPERATIONS.md
+      - Data Browser: guides/data-browser.md
+      - 常见问题: guides/troubleshooting.md
   - Measurement Module:
       - 从这里开始: development/index.md
       - 第一个测量模块: development/first-module.md
@@ -117,7 +121,6 @@ nav:
       - 怎样检查模块: development/testing.md
       - 离线安装与发布: guides/offline-packaging.md
       - 仪表安全清单: guides/safety-checklist.md
-      - 常见问题: guides/troubleshooting.md
       - 参与核心开发: guides/contributing.md
   - 参考:
       - 公共 Python API: reference/public-api.md
@@ -126,4 +129,3 @@ nav:
       - 配置参考: CONFIGURATION.md
       - 系统架构: ARCHITECTURE.md
       - 完整扩展规范: PLUGIN_DEVELOPMENT.md
-      - 操作手册: OPERATIONS.md

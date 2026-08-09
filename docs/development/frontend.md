@@ -3,12 +3,21 @@
 先让模块在没有自定义窗口时完成测量。只有确实需要设置电流、量程、等待时间等参数时，才
 增加 `frontend.py`。
 
-这个文件只负责窗口。连接仪表和发送命令仍然放在 `backend.py`。
+这个文件只负责显示和收集输入。连接仪表、发送命令和检查安全状态仍放在 `backend.py`。
 
-## 最小窗口
+## 一个可直接作为 frontend.py 使用的窗口
+
+下面的例子提供一个电流输入、一个连接状态和一个测试按钮：
 
 ```python
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import (
+    QDoubleSpinBox,
+    QFormLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class Frontend(QWidget):
@@ -16,22 +25,106 @@ class Frontend(QWidget):
         super().__init__()
         self.api = api
 
+        settings_layout = QFormLayout(self)
+        self.current_input = QDoubleSpinBox()
+        self.current_input.setDecimals(6)
+        self.current_input.setRange(0.0, 0.01)
+        self.current_input.setSuffix(" A")
+        settings_layout.addRow("Current", self.current_input)
+
+        self.status_widget = QWidget()
+        status_layout = QVBoxLayout(self.status_widget)
+        self.connection_label = QLabel("Not connected")
+        self.test_button = QPushButton("Test Connection")
+        self.test_button.clicked.connect(
+            lambda: self.api.action("test_connection")
+        )
+        status_layout.addWidget(self.connection_label)
+        status_layout.addWidget(self.test_button)
+        status_layout.addStretch(1)
+
     def load(self, settings):
-        """把保存的数值显示在窗口中。"""
+        self.current_input.setValue(
+            float(settings.get("current_a", 0.001))
+        )
 
     def dump(self):
-        """收集窗口中的当前数值。"""
-        return {}
+        return {"current_a": self.current_input.value()}
+
+    def show_status(self, status):
+        self.connection_label.setText(
+            str(status.get("Connection", "—"))
+        )
 ```
 
-只需要记住：
+类名必须是 `Frontend`。主程序会把这个 QWidget 放入 Settings 页，并把
+`status_widget` 放入 Status 页。
 
-- `load` 把保存的设置填进窗口，但不会发送给仪表；
-- `dump` 在用户点击 **Apply Settings** 时收集设置；
-- 类名必须是 `Frontend`。
+- `load` 只把保存的数值显示出来，不会发送给仪表；
+- `dump` 在用户点击 **Apply Settings** 时收集当前数值；
+- `show_status` 显示后台最近报告的状态；
+- `api.action` 只向后台发一个请求，不在界面线程中访问仪表。
 
 “加载设置”和“应用设置”故意分开。打开模块或载入 SEQ 时，不会因为旧设置而自动改变
 仪表。
+
+## 在 backend.py 应用设置
+
+用户点击 **Apply Settings** 后，`dump()` 返回的 Mapping 会传给后台 `configure`。在
+`backend.py` 的 `Module` 类中添加下面的方法；后台必须重新检查范围、发送命令并读回确认，
+只有成功后才更新实际使用值：
+
+```python
+from labcontrol.module_api import ModuleError
+
+
+def configure(self, settings, api):
+    current_a = float(settings.get("current_a", 0.001))
+    if not 0 < current_a <= 0.01:
+        raise ModuleError(
+            "Current must be within (0, 0.01] A",
+            "CURRENT_OUT_OF_RANGE",
+        )
+
+    self.instrument.set_current(current_a)
+    actual_a = self.instrument.read_current()
+    if abs(actual_a - current_a) > max(1e-12, current_a * 1e-6):
+        raise ModuleError(
+            "Instrument current readback does not match",
+            "CURRENT_READBACK_MISMATCH",
+        )
+
+    self.current_a = current_a
+    status = {"Connection": "Connected", "Current (A)": actual_a}
+    api.status(status)
+    return status
+```
+
+`self.instrument` 应由 Enable 阶段的 `open()` 创建。上例中的 `set_current` 和
+`read_current` 是该模块自己的仪表文件方法；不要从界面代码直接调用它们。
+
+## 在 backend.py 处理按钮请求
+
+上面的按钮会让后台收到 `event == "action"`，动作名和可选参数放在 `data` 中。下面的方法
+同样写在 `backend.py` 的 `Module` 类中：
+
+```python
+def on_event(self, event, data, api):
+    if event == "action" and data.get("name") == "test_connection":
+        identity = self.instrument.identify()
+        status = {"Connection": "Connected", "Identity": identity}
+        api.status(status)
+        return status
+    return {}
+```
+
+后台也可以在连接或测量时主动更新状态：
+
+```python
+api.status({"Connection": "Connected", "State": "Ready"})
+```
+
+状态文字只用于显示。不能因为标签写着 “Connected” 就跳过真正的仪表读回。
 
 ## 主程序已经准备好的功能
 
@@ -44,45 +137,6 @@ class Frontend(QWidget):
 - 防止用户直接关闭模块窗口；
 - 自动选择不出现横向滚动条的初始宽度；
 - 下拉列表未展开时，阻止滚轮误改数值。
-
-## 显示模块状态
-
-先准备一个 `status_widget`，再实现 `show_status`：
-
-```python
-self.status_widget = QWidget()
-
-def show_status(self, status):
-    self.connection_label.setText(str(status.get("Connection", "—")))
-```
-
-后台测量代码可以这样更新状态：
-
-```python
-api.status({"Connection": "Connected", "State": "Ready"})
-```
-
-状态文字只用于显示。不能因为标签写着 “Connected” 就跳过真正的仪表读回。
-
-## 从按钮请求后台动作
-
-例如在 Status 页增加“测试连接”按钮：
-
-```python
-self.test_button.clicked.connect(
-    lambda: self.api.action("test_connection")
-)
-```
-
-窗口只发出请求。真正的连接测试由 `backend.py` 处理：
-
-```python
-def on_event(self, event, data, api):
-    if event == "action" and data.get("name") == "test_connection":
-        return self.test_connection(api)
-```
-
-具体的 `data` 内容可直接参考教学模块，不必从零猜测。
 
 ## 窗口代码不要做这些事
 

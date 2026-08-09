@@ -24,13 +24,30 @@
 
     **Device Plugin** 只用来更换主温度、主磁场或只读监视设备。普通测量模块不需要它。
 
+## 按职责选择扩展
+
+不要只看仪表型号；先看它在 OpenLab Control 中负责什么。
+
+| 你希望它做什么 | 应写什么 |
+| --- | --- |
+| 接受 SEQ 或手动界面的温度/磁场 Set、Hold | Device Plugin |
+| 保留标准温度/磁场语义，但只读显示 | Device Plugin（secondary temperature/field） |
+| 显示 2nd Stage 等一般辅助量 | Device Plugin（Monitor） |
+| 在 `Measure` 时产生电阻、电压、电流等实验列 | Measurement Module |
+
+同一型号也可能承担不同职责。例如一台温控仪若负责主温度控制，就是 Device Plugin；若只在
+底部按标准温度显示，则是 secondary temperature；若只在某个实验方案里读取传感器并写
+测量列，也可以属于 Measurement Module。Monitor 不参与标准温度/磁场控制。
+
 ## 推荐学习顺序
 
 1. 运行一次嵌套扫描，观察 Sequence Editor、状态卡和运行目录。
-2. 打开 Modules，练习 Enable 和 Disable。
-3. 跟随 [第一个测量模块](../development/first-module.md) 完成四通道教程模块。
-4. 根据需要增加设置窗口或模块自己的 SEQ 指令。
-5. 在连接真实仪表前完成 [安全清单](../guides/safety-checklist.md)。
+2. 按 [Windows 安装说明](windows.md) 把 `simulated_transport` 复制到
+   `modules/`；源码环境也使用相同目录。
+3. 重启，确认模块出现在 Modules 中，再练习 Enable 和 Disable。
+4. 跟随 [第一个测量模块](../development/first-module.md) 完成四通道教程模块。
+5. 根据需要增加设置窗口或模块自己的 SEQ 指令。
+6. 在连接真实仪表前完成 [安全清单](../guides/safety-checklist.md)。
 
 如果你的目标只是更换温控仪或磁场控制器，请直接阅读
 [更换温度或磁场设备](../development/device-plugin.md)，不要从测量模块教程开始。
