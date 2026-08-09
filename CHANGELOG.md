@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- 新增基于 MkDocs Material 的中文开发者网站，包含首页、快速开始、Measurement Module、
+  Device Plugin、仪表驱动分层、离线发布、排错、安全清单和自动公共 API 页面。
+- 网站使用 `dev` / `stable` 版本通道、站内搜索、代码复制和 GitHub Pages 自动发布；
+  严格构建会在链接、代码片段或 API 文档失效时阻止部署。
+- 新增无硬件 `tutorial_resistance` 四通道教程模块及测试，展示 Settings/Status、稀疏
+  测量行、数字状态码、rawdata、SI 电流写法和模块自定义普通/扫描 SEQ 指令。
+
 ## 0.13.0 - 2026-08-08
 
 - Enabled Measurement Module 可按需声明自己的普通 SEQ 指令和扫描指令；完成 Enable 后

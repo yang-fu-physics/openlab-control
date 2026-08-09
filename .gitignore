@@ -5,6 +5,7 @@ __pycache__/
 .coverage
 build/
 dist/
+site/
 *.spec
 !OpenLabControl.spec
 runs/*

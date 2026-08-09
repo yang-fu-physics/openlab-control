@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="OpenLab Control 开发者站点">
+  <meta property="og:description" content="从第一个测量模块到真实仪表安全验证的中文开发教程。">
+  <meta property="og:image" content="{{ config.site_url }}stable/assets/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="{{ config.site_url }}stable/assets/og.png">
+{% endblock %}

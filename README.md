@@ -9,6 +9,10 @@ Measurement Module 提供。
 仿真设备。Lake Shore 372A、LR-700、Keithley
 6221/2182A/7001/3706A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
 
+开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站提供可搜索的中文
+快速开始、Measurement Module、Device Plugin、测试、安全清单和公共 API 教程；`dev` 与
+`stable` 文档通过版本菜单切换。
+
 ![主窗口](docs/main-window-preview.png)
 
 ## 主要能力
@@ -157,6 +161,7 @@ tests/                    核心自动测试
 
 ## 文档
 
+- [开发者网站](https://yang-fu-physics.github.io/openlab-control/)
 - [操作手册](docs/OPERATIONS.md)
 - [SEQ 格式](docs/SEQUENCE_FORMAT.md)
 - [DAT 与事件格式](docs/DAT_FORMAT.md)

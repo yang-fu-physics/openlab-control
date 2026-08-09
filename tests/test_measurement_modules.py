@@ -89,12 +89,18 @@ class ManifestAndSettingsTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 load_config(invalid)
 
-    def test_discovers_simulated_module_and_round_trips_settings(self) -> None:
+    def test_discovers_template_modules_and_round_trips_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = copied_project(Path(temp))
             descriptors = discover_modules(config)
-            self.assertEqual([item.id for item in descriptors], ["simulated_transport"])
-            descriptor = descriptors[0]
+            self.assertEqual(
+                [item.id for item in descriptors],
+                ["simulated_transport", "tutorial_resistance"],
+            )
+            self.assertTrue(all(item.valid for item in descriptors))
+            descriptor = next(
+                item for item in descriptors if item.id == "simulated_transport"
+            )
             self.assertTrue(descriptor.valid)
             self.assertEqual(descriptor.columns, ())
             path = Path(temp) / "module_data" / descriptor.id / "settings.toml"
