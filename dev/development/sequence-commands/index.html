@@ -27,7 +27,7 @@
     
     
       
-        <title>自定义 SEQ 指令 - OpenLab Control</title>
+        <title>模块自己的 SEQ 指令 - OpenLab Control</title>
       
     
     
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              自定义 SEQ 指令
+              模块自己的 SEQ 指令
             
           </span>
         </div>
@@ -725,7 +725,7 @@
   <span class="md-ellipsis">
     
   
-    多通道与测量结果
+    多通道数据
   
 
     
@@ -753,7 +753,7 @@
   <span class="md-ellipsis">
     
   
-    Settings 与 Status
+    设置与状态窗口
   
 
     
@@ -790,7 +790,7 @@
   <span class="md-ellipsis">
     
   
-    自定义 SEQ 指令
+    模块自己的 SEQ 指令
   
 
     
@@ -808,7 +808,7 @@
   <span class="md-ellipsis">
     
   
-    自定义 SEQ 指令
+    模块自己的 SEQ 指令
   
 
     
@@ -834,54 +834,43 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 告诉程序要显示什么
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 收到指令后执行动作
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 需要扫描时再增加 Scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        声明一条普通指令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#scan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        声明一个可嵌套 Scan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        统一执行入口
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        DAT 和异常语义
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        动态注册和缺失模块
+        出错时怎样处理
       
     </span>
   </a>
@@ -911,7 +900,7 @@
   <span class="md-ellipsis">
     
   
-    仪表驱动分层
+    一台仪表一个文件
   
 
     
@@ -1002,7 +991,7 @@
   <span class="md-ellipsis">
     
   
-    开发温场设备插件
+    更换温度或磁场设备
   
 
     
@@ -1101,7 +1090,7 @@
   <span class="md-ellipsis">
     
   
-    测试策略
+    怎样检查模块
   
 
     
@@ -1532,54 +1521,43 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 告诉程序要显示什么
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 收到指令后执行动作
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-scan" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 需要扫描时再增加 Scan
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        声明一条普通指令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#scan" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        声明一个可嵌套 Scan
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        统一执行入口
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#dat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        DAT 和异常语义
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        动态注册和缺失模块
+        出错时怎样处理
       
     </span>
   </a>
@@ -1606,105 +1584,80 @@
   
 
 
-<h1 id="seq">给模块增加 SEQ 指令<a class="headerlink" href="#seq" title="Permanent link">&para;</a></h1>
-<p>当模块需要“设置电流”“扫描电流”“切换量程”等不直接写 DAT 的动作时，可以在 Enable 后
-向 Sequence Command Bar 动态注册指令。不需要修改核心枚举、解析器或对话框。</p>
-<h2 id="_1">声明一条普通指令<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Module</span><span class="p">:</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">sequence_commands</span> <span class="o">=</span> <span class="p">[</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        <span class="p">{</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>            <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;set_current&quot;</span><span class="p">,</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>            <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Set Current&quot;</span><span class="p">,</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>            <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;command&quot;</span><span class="p">,</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            <span class="s2">&quot;fields&quot;</span><span class="p">:</span> <span class="p">[</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                <span class="p">{</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;current&quot;</span><span class="p">,</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                    <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Current&quot;</span><span class="p">,</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;text&quot;</span><span class="p">,</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                    <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="s2">&quot;1 mA&quot;</span><span class="p">,</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>                <span class="p">},</span>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>                <span class="p">{</span>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>                    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;settle_seconds&quot;</span><span class="p">,</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>                    <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Settle time&quot;</span><span class="p">,</span>
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>                    <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;float&quot;</span><span class="p">,</span>
-</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>                    <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>                    <span class="s2">&quot;minimum&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>                    <span class="s2">&quot;maximum&quot;</span><span class="p">:</span> <span class="mf">60.0</span><span class="p">,</span>
-</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>                    <span class="s2">&quot;unit&quot;</span><span class="p">:</span> <span class="s2">&quot;s&quot;</span><span class="p">,</span>
-</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>                <span class="p">},</span>
-</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>            <span class="p">],</span>
-</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>        <span class="p">}</span>
-</span><span id="__span-0-25"><a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>    <span class="p">]</span>
+<h1 id="seq">给模块增加自己的 SEQ 指令<a class="headerlink" href="#seq" title="Permanent link">&para;</a></h1>
+<p>有些模块除了 <code>Measure</code>，还需要“设置电流”或“扫描电流”。模块可以在 Enable 后把这些
+指令加入右侧的 Sequence Command Bar。</p>
+<p>如果 <code>Measure</code> 已经能完成全部工作，就不需要本章。</p>
+<h2 id="1">1. 告诉程序要显示什么<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>在 <code>Module</code> 类中加入：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">sequence_commands</span> <span class="o">=</span> <span class="p">[</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="p">{</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;set_current&quot;</span><span class="p">,</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Set Current&quot;</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;command&quot;</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        <span class="s2">&quot;fields&quot;</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>            <span class="p">{</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;current&quot;</span><span class="p">,</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Current&quot;</span><span class="p">,</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;text&quot;</span><span class="p">,</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="s2">&quot;1 mA&quot;</span><span class="p">,</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>            <span class="p">}</span>
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="p">],</span>
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="p">}</span>
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">]</span>
 </span></code></pre></div>
-<p>支持的字段只有 <code>text</code>、<code>int</code>、<code>float</code>、<code>choice</code>、<code>bool</code> 和 <code>list</code>。参数窗口只是第一层
-输入校验；后端发送仪表命令前仍必须重新解析单位、验证范围和当前状态。</p>
-<h2 id="scan">声明一个可嵌套 Scan<a class="headerlink" href="#scan" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;scan_current&quot;</span><span class="p">,</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Scan Current&quot;</span><span class="p">,</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;scan&quot;</span><span class="p">,</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="s2">&quot;points_field&quot;</span><span class="p">:</span> <span class="s2">&quot;points&quot;</span><span class="p">,</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="s2">&quot;point_parameter&quot;</span><span class="p">:</span> <span class="s2">&quot;current&quot;</span><span class="p">,</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="s2">&quot;fields&quot;</span><span class="p">:</span> <span class="p">[</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        <span class="p">{</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>            <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;points&quot;</span><span class="p">,</span>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>            <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Current points&quot;</span><span class="p">,</span>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;list&quot;</span><span class="p">,</span>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>            <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;100 uA&quot;</span><span class="p">,</span> <span class="s2">&quot;200 uA&quot;</span><span class="p">,</span> <span class="s2">&quot;500 uA&quot;</span><span class="p">],</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="p">},</span>
-</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        <span class="p">{</span>
-</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>            <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;settle_seconds&quot;</span><span class="p">,</span>
-</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Settle time&quot;</span><span class="p">,</span>
-</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;float&quot;</span><span class="p">,</span>
-</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>            <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>            <span class="s2">&quot;minimum&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
-</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>            <span class="s2">&quot;maximum&quot;</span><span class="p">:</span> <span class="mf">60.0</span><span class="p">,</span>
-</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>            <span class="s2">&quot;unit&quot;</span><span class="p">:</span> <span class="s2">&quot;s&quot;</span><span class="p">,</span>
-</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>        <span class="p">},</span>
-</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>    <span class="p">],</span>
-</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="p">}</span>
+<p>模块成功 Enable 后，程序会出现一个以模块名称命名的指令组。Disable 后，这组指令会消失。</p>
+<p>常用输入类型只有：文字、整数、小数、下拉选项、开关和列表。完整写法可在需要时查看
+<a href="../../PLUGIN_DEVELOPMENT/">完整扩展规范</a>。</p>
+<h2 id="2">2. 收到指令后执行动作<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">execute_sequence_command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command_id</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">if</span> <span class="n">command_id</span> <span class="o">!=</span> <span class="s2">&quot;set_current&quot;</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>        <span class="k">raise</span> <span class="n">ModuleError</span><span class="p">(</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>            <span class="sa">f</span><span class="s2">&quot;Unknown command: </span><span class="si">{</span><span class="n">command_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>            <span class="s2">&quot;UNKNOWN_SEQUENCE_COMMAND&quot;</span><span class="p">,</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>            <span class="n">command_id</span><span class="p">,</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="p">)</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="n">current</span> <span class="o">=</span> <span class="n">parse_current</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="s2">&quot;current&quot;</span><span class="p">])</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="n">validate_hardware_range</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span><span class="o">.</span><span class="n">set_current</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">instrument</span><span class="o">.</span><span class="n">verify_current</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;Current&quot;</span><span class="p">:</span> <span class="n">current</span><span class="p">}</span>
 </span></code></pre></div>
-<p>核心按原列表逐点调用后端，把当前点放入 <code>point_parameter</code> 指定的键；该点成功后才递归
-运行 Scan 子树。</p>
-<h2 id="_2">统一执行入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">execute_sequence_command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command_id</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="k">if</span> <span class="n">command_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;set_current&quot;</span><span class="p">,</span> <span class="s2">&quot;scan_current&quot;</span><span class="p">}:</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        <span class="k">raise</span> <span class="n">ModuleError</span><span class="p">(</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>            <span class="sa">f</span><span class="s2">&quot;Unknown command: </span><span class="si">{</span><span class="n">command_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>            <span class="s2">&quot;UNKNOWN_SEQUENCE_COMMAND&quot;</span><span class="p">,</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>            <span class="n">command_id</span><span class="p">,</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        <span class="p">)</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="n">current</span> <span class="o">=</span> <span class="n">parse_current</span><span class="p">(</span><span class="n">parameters</span><span class="p">[</span><span class="s2">&quot;current&quot;</span><span class="p">])</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">validate_hardware_range</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">instrument</span><span class="o">.</span><span class="n">set_current</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="n">instrument</span><span class="o">.</span><span class="n">verify_current</span><span class="p">(</span><span class="n">current</span><span class="p">)</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>    <span class="n">api</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">parameters</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;settle_seconds&quot;</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">)))</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;Current&quot;</span><span class="p">:</span> <span class="n">current</span><span class="p">}</span>
+<p>参数窗口会做简单检查，但发送仪表命令前仍要再次检查范围。写入后应尽可能读回确认。</p>
+<p>这类指令本身不写 DAT。需要记录一次数据时，在它后面再放一条 <code>Measure</code>。</p>
+<h2 id="3-scan">3. 需要扫描时再增加 Scan<a class="headerlink" href="#3-scan" title="Permanent link">&para;</a></h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;scan_current&quot;</span><span class="p">,</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Scan Current&quot;</span><span class="p">,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="s2">&quot;kind&quot;</span><span class="p">:</span> <span class="s2">&quot;scan&quot;</span><span class="p">,</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="s2">&quot;points_field&quot;</span><span class="p">:</span> <span class="s2">&quot;points&quot;</span><span class="p">,</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="s2">&quot;point_parameter&quot;</span><span class="p">:</span> <span class="s2">&quot;current&quot;</span><span class="p">,</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="s2">&quot;fields&quot;</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>        <span class="p">{</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>            <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;points&quot;</span><span class="p">,</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>            <span class="s2">&quot;label&quot;</span><span class="p">:</span> <span class="s2">&quot;Current points&quot;</span><span class="p">,</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;list&quot;</span><span class="p">,</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>            <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;100 uA&quot;</span><span class="p">,</span> <span class="s2">&quot;200 uA&quot;</span><span class="p">,</span> <span class="s2">&quot;500 uA&quot;</span><span class="p">],</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>        <span class="p">}</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="p">],</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>普通指令和每个 Scan 点都走这个方法。同一模块的指令、生命周期和测量不会并发访问同一
-VISA session。</p>
-<h2 id="dat">DAT 和异常语义<a class="headerlink" href="#dat" title="Permanent link">&para;</a></h2>
+<p>程序会逐个把列表中的电流交给 <code>execute_sequence_command</code>，然后运行这个 Scan 里面的指令。
+因此可以把 <code>Measure</code> 放进 Scan 中。</p>
+<p>生成的 SEQ 大致如下：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>T Module Scan &quot;tutorial_resistance&quot; &quot;scan_current&quot; {&quot;points&quot;:[&quot;100 uA&quot;,&quot;200 uA&quot;]}
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>T     Measure
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>T End Scan
+</span></code></pre></div>
+<h2 id="_1">出错时怎样处理<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
 <ul>
-<li>模块指令返回的是状态 Mapping 或 <code>None</code>，本身不写 DAT。</li>
-<li>要记录测量，必须在普通指令之后或 Scan 子树中显式插入 <code>Measure</code>。</li>
-<li><code>ModuleWarning</code> 结束当前普通动作并继续；在 Scan 中会跳过当前点的子树。</li>
-<li><code>ModuleError</code>、通信异常或未处理异常中止整个 SEQ。</li>
-<li>不要提供“任意 SCPI”文本框，它会绕过可审查参数和安全状态机。</li>
+<li>某一点数据不好但可以继续：报告 Warning；</li>
+<li>通讯失败、范围不安全或输出状态不明：报告 Error，停止 SEQ；</li>
+<li>保存的 SEQ 缺少对应模块时：可以打开和编辑，但不能开始运行。</li>
 </ul>
-<p>生成的通用 SEQ 文本类似：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>T Module Command &quot;tutorial_resistance&quot; &quot;set_current&quot; {&quot;current&quot;:&quot;1 mA&quot;,&quot;settle_seconds&quot;:0}
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>T Module Scan &quot;tutorial_resistance&quot; &quot;scan_current&quot; {&quot;points&quot;:[&quot;100 uA&quot;,&quot;200 uA&quot;],&quot;settle_seconds&quot;:0}
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>T     Measure
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>T End Scan
-</span></code></pre></div>
-<h2 id="_3">动态注册和缺失模块<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<ul>
-<li>模块成功 Enable 后才出现以模块显示名称为标题的指令组。</li>
-<li>Disable、worker timeout 或 IPC 失效时立即移除。</li>
-<li>SEQ 中缺失的模块 ID 或旧指令 ID 仍可加载、标红和原样保存。</li>
-<li>Run 预检会 fail-closed；不会自动 Enable、安装或静默跳过。</li>
-</ul>
-<p>教程模块的完整声明和解析实现位于
+<p>不要提供“任意仪表命令”输入框。它很容易绕过范围检查和安全步骤。</p>
+<p>完整可运行例子在
 <code>plugin_templates/measurement-modules-repository/modules/tutorial_resistance/backend.py</code>。</p>
 
 
@@ -1743,7 +1696,7 @@ VISA session。</p>
       <nav class="md-footer__inner md-grid" aria-label="页脚" >
         
           
-          <a href="../frontend/" class="md-footer__link md-footer__link--prev" aria-label="上一页: Settings 与 Status">
+          <a href="../frontend/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 设置与状态窗口">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1753,20 +1706,20 @@ VISA session。</p>
                 上一页
               </span>
               <div class="md-ellipsis">
-                Settings 与 Status
+                设置与状态窗口
               </div>
             </div>
           </a>
         
         
           
-          <a href="../instrument-drivers/" class="md-footer__link md-footer__link--next" aria-label="下一页: 仪表驱动分层">
+          <a href="../instrument-drivers/" class="md-footer__link md-footer__link--next" aria-label="下一页: 一台仪表一个文件">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 下一页
               </span>
               <div class="md-ellipsis">
-                仪表驱动分层
+                一台仪表一个文件
               </div>
             </div>
             <div class="md-footer__button md-icon">

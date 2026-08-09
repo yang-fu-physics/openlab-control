@@ -27,7 +27,7 @@
     
     
       
-        <title>仪表驱动分层 - OpenLab Control</title>
+        <title>一台仪表一个文件 - OpenLab Control</title>
       
     
     
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              仪表驱动分层
+              一台仪表一个文件
             
           </span>
         </div>
@@ -725,7 +725,7 @@
   <span class="md-ellipsis">
     
   
-    多通道与测量结果
+    多通道数据
   
 
     
@@ -753,7 +753,7 @@
   <span class="md-ellipsis">
     
   
-    Settings 与 Status
+    设置与状态窗口
   
 
     
@@ -781,7 +781,7 @@
   <span class="md-ellipsis">
     
   
-    自定义 SEQ 指令
+    模块自己的 SEQ 指令
   
 
     
@@ -818,7 +818,7 @@
   <span class="md-ellipsis">
     
   
-    仪表驱动分层
+    一台仪表一个文件
   
 
     
@@ -836,7 +836,7 @@
   <span class="md-ellipsis">
     
   
-    仪表驱动分层
+    一台仪表一个文件
   
 
     
@@ -865,7 +865,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        推荐结构
+        推荐目录
       
     </span>
   </a>
@@ -876,7 +876,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        驱动文件负责什么
+        仪表文件只处理一台仪表
       
     </span>
   </a>
@@ -887,18 +887,7 @@
   <a href="#backendpy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        backend.py 负责编排
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#timeout" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Timeout 的真正边界
+        backend.py 只写测量顺序
       
     </span>
   </a>
@@ -909,7 +898,18 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        用假会话测试协议
+        每次等待都要有上限
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不接仪表也能检查命令
       
     </span>
   </a>
@@ -1002,7 +1002,7 @@
   <span class="md-ellipsis">
     
   
-    开发温场设备插件
+    更换温度或磁场设备
   
 
     
@@ -1101,7 +1101,7 @@
   <span class="md-ellipsis">
     
   
-    测试策略
+    怎样检查模块
   
 
     
@@ -1535,7 +1535,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        推荐结构
+        推荐目录
       
     </span>
   </a>
@@ -1546,7 +1546,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        驱动文件负责什么
+        仪表文件只处理一台仪表
       
     </span>
   </a>
@@ -1557,18 +1557,7 @@
   <a href="#backendpy" class="md-nav__link">
     <span class="md-ellipsis">
       
-        backend.py 负责编排
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#timeout" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Timeout 的真正边界
+        backend.py 只写测量顺序
       
     </span>
   </a>
@@ -1579,7 +1568,18 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        用假会话测试协议
+        每次等待都要有上限
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        不接仪表也能检查命令
       
     </span>
   </a>
@@ -1606,63 +1606,56 @@
   
 
 
-<h1 id="_1">把仪表指令放进独立文件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>核心不强制模块内部结构，但真实组合仪表建议“一台仪表一个 Python 文件”。这样
-<code>backend.py</code> 只描述实验流程，SCPI/状态字/量程表可以独立测试。</p>
-<h2 id="_2">推荐结构<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h1 id="_1">一台仪表一个文件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>真实测量可能同时使用电流源、电压表和切换器。把所有仪表命令都塞进 <code>backend.py</code> 会很快
+变得难读。简单的做法是：每台仪表一个 Python 文件，<code>backend.py</code> 只写测量顺序。</p>
+<p>这不是强制要求。模块只有一台简单仪表时，一个 <code>instrument.py</code> 就够了。</p>
+<h2 id="_2">推荐目录<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>modules/my_transport/
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├─ module.toml
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─ backend.py              # open/configure/measure/close 与跨仪表编排
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├─ frontend.py             # 可选 QWidget
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─ backend.py                 # 整体测量顺序
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├─ frontend.py                # 可选设置窗口
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├─ instruments/
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  ├─ current_source.py    # 一台仪表一个文件
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  ├─ nanovoltmeter.py
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  └─ multiplexer.py
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  ├─ current_source.py       # 电流源命令
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  ├─ nanovoltmeter.py        # 电压表命令
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  └─ multiplexer.py          # 切换器命令
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>└─ tests/
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>   ├─ test_protocol.py
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>   ├─ test_backend.py
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>   └─ fakes.py
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>   ├─ test_instruments.py
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>   └─ test_measurement.py
 </span></code></pre></div>
-<p>如果模块只有一台简单仪表，也可以直接使用 <code>instrument.py</code>。不要为了形式增加基类、Mixin、
-工厂或依赖注入容器。</p>
-<h2 id="_3">驱动文件负责什么<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>不需要为了目录整齐再增加很多基类、工厂或其他中间层。</p>
+<h2 id="_3">仪表文件只处理一台仪表<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">CurrentSource</span><span class="p">:</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resource</span><span class="p">):</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">resource</span> <span class="o">=</span> <span class="n">resource</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">identify</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">identify</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">resource</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">&quot;*IDN?&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">configure_current</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value_a</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">compliance_v</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">set_current</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value_a</span><span class="p">,</span> <span class="n">compliance_v</span><span class="p">):</span>
 </span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">resource</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;SOUR:CURR </span><span class="si">{</span><span class="n">value_a</span><span class="si">:</span><span class="s2">.12g</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">resource</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;SENS:VOLT:PROT </span><span class="si">{</span><span class="n">compliance_v</span><span class="si">:</span><span class="s2">.12g</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">output_off</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">output_off</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 </span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">resource</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;OUTP OFF&quot;</span><span class="p">)</span>
 </span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
-</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 </span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">resource</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </span></code></pre></div>
-<p>驱动文件应负责：</p>
-<ul>
-<li>精确仪表命令和响应解析；</li>
-<li>状态字、量程、compliance 和错误队列；</li>
-<li>仪表本机配置读回；</li>
-<li>单个会话的关闭和尽力安全状态。</li>
-</ul>
-<p>它不应知道 SEQ、slot、DAT、Qt 或温场控制。</p>
-<h2 id="backendpy">backend.py 负责编排<a class="headerlink" href="#backendpy" title="Permanent link">&para;</a></h2>
+<p>这个文件负责仪表命令、返回值解析、量程、状态字和关闭连接。它不需要知道 SEQ、DAT、Qt
+或其他模块。</p>
+<h2 id="backendpy">backend.py 只写测量顺序<a class="headerlink" href="#backendpy" title="Permanent link">&para;</a></h2>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">open</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">source</span> <span class="o">=</span> <span class="n">CurrentSource</span><span class="p">(</span><span class="n">open_visa</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source_address</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">3.0</span><span class="p">))</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">meter</span> <span class="o">=</span> <span class="n">Nanovoltmeter</span><span class="p">(</span><span class="n">open_visa</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">meter_address</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mf">3.0</span><span class="p">))</span>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">verify_supported_pair</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="o">.</span><span class="n">identify</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">meter</span><span class="o">.</span><span class="n">identify</span><span class="p">())</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">slot</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">measure</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">channel</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="n">api</span><span class="o">.</span><span class="n">checkpoint</span><span class="p">()</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">switch</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">slot</span><span class="p">)</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">switch</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">channel</span><span class="p">)</span>
 </span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">api</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">switch_pause</span><span class="p">)</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">raw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">meter</span><span class="o">.</span><span class="n">read_delta_samples</span><span class="p">()</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="k">return</span> <span class="n">build_result</span><span class="p">(</span><span class="n">slot</span><span class="p">,</span> <span class="n">raw</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_a</span><span class="p">)</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">raw</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">meter</span><span class="o">.</span><span class="n">read_samples</span><span class="p">()</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    <span class="k">return</span> <span class="n">build_result</span><span class="p">(</span><span class="n">channel</span><span class="p">,</span> <span class="n">raw</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_a</span><span class="p">)</span>
 </span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
 </span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
 </span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="k">try</span><span class="p">:</span>
@@ -1671,27 +1664,26 @@
 </span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="k">finally</span><span class="p">:</span>
 </span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>        <span class="n">close_all</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">switch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">meter</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">)</span>
 </span></code></pre></div>
-<h2 id="timeout">Timeout 的真正边界<a class="headerlink" href="#timeout" title="Permanent link">&para;</a></h2>
-<p><code>api.timeout</code> 是核心给整次操作的总时间，不是 VISA timeout。最坏路径必须满足：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>所有可能耗尽的 I/O timeout 总和
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>+ pause / dwell / arm 等待
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>+ 输出关闭和资源释放预留
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>&lt; api.timeout
+<p>这样打开 <code>backend.py</code> 就能直接看出：连接哪些仪表、先切换什么、等待多久、读取什么，以及
+结束时怎样关闭输出。</p>
+<h2 id="_4">每次等待都要有上限<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>仪表读取不能无限等待。连接、查询和读取都应设置合理时间。所有步骤加起来，还要给关闭
+输出和释放连接留出时间。</p>
+<p>写命令等待超时，不等于仪表没有执行。危险写命令不能自动再发一次；应重新连接并读回真实
+状态。无法确认时停止 SEQ。</p>
+<h2 id="_5">不接仪表也能检查命令<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>可以准备一个假的 VISA 连接，记录程序发送了什么：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">fake</span> <span class="o">=</span> <span class="n">FakeVisaResource</span><span class="p">(</span><span class="n">responses</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;*IDN?&quot;</span><span class="p">:</span> <span class="s2">&quot;MODEL,2400,...&quot;</span><span class="p">})</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">source</span> <span class="o">=</span> <span class="n">CurrentSource</span><span class="p">(</span><span class="n">fake</span><span class="p">)</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">source</span><span class="o">.</span><span class="n">set_current</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">assert</span> <span class="n">fake</span><span class="o">.</span><span class="n">writes</span> <span class="o">==</span> <span class="p">[</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="s2">&quot;SOUR:CURR 0.001&quot;</span><span class="p">,</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="s2">&quot;SENS:VOLT:PROT 10&quot;</span><span class="p">,</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">]</span>
 </span></code></pre></div>
-<p>写命令 timeout 表示“可能已经执行”，禁止自动重发危险写命令。应断开、重新连接并读取
-真实状态；无法确认时抛 Error。</p>
-<h2 id="_4">用假会话测试协议<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<p>协议测试要断言完整命令顺序，而不只是最终返回值：</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">fake</span> <span class="o">=</span> <span class="n">FakeVisaResource</span><span class="p">(</span><span class="n">responses</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;*IDN?&quot;</span><span class="p">:</span> <span class="s2">&quot;MODEL,2400,...&quot;</span><span class="p">})</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">driver</span> <span class="o">=</span> <span class="n">CurrentSource</span><span class="p">(</span><span class="n">fake</span><span class="p">)</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">driver</span><span class="o">.</span><span class="n">configure_current</span><span class="p">(</span><span class="mf">1e-3</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">assert</span> <span class="n">fake</span><span class="o">.</span><span class="n">writes</span> <span class="o">==</span> <span class="p">[</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="s2">&quot;SOUR:CURR 0.001&quot;</span><span class="p">,</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="s2">&quot;SENS:VOLT:PROT 10&quot;</span><span class="p">,</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">]</span>
-</span></code></pre></div>
-<p>真实仪表手册属于驱动测试的依据，不应把未经验证的命令直接复制到生产模块。</p>
+<p>测试应检查命令顺序和错误处理，而不只是最后算出的数字。连接真实仪表前，还要按照手册做
+低风险现场检查。</p>
 
 
 
@@ -1729,7 +1721,7 @@
       <nav class="md-footer__inner md-grid" aria-label="页脚" >
         
           
-          <a href="../sequence-commands/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 自定义 SEQ 指令">
+          <a href="../sequence-commands/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 模块自己的 SEQ 指令">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1739,20 +1731,20 @@
                 上一页
               </span>
               <div class="md-ellipsis">
-                自定义 SEQ 指令
+                模块自己的 SEQ 指令
               </div>
             </div>
           </a>
         
         
           
-          <a href="../device-plugin/" class="md-footer__link md-footer__link--next" aria-label="下一页: 开发温场设备插件">
+          <a href="../device-plugin/" class="md-footer__link md-footer__link--next" aria-label="下一页: 更换温度或磁场设备">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 下一页
               </span>
               <div class="md-ellipsis">
-                开发温场设备插件
+                更换温度或磁场设备
               </div>
             </div>
             <div class="md-footer__button md-icon">

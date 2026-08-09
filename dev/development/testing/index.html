@@ -27,7 +27,7 @@
     
     
       
-        <title>测试策略 - OpenLab Control</title>
+        <title>怎样检查模块 - OpenLab Control</title>
       
     
     
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              测试策略
+              怎样检查模块
             
           </span>
         </div>
@@ -720,7 +720,7 @@
   <span class="md-ellipsis">
     
   
-    多通道与测量结果
+    多通道数据
   
 
     
@@ -748,7 +748,7 @@
   <span class="md-ellipsis">
     
   
-    Settings 与 Status
+    设置与状态窗口
   
 
     
@@ -776,7 +776,7 @@
   <span class="md-ellipsis">
     
   
-    自定义 SEQ 指令
+    模块自己的 SEQ 指令
   
 
     
@@ -804,7 +804,7 @@
   <span class="md-ellipsis">
     
   
-    仪表驱动分层
+    一台仪表一个文件
   
 
     
@@ -895,7 +895,7 @@
   <span class="md-ellipsis">
     
   
-    开发温场设备插件
+    更换温度或磁场设备
   
 
     
@@ -1008,7 +1008,7 @@
   <span class="md-ellipsis">
     
   
-    测试策略
+    怎样检查模块
   
 
     
@@ -1026,7 +1026,7 @@
   <span class="md-ellipsis">
     
   
-    测试策略
+    怎样检查模块
   
 
     
@@ -1055,18 +1055,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        教程模块测试
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Backend 必测行为
+        先运行教学模块测试
       
     </span>
   </a>
@@ -1077,18 +1066,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        协议层必测行为
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frontend" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Frontend 测试
+        每个模块至少检查这些情况
       
     </span>
   </a>
@@ -1099,7 +1077,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        核心回归测试
+        单独检查仪表命令
       
     </span>
   </a>
@@ -1110,7 +1088,29 @@
   <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        真实仪表验证顺序
+        检查设置窗口
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        修改主程序后运行完整测试
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        最后才连接真实仪表
       
     </span>
   </a>
@@ -1546,18 +1546,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        教程模块测试
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#backend" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Backend 必测行为
+        先运行教学模块测试
       
     </span>
   </a>
@@ -1568,18 +1557,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        协议层必测行为
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frontend" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Frontend 测试
+        每个模块至少检查这些情况
       
     </span>
   </a>
@@ -1590,7 +1568,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        核心回归测试
+        单独检查仪表命令
       
     </span>
   </a>
@@ -1601,7 +1579,29 @@
   <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        真实仪表验证顺序
+        检查设置窗口
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        修改主程序后运行完整测试
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        最后才连接真实仪表
       
     </span>
   </a>
@@ -1628,80 +1628,60 @@
   
 
 
-<h1 id="_1">测试扩展<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>测试分成三层：纯函数与协议、模块/插件生命周期、真实仪表低风险验证。前两层通过不代表
-第三层可以省略。</p>
-<h2 id="_2">教程模块测试<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>配套测试不启动完整 GUI，直接创建 Module 和 ModuleAPI：</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">api</span> <span class="o">=</span> <span class="n">ModuleAPI</span><span class="p">(</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="p">{</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        <span class="s2">&quot;temperature&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;current&quot;</span><span class="p">:</span> <span class="mf">300.0</span><span class="p">},</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        <span class="s2">&quot;field&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;current&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">},</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="p">},</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="k">lambda</span> <span class="n">kind</span><span class="p">,</span> <span class="n">payload</span><span class="p">:</span> <span class="n">events</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">kind</span><span class="p">,</span> <span class="n">payload</span><span class="p">)),</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">module</span> <span class="o">=</span> <span class="n">Module</span><span class="p">()</span>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">module</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">module</span><span class="o">.</span><span class="n">configure</span><span class="p">({},</span> <span class="n">api</span><span class="p">)</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="n">row</span><span class="p">,</span> <span class="n">rawdata</span> <span class="o">=</span> <span class="n">module</span><span class="o">.</span><span class="n">measure</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">api</span><span class="p">)</span>
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="k">assert</span> <span class="n">row</span><span class="p">[</span><span class="s2">&quot;StatusCode&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span>
-</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="k">assert</span> <span class="s2">&quot;R1&quot;</span> <span class="ow">in</span> <span class="n">row</span>
-</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">rawdata</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span>
-</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">module</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">api</span><span class="p">)</span>
+<h1 id="_1">怎样检查测量模块<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>测试的目的不是证明“永远不会出错”，而是尽早发现明显问题。先在不连接仪表时检查，再做
+低风险真机检查。</p>
+<h2 id="_2">先运行教学模块测试<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="p">`</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  <span class="n">-s</span> <span class="n">plugin_templates</span><span class="p">\</span><span class="n">measurement-modules-repository</span><span class="p">\</span><span class="n">tests</span> <span class="n">-v</span>
 </span></code></pre></div>
-<p>运行模板测试：</p>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="p">`</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  <span class="n">-s</span> <span class="n">plugin_templates</span><span class="p">\</span><span class="n">measurement-modules-repository</span><span class="p">\</span><span class="n">tests</span> <span class="n">-v</span>
+<p>这些测试会检查教学模块能否启动、应用设置、逐通道测量、报告超量程并安全关闭。完整例子在
+<code>plugin_templates/measurement-modules-repository/tests/test_tutorial_resistance.py</code>。</p>
+<h2 id="_3">每个模块至少检查这些情况<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ul>
+<li>正常 Enable 和 Disable；</li>
+<li>连接进行到一半时失败，仍能安全关闭；</li>
+<li>仪表型号不正确时拒绝继续；</li>
+<li>没有点击 Apply Settings 时拒绝测量；</li>
+<li>每个通道只写自己的列；</li>
+<li>未测量和出错的电阻值保持空白；</li>
+<li>正常、超量程、仪表保护限制和其他状态码；</li>
+<li>Pause 和 Stop 能在等待步骤中生效；</li>
+<li>重复关闭不会报错；</li>
+<li>程序结束或出错时，输出按模块设置安全关闭。</li>
+</ul>
+<h2 id="_4">单独检查仪表命令<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>不接真实仪表，用假的 VISA 或串口连接检查：</p>
+<ul>
+<li>先确认仪表型号，再发送设置命令；</li>
+<li>设置、读回、触发和读取的顺序正确；</li>
+<li>每种量程和状态都能正确解释；</li>
+<li>空返回、乱码和无效数字会被发现；</li>
+<li>写命令等待超时后不会盲目重发；</li>
+<li>一个资源关闭失败时，其他资源仍会继续释放；</li>
+<li>每次读取都有等待上限。</li>
+</ul>
+<h2 id="_5">检查设置窗口<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<ul>
+<li>保存值载入后仍能原样取出；</li>
+<li>Load SEQ 不会自动连接仪表或应用设置；</li>
+<li>状态更新只改变显示；</li>
+<li>初始宽度不出现横向滚动条；</li>
+<li>下拉列表没有展开时，滚轮不会误改数值。</li>
+</ul>
+<h2 id="_6">修改主程序后运行完整测试<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<p>普通模块通常不需要修改主程序。如果确实修改了主程序，再运行：</p>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="n">-s</span> <span class="n">tests</span> <span class="n">-v</span>
 </span></code></pre></div>
-<h2 id="backend">Backend 必测行为<a class="headerlink" href="#backend" title="Permanent link">&para;</a></h2>
-<ul>
-<li><code>open</code> 成功、部分失败和身份不符；</li>
-<li>未 Apply 时拒绝测量；</li>
-<li>每个 slot 只返回一行，其他通道列为空；</li>
-<li>正常、超量程、compliance 和作者状态码；</li>
-<li>rawdata 有限、长度有界并与正式行对应；</li>
-<li>Pause/Stop 检查点；</li>
-<li><code>run_end</code> 的 completed/stopped/error；</li>
-<li>重复 <code>close</code> 和异常清理；</li>
-<li>自定义普通/扫描指令的非法参数和未知 ID。</li>
-</ul>
-<h2 id="_3">协议层必测行为<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>使用 Fake VISA/Serial session 断言：</p>
-<ul>
-<li>身份查询发生在任何写命令之前；</li>
-<li>设置、读回和触发命令的完整顺序；</li>
-<li>每种量程和状态字解析；</li>
-<li>坏响应、空响应和非有限数；</li>
-<li>写 timeout 后不盲目重放；</li>
-<li>关闭输出失败时仍继续释放其他资源；</li>
-<li>每个 I/O 的 timeout 小于总操作上限。</li>
-</ul>
-<h2 id="frontend">Frontend 测试<a class="headerlink" href="#frontend" title="Permanent link">&para;</a></h2>
-<p>在 Qt offscreen 环境验证：</p>
-<ul>
-<li><code>load</code> 后 <code>dump</code> 保持数据；</li>
-<li>加载设置不触发 action 或后端连接；</li>
-<li><code>show_status</code> 只更新已有控件；</li>
-<li>Settings 窗口在最小内容宽度下无横向滚动条；</li>
-<li>滚轮不会在未展开控件上误改值。</li>
-</ul>
-<h2 id="_4">核心回归测试<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<p>如果扩展需要修改核心公共接口，应先运行受影响测试，再运行完整测试：</p>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="n">-s</span> <span class="n">tests</span> <span class="n">-v</span>
-</span></code></pre></div>
-<p>核心改动还必须覆盖 SEQ 解析/格式化往返、任意嵌套、缺失模块预检、IPC timeout、进程退出、
-动态 DAT 列和窗口重建。</p>
-<h2 id="_5">真实仪表验证顺序<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h2 id="_7">最后才连接真实仪表<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
 <ol>
-<li>不连接样品，只做身份和只读状态。</li>
-<li>使用仪表本机最低风险上下限。</li>
-<li>单次写入后立即读回，不开始长 SEQ。</li>
-<li>人工触发 Stop、断线和 timeout。</li>
-<li>验证仪表面板、硬件联锁和急停。</li>
-<li>保存脱敏命令日志和测试结果。</li>
-<li>完成后才能移除 Beta 标记或考虑无人值守。</li>
+<li>先不接样品，只读取型号和状态。</li>
+<li>在仪表面板上设置最低风险的限流、限压或量程。</li>
+<li>每发送一次设置，立即从仪表读回确认。</li>
+<li>人工测试 Stop、断线和等待超时。</li>
+<li>确认硬件联锁和人工急停有效。</li>
+<li>保存去除隐私信息的命令日志和测试结果。</li>
+<li>完成这些检查前，模块保持 Beta，不要无人值守运行。</li>
 </ol>
 
 
@@ -1740,7 +1720,7 @@
       <nav class="md-footer__inner md-grid" aria-label="页脚" >
         
           
-          <a href="../device-plugin/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 开发温场设备插件">
+          <a href="../device-plugin/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 更换温度或磁场设备">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -1750,7 +1730,7 @@
                 上一页
               </span>
               <div class="md-ellipsis">
-                开发温场设备插件
+                更换温度或磁场设备
               </div>
             </div>
           </a>
