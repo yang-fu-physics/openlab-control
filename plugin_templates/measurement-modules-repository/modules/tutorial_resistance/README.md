@@ -1,12 +1,13 @@
 # Tutorial Resistance
 
-开发者网站配套的无硬件四通道模块。它有意保持单文件后端，同时覆盖完整公开接口：
+开发者网站配套的四通道教学模块，不需要连接真实仪表。建议初学者先运行它，再逐步查看
+自己需要的功能：
 
-- `open / configure / measure / on_event / close`；
-- `slots = 4`，每个逻辑通道独立写一行；
+- 启动、应用设置、测量和关闭；
+- 四个通道，每个通道独立写一行；
 - 无效电阻留空，`StatusCode` 使用数字；
-- 返回有限原始采样序列，由核心写入 rawdata sidecar；
-- Settings/Status QWidget；
-- Enable 后注册 Set Current 和 Scan Current 两条 SEQ 指令。
+- 可选保存原始读数；
+- 可选设置和状态窗口；
+- 可选 Set Current 和 Scan Current 两条 SEQ 指令。
 
-它只模拟电阻和激励电流，不连接真实仪表，也不能作为真实仪表安全实现。
+它只生成模拟电阻和激励电流，不能直接改成真实仪表安全程序。

@@ -1,15 +1,25 @@
-# 开发温度、磁场或 Monitor 插件
+# 更换温度或磁场设备
 
-Device Plugin 的接口比 Measurement Module 更严格，因为核心必须持续读取设备并统一执行
-安全限制、角色、稳定性和失联恢复。
+!!! info "本页不是 Measurement Module 教程"
 
-## 清单
+    如果你在开发电阻、电压或电流测量，请跳过本页。Device Plugin 只负责主温度、主磁场
+    和只读监视设备。
+
+OpenLab Control 不控制 PPMS。这里的插件用于连接程序自己管理的温控仪、磁场控制器或只读
+监视仪表。
+
+## 更换设备时需要改什么
+
+每种设备准备一个插件。设备确定后，只需在主配置中写入插件名称、通讯地址和允许范围，然后
+重启程序。通常不需要为不同仪表维护不同的主程序分支。
 
 ```text
 device_plugins/my_controller/
 ├─ device.toml
 └─ backend.py
 ```
+
+`device.toml` 写名称、版本和设备种类：
 
 ```toml
 id = "my_controller"
@@ -22,10 +32,13 @@ kinds = ["temperature"]
 dependencies = []
 ```
 
-`kinds` 可以是 `temperature`、`field` 或 `monitor`。不同设备协议、安全行为和界面不同，
-核心只提供 fail-closed 示例，不声称示例可以直接控制任意真实仪表。
+种类可以是：
 
-## 后端接口
+- `temperature`：主温度或温度监视；
+- `field`：主磁场或磁场监视；
+- `monitor`：只读显示，例如 2nd Stage。
+
+## 后台代码需要做的事情
 
 ```python
 from labcontrol.devices.base import DevicePlugin
@@ -39,48 +52,29 @@ class MyController(DevicePlugin):
     async def disconnect(self): ...
 ```
 
-只读 Monitor 只需实现 `connect/poll/disconnect`；默认 `set_target` 和 `hold` 会明确拒绝。
+| 方法 | 用途 |
+| --- | --- |
+| `connect` | 连接仪表、确认型号、读取当前状态 |
+| `poll` | 定期读取当前值、目标、速率和是否稳定 |
+| `set_target` | 设置新的目标和速率 |
+| `hold` | 保持刚刚读到的当前状态 |
+| `disconnect` | 关闭连接 |
 
-## connect：只确认，不改变输出
+只读设备只需要连接、读取和断开；它不能接受目标值。
 
-`connect()` 应当：
+## 连接时不要自动改变仪表
 
-1. 使用有限 timeout 打开会话；
-2. 查询 `*IDN?` 或等价身份；
-3. 验证型号和必要固件；
-4. 读取当前状态；
-5. 不自动写入保存配置，不改变目标或输出。
+`connect` 应按顺序完成：
 
-导入、构造和发现阶段都不得连接仪表。
+1. 用有限等待时间打开连接；
+2. 读取仪表型号；
+3. 确认型号正确；
+4. 读取当前值、目标和状态；
+5. 不自动发送保存设置，不改变目标或输出。
 
-## poll：返回完整快照
+插件文件被发现或读取时，也不能提前连接仪表。
 
-```python
-return DeviceSnapshot(
-    device_id=self.config.id,
-    display_name=self.config.display_name,
-    kind=self.config.kind,
-    timestamp=time.monotonic(),
-    connected=True,
-    unit=self.config.unit,
-    current=current,
-    target=target,
-    rate_per_minute=rate,
-    activity=DeviceActivity.MOVING,
-)
-```
-
-时间戳必须使用单调时钟。绝对 DAT 时间由日志层生成，不要混用。
-
-## 三层限制
-
-目标和速率至少在三处防护：
-
-1. 核心主配置限制手动控制、SEQ 参数窗口和运行时执行；
-2. 插件在发送命令前再次检查 `config.min_value/max_value/max_rate_per_minute`；
-3. 仪表本机限制、联锁和急停作为最终硬件边界。
-
-配置示例：
+## 在主配置中选择插件
 
 ```toml
 [[devices]]
@@ -96,17 +90,24 @@ max_rate_per_minute = 20.0
 address = "GPIB0::12::INSTR"
 ```
 
-同一种类最多一个 primary；其他设备默认只读监视。更换设备只需复制目标插件、修改这一段
-配置并重启，不需要为每台温控或磁体维护核心分支。
+`primary` 表示主设备。同一种类最多只有一个主设备；其他同类设备默认只监视。更换仪表时，
+通常只需要更换 `plugin`、`address` 和允许范围，然后重启。
 
-## Hold 和失联
+## 安全检查不能只做一次
 
-`hold()` 必须基于新鲜读回保持当前值，不能使用缓存值、猜测值或零。写命令 timeout 不自动
-重试。读链路失联时核心关闭旧 worker 并重连；恢复后读取实际 target/rate，不重放旧写入。
+目标值和速率至少要经过：
 
-完整 fail-closed 骨架位于：
+1. 主程序检查手动输入和 SEQ 参数；
+2. 插件在发送命令前再次检查；
+3. 仪表本机限制和硬件联锁作最后保护。
+
+停止 SEQ 后，温度和磁场保持当前状态，不自动回零。需要 Hold 时，必须先读取当前真实值，
+不能使用很久以前保存的数值。写命令等待超时后，也不要直接重发危险命令。
+
+可以复制的例子位于：
 
 - `plugin_templates/device-plugins-repository/plugins/example_controller/`
 - `plugin_templates/device-plugins-repository/plugins/example_monitor/`
 
-在连接真实设备前完成 [测试策略](testing.md) 和 [安全清单](../guides/safety-checklist.md)。
+这些只是程序结构示例，不代表已经适合任何真实仪表。连接前请完成
+[安全清单](../guides/safety-checklist.md)。

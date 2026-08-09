@@ -1,12 +1,9 @@
-# 开发第一个 Measurement Module
+# 写第一个测量模块
 
-这一章先完成一个没有真实仪表的四通道模块。最终代码已经放在
-`plugin_templates/measurement-modules-repository/modules/tutorial_resistance/`，可以一边
-阅读一边运行。
+这一章做一个不连接真实仪表的四通道电阻模块。完整例子已经放在
+`plugin_templates/measurement-modules-repository/modules/tutorial_resistance/`，可以直接复制。
 
-## 1. 创建最小目录
-
-目录名就是稳定模块 ID。不要把显示名称当作 ID：
+## 1. 创建两个文件
 
 ```text
 modules/tutorial_resistance/
@@ -14,54 +11,23 @@ modules/tutorial_resistance/
 └─ backend.py
 ```
 
-`module.toml` 只需要名称和版本：
+`module.toml` 告诉程序模块的名称和版本：
 
 ```toml
 name = "Tutorial Resistance"
 version = "0.1.0"
 ```
 
-发现阶段只读取清单和目录指纹，不导入 `backend.py`，所以扫描模块列表不会执行作者代码。
+文件夹名是模块在程序内部使用的名字。建议只用小写字母、数字和下划线。
 
-## 2. 实现三个必需方法
+## 2. 写启动、测量和关闭
 
-```python
-from labcontrol.module_api import ModuleAPI, ModuleError
-
-
-class Module:
-    columns = {"Resistance": "Ohm", "StatusCode": ""}
-
-    def open(self, api: ModuleAPI):
-        self.ready = True
-        api.status({"State": "Ready"})
-
-    def measure(self, slot: int, api: ModuleAPI):
-        if not self.ready:
-            raise ModuleError("Module is not ready", "NOT_READY")
-        api.checkpoint()
-        return {"Resistance": 100.0, "StatusCode": 0}
-
-    def close(self, api: ModuleAPI):
-        self.ready = False
-```
-
-三个方法都可以是同步函数或返回 awaitable：
-
-- `open(api)`：用户 Enable 后调用。建立连接并进入安全初态，但不会收到保存设置。
-- `measure(slot, api)`：一次调用最多返回一行。
-- `close(api)`：Disable 和应用退出时调用，必须允许部分初始化和重复调用。
-
-!!! warning "不要在导入和构造阶段连接仪表"
-
-    `backend.py` 被 worker 导入、`Module()` 被构造时都不得发 I/O。真实连接必须推迟到
-    `open()`，否则首次信任和生命周期控制会被绕过。
-
-## 3. 声明 DAT 列和通道
-
-四通道模块只需要：
+把下面内容放进 `backend.py`：
 
 ```python
+from labcontrol.module_api import ModuleError
+
+
 class Module:
     columns = {
         "R1": "Ohm",
@@ -71,50 +37,52 @@ class Module:
         "StatusCode": "",
     }
     slots = 4
+
+    def __init__(self):
+        self.ready = False
+
+    def open(self, api):
+        self.ready = True
+        api.status({"State": "Ready"})
+
+    def measure(self, channel, api):
+        if not self.ready:
+            raise ModuleError("Module is not ready", "NOT_READY")
+        api.checkpoint()
+        return {
+            f"R{channel}": 100.0 + channel,
+            "StatusCode": 0,
+        }
+
+    def close(self, api):
+        self.ready = False
 ```
 
-核心会依次调用 `measure(1, api)` 到 `measure(4, api)`。模块在每次调用中只测一个通道，
-不再自行循环四次。
+这里真正需要记住的只有三件事：
 
-## 4. 加入 Apply Settings
+- `open`：点击 Enable 后运行。以后把“打开仪表连接”写在这里。
+- `measure`：每次测一个通道并返回一行数据。
+- `close`：Disable 或退出时运行。以后把“关闭输出、断开连接”写在这里。
 
-只有需要设置时才实现 `configure`：
+`columns` 是 DAT 中允许出现的列，`slots = 4` 表示有四个通道。
+
+!!! warning "不要过早连接仪表"
+
+    不要在文件刚被读取时连接仪表，也不要在 `__init__` 中连接。必须等到 `open`，这样模块
+    保持 Disabled 时不会碰真实仪表。
+
+## 3. 只在需要时使用这些帮助功能
 
 ```python
-def configure(self, settings, api):
-    delay = float(settings["delay_seconds"])
-    if not 0 <= delay <= 60:
-        raise ModuleError(
-            "delay_seconds must be between 0 and 60",
-            "INVALID_SETTINGS",
-            "delay_seconds",
-        )
-    self.delay_seconds = delay
-    self.applied = True
+api.sleep(0.5)                              # 等待 0.5 秒，可被 Pause/Stop 控制
+api.checkpoint()                            # 检查是否 Pause 或 Stop
+api.warn("OVER_RANGE", "R1 超量程", "R1") # 报告一次可继续运行的问题
+api.status({"State": "Measuring"})        # 更新模块状态窗口
 ```
 
-Enable 读取保存值到界面，但不调用 `configure`。只有用户检查后点击 Settings 页的
-**Apply Settings**，核心才把 `Frontend.dump()` 的结果传给后端。
+第一次练习不必把它们全部用上。先让 `measure` 正常返回数据即可。
 
-## 5. 使用 ModuleAPI
-
-模块通常只需要这些能力：
-
-```python
-api.sleep(0.5)                 # Pause 冻结计时，Stop 可打断
-api.checkpoint()               # 两次仪表 I/O 之间检查 Pause/Stop
-devices = api.devices()        # 最新温度、磁场和 Monitor 快照副本
-api.warn("OVER_RANGE", "R1 exceeded range", "R1")
-api.warn("OVER_RANGE", None, "R1")  # 解除同一 Warning
-api.status({"State": "Measuring"})
-operation_limit = api.timeout  # 本次核心操作总时限
-```
-
-`ModuleAPI` 不能控制温度、磁场、SEQ 或 DAT，也不能中断已经进入厂商驱动的阻塞调用。
-
-## 6. 运行完整教程模块
-
-把目录复制到活动模块目录：
+## 4. 复制并运行完整例子
 
 ```powershell
 Copy-Item -Recurse `
@@ -125,9 +93,12 @@ Copy-Item -Recurse `
 重启程序后：
 
 1. 打开 Modules，Enable **Tutorial Resistance**。
-2. 检查 Settings，点击 **Apply Settings**。
-3. 创建一条含 `Measure` 的 SEQ。
-4. 运行后确认每次 Measure 写四行，R1–R4 分别只出现在自己的行。
+2. 打开 Settings，检查数值后点击 **Apply Settings**。
+3. 新建一条包含 `Measure` 的 SEQ。
+4. 运行后确认写出四行；R1、R2、R3、R4 分别只出现在自己的行。
+
+完整例子多了一些后面才会用到的功能，例如设置窗口、原始数据和模块自己的 SEQ 指令。
+不理解这些代码也不会影响本章。
 
 ??? example "展开完整 backend.py"
 
@@ -135,4 +106,4 @@ Copy-Item -Recurse `
     --8<-- "plugin_templates/measurement-modules-repository/modules/tutorial_resistance/backend.py"
     ```
 
-接下来阅读 [多通道与测量结果](results-and-slots.md)，理解多个模块如何对齐到同一组行。
+下一步阅读 [多通道数据](results-and-slots.md)。

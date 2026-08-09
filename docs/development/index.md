@@ -1,62 +1,69 @@
-# 先理解扩展边界
+# 从这里开始写测量模块
 
-OpenLab Control 刻意只保留两类扩展。判断方式很简单：它是在控制实验环境，还是在完成
-一次测量？
+测量模块就是一段完成测量的小程序。例如：切换通道、等待仪表稳定、读取电压，再换算成
+电阻。主程序会在 SEQ 遇到 `Measure` 时调用它。
 
-| 问题 | Device Plugin | Measurement Module |
-| --- | --- | --- |
-| 负责对象 | 温控仪、磁体电源、只读 Monitor | 电表、电流源、切换器及组合测量方案 |
-| 能否改变温度/磁场 | 主控插件可以，由核心统一授权 | 不可以，只能读取快照 |
-| 生命周期 | connect / poll / set_target / hold / disconnect | open / measure / close |
-| 运行位置 | 每个设备实例一个子进程 | 每个 Enabled 模块一个子进程 |
-| 设置入口 | `configs/default.toml` | 模块 Settings 页与 SEQ 伴随设置 |
-| 主要安全责任 | 上下限、速率、读回、Hold、失联恢复 | 仪表量程、输出、测量时序、异常清理 |
+如果你只是想写电阻、电压或电流测量，下面这些内容已经够用了。本章不讲主程序管理的
+其他设备。
 
-## Measurement Module 应拥有完整测量
+## 模块负责什么
 
-如果一次电阻测量需要 6221、2182A 和 7001，那么这三个仪表属于同一个 Measurement
-Module。模块知道切换顺序、触发状态、原始样本、compliance 和安全关断；核心只在
-`Measure` 时调用它。
+- 用户点击 Enable 后，连接模块自己的仪表；
+- 用户点击 Apply Settings 后，应用量程、电流、等待时间等设置；
+- 收到测量请求后，按顺序完成一次测量；
+- 返回数字结果和状态码；
+- Disable、程序退出或出错时，关闭自己的输出并释放连接。
 
-不要为每条 SCPI 命令增加核心接口。模块可以自由组织自己的 Python 文件，只需要在
-`backend.py` 暴露一个 `Module` 类。
+一个测量需要多台仪表时，把它们放进同一个模块。例如 6221、2182A 和 7001 一起完成
+Delta 测量，就应该是一个模块，而不是三个模块。
 
-## Device Plugin 必须受核心约束
+## 模块不负责什么
 
-温度和磁场会影响所有后续指令，所以核心必须掌握：
+- 不改变主程序管理的其他设备；
+- 不直接写 DAT 文件；
+- 不控制 SEQ 开始、暂停或停止；
+- 不从设置窗口直接连接仪表；
+- 不要求修改主程序才能增加一种新仪表。
 
-- 哪个设备是 primary；
-- 允许的目标范围和最大速率；
-- 当前值、目标、速率、稳定状态与连接状态；
-- 失联恢复窗；
-- Stop/Error 时如何请求 Hold Current。
-
-因此不要把温控或磁场写成普通测量模块，也不要从模块或 GUI 直接操作它们。
-
-## 线程和进程边界
+## 先认识三个文件
 
 ```text
-GUI 主线程
-├─ 主窗口、SEQ 编辑器、Data Browser
-└─ 模块 Frontend QWidget（只编辑/显示数据）
-        │ 请求
-        ▼
-后台 Runtime
-├─ SEQ Engine、设备管理、DAT 唯一写入者
-├─ Device Plugin 子进程 × N
-└─ Enabled Measurement Module 子进程 × N
+modules/my_measurement/
+├─ module.toml    # 模块名称和版本
+├─ backend.py     # 连接、测量、关闭
+└─ frontend.py    # 可选：设置和状态窗口
 ```
 
-模块内部请求串行；同一槽位的不同模块可以并行。IPC 只接受受限 JSON，不能发送任意
-Python 对象、NaN、Infinity 或仪表句柄。
+初学时只创建前两个文件。模块已经能测量后，再决定是否需要 `frontend.py`。
 
-## 作者不需要理解的内部实现
+## 程序会按这个顺序调用
 
-编写普通模块时，不需要导入 parser、engine、worker、service 或 UI 主窗口。优先只接触：
+```text
+用户点击 Enable
+        ↓
+open：连接仪表
+        ↓
+用户检查设置并点击 Apply Settings
+        ↓
+configure：应用设置（如果模块有设置）
+        ↓
+SEQ 执行 Measure
+        ↓
+measure：逐通道测量
+        ↓
+用户点击 Disable 或程序退出
+        ↓
+close：关闭输出并释放连接
+```
 
-- `labcontrol.module_api.ModuleAPI`
-- `labcontrol.module_api.ModuleWarning`
-- `labcontrol.module_api.ModuleError`
-- 可选 `labcontrol.measurement.frontend_api.ModuleUIAPI`
+第一次学习时只要记住 `open`、`measure`、`close` 三个名字。其余功能都可以以后再加。
 
-下一步直接创建 [第一个测量模块](first-module.md)。
+## 推荐阅读顺序
+
+1. [第一个测量模块](first-module.md)
+2. [多通道数据](results-and-slots.md)
+3. [设置与状态窗口](frontend.md)（需要设置时再看）
+4. [一台仪表一个文件](instrument-drivers.md)（连接真实仪表前再看）
+5. [模块自己的 SEQ 指令](sequence-commands.md)（确实需要时再看）
+
+更完整、也更偏技术的内容放在 [完整扩展规范](../PLUGIN_DEVELOPMENT.md) 中。初学者不需要先读。

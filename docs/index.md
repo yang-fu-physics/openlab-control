@@ -6,97 +6,91 @@ hide:
 
 <section class="olc-hero">
   <div>
-    <div class="olc-eyebrow">OpenLab Control · Developer Guide</div>
-    <h1>让控制核心保持小，让测量方案自由生长。</h1>
+    <div class="olc-eyebrow">OpenLab Control · 中文教程</div>
+    <h1>先做出一个能测量的模块，再慢慢增加功能。</h1>
     <p class="olc-hero-copy">
-      面向低温、磁场与电输运实验的中文开发教程。从一个可运行的四通道模块开始，逐步加入
-      设置窗口、自定义 SEQ 指令、仪表驱动、离线安装和真实硬件安全测试。
+      不需要先读懂整个程序。你可以复制一个不连接仪表的四通道例子，运行成功后，再加入
+      自己的设置、仪表命令和测量步骤。
     </p>
     <div class="olc-actions">
-      <a class="md-button md-button--primary" href="getting-started/">开始使用</a>
-      <a class="md-button" href="development/first-module/">开发第一个模块</a>
-      <a class="md-button" href="reference/public-api/">查看公共 API</a>
+      <a class="md-button md-button--primary" href="getting-started/">第一次使用</a>
+      <a class="md-button" href="development/first-module/">写第一个测量模块</a>
+      <a class="md-button" href="development/device-plugin/">更换温度或磁场设备</a>
     </div>
   </div>
-  <div class="olc-terminal" aria-label="Measurement Module 最小接口示例">
+  <div class="olc-terminal" aria-label="最小测量模块示例">
     <pre><code><span class="olc-keyword">class</span> Module:
     columns = {<span class="olc-string">"Resistance"</span>: <span class="olc-string">"Ohm"</span>}
 
     <span class="olc-keyword">def</span> <span class="olc-method">open</span>(self, api):
-        self.instrument = open_instrument()
+        self.ready = <span class="olc-keyword">True</span>
 
-    <span class="olc-keyword">def</span> <span class="olc-method">measure</span>(self, slot, api):
-        api.checkpoint()
-        <span class="olc-keyword">return</span> {<span class="olc-string">"Resistance"</span>: self.read()}
+    <span class="olc-keyword">def</span> <span class="olc-method">measure</span>(self, channel, api):
+        <span class="olc-keyword">return</span> {<span class="olc-string">"Resistance"</span>: 100.0}
 
     <span class="olc-keyword">def</span> <span class="olc-method">close</span>(self, api):
-        self.instrument.close()</code></pre>
+        self.ready = <span class="olc-keyword">False</span></code></pre>
   </div>
 </section>
 
 <div class="olc-statbar">
-  <div class="olc-stat"><strong>3 个</strong><span>必需后端方法</span></div>
-  <div class="olc-stat"><strong>1 个</strong><span>扩展一个独立进程</span></div>
-  <div class="olc-stat"><strong>0 次</strong><span>Frontend 直接仪表 I/O</span></div>
-  <div class="olc-stat"><strong>3 层</strong><span>核心、插件、硬件安全边界</span></div>
+  <div class="olc-stat"><strong>3 步</strong><span>启动、测量、关闭</span></div>
+  <div class="olc-stat"><strong>4 通道</strong><span>现成教学例子</span></div>
+  <div class="olc-stat"><strong>可选</strong><span>设置和状态窗口</span></div>
+  <div class="olc-stat"><strong>无需仪表</strong><span>先在电脑上练习</span></div>
 </div>
 
-## 从能运行的例子开始
+## 写测量模块的学习顺序
 
 <p class="olc-section-lead">
-教程按一次真实开发的顺序组织。每一章都有明确产物、可复制代码和验证方法，不要求作者先理解
-整个核心实现。
+Measurement Module 是“完成一次测量”的小程序，例如读取电阻、电压或电流。初学时按下面
+四步学习即可。
 </p>
 
 <div class="olc-card-grid">
   <a class="olc-card" href="development/first-module/">
-    <span class="olc-card-number">01 / MODULE</span>
-    <h3>写出第一个模块</h3>
-    <p>从 module.toml 和 backend.py 开始，用 open、measure、close 完成最小生命周期。</p>
+    <span class="olc-card-number">01</span>
+    <h3>复制并运行教学模块</h3>
+    <p>先让一个不连接真实仪表的模块出现在列表中，并写出四行测试数据。</p>
   </a>
   <a class="olc-card" href="development/results-and-slots/">
-    <span class="olc-card-number">02 / DATA</span>
-    <h3>正确返回四通道数据</h3>
-    <p>理解 slot、稀疏行、数字状态码、Warning、Error、rawdata 与动态 DAT 列。</p>
+    <span class="olc-card-number">02</span>
+    <h3>让每个通道各写一行</h3>
+    <p>只填写本通道测到的数值；没有测量的列保持空白。</p>
   </a>
-  <a class="olc-card" href="development/sequence-commands/">
-    <span class="olc-card-number">03 / SEQUENCE</span>
-    <h3>给模块增加 SEQ 指令</h3>
-    <p>Enable 后动态注册普通动作和可任意嵌套的扫描，无需修改核心解析器。</p>
+  <a class="olc-card" href="development/frontend/">
+    <span class="olc-card-number">03</span>
+    <h3>按需增加设置窗口</h3>
+    <p>简单模块可以没有窗口；需要量程、电流等参数时再添加。</p>
   </a>
   <a class="olc-card" href="development/instrument-drivers/">
-    <span class="olc-card-number">04 / DRIVER</span>
-    <h3>隔离底层仪表命令</h3>
-    <p>每台仪表一个文件，backend.py 只编排连接、配置、测量和安全收尾。</p>
-  </a>
-  <a class="olc-card" href="development/device-plugin/">
-    <span class="olc-card-number">05 / DEVICE</span>
-    <h3>接入温度和磁场设备</h3>
-    <p>实现统一的异步 Device Plugin，让核心继续负责上下限、角色、恢复和 Hold。</p>
-  </a>
-  <a class="olc-card" href="guides/safety-checklist/">
-    <span class="olc-card-number">06 / SAFETY</span>
-    <h3>通过真实仪表安全门</h3>
-    <p>检查身份、量程、超时、写入歧义、联锁、Stop/Error 和人工急停。</p>
+    <span class="olc-card-number">04</span>
+    <h3>接入真实仪表</h3>
+    <p>每台仪表的命令放在自己的文件里，主文件只写测量顺序。</p>
   </a>
 </div>
 
-## 核心只负责共同问题
+## 温度和磁场设备是另一条路线
 
-OpenLab Control 不控制 PPMS 本体，也不假设所有实验仪表共享一套界面或命令。核心统一
-处理 SEQ、进程隔离、数据写入、错误语义和温场安全限制；扩展作者决定自己的协议、测量
-时序、状态码和设置窗口。
+温控仪和磁场控制器不属于 Measurement Module。只有需要更换主温度、主磁场或只读监视
+设备时，才阅读 [Device Plugin 教程](development/device-plugin.md)。普通测量模块作者可以
+完全跳过那一章。
+
+## 先记住一条原则
+
+模块只负责自己的仪表和测量步骤。SEQ、DAT 文件、温度目标和磁场目标由主程序管理。这样
+开发一个新模块时，不需要理解或修改整个主程序。
 
 <div class="olc-screenshot">
   <img src="main-window-preview.png" alt="OpenLab Control 主窗口与 Sequence Command Bar" loading="lazy">
 </div>
 
-!!! warning "真实仪表还需要现场验证"
+!!! warning "连接真实仪表前仍要现场检查"
 
-    示例和自动测试不能替代仪表本机限流、限压、限温、磁体保护、硬件联锁和人工急停。
-    未完成低风险真机验证的扩展必须保持 Beta，并禁止无人值守运行。
+    教学例子只能说明程序怎样运行，不能代替仪表本机的限流、限压、联锁和人工急停。
+    没有完成低风险真机检查前，不要无人值守运行。
 
 <div class="olc-next">
-  <a href="getting-started/">下一步：五分钟运行仿真 →</a>
-  <a href="development/">已经熟悉程序：直接理解扩展边界 →</a>
+  <a href="getting-started/">第一次使用：先运行仿真 →</a>
+  <a href="development/first-module/">开始写第一个测量模块 →</a>
 </div>

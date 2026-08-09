@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 重写开发者网站的初学者路线，用日常语言解释模块文件、通道、设置和测试；Measurement
+  Module 与温度/磁场 Device Plugin 改为两条独立教程，不再在模块章节混讲。
 - 新增基于 MkDocs Material 的中文开发者网站，包含首页、快速开始、Measurement Module、
   Device Plugin、仪表驱动分层、离线发布、排错、安全清单和自动公共 API 页面。
 - 网站使用 `dev` / `stable` 版本通道、站内搜索、代码复制和 GitHub Pages 自动发布；

@@ -112,16 +112,16 @@ nav:
       - 源码环境: getting-started/source.md
       - 第一条 SEQ: getting-started/first-sequence.md
   - Measurement Module:
-      - 扩展边界: development/index.md
+      - 从这里开始: development/index.md
       - 第一个测量模块: development/first-module.md
-      - 多通道与测量结果: development/results-and-slots.md
-      - Settings 与 Status: development/frontend.md
-      - 自定义 SEQ 指令: development/sequence-commands.md
-      - 仪表驱动分层: development/instrument-drivers.md
+      - 多通道数据: development/results-and-slots.md
+      - 设置与状态窗口: development/frontend.md
+      - 模块自己的 SEQ 指令: development/sequence-commands.md
+      - 一台仪表一个文件: development/instrument-drivers.md
   - Device Plugin:
-      - 开发温场设备插件: development/device-plugin.md
+      - 更换温度或磁场设备: development/device-plugin.md
   - 测试与发布:
-      - 测试策略: development/testing.md
+      - 怎样检查模块: development/testing.md
       - 离线安装与发布: guides/offline-packaging.md
       - 仪表安全清单: guides/safety-checklist.md
       - 常见问题: guides/troubleshooting.md

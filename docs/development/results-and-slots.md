@@ -1,79 +1,85 @@
-# 多通道、测量结果与状态
+# 让每个通道各写一行
 
-一次 `Measure` 不等于固定一行。核心先收集所有 Enabled 模块声明的逻辑 slot，再按 slot
-逐行调度。
+程序把“第几行、也是第几个通道”叫作 `slot`。这个名字只会出现在代码中；把它理解成通道号
+即可。
 
-## Slot 合并规则
-
-假设同时启用三个模块：
-
-| 模块 | 声明 | 参与方式 |
-| --- | --- | --- |
-| 四通道电桥 | `slots = 4` | slot 1–4 |
-| 只启用奇数通道的模块 | `slots = (1, 3)` | 只参与 slot 1、3 |
-| 独立 2400 | 不声明 `slots` | 跟随每个现有 slot 调用一次 |
-
-逻辑 slot 的并集是 1、2、3、4，因此一次 `Measure` 写四行：
-
-| 行 | 电桥 | 奇数通道模块 | 独立 2400 |
-| --- | --- | --- | --- |
-| slot 1 | 测量 | 测量 | 测量一次 |
-| slot 2 | 测量 | 空列 | 测量一次 |
-| slot 3 | 测量 | 测量 | 测量一次 |
-| slot 4 | 测量 | 空列 | 测量一次 |
-
-同一 slot 的不同模块并行等待；同一个模块内部仍严格串行。若所有模块都不声明 `slots`，
-一次 Measure 只有 slot 1。
-
-## 稀疏行，而不是填文字
-
-每个通道只返回自己的列：
+## 四通道模块
 
 ```python
-def measure(self, slot, api):
-    resistance = self.read_channel(slot)
-    return {
-        f"R{slot}": resistance,
-        "StatusCode": 0,
-    }
+class Module:
+    slots = 4
+
+    def measure(self, channel, api):
+        resistance = self.read_channel(channel)
+        return {
+            f"R{channel}": resistance,
+            "StatusCode": 0,
+        }
 ```
 
-不要给未测量通道返回 `0`、`None`、`"N/A"` 或 `"Error"`。直接省略键，中央 DAT 写入器
-会保持该列为空。
+一次 `Measure` 会调用四次：通道 1、2、3、4 各一次，并写成四行。模块不用在
+`measure` 里面再循环四次。
 
-## 数据异常和系统异常不同
+## 没测量的列保持空白
 
-状态码由每个模块定义，不存在强行统一的全局含义。常见约定可以是：
-
-| 数值 | 某个模块中的含义示例 |
-| --- | --- |
-| `0` | 正常 |
-| `1` | 超量程 |
-| `2` | 超 compliance |
-| `3+` | 作者定义的其他数据状态 |
-
-如果某次电阻无效：
+测量通道 2 时，只返回 R2：
 
 ```python
 return {
-    "ExcitationCurrent": current,
-    "StatusCode": STATUS_OVER_RANGE,
+    "R2": resistance,
+    "StatusCode": 0,
 }
 ```
 
-电阻列被省略，同时用 `api.warn(...)` 报告可恢复数据问题。SEQ 继续，Warning 按
-`source/code/context` 去重。
+不要给 R1、R3、R4 填 `0`、`None`、`"N/A"` 或 `"Error"`。不返回这些列，DAT 会自然
+留下空白。
 
-如果通讯、输出状态、联锁或安全状态无法确认，应抛 `ModuleError` 或普通异常，使整个 SEQ
-进入 Error。不要用一个普通状态码掩盖系统故障。
+## 同时启用多个模块
 
-## 原始样本
+假设同时启用一个四通道模块和一台独立 2400：
 
-需要保存仪表原始读数时返回二元组：
+| DAT 行 | 四通道模块 | 独立 2400 |
+| --- | --- | --- |
+| 通道 1 | 测通道 1 | 测量一次 |
+| 通道 2 | 测通道 2 | 再测量一次 |
+| 通道 3 | 测通道 3 | 再测量一次 |
+| 通道 4 | 测通道 4 | 再测量一次 |
+
+不声明 `slots` 的模块会跟随每一行测量。两个四通道模块同时启用时，则按通道号对齐：
+通道 1 和通道 1 写在同一行，通道 2 和通道 2 写在同一行。
+
+如果某个模块没有启用某一通道，它在那一行的列保持空白，其他模块仍然正常写入。
+
+## 状态只写数字
+
+每个模块可以自己规定数字含义。例如：
+
+| 数值 | 示例含义 |
+| --- | --- |
+| `0` | 正常 |
+| `1` | 超量程 |
+| `2` | 触发仪表的保护限制（手册中常写 compliance） |
+| `3` 及以上 | 模块自己定义 |
+
+测量值无效时，不返回电阻列，只返回状态：
+
+```python
+api.warn("OVER_RANGE", "R2 超量程", "R2")
+return {
+    "StatusCode": 1,
+}
+```
+
+这种情况只表示本次数据不可用，SEQ 可以继续。如果仪表断线、输出状态无法确认或安全状态
+不明，则应该报 Error 并停止 SEQ，不能只写一个状态码继续运行。
+
+## 需要保存仪表原始读数时
+
+这一步是可选的。返回“正式数据 + 原始数字列表”即可：
 
 ```python
 row = {
-    f"R{slot}": mean_resistance,
+    f"R{channel}": mean_resistance,
     "ResistanceStdDev": stddev,
     "SampleCount": len(raw_values),
     "StatusCode": 0,
@@ -81,17 +87,7 @@ row = {
 return row, raw_values
 ```
 
-核心把每个模块的有限数值序列写到独立无表头 rawdata sidecar，每一行与正式 DAT 行对应。
-模块不能自行写主 DAT，也没有 `emit_row`。
+主程序会把原始数字写进单独的 rawdata 文件。模块不要自己写 DAT，也不要在原始数据中放
+文字、`NaN` 或 `Infinity`。
 
-边界要求：
-
-- rawdata 只能是有限数字；
-- 单次最多 32,768 个值；
-- Mapping 只能包含 `columns` 已声明的键；
-- NaN、Infinity、复杂对象和过大 IPC 消息都会被拒绝。
-
-## 温度和磁场快照
-
-核心在一条正式测量行中只取一份温场快照。模块需要在切换前后读取实际环境时，可在自己的
-测量流程里调用 `api.devices()` 两次并自行求平均；不要修改核心 DAT 的系统列。
+公共数据列由主程序写入。测量模块只返回自己声明的测量列。
