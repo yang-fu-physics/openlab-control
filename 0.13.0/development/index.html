@@ -1661,7 +1661,7 @@ Delta 测量，就应该是一个模块，而不是三个模块。</p>
 </span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>        ↓
 </span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>SEQ 完成 / Stop / Error
 </span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>        ↓
-</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>run_end：关闭本次 Run 的输出
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>run_end：默认关闭；或按明确设置保持已验证的输出
 </span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>        ↓
 </span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>用户点击 Disable 或程序退出
 </span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>        ↓
@@ -1669,8 +1669,10 @@ Delta 测量，就应该是一个模块，而不是三个模块。</p>
 </span></code></pre></div>
 <p>最小仿真模块只需 <code>open</code>、<code>measure</code>、<code>close</code>。只要真实模块可能在两次 <code>Measure</code> 之间
 保持电流、电压或其他输出，就必须实现 <code>on_event</code>：在 <code>run_start</code> 准备本次运行，在
-<code>run_end</code> 关闭输出。<code>run_end</code> 的 reason 是 <code>completed</code>、<code>stopped</code> 或 <code>error</code>；三种情况
-都要执行同一安全收尾。<code>close</code> 只在 Disable 或应用退出时调用，不能代替 <code>run_end</code>。</p>
+<code>run_end</code> 完成本轮收尾。默认关闭输出；只有用户明确取消默认安全选项时，才可在读回确认
+输出和关键设置后保持连续偏置。<code>run_end</code> 的 reason 是 <code>completed</code>、<code>stopped</code> 或
+<code>error</code>；三种情况都要执行收尾。<code>close</code> 只在 Disable 或应用退出时调用，不能代替
+<code>run_end</code>，并且始终要关闭输出。</p>
 <h2 id="_6">推荐阅读顺序<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
 <ol>
 <li><a href="first-module/">第一个测量模块</a></li>

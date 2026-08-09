@@ -1817,11 +1817,13 @@
 </span><span id="__span-2-54"><a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>            <span class="n">close_all</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">switch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">meter</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">source</span><span class="p">)</span>
 </span></code></pre></div>
 <p>这样打开 <code>backend.py</code> 就能直接看出：连接哪些仪表、先切换什么、等待多久、读取什么，以及
-结束时怎样关闭输出。<code>run_end</code> 负责每次 SEQ 的安全收尾；<code>close</code> 只在 Disable 或程序退出
-时调用，并再次关闭输出后释放连接。关闭动作应可重复调用而不报错。</p>
+结束时怎样处理输出。<code>run_end</code> 负责每次 SEQ 的收尾，默认关闭输出；<code>close</code> 只在 Disable
+或程序退出时调用，并再次关闭输出后释放连接。关闭动作应可重复调用而不报错。</p>
 <p>并非所有模块都要在 <code>run_start</code> 打开输出。若设置要求“每行测量完关闭”，就在
-<code>measure</code> 的 <code>finally</code> 中关闭，下次调用再打开。无论采用哪种模式，<code>run_end</code> 和 <code>close</code>
-仍要保证最终输出为 Off。</p>
+<code>measure</code> 的 <code>finally</code> 中关闭，下次调用再打开。若连续栅压等偏置必须跨 SEQ 保持，可增加
+默认勾选的“SEQ 结束关闭输出”设置。取消勾选时，<code>run_end</code> 只能在读回输出和关键设置都
+正确后保持，并且下一次 <code>run_start</code> 不能先关再开。任何读回不确定、Apply、Disable、
+应用退出或测量异常仍要关闭；<code>close</code> 始终保证最终输出为 Off。</p>
 <h2 id="_4">每次等待都要有上限<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <p>仪表读取不能无限等待。连接、查询和读取都应设置合理时间。所有步骤加起来，还要给关闭
 输出和释放连接留出时间。</p>

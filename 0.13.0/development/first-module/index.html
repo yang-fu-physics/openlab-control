@@ -2105,10 +2105,12 @@ OpenLabControl 根目录执行。</p>
 <li><code>slots = 4</code>：一次 <code>Measure</code> 依次请求四个逻辑行键。</li>
 </ul>
 <div class="admonition warning">
-<p class="admonition-title">真实输出必须在 run_end 关闭</p>
+<p class="admonition-title">真实输出必须在 run_end 明确收尾</p>
 <p><code>close</code> 不会在每次 SEQ 结束时调用。真实模块若会打开电流、电压或其他输出，必须在
-<code>on_event("run_end", ...)</code> 中关闭；正常完成、Stop 和 Error 都走这条收尾。<code>close</code>
-仍要再做一次幂等关闭，作为 Disable 和应用退出时的最后保障。</p>
+<code>on_event("run_end", ...)</code> 中处理；默认做法是关闭，正常完成、Stop 和 Error 都走
+这条收尾。只有确实需要连续栅压等偏置时，才提供默认勾选的“SEQ 结束关闭输出”选项。
+用户取消勾选后，<code>run_end</code> 必须读回输出和关键设置，确认无误才允许保持；Disable、
+Apply、应用退出和测量异常仍要关闭。<code>close</code> 还要再做一次幂等关闭，作为最后保障。</p>
 </div>
 <h2 id="_2">只在需要时使用帮助功能<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">api</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>                              <span class="c1"># 等待 0.5 秒，可被 Pause/Stop 控制</span>

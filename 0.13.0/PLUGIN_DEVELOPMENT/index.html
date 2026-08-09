@@ -1905,7 +1905,10 @@ Measurement Module 负责一次完整测量。扩展是本地可执行代码，�
 </span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>        <span class="k">return</span> <span class="p">{}</span>
 </span></code></pre></div>
 <p><code>on_event</code> 是可选方法，但只要模块可能在两次 <code>Measure</code> 之间保持输出，就必须处理
-<code>run_end</code>。每次 SEQ 结束不会调用 <code>close</code>；<code>close</code> 只是 Disable/退出时的重复保障。</p>
+<code>run_end</code>。默认应关闭输出。若模块需要让连续偏置跨 SEQ 保持，可以提供默认勾选的关闭
+选项；用户取消后，<code>run_end</code> 必须读回输出和所有关键设置，确认无误才保持，下一次
+<code>run_start</code> 也不能制造一次短暂掉电。Apply、Disable、退出、测量异常或状态无法确认时
+仍要关闭。每次 SEQ 结束不会调用 <code>close</code>；<code>close</code> 是 Disable/退出时始终关闭输出的保障。</p>
 <p><code>on_event</code> 的输入固定为：</p>
 <ul>
 <li><code>run_start</code>：<code>data == {}</code>；第一条 SEQ 指令前调用。</li>
