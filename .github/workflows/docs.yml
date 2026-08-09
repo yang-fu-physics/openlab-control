@@ -1,0 +1,94 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "plugin_templates/**"
+      - "src/labcontrol/module_api.py"
+      - "src/labcontrol/measurement/frontend_api.py"
+      - "src/labcontrol/devices/base.py"
+      - "src/labcontrol/models.py"
+      - "mkdocs.yml"
+      - "requirements-docs.txt"
+      - ".github/workflows/docs.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Documentation channel to publish
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - stable
+      version:
+        description: Stable version label; empty uses pyproject.toml
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: documentation-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name != 'release' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - name: Install documentation dependencies
+        run: python -m pip install -r requirements-docs.txt
+
+      - name: Validate documentation
+        run: mkdocs build --strict
+
+      - name: Configure documentation publisher
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Publish versioned documentation
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          project_version() {
+            python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])'
+          }
+
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            version="${RELEASE_TAG#v}"
+            mike deploy --push --update-aliases "$version" stable
+            mike set-default --push stable
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$INPUT_CHANNEL" == "stable" ]]; then
+            version="${INPUT_VERSION:-$(project_version)}"
+            mike deploy --push --update-aliases "$version" stable
+            mike set-default --push stable
+          elif git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            mike deploy --push --update-aliases dev
+          else
+            version="$(project_version)"
+            mike deploy --push --update-aliases "$version" stable
+            mike set-default --push stable
+            mike deploy --push --update-aliases dev
+          fi
