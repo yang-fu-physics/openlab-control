@@ -103,11 +103,13 @@ class Module:
 - `columns`：DAT 中允许出现的列。
 - `slots = 4`：一次 `Measure` 依次请求四个逻辑行键。
 
-!!! warning "真实输出必须在 run_end 关闭"
+!!! warning "真实输出必须在 run_end 明确收尾"
 
     `close` 不会在每次 SEQ 结束时调用。真实模块若会打开电流、电压或其他输出，必须在
-    `on_event("run_end", ...)` 中关闭；正常完成、Stop 和 Error 都走这条收尾。`close`
-    仍要再做一次幂等关闭，作为 Disable 和应用退出时的最后保障。
+    `on_event("run_end", ...)` 中处理；默认做法是关闭，正常完成、Stop 和 Error 都走
+    这条收尾。只有确实需要连续栅压等偏置时，才提供默认勾选的“SEQ 结束关闭输出”选项。
+    用户取消勾选后，`run_end` 必须读回输出和关键设置，确认无误才允许保持；Disable、
+    Apply、应用退出和测量异常仍要关闭。`close` 还要再做一次幂等关闭，作为最后保障。
 
 ## 只在需要时使用帮助功能
 

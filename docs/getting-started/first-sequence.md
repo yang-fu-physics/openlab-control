@@ -61,8 +61,9 @@ events.dat
 
 - Pause 冻结框架等待和 `ModuleAPI.sleep()` 计时，不主动关闭模块输出。
 - Stop 在安全检查点取消测量，并要求可控温场设备 Hold Current。
-- 正常完成、Stop 和 Error 都会向模块发送 `run_end`。真实模块应在这里关闭本次 Run 的
-  输出；它仍保持 Enabled，只有 Disable 或应用退出才调用 `close` 释放连接。
+- 正常完成、Stop 和 Error 都会向模块发送 `run_end`。真实模块默认在这里关闭本次 Run
+  的输出；明确选择连续偏置时，模块可读回确认后保持。它仍保持 Enabled，只有 Disable
+  或应用退出才调用 `close` 关闭输出并释放连接。
 - 厂商驱动中已经阻塞的 I/O 只能等待它自己的有限 timeout，所以真实仪表调用不能无限等。
 
 只想使用软件，请继续阅读 [操作手册](../OPERATIONS.md) 和

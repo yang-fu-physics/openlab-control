@@ -56,7 +56,7 @@ measure：逐通道测量
         ↓
 SEQ 完成 / Stop / Error
         ↓
-run_end：关闭本次 Run 的输出
+run_end：默认关闭；或按明确设置保持已验证的输出
         ↓
 用户点击 Disable 或程序退出
         ↓
@@ -65,8 +65,10 @@ close：再次确认输出关闭并释放连接
 
 最小仿真模块只需 `open`、`measure`、`close`。只要真实模块可能在两次 `Measure` 之间
 保持电流、电压或其他输出，就必须实现 `on_event`：在 `run_start` 准备本次运行，在
-`run_end` 关闭输出。`run_end` 的 reason 是 `completed`、`stopped` 或 `error`；三种情况
-都要执行同一安全收尾。`close` 只在 Disable 或应用退出时调用，不能代替 `run_end`。
+`run_end` 完成本轮收尾。默认关闭输出；只有用户明确取消默认安全选项时，才可在读回确认
+输出和关键设置后保持连续偏置。`run_end` 的 reason 是 `completed`、`stopped` 或
+`error`；三种情况都要执行收尾。`close` 只在 Disable 或应用退出时调用，不能代替
+`run_end`，并且始终要关闭输出。
 
 ## 推荐阅读顺序
 

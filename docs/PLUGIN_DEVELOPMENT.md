@@ -98,7 +98,10 @@ class Module:
 ```
 
 `on_event` 是可选方法，但只要模块可能在两次 `Measure` 之间保持输出，就必须处理
-`run_end`。每次 SEQ 结束不会调用 `close`；`close` 只是 Disable/退出时的重复保障。
+`run_end`。默认应关闭输出。若模块需要让连续偏置跨 SEQ 保持，可以提供默认勾选的关闭
+选项；用户取消后，`run_end` 必须读回输出和所有关键设置，确认无误才保持，下一次
+`run_start` 也不能制造一次短暂掉电。Apply、Disable、退出、测量异常或状态无法确认时
+仍要关闭。每次 SEQ 结束不会调用 `close`；`close` 是 Disable/退出时始终关闭输出的保障。
 
 `on_event` 的输入固定为：
 

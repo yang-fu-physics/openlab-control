@@ -41,7 +41,7 @@ hide:
 </section>
 
 <div class="olc-statbar">
-  <div class="olc-stat"><strong>每次收尾</strong><span>Run 结束关闭输出</span></div>
+  <div class="olc-stat"><strong>每次收尾</strong><span>默认关闭，明确选择才保持</span></div>
   <div class="olc-stat"><strong>4 通道</strong><span>现成教学例子</span></div>
   <div class="olc-stat"><strong>可选</strong><span>设置和状态窗口</span></div>
   <div class="olc-stat"><strong>无需仪表</strong><span>先在电脑上练习</span></div>

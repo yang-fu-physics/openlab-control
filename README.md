@@ -30,7 +30,8 @@ Measurement Module 提供。
 - 一个 `T Measure` 按模块可选的 `slots` 并集展开，每个通道槽位写一行；同一槽位的
   模块并行，未声明 `slots` 的模块跟随每个槽位测量。
 - Measurement Module 最小只需 `open(api)`、`measure(slot, api)`、`close(api)`；会维持
-  输出的模块还要用 `on_event` 在每次 `run_end` 安全关闭输出。按需增加 `configure`、
+  输出的模块还要用 `on_event` 在每次 `run_end` 完成明确收尾。默认关闭输出；确有连续
+  偏置需求的模块可提供默认关闭的保留选项，并在保留前读回确认。按需增加 `configure`、
   `slots` 和自己的 SEQ 指令，不需要修改核心解析器。
 - 模块可为正式结果行附带有限原始采样序列，由中央写入独立无表头 `rawdata` sidecar。
 - Warning 继续运行且按 Source/Code/Context 去重；Error 中止 SEQ。
