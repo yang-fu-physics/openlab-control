@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.2 - 2026-08-10
+
 - 主窗口左侧在 `Sequence Status` 下方增加 Enabled Measurement Module 监视卡，显示
   运行/最小化/报警状态及模块选择的最近测量列；点击卡片可恢复独立模块窗口。
 - 新增可选 `Module.display_columns` 列名声明。紧凑结果只复用已经通过 Schema 校验的
