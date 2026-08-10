@@ -45,6 +45,7 @@ class Module:
         "SampleCount": "",
         "StatusCode": "",
     }
+    display_columns = ("R1", "R2", "R3", "R4")
     slots = 4
 
     # 声明只包含受限 JSON 元数据。模块成功 Enable 后，核心才会把这些指令加入右侧栏。

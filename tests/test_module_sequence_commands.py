@@ -450,6 +450,12 @@ class ModuleCommandUITests(unittest.TestCase):
                 def hide(self):
                     return None
 
+                def isMinimized(self):  # noqa: N802
+                    return False
+
+                def settings(self):
+                    return {}
+
                 def allow_application_close(self):
                     return None
 

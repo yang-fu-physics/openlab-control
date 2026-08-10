@@ -11,6 +11,7 @@ class Module:
         "R4": "Ohm",
         "StatusCode": "",
     }
+    display_columns = ("R1", "R2", "R3", "R4")
     slots = 4
 
     def __init__(self) -> None:

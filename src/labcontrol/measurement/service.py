@@ -184,6 +184,11 @@ class MeasurementModuleService:
             "state": record.state,
             "status": deepcopy(record.status),
             "message": message,
+            "display_columns": (
+                list(record.descriptor.display_columns)
+                if record.enabled
+                else []
+            ),
             # 只有 Enabled 状态才允许 UI 注册这些指令。初始化和 Disabled 消息始终
             # 发送空列表，避免 open 尚未成功时出现一个实际不可执行的菜单项。
             "sequence_commands": (
@@ -192,6 +197,49 @@ class MeasurementModuleService:
                 else []
             ),
         })
+
+    def _publish_measurement_result(
+        self,
+        record: ModuleRuntimeRecord,
+        logical_slot: int,
+        values: Mapping[str, Any] | None,
+    ) -> None:
+        """把已校验结果的只读子集发给主窗口监视卡。
+
+        ``display_columns`` 只引用现有 DAT 列。这里不会调用 worker 或仪表；无效或
+        缺失的测量值以 ``None`` 发送，让界面显示空值而不是沿用旧通道结果。
+        """
+
+        names = record.descriptor.display_columns
+        if not names:
+            return
+        columns = {
+            column.name: column
+            for column in record.descriptor.columns
+        }
+        self.message_callback(
+            "module_result",
+            {
+                "module_id": record.descriptor.id,
+                "slot": logical_slot,
+                "multi_slot": (
+                    record.descriptor.id
+                    in self._module_slots
+                ),
+                "items": [
+                    {
+                        "name": name,
+                        "unit": columns[name].unit,
+                        "value": (
+                            None
+                            if values is None
+                            else values.get(name)
+                        ),
+                    }
+                    for name in names
+                ],
+            },
+        )
 
     def _system_payload(self) -> dict[str, dict[str, Any]]:
         """把核心 DeviceSnapshot 转成只读、可 JSON 化的模块视图。"""
@@ -444,6 +492,9 @@ class MeasurementModuleService:
             # DAT schema 由已验证 worker 返回。只有握手成功才写入 descriptor，避免
             # 发现阶段 import 第三方代码，也避免清单和实际输出维护两份列定义。
             record.descriptor.columns = columns
+            record.descriptor.display_columns = (
+                client.display_columns
+            )
             record.sequence_commands = client.sequence_commands
             result = await self._request(record, "open")
         except WorkerRequestError as exc:
@@ -1011,6 +1062,15 @@ class MeasurementModuleService:
             logger.write_system_row(self.devices.snapshots(), sequence_step)
             return
         self.events.resolve("modules", "NO_ENABLED_MODULES")
+        # 每个 T Measure 都是一组新的可见结果。先清空上一组缓存，防止本轮某个
+        # 通道返回空值或 Warning 时，主窗口继续展示上一次的旧数字。
+        for module_id in self._sequence_modules:
+            record = self.records[module_id]
+            if record.descriptor.display_columns:
+                self.message_callback(
+                    "module_results_reset",
+                    {"module_id": module_id},
+                )
 
         async def wait_for_slot() -> bool:
             """在相邻槽位之间响应 Pause/Stop，不启动新的仪表事务。"""
@@ -1058,6 +1118,11 @@ class MeasurementModuleService:
                         str(missing),
                         missing.context,
                     )
+                    self._publish_measurement_result(
+                        record,
+                        logical_slot,
+                        None,
+                    )
                     return _ModuleSlotResult(
                         module_id,
                         error=missing,
@@ -1066,6 +1131,11 @@ class MeasurementModuleService:
                 validated_raw = self._validated_raw_values(
                     module_id,
                     result.get("raw_values"),
+                )
+                self._publish_measurement_result(
+                    record,
+                    logical_slot,
+                    values,
                 )
                 return _ModuleSlotResult(
                     module_id,
@@ -1078,6 +1148,11 @@ class MeasurementModuleService:
                         module_id,
                         cancelled=True,
                     )
+                self._publish_measurement_result(
+                    record,
+                    logical_slot,
+                    None,
+                )
                 return _ModuleSlotResult(
                     module_id,
                     error=self._operation_error(
@@ -1088,6 +1163,11 @@ class MeasurementModuleService:
                 )
             except DeviceError as exc:
                 self.events.report(Severity.ERROR, f"module:{module_id}", exc.code, str(exc), exc.context)
+                self._publish_measurement_result(
+                    record,
+                    logical_slot,
+                    None,
+                )
                 return _ModuleSlotResult(
                     module_id,
                     error=exc,

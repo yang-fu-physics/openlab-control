@@ -47,6 +47,9 @@ class ModuleDescriptor:
     path: Path
     dependencies: tuple[str, ...] = ()
     columns: tuple[ModuleColumn, ...] = ()
+    # ``display_columns`` 只选择主窗口紧凑卡片要显示的既有 DAT 列。它在
+    # Enable 后由可信 worker 握手填入；不会触发额外测量，也不改变 DAT Schema。
+    display_columns: tuple[str, ...] = ()
     fingerprint: str = ""
     valid: bool = True
     error: str = ""

@@ -96,7 +96,7 @@ class DatafileTests(unittest.TestCase):
             )
             self.assertIn("[Data]", data)
             self.assertIn(
-                "Module simulated_transport: Simulated Transport; version=2.0.0",
+                "Module simulated_transport: Simulated Transport; version=2.0.1",
                 data,
             )
             self.assertIn("simulated_transport.R1(Ohm)", data)

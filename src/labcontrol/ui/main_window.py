@@ -92,7 +92,11 @@ from ..sequence.module_settings import (
 from ..sequence.parser import load_sequence, parse_sequence, save_sequence, serialize_sequence
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
-from .measurement_modules import ModuleManagerDialog, ModuleWindow
+from .measurement_modules import (
+    ModuleManagerDialog,
+    ModuleWindow,
+)
+from .module_monitor import ModuleMonitorPanel
 from .plugin_trust import confirm_module_plugin_trust
 from .scaling import current_ui_scale, scaled
 from .sequence_editor import SequenceEditorWidget
@@ -303,7 +307,19 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self.progress_bar)
         layout.addWidget(status_group)
 
-        layout.addStretch(1)
+        self.module_monitor_group = ModuleMonitorPanel(panel)
+        self.module_monitor_group.activated.connect(
+            self._show_module_window
+        )
+        # 保留清楚的别名，布局测试和主窗口的窗口状态同步不需要了解面板内部布局。
+        self.module_monitor_scroll = (
+            self.module_monitor_group.scroll
+        )
+        self.module_monitor_cards = (
+            self.module_monitor_group.cards
+        )
+        layout.addWidget(self.module_monitor_group, 1)
+
         run_buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
         self.pause_button = QPushButton("Pause")
@@ -1297,8 +1313,17 @@ class MainWindow(QMainWindow):
                 self._handle_progress(message.payload)
             elif message.kind == "module_state":
                 self._handle_module_state(message.payload)
+            elif message.kind == "module_result":
+                self.module_monitor_group.update_result(
+                    message.payload
+                )
+            elif message.kind == "module_results_reset":
+                self.module_monitor_group.reset_results(
+                    str(message.payload.get("module_id", ""))
+                )
             elif message.kind == "startup_error":
                 QMessageBox.critical(self, "Runtime Startup Failed", str(message.payload))
+        self._sync_module_monitor_window_states()
         self._check_pending_run()
         self._check_pending_module_operations()
         self._check_pending_manual_operations()
@@ -1451,6 +1476,7 @@ class MainWindow(QMainWindow):
 
     def _handle_event(self, notice: EventNotice) -> None:
         event = notice.event
+        self._handle_module_alert(notice)
         if event.code == "RUN_DIRECTORY" and not notice.is_resolution:
             self.run_directory = Path(event.message)
             self.data_file_label.setFullText(str(event.context or event.message))
@@ -1501,6 +1527,34 @@ class MainWindow(QMainWindow):
         if descriptor is None:
             raise KeyError(module_id)
         return descriptor
+
+    def _sync_module_monitor_window_states(self) -> None:
+        """只观察 Qt 窗口状态；不向 worker 或仪表发送任何请求。"""
+
+        for module_id in self.module_monitor_cards:
+            window = self.module_windows.get(module_id)
+            self.module_monitor_group.set_minimized(
+                module_id,
+                bool(
+                    window is not None
+                    and window.isMinimized()
+                )
+            )
+
+    def _handle_module_alert(
+        self,
+        notice: EventNotice,
+    ) -> None:
+        source = notice.event.source
+        if not source.startswith("module:"):
+            return
+        module_id = source.split(":", 1)[1]
+        self.module_monitor_group.update_alert(
+            module_id,
+            notice.event.key,
+            notice.event.severity.value,
+            resolved=notice.is_resolution,
+        )
 
     def _module_settings_path(self, module_id: str) -> Path:
         root = self.config.resolve_project_path(self.config.modules.data_directory)
@@ -1694,6 +1748,10 @@ class MainWindow(QMainWindow):
             "sequence_commands",
             [],
         )
+        display_columns = payload.get(
+            "display_columns",
+            [],
+        )
         was_enabled = module_id in self.enabled_modules
         if enabled:
             self.enabled_modules.add(module_id)
@@ -1737,6 +1795,17 @@ class MainWindow(QMainWindow):
             self._set_module_command_palette(module_id, [])
         elif not enabled:
             self._set_module_command_palette(module_id, [])
+        self.module_monitor_group.update_module(
+            self._module_descriptor(module_id),
+            enabled=enabled,
+            state=state,
+            message=message,
+            minimized=bool(
+                window is not None
+                and window.isMinimized()
+            ),
+            display_columns=display_columns,
+        )
         self.measure_status_label.setText(
             f"{len(self.enabled_modules)} of {len(self.module_descriptors)} measurement modules enabled"
         )
@@ -1809,6 +1878,7 @@ class MainWindow(QMainWindow):
             window.allow_application_close()
             window.close()
         self.module_windows.clear()
+        self.module_monitor_group.clear()
         for module_id in tuple(self._module_command_groups):
             self._set_module_command_palette(module_id, [])
         self.module_descriptors = descriptors

@@ -24,6 +24,7 @@ from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QGroupBox,
     QMessageBox,
     QSizePolicy,
 )
@@ -162,6 +163,9 @@ class MainWindowLayoutTests(unittest.TestCase):
     def test_default_modules_directory_is_empty_and_has_no_measurement_tile(self) -> None:
         window = MainWindow(self.config)
         try:
+            window.resize(1180, 720)
+            window.show()
+            self.application.processEvents()
             manager = window.module_manager
             self.assertEqual(manager.table.columnCount(), 3)
             self.assertEqual(
@@ -171,6 +175,24 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
             self.assertEqual(window.module_descriptors, ())
             self.assertEqual(window.windowTitle(), self.config.title)
+            status_group = window.findChild(
+                QGroupBox,
+                "statusGroup",
+            )
+            self.assertIsNotNone(status_group)
+            self.assertGreaterEqual(
+                window.module_monitor_group.geometry().top(),
+                status_group.geometry().bottom(),
+            )
+            self.assertGreater(
+                window.run_button.geometry().top(),
+                window.module_monitor_group.geometry().bottom(),
+            )
+            self.assertFalse(
+                window.module_monitor_scroll
+                .horizontalScrollBar()
+                .isVisible()
+            )
         finally:
             window.close()
 
@@ -321,6 +343,18 @@ class MainWindowLayoutTests(unittest.TestCase):
                     ),
                     "enabled",
                 )
+                card = window.module_monitor_cards.get(
+                    "simulated_transport"
+                )
+                self.assertIsNotNone(card)
+                self.assertEqual(
+                    card._display_columns,
+                    ("R1", "R2", "R3", "R4"),
+                )
+                self.assertEqual(
+                    card.results_label.text(),
+                    "No results yet",
+                )
             finally:
                 window.close()
 
@@ -421,7 +455,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                         "delay_seconds": 0.375,
                     }
                 },
-                {"simulated_transport": "2.0.0"},
+                {"simulated_transport": "2.0.1"},
             )
             window = MainWindow(
                 load_config(
@@ -602,7 +636,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                     loaded.versions[
                         "simulated_transport"
                     ],
-                    "2.0.0",
+                    "2.0.1",
                 )
             finally:
                 window.enabled_modules.clear()

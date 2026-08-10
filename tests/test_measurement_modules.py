@@ -24,7 +24,12 @@ MODULE_REPOSITORY = (
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QSizePolicy,
+    QWidget,
+)
 
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
@@ -46,6 +51,11 @@ from labcontrol.ui.measurement_modules import (  # noqa: E402
     MODULE_WINDOW_MIN_WIDTH,
     ModuleManagerDialog,
     ModuleWindow,
+)
+from labcontrol.ui.module_monitor import (  # noqa: E402
+    ModuleMonitorCard,
+    ModuleMonitorPanel,
+    format_compact_result,
 )
 from labcontrol.ui.scaling import scaled  # noqa: E402
 
@@ -549,7 +559,15 @@ class ModuleServiceTests(unittest.TestCase):
             notices = []
             events.subscribe(notices.append)
             devices = DeviceManager(config, events, isolate_processes=False)
-            modules = MeasurementModuleService(discover_modules(config), events, devices)
+            runtime_messages: list[tuple[str, dict[str, object]]] = []
+            modules = MeasurementModuleService(
+                discover_modules(config),
+                events,
+                devices,
+                lambda kind, payload: runtime_messages.append(
+                    (kind, payload)
+                ),
+            )
             logger = DatRunLogger(config, events)
             await devices.connect_all()
             await devices.poll_all()
@@ -563,6 +581,10 @@ class ModuleServiceTests(unittest.TestCase):
                     [column.name for column in record.descriptor.columns],
                     ["R1", "R2", "R3", "R4", "StatusCode"],
                 )
+                self.assertEqual(
+                    record.descriptor.display_columns,
+                    ("R1", "R2", "R3", "R4"),
+                )
                 await modules.apply_settings("simulated_transport", settings)
                 descriptors, statuses = await modules.prepare_sequence()
                 paths = logger.open_run(
@@ -574,6 +596,41 @@ class ModuleServiceTests(unittest.TestCase):
                 )
                 await modules.begin_sequence()
                 await modules.measure_all(logger, "1:Measure")
+                compact_messages = [
+                    (kind, payload)
+                    for kind, payload in runtime_messages
+                    if kind in {
+                        "module_result",
+                        "module_results_reset",
+                    }
+                ]
+                self.assertEqual(
+                    [kind for kind, _ in compact_messages],
+                    ["module_results_reset"]
+                    + ["module_result"] * 4,
+                )
+                for slot, (_, payload) in enumerate(
+                    compact_messages[1:],
+                    start=1,
+                ):
+                    self.assertEqual(payload["slot"], slot)
+                    self.assertTrue(payload["multi_slot"])
+                    values = {
+                        item["name"]: item["value"]
+                        for item in payload["items"]
+                    }
+                    self.assertEqual(
+                        set(values),
+                        {"R1", "R2", "R3", "R4"},
+                    )
+                    self.assertEqual(
+                        [
+                            name
+                            for name, value in values.items()
+                            if value is not None
+                        ],
+                        [f"R{slot}"],
+                    )
                 self.assertTrue(await modules.end_sequence("completed"))
                 logger.close()
                 data = paths.data_file.read_text(encoding="utf-8")
@@ -1044,6 +1101,54 @@ class ModuleWorkerTimeoutTests(unittest.TestCase):
                 [child.name for child in multiprocessing.active_children()],
             )
 
+    def test_worker_validates_optional_display_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            descriptor = self._descriptor(root)
+            backend = root / "backend.py"
+            backend.write_text(
+                backend.read_text(encoding="utf-8").replace(
+                    "    columns = {'Value': ''}",
+                    "    columns = {'Value': ''}\n"
+                    "    display_columns = 'Value'",
+                ),
+                encoding="utf-8",
+            )
+            client = ModuleWorkerClient(descriptor)
+            try:
+                client.start(timeout_seconds=2.0)
+                self.assertEqual(
+                    client.display_columns,
+                    ("Value",),
+                )
+            finally:
+                client.close(timeout_seconds=1.0)
+
+    def test_worker_rejects_undeclared_display_column(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            descriptor = self._descriptor(root)
+            backend = root / "backend.py"
+            backend.write_text(
+                backend.read_text(encoding="utf-8").replace(
+                    "    columns = {'Value': ''}",
+                    "    columns = {'Value': ''}\n"
+                    "    display_columns = ('Missing',)",
+                ),
+                encoding="utf-8",
+            )
+            client = ModuleWorkerClient(descriptor)
+            with self.assertRaises(WorkerRequestError) as captured:
+                client.start(timeout_seconds=2.0)
+            self.assertEqual(
+                captured.exception.code,
+                "MODULE_WORKER_START_FAILED",
+            )
+            self.assertIn(
+                "undeclared column",
+                str(captured.exception),
+            )
+
     def test_request_timeout_terminates_worker_and_rejects_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             client = ModuleWorkerClient(self._descriptor(Path(temp)))
@@ -1252,6 +1357,143 @@ class ModuleWindowTests(unittest.TestCase):
         )
         dialog.close()
         owner.close()
+
+    def test_compact_result_card_formats_slots_and_restores_window(self) -> None:
+        owner = QWidget()
+        descriptor = ModuleDescriptor(
+            id="compact_meter",
+            name="Compact Meter With A Long Name",
+            version="1.0.0",
+            path=ROOT,
+        )
+        card = ModuleMonitorCard(descriptor, owner)
+        opened: list[str] = []
+        card.activated.connect(opened.append)
+        card.set_display_columns(["Resistance"])
+        card.update_result({
+            "slot": 1,
+            "multi_slot": True,
+            "timestamp": 1.0,
+            "items": [
+                {
+                    "name": "Resistance",
+                    "unit": "Ohm",
+                    "value": 0.001,
+                }
+            ],
+        })
+        card.update_result({
+            "slot": 2,
+            "multi_slot": True,
+            "timestamp": 2.0,
+            "items": [
+                {
+                    "name": "Resistance",
+                    "unit": "Ohm",
+                    "value": None,
+                }
+            ],
+        })
+        owner.resize(230, 180)
+        card.setGeometry(0, 0, 220, 160)
+        owner.show()
+        self.application.processEvents()
+
+        self.assertIn("CH1  1 mΩ", card.results_label.text())
+        self.assertIn("CH2  —", card.results_label.text())
+        self.assertEqual(
+            card.name_label.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Ignored,
+        )
+        self.assertEqual(
+            card.results_label.textFormat(),
+            Qt.TextFormat.PlainText,
+        )
+        QTest.mouseClick(card, Qt.MouseButton.LeftButton)
+        self.assertEqual(opened, ["compact_meter"])
+        card.set_minimized(True)
+        self.assertIn("Minimized", card.state_label.text())
+        card.reset_results()
+        self.assertEqual(
+            card.results_label.text(),
+            "Waiting for next Measure",
+        )
+        card.update_result({
+            "slot": 1,
+            "multi_slot": False,
+            "items": [
+                {
+                    "name": "Resistance",
+                    "unit": "Ohm",
+                    "value": 0.001,
+                }
+            ],
+        })
+        card.update_result({
+            "slot": 4,
+            "multi_slot": False,
+            "items": [
+                {
+                    "name": "Resistance",
+                    "unit": "Ohm",
+                    "value": 0.002,
+                }
+            ],
+        })
+        self.assertEqual(
+            card.results_label.text(),
+            "Resistance 2 mΩ",
+        )
+        owner.close()
+
+    def test_compact_result_formatter_uses_short_si_units(self) -> None:
+        self.assertEqual(format_compact_result(1e-12, "Ohm"), "1 pΩ")
+        self.assertEqual(format_compact_result(3e-6, "A"), "3 µA")
+        self.assertEqual(format_compact_result(None, "V"), "—")
+
+    def test_monitor_panel_owns_card_and_deduplicated_alert_state(self) -> None:
+        panel = ModuleMonitorPanel()
+        descriptor = ModuleDescriptor(
+            id="panel_meter",
+            name="Panel Meter",
+            version="1.0.0",
+            path=ROOT,
+        )
+        panel.update_module(
+            descriptor,
+            enabled=True,
+            state="enabled",
+            message="",
+            minimized=False,
+            display_columns=["Resistance"],
+        )
+        card = panel.cards[descriptor.id]
+        self.assertTrue(panel.empty_label.isHidden())
+        panel.update_alert(
+            descriptor.id,
+            "module:panel_meter/OVER_RANGE/R1",
+            "warning",
+            resolved=False,
+        )
+        self.assertEqual(card.state_label.text(), "Warning")
+        panel.update_alert(
+            descriptor.id,
+            "module:panel_meter/OVER_RANGE/R1",
+            "warning",
+            resolved=True,
+        )
+        self.assertEqual(card.state_label.text(), "Enabled")
+        panel.update_module(
+            descriptor,
+            enabled=False,
+            state="disabled",
+            message="",
+            minimized=False,
+            display_columns=[],
+        )
+        self.assertNotIn(descriptor.id, panel.cards)
+        self.assertFalse(panel.empty_label.isHidden())
+        panel.close()
 
     def test_window_uses_generic_pages_and_ignores_user_close(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

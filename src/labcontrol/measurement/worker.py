@@ -42,6 +42,7 @@ WorkerEventHandler = Callable[
     Mapping[str, Any] | None,
 ]
 _MAX_IPC_BYTES = 1024 * 1024
+_MAX_DISPLAY_COLUMNS = 8
 
 
 class WorkerRequestError(RuntimeError):
@@ -193,6 +194,53 @@ def _normalize_columns(value: object) -> tuple[ModuleColumn, ...]:
     return tuple(columns)
 
 
+def _normalize_display_columns(
+    value: object,
+    columns: tuple[ModuleColumn, ...],
+) -> tuple[str, ...]:
+    """验证主窗口紧凑卡片使用的可选列名。
+
+    模块只能选择自己已经声明的 DAT 列。该元数据不包含格式化回调，因此刷新卡片
+    不会执行第三方代码，更不会为了界面显示再次访问仪表。
+    """
+
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        raw_names: list[object] = [value]
+    elif isinstance(value, Sequence) and not isinstance(
+        value,
+        (bytes, bytearray),
+    ):
+        raw_names = list(value)
+    else:
+        raise TypeError(
+            "Module.display_columns must be a column name or sequence of column names"
+        )
+    if len(raw_names) > _MAX_DISPLAY_COLUMNS:
+        raise TypeError(
+            f"Module.display_columns may contain at most {_MAX_DISPLAY_COLUMNS} columns"
+        )
+    available = {column.name for column in columns}
+    result: list[str] = []
+    for raw_name in raw_names:
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise TypeError(
+                "Module.display_columns entries must be non-empty strings"
+            )
+        name = raw_name.strip()
+        if name not in available:
+            raise TypeError(
+                f"Module.display_columns contains undeclared column {name!r}"
+            )
+        if name in result:
+            raise TypeError(
+                f"Module.display_columns contains duplicate column {name!r}"
+            )
+        result.append(name)
+    return tuple(result)
+
+
 def module_worker_main(
     connection: Connection,
     descriptor: ModuleDescriptor,
@@ -265,6 +313,10 @@ def module_worker_main(
                 f"missing: {', '.join(missing)}"
             )
         columns = _normalize_columns(getattr(backend, "columns", None))
+        display_columns = _normalize_display_columns(
+            getattr(backend, "display_columns", None),
+            columns,
+        )
         sequence_commands = normalize_module_commands(
             descriptor.id,
             getattr(backend, "sequence_commands", ()),
@@ -284,6 +336,7 @@ def module_worker_main(
                 {"name": column.name, "unit": column.unit}
                 for column in columns
             ],
+            "display_columns": list(display_columns),
             "sequence_commands": [
                 command.to_payload()
                 for command in sequence_commands
@@ -569,6 +622,7 @@ class ModuleWorkerClient:
         self._state_lock = threading.Lock()
         self._request_number = 0
         self.sequence_commands: tuple[ModuleCommandSpec, ...] = ()
+        self.display_columns: tuple[str, ...] = ()
 
     @staticmethod
     def _timeout(value: float, operation: str) -> float:
@@ -755,6 +809,31 @@ class ModuleWorkerClient:
                 )
             column_names.add(name)
             columns.append(ModuleColumn(name, unit))
+        raw_display_columns = hello.get("display_columns", [])
+        if (
+            not isinstance(raw_display_columns, list)
+            or len(raw_display_columns) > _MAX_DISPLAY_COLUMNS
+        ):
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise WorkerRequestError(
+                "Module worker returned invalid display column metadata",
+                "MODULE_WORKER_START_FAILED",
+                self.descriptor.id,
+            )
+        display_columns: list[str] = []
+        for name in raw_display_columns:
+            if (
+                not isinstance(name, str)
+                or name not in column_names
+                or name in display_columns
+            ):
+                self._invalidate(parent, process, min(timeout, 1.0))
+                raise WorkerRequestError(
+                    "Module worker returned invalid display column metadata",
+                    "MODULE_WORKER_START_FAILED",
+                    self.descriptor.id,
+                )
+            display_columns.append(name)
         try:
             sequence_commands = normalize_module_commands(
                 self.descriptor.id,
@@ -768,6 +847,7 @@ class ModuleWorkerClient:
                 self.descriptor.id,
             ) from exc
         self.sequence_commands = sequence_commands
+        self.display_columns = tuple(display_columns)
         return tuple(columns)
 
     def request(
