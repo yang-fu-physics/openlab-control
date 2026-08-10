@@ -2661,7 +2661,8 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 中止 SEQ、Stop 后温场 Hold Current 的行为。</p>
 <h2 id="_6">主窗口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
 <ul>
-<li>左侧 <code>Sequence Control</code>：数据文件、当前 SEQ、运行状态和 Run/Pause/Stop。</li>
+<li>左侧 <code>Sequence Control</code>：数据文件、当前 SEQ、运行状态、Enabled 模块监视卡和
+  Run/Pause/Stop。</li>
 <li>中央：浮动 SEQ 和 Data Browser 窗口。</li>
 <li>右侧 <code>Sequence Command Bar</code>：双击命令后设置参数并插入。</li>
 <li>底部 <code>Device Status</code>：Temperature、Magnetic Field、<code>2nd Stage</code> 等控制/Monitor；不再显示测量 Transport 块。</li>
@@ -2689,7 +2690,13 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 <p>如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 <code>Sequence Command Bar</code> 会新增一个
 直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
 worker 通信失效后立即移除，不会留下一个无法执行的菜单项。</p>
-<p>模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块可把窗口带到前面。</p>
+<p>模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；
+用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块，或点击主窗口左侧的
+模块卡片，都可把窗口带到前面。</p>
+<p>每个 Enabled 模块在 <code>Sequence Status</code> 下方有一张紧凑卡片。它显示 Enabled/Measuring、
+最小化状态和活动 Warning/Error；模块若选择了结果列，还会显示最近通道值。新一轮
+<code>Measure</code> 会先清空旧值，空值显示 <code>—</code>。这些内容来自已经返回的测量结果，不会额外访问
+仪表。模块较多时只出现纵向滚动条，Run/Pause/Stop 始终留在左栏底部。</p>
 <h3 id="settings-status">Settings 与 Status<a class="headerlink" href="#settings-status" title="Permanent link">&para;</a></h3>
 <ul>
 <li>默认打开 <code>Settings</code> 页。</li>

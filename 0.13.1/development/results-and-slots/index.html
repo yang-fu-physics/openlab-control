@@ -1001,6 +1001,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在主窗口显示最近结果
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1695,6 +1706,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在主窗口显示最近结果
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1828,6 +1850,29 @@
 <p>主程序会把原始数字写进单独的 rawdata 文件。模块不要自己写 DAT，也不要在原始数据中放
 文字、<code>NaN</code> 或 <code>Infinity</code>。</p>
 <p>公共数据列由主程序写入。测量模块只返回自己声明的测量列。</p>
+<h2 id="_7">在主窗口显示最近结果<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>如果希望模块窗口最小化后仍能看到几个关键数值，在 <code>columns</code> 下面增加一行：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">Module</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="n">columns</span> <span class="o">=</span> <span class="p">{</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="s2">&quot;R1&quot;</span><span class="p">:</span> <span class="s2">&quot;Ohm&quot;</span><span class="p">,</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>        <span class="s2">&quot;R2&quot;</span><span class="p">:</span> <span class="s2">&quot;Ohm&quot;</span><span class="p">,</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>        <span class="s2">&quot;R3&quot;</span><span class="p">:</span> <span class="s2">&quot;Ohm&quot;</span><span class="p">,</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>        <span class="s2">&quot;R4&quot;</span><span class="p">:</span> <span class="s2">&quot;Ohm&quot;</span><span class="p">,</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="s2">&quot;StatusCode&quot;</span><span class="p">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="p">}</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="n">display_columns</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;R1&quot;</span><span class="p">,</span> <span class="s2">&quot;R2&quot;</span><span class="p">,</span> <span class="s2">&quot;R3&quot;</span><span class="p">,</span> <span class="s2">&quot;R4&quot;</span><span class="p">)</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="n">slots</span> <span class="o">=</span> <span class="mi">4</span>
+</span></code></pre></div>
+<p><code>display_columns</code> 只能填写 <code>columns</code> 中已有的名字，最多八个。它是可选的：不写时模块
+照常 Enable、测量和写 DAT，只是不在紧凑卡片中显示数值。</p>
+<ul>
+<li>卡片位于主窗口左侧 <code>Sequence Status</code> 下方，点击可恢复模块窗口。</li>
+<li>声明 <code>slots</code> 的模块按逻辑通道保留本轮结果；未声明的模块只显示最近一次返回结果。</li>
+<li>每次新的 <code>Measure</code> 开始前会清空上一轮缓存。空值或报警行显示 <code>—</code>，不会沿用旧数字。</li>
+<li>数值会自动缩短成 <code>1 pΩ</code>、<code>2 mV</code>、<code>5 kΩ</code> 等写法。</li>
+<li>卡片只接收已经校验过的测量结果，不调用模块方法，也不会增加 VISA/串口访问。</li>
+</ul>
+<p>不要把仪表读取函数或自定义格式化函数放进 <code>display_columns</code>；这里只写列名即可。</p>
 
 
 

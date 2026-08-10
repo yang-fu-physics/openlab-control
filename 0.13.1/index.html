@@ -1670,7 +1670,8 @@
     <h1>先做出一个能测量的模块，再慢慢增加功能。</h1>
     <p class="olc-hero-copy">
       不需要先读懂整个程序。你可以复制一个不连接仪表的四通道例子，运行成功后，再加入
-      自己的设置、仪表命令和测量步骤。
+      自己的设置、仪表命令和测量步骤。Enable 后，模块状态和最近通道值会留在主窗口
+      左侧；不必一直展开每个独立窗口。
     </p>
     <div class="olc-actions">
       <a class="md-button md-button--primary" href="getting-started/">第一次使用</a>
@@ -1682,6 +1683,7 @@
     <pre><code># 一行生命周期骨架；四通道完整例子见教程
 <span class="olc-keyword">class</span> Module:
     columns = {<span class="olc-string">"Resistance"</span>: <span class="olc-string">"Ohm"</span>}
+    display_columns = (<span class="olc-string">"Resistance"</span>,)
 
     <span class="olc-keyword">def</span> <span class="olc-method">open</span>(self, api):
         self.ready = <span class="olc-keyword">True</span>
@@ -1703,7 +1705,7 @@
 <div class="olc-statbar">
   <div class="olc-stat"><strong>每次收尾</strong><span>默认关闭，明确选择才保持</span></div>
   <div class="olc-stat"><strong>4 通道</strong><span>现成教学例子</span></div>
-  <div class="olc-stat"><strong>可选</strong><span>设置和状态窗口</span></div>
+  <div class="olc-stat"><strong>一眼看到</strong><span>模块状态和最近结果</span></div>
   <div class="olc-stat"><strong>无需仪表</strong><span>先在电脑上练习</span></div>
 </div>
 
