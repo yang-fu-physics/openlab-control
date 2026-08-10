@@ -10,14 +10,16 @@ version = "0.1.0"
 ```python
 class Module:
     columns = {"Value": "V"}
+    display_columns = ("Value",)  # 可选：在主窗口卡片显示最近值
 
     def open(self, api): ...
     def measure(self, slot, api): return {"Value": 1.0}
     def close(self, api): ...
 ```
 
-可选接口只有 `configure(settings, api)`、`on_event(event, data, api)`、`slots` 和模块
-自定义 SEQ 指令。完整规范见 OpenLab Control 的开发者网站与
+常用可选项包括 `display_columns`、`configure(settings, api)`、
+`on_event(event, data, api)`、`slots` 和模块自定义 SEQ 指令。`display_columns` 只填写
+已有 DAT 列名；主窗口显示返回结果的缓存，不会额外读取仪表。完整规范见 OpenLab Control 的开发者网站与
 `docs/PLUGIN_DEVELOPMENT.md`。
 
 - `simulated_transport`：只演示 `open/measure/close` 的最小无硬件模块。

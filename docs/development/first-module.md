@@ -70,6 +70,7 @@ class Module:
         "R4": "Ohm",
         "StatusCode": "",
     }
+    display_columns = ("R1", "R2", "R3", "R4")
     slots = 4
 
     def __init__(self):
@@ -101,7 +102,12 @@ class Module:
 - `measure`：每次测一个逻辑通道并返回一行数据。
 - `close`：Disable 或退出时运行；再次确认输出关闭，再断开连接。
 - `columns`：DAT 中允许出现的列。
+- `display_columns`：可选；从这些已有列中挑几个显示在主窗口模块卡片里。
 - `slots = 4`：一次 `Measure` 依次请求四个逻辑行键。
+
+运行后可以把独立模块窗口最小化。主窗口左侧 `Sequence Status` 下方的卡片仍会显示模块
+状态和本轮 R1–R4；点击卡片即可恢复窗口。卡片只是显示 `measure` 已经返回的值，不会
+为了刷新界面再读一次仪表。
 
 !!! warning "真实输出必须在 run_end 明确收尾"
 

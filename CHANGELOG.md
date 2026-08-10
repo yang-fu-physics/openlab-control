@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- 主窗口左侧在 `Sequence Status` 下方增加 Enabled Measurement Module 监视卡，显示
+  运行/最小化/报警状态及模块选择的最近测量列；点击卡片可恢复独立模块窗口。
+- 新增可选 `Module.display_columns` 列名声明。紧凑结果只复用已经通过 Schema 校验的
+  测量返回值，不触发额外仪表访问；每轮 `Measure` 先清空旧缓存，空值不会沿用前一轮。
+
 ## 0.13.1 - 2026-08-10
 
 - Keithley 2400、2614B 和 6517B Measurement Module 增加默认勾选的

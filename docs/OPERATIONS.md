@@ -85,7 +85,8 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 
 ## 主窗口
 
-- 左侧 `Sequence Control`：数据文件、当前 SEQ、运行状态和 Run/Pause/Stop。
+- 左侧 `Sequence Control`：数据文件、当前 SEQ、运行状态、Enabled 模块监视卡和
+  Run/Pause/Stop。
 - 中央：浮动 SEQ 和 Data Browser 窗口。
 - 右侧 `Sequence Command Bar`：双击命令后设置参数并插入。
 - 底部 `Device Status`：Temperature、Magnetic Field、`2nd Stage` 等控制/Monitor；不再显示测量 Transport 块。
@@ -117,7 +118,14 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
 worker 通信失效后立即移除，不会留下一个无法执行的菜单项。
 
-模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块可把窗口带到前面。
+模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；
+用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块，或点击主窗口左侧的
+模块卡片，都可把窗口带到前面。
+
+每个 Enabled 模块在 `Sequence Status` 下方有一张紧凑卡片。它显示 Enabled/Measuring、
+最小化状态和活动 Warning/Error；模块若选择了结果列，还会显示最近通道值。新一轮
+`Measure` 会先清空旧值，空值显示 `—`。这些内容来自已经返回的测量结果，不会额外访问
+仪表。模块较多时只出现纵向滚动条，Run/Pause/Stop 始终留在左栏底部。
 
 ### Settings 与 Status
 

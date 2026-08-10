@@ -27,6 +27,9 @@ Measurement Module 提供。
 - 一个温度/磁场种类最多一个主控设备；其他设备默认只读监视。
 - 每次启动所有 Measurement Module 都是 Disabled；Enable 只初始化并加载设置，不会
   自动 Apply。
+- Enabled 模块会在左侧 `Sequence Status` 下方显示紧凑监视卡；卡片可显示运行状态、
+  Warning/Error、窗口是否最小化和最近一次测量值，点击即可恢复模块窗口。这里仅使用
+  模块已经返回的结果缓存，不会额外读取仪表。
 - 一个 `T Measure` 按模块可选的 `slots` 并集展开，每个通道槽位写一行；同一槽位的
   模块并行，未声明 `slots` 的模块跟随每个槽位测量。
 - Measurement Module 最小只需 `open(api)`、`measure(slot, api)`、`close(api)`；会维持
@@ -114,8 +117,10 @@ worker；不会污染主进程或覆盖框架统一版本。
 2. 重启程序并打开 `Modules`。
 3. 勾选 `Simulated Transport`，核对首次信任提示后确认。
 4. 该最小示例没有自定义设置，通用 `Settings` 页无需 Apply。
-5. 运行含无参数 `T Measure` 的 SEQ。
-6. Disable 时核心调用模块 `close(api)`，随后关闭工作进程并隐藏窗口。
+5. Enable 后，左侧 `Sequence Status` 下方会出现模块卡片；最小化独立窗口后可点击卡片
+   恢复。
+6. 运行含无参数 `T Measure` 的 SEQ；卡片会显示本轮 R1–R4 的最近结果。
+7. Disable 时核心调用模块 `close(api)`，随后关闭工作进程、隐藏窗口并移除卡片。
 
 保存一个 SEQ 时，程序会把该实验已关联模块和当前 Enabled 模块的界面值保存为同目录
 同名伴随文件，例如 `experiment.seq` + `experiment.modules.toml`。以后 Load

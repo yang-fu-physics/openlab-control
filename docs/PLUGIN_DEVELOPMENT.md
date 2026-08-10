@@ -30,6 +30,7 @@ from labcontrol.module_api import ModuleAPI, ModuleError
 
 class Module:
     columns = {"Resistance": "Ohm", "StatusCode": ""}
+    display_columns = ("Resistance",)  # 可选：主窗口卡片显示的已有列
 
     def __init__(self):
         self.instrument = None
@@ -73,6 +74,10 @@ class Module:
 
 `columns` 是有序的 `{列名: 单位}`。核心校验列名、JSON 标量、有限数值和消息大小，
 不解释模块状态码。
+
+可选 `display_columns` 是最多八个现有列名。核心把每次已经校验的结果缓存到主窗口卡片，
+不会再次调用模块或仪表。声明 `slots` 时按逻辑槽位显示；未声明时只保留最新一行。
+不声明不会产生兼容提示，也不影响 DAT。
 
 ## 常用可选能力
 
