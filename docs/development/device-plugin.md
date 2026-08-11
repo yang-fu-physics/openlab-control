@@ -31,7 +31,7 @@ id = "my_controller"
 name = "My Temperature Controller"
 version = "0.1.0"
 api_version = "1.1"
-core_requires = ">=0.13,<0.14"
+core_requires = ">=0.14,<0.15"
 backend = "backend:MyController"
 kinds = ["temperature"]
 dependencies = []

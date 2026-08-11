@@ -6,7 +6,7 @@
 ## 安装运行依赖
 
 ```powershell
-git clone --branch v0.13.3 https://github.com/yang-fu-physics/openlab-control.git
+git clone --branch v0.14.0 https://github.com/yang-fu-physics/openlab-control.git
 cd openlab-control
 .\setup.bat
 .\run.bat
