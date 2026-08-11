@@ -1935,6 +1935,11 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 <code>site.example
 <td>前面板和常规状态的设备轮询周期；测量时的即时采样不受此值限制</td>
 </tr>
 <tr>
+<td><code>control_poll_interval_seconds</code></td>
+<td style="text-align: right;"><code>0.20</code></td>
+<td>SEQ 正在运行、暂停或停止收尾时的设备判稳采样周期；不会提高前面板刷新率</td>
+</tr>
+<tr>
 <td><code>simulation_speed</code></td>
 <td style="text-align: right;"><code>120.0</code></td>
 <td>仿真控制器的时间倍率</td>
@@ -1956,7 +1961,9 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 <code>site.example
 个人值优先。Appearance 还提供独立的 70%–150% 文字倍率和窗口布局记忆，这些值保存在
 操作系统用户配置目录，不属于主配置，也不会进入运行快照。</p>
 <p>Measurement Module 在测量时调用 <code>api.devices()</code> 会请求一次即时设备采样，不会复用最多
-一个常规周期以前的前面板缓存，也不会永久改变 <code>poll_interval_seconds</code>。</p>
+一个常规周期以前的前面板缓存，也不会永久改变 <code>poll_interval_seconds</code>。
+SEQ 控制期间则使用 <code>control_poll_interval_seconds</code> 更新安全状态和稳定性；快照消息仍按
+<code>poll_interval_seconds</code> 节流，所以界面不会因为内部判稳而快速闪动。</p>
 <h2 id="logging"><code>[logging]</code><a class="headerlink" href="#logging" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
