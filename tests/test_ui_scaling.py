@@ -15,7 +15,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
-from labcontrol.ui.scaling import automatic_ui_scale, scaled  # noqa: E402
+from labcontrol.ui.scaling import (  # noqa: E402
+    automatic_ui_scale,
+    current_font_scale,
+    scaled,
+    scaled_text,
+)
 
 
 class UiScalingTests(unittest.TestCase):
@@ -38,6 +43,24 @@ class UiScalingTests(unittest.TestCase):
         self.assertAlmostEqual(self.application.font().pointSizeF(), 14.0, places=1)
         self.assertEqual(scaled(100), 140)
         self.assertEqual(self.application.property("openlabUiScaleMode"), "manual")
+
+    def test_font_scale_is_independent_from_control_geometry(
+        self,
+    ) -> None:
+        result = configure_qt_appearance(
+            self.application,
+            1.25,
+            0.70,
+        )
+        self.assertEqual(result, 1.25)
+        self.assertAlmostEqual(
+            self.application.font().pointSizeF(),
+            8.75,
+            places=2,
+        )
+        self.assertAlmostEqual(current_font_scale(), 0.70)
+        self.assertEqual(scaled(100), 125)
+        self.assertEqual(scaled_text(20), 18)
 
     def test_configuration_accepts_auto_and_manual_scale(self) -> None:
         default_text = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")

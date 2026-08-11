@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -90,6 +91,7 @@ from ..sequence.module_settings import (
     sequence_module_settings_path,
 )
 from ..sequence.parser import load_sequence, parse_sequence, save_sequence, serialize_sequence
+from .appearance import AppearanceDialog
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
 from .measurement_modules import (
@@ -98,11 +100,20 @@ from .measurement_modules import (
 )
 from .module_monitor import ModuleMonitorPanel
 from .plugin_trust import confirm_module_plugin_trust
-from .scaling import current_ui_scale, scaled
+from .preferences import UiPreferences, UiPreferenceStore
+from .scaling import (
+    current_font_scale,
+    current_ui_scale,
+    scaled,
+    scaled_text,
+)
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
 from .widgets import ElidedLabel, StatusTile
-from .window_sizing import fit_initial_window_width
+from .window_sizing import (
+    fit_initial_window_width,
+    preserve_restored_window_size,
+)
 
 
 class MainWindow(QMainWindow):
@@ -112,9 +123,22 @@ class MainWindow(QMainWindow):
         self,
         config: AppConfig,
         device_descriptors: tuple[DevicePluginDescriptor, ...] = (),
+        *,
+        ui_preferences: UiPreferences | None = None,
+        ui_preference_store: UiPreferenceStore | None = None,
     ) -> None:
         super().__init__()
         self.config = config
+        self.ui_preference_store = ui_preference_store
+        self.ui_preferences = ui_preferences or UiPreferences(
+            config.ui_scale,
+            current_font_scale(),
+            "default",
+        )
+        self._skip_window_layout_save = False
+        self._start_maximized = (
+            self.ui_preferences.window_mode == "maximized"
+        )
         self.plugin_trust_store = PluginTrustStore(
             config.resolve_project_path(
                 config.plugins.state_directory
@@ -178,6 +202,7 @@ class MainWindow(QMainWindow):
         self.trend_dialog = TrendDialog(self)
         self._dirty = False
         self.ui_scale = current_ui_scale()
+        self.font_scale = current_font_scale()
         application = QApplication.instance()
         scale_mode = application.property("openlabUiScaleMode") if application is not None else None
         self.ui_scale_mode = str(scale_mode or "auto").title()
@@ -187,6 +212,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(scaled(1180), scaled(720))
         self.setAcceptDrops(True)
         self._build_ui()
+        self._restore_window_layout()
         self._apply_style()
         self._load_default_sequence()
         self.runtime.start()
@@ -241,7 +267,8 @@ class MainWindow(QMainWindow):
         self._build_log_dock()
         self._build_actions()
         self.statusBar().showMessage(
-            f"Starting simulation framework · UI scale {self.ui_scale:.2f}x ({self.ui_scale_mode})"
+            f"Starting simulation framework · UI scale {self.ui_scale:.2f}x "
+            f"({self.ui_scale_mode}) · text {self.font_scale:.0%}"
         )
         QTimer.singleShot(0, self._fit_mdi_windows)
 
@@ -249,6 +276,11 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Sequence Control", self)
         dock.setObjectName("sequenceControlDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        # 左右主侧栏属于固定工作区，不允许误关闭或拖成浮动窗口；QMainWindow 的
+        # 分隔线缩放不依赖这些 feature，因此用户仍可自由调节侧栏宽度。
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.NoDockWidgetFeatures
+        )
         dock.setMinimumWidth(scaled(205))
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -343,12 +375,26 @@ class MainWindow(QMainWindow):
         dock = QDockWidget("Sequence Command Bar", self)
         dock.setObjectName("commandDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
-        dock.setMinimumWidth(scaled(285))
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.NoDockWidgetFeatures
+        )
+        # 只保留命令树可用所需的紧凑下限。原来的 285 px 硬下限会让 4K 自动缩放
+        # 后的右栏接近 400 px，看起来像分隔线失效。
+        dock.setMinimumWidth(scaled(190))
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        hint = QLabel("Double-click a command to configure and insert it")
-        hint.setObjectName("mutedLabel")
-        layout.addWidget(hint)
+        # 允许按停靠栏的实际宽度自动换行。横向 Ignored 很关键：否则 QLabel 的
+        # 单行 sizeHint 会反过来决定停靠栏最低宽度，使“自动换行”永远没有机会发生。
+        self.command_hint = QLabel(
+            "Double-click a command to configure and insert it"
+        )
+        self.command_hint.setObjectName("mutedLabel")
+        self.command_hint.setWordWrap(True)
+        self.command_hint.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        layout.addWidget(self.command_hint)
         self.command_tree = QTreeWidget()
         self.command_tree.setHeaderHidden(True)
         self.command_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -503,6 +549,7 @@ class MainWindow(QMainWindow):
         self.graph_action = QAction(qta.icon("fa5s.chart-line"), "Live Trend", self)
         self.data_browser_action = QAction(qta.icon("fa5s.database"), "Data Browser", self)
         self.modules_action = QAction(qta.icon("fa5s.cubes"), "Modules", self)
+        self.appearance_action = QAction("Appearance…", self)
         self.log_action = self.log_dock.toggleViewAction()
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
@@ -517,6 +564,9 @@ class MainWindow(QMainWindow):
         self.graph_action.triggered.connect(self._show_graph)
         self.data_browser_action.triggered.connect(lambda checked=False: self._show_data_browser())
         self.modules_action.triggered.connect(self._show_module_manager)
+        self.appearance_action.triggered.connect(
+            self._show_appearance
+        )
         self.about_action.triggered.connect(self._show_about)
         self.exit_action.triggered.connect(self.close)
 
@@ -542,6 +592,8 @@ class MainWindow(QMainWindow):
         down_action.triggered.connect(lambda: self.editor.move_selected(1))
         view_menu = menu.addMenu("View")
         view_menu.addActions([self.left_dock.toggleViewAction(), self.command_dock.toggleViewAction(), self.log_action])
+        view_menu.addSeparator()
+        view_menu.addAction(self.appearance_action)
         sequence_menu = menu.addMenu("Sequence")
         sequence_menu.addActions([self.run_action, self.pause_action, self.stop_action])
         graph_menu = menu.addMenu("Graph")
@@ -579,14 +631,158 @@ class MainWindow(QMainWindow):
         toolbar.addActions([self.graph_action, self.data_browser_action, self.modules_action])
         self.addToolBar(toolbar)
 
+    def _restore_dialog_geometry(
+        self,
+        window: QWidget,
+        key: str,
+    ) -> bool:
+        """恢复一个浮动窗口，并禁止默认宽度适配覆盖用户尺寸。"""
+
+        store = self.ui_preference_store
+        if (
+            store is None
+            or self.ui_preferences.window_mode != "remember"
+        ):
+            return False
+        geometry = store.geometry(key)
+        if geometry is None or not window.restoreGeometry(geometry):
+            return False
+        preserve_restored_window_size(window)
+        return True
+
+    def _restore_window_layout(self) -> None:
+        """在首次 Show 前恢复主窗口、MDI 子窗口和已创建工具窗口。"""
+
+        store = self.ui_preference_store
+        if (
+            store is None
+            or self.ui_preferences.window_mode != "remember"
+        ):
+            return
+        main_geometry = store.geometry("main")
+        if main_geometry is not None:
+            self.restoreGeometry(main_geometry)
+        main_state = store.main_window_state()
+        if main_state is not None:
+            self.restoreState(main_state)
+        for key, window in (
+            ("sequence", self.sequence_window),
+            ("data_browser", self.data_window),
+        ):
+            rect = store.rect(key)
+            if rect is not None:
+                window.setGeometry(rect)
+        self._restore_dialog_geometry(
+            self.trend_dialog,
+            "live_trend",
+        )
+        self._restore_dialog_geometry(
+            self.module_manager,
+            "module_manager",
+        )
+        self._start_maximized = (
+            store.main_window_maximized()
+        )
+
+    def _save_window_layout(self) -> None:
+        """保存本机窗口几何；失败只影响便利性，不改变仪表关闭流程。"""
+
+        store = self.ui_preference_store
+        if (
+            store is None
+            or self.ui_preferences.window_mode != "remember"
+            or self._skip_window_layout_save
+        ):
+            return
+        store.set_geometry("main", self.saveGeometry())
+        store.set_main_window_state(self.saveState())
+        store.set_main_window_maximized(self.isMaximized())
+        store.set_rect(
+            "sequence",
+            self.sequence_window.geometry(),
+        )
+        store.set_rect(
+            "data_browser",
+            self.data_window.geometry(),
+        )
+        store.set_geometry(
+            "live_trend",
+            self.trend_dialog.saveGeometry(),
+        )
+        store.set_geometry(
+            "module_manager",
+            self.module_manager.saveGeometry(),
+        )
+        for device_id, dialog in self.manual_dialogs.items():
+            store.set_geometry(
+                f"manual/{device_id}",
+                dialog.saveGeometry(),
+            )
+        for module_id, window in self.module_windows.items():
+            store.set_geometry(
+                f"module/{module_id}",
+                window.saveGeometry(),
+            )
+
+    def should_start_maximized(self) -> bool:
+        """供应用入口在第一次显示时选择 show 或 showMaximized。"""
+
+        return self._start_maximized
+
+    def _show_appearance(self) -> None:
+        """保存下次启动使用的外观值；本次会话不重建任何仪表窗口。"""
+
+        store = self.ui_preference_store
+        if store is None:
+            QMessageBox.warning(
+                self,
+                "Appearance Unavailable",
+                "No writable UI preference store was configured.",
+            )
+            return
+        dialog = AppearanceDialog(
+            self.ui_preferences,
+            self.config.ui_scale,
+            self,
+        )
+        try:
+            if (
+                dialog.exec()
+                != AppearanceDialog.DialogCode.Accepted
+            ):
+                return
+            preferences = dialog.preferences()
+            store.save(preferences)
+            if dialog.reset_window_layout_requested:
+                store.clear_window_layout()
+                # 若本次关闭时重新保存当前几何，刚才的 Reset 会被抵消；跳过一次，
+                # 下次启动采用默认位置后再恢复正常记忆。
+                self._skip_window_layout_save = True
+            self.ui_preferences = preferences
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(
+                self,
+                "Appearance Save Failed",
+                str(exc),
+            )
+            return
+        finally:
+            dialog.deleteLater()
+        QMessageBox.information(
+            self,
+            "Appearance Saved",
+            "The new overall size, text size and startup layout "
+            "will take effect after restarting OpenLab Control.",
+        )
+
     def _apply_style(self) -> None:
-        status_size = scaled(21)
+        status_size = scaled_text(21)
         status_padding = scaled(6)
         status_radius = scaled(6)
-        tile_title_size = scaled(18)
-        tile_value_size = scaled(27)
-        tile_detail_size = scaled(16)
-        manual_size = scaled(30)
+        tile_title_size = scaled_text(18)
+        tile_value_size = scaled_text(27)
+        tile_detail_size = scaled_text(16)
+        manual_size = scaled_text(30)
         manual_padding = scaled(15)
         self.setStyleSheet(
             "QLabel#mutedLabel { color: #888888; }"
@@ -1735,6 +1931,10 @@ class MainWindow(QMainWindow):
         window.applyRequested.connect(self._apply_module_settings)
         window.actionRequested.connect(self._module_action)
         window.statusRefreshRequested.connect(self._refresh_module_status)
+        self._restore_dialog_geometry(
+            window,
+            f"module/{module_id}",
+        )
         self.module_windows[module_id] = window
         return window
 
@@ -2011,6 +2211,10 @@ class MainWindow(QMainWindow):
             dialog = ManualControlDialog(config, self)
             dialog.setRequested.connect(self._manual_set_target)
             dialog.holdRequested.connect(self._manual_hold_device)
+            self._restore_dialog_geometry(
+                dialog,
+                f"manual/{device_id}",
+            )
             self.manual_dialogs[device_id] = dialog
         dialog.set_runtime_editable(
             self.current_run_state in self.TERMINAL_STATES
@@ -2130,7 +2334,8 @@ class MainWindow(QMainWindow):
             "with process-isolated measurement modules.\n"
             "Configured plugins may communicate with external instruments. "
             "This application does not control PPMS.\n"
-            f"UI scale: {self.ui_scale:.2f}x ({self.ui_scale_mode}).",
+            f"UI scale: {self.ui_scale:.2f}x ({self.ui_scale_mode}).\n"
+            f"Text scale: {self.font_scale:.0%}.",
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
@@ -2154,6 +2359,14 @@ class MainWindow(QMainWindow):
                     "Module Settings Save Failed",
                     f"{module_id}: {exc}\n\nThe application will continue closing.",
                 )
+        try:
+            self._save_window_layout()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Window Layout Save Failed",
+                f"The application will continue closing.\n\n{exc}",
+            )
         for window in self.module_windows.values():
             window.allow_application_close()
             window.close()

@@ -45,7 +45,7 @@ hide:
 <div class="olc-statbar">
   <div class="olc-stat"><strong>每次收尾</strong><span>默认关闭，明确选择才保持</span></div>
   <div class="olc-stat"><strong>4 通道</strong><span>现成教学例子</span></div>
-  <div class="olc-stat"><strong>一眼看到</strong><span>模块状态和最近结果</span></div>
+  <div class="olc-stat"><strong>70%–150%</strong><span>文字可独立缩放</span></div>
   <div class="olc-stat"><strong>无需仪表</strong><span>先在电脑上练习</span></div>
 </div>
 

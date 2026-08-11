@@ -20,10 +20,11 @@ MODULE_REPOSITORY = (
 )
 sys.path.insert(0, str(ROOT / "src"))
 
-from PySide6.QtCore import QCoreApplication, QEvent  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
+    QDockWidget,
     QGroupBox,
     QMessageBox,
     QSizePolicy,
@@ -43,6 +44,10 @@ from labcontrol.sequence.parser import (  # noqa: E402
 )
 from labcontrol.ui.dialogs import CommandDialog  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
+from labcontrol.ui.preferences import (  # noqa: E402
+    UiPreferences,
+    UiPreferenceStore,
+)
 
 
 class MainWindowLayoutTests(unittest.TestCase):
@@ -175,6 +180,45 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
             self.assertEqual(window.module_descriptors, ())
             self.assertEqual(window.windowTitle(), self.config.title)
+            self.assertEqual(
+                window.appearance_action.text(),
+                "Appearance…",
+            )
+            self.assertEqual(
+                window.command_hint.text(),
+                "Double-click a command to configure and insert it",
+            )
+            self.assertTrue(window.command_hint.wordWrap())
+            self.assertEqual(
+                window.command_hint.sizePolicy().horizontalPolicy(),
+                QSizePolicy.Policy.Ignored,
+            )
+            self.assertEqual(
+                window.left_dock.features(),
+                QDockWidget.DockWidgetFeature.NoDockWidgetFeatures,
+            )
+            self.assertEqual(
+                window.command_dock.features(),
+                QDockWidget.DockWidgetFeature.NoDockWidgetFeatures,
+            )
+            compact_width = window.command_dock.minimumWidth()
+            window.resizeDocks(
+                [window.command_dock],
+                [compact_width + 180],
+                Qt.Orientation.Horizontal,
+            )
+            self.application.processEvents()
+            expanded_width = window.command_dock.width()
+            window.resizeDocks(
+                [window.command_dock],
+                [compact_width],
+                Qt.Orientation.Horizontal,
+            )
+            self.application.processEvents()
+            self.assertLess(
+                window.command_dock.width(),
+                expanded_width,
+            )
             status_group = window.findChild(
                 QGroupBox,
                 "statusGroup",
@@ -193,6 +237,92 @@ class MainWindowLayoutTests(unittest.TestCase):
                 .horizontalScrollBar()
                 .isVisible()
             )
+        finally:
+            window.close()
+
+    def test_remembered_window_layout_round_trips(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = UiPreferenceStore(
+                Path(directory) / "ui.ini"
+            )
+            preferences = UiPreferences(
+                1.0,
+                0.80,
+                "remember",
+            )
+            first = MainWindow(
+                self.config,
+                ui_preferences=preferences,
+                ui_preference_store=store,
+            )
+            first.show()
+            self.application.processEvents()
+            first.resize(1260, 760)
+            first.trend_dialog.resize(710, 480)
+            first.module_manager.resize(620, 430)
+            first.sequence_window.setGeometry(
+                17,
+                23,
+                650,
+                420,
+            )
+            expected_main_size = first.size()
+            expected_trend_size = first.trend_dialog.size()
+            expected_manager_size = first.module_manager.size()
+            expected_sequence = first.sequence_window.geometry()
+            first.close()
+            self.application.processEvents()
+
+            restored = MainWindow(
+                self.config,
+                ui_preferences=preferences,
+                ui_preference_store=store,
+            )
+            try:
+                # offscreen 测试屏只有约 800 px，而主窗口最低宽度为 1180；Qt 的
+                # restoreGeometry 会主动夹到可见屏幕/最低尺寸。高度仍能证明保存
+                # 几何确实被读取，真实大屏则会保留完整宽度。
+                self.assertEqual(
+                    restored.height(),
+                    expected_main_size.height(),
+                )
+                self.assertGreaterEqual(
+                    restored.width(),
+                    restored.minimumWidth(),
+                )
+                self.assertEqual(
+                    restored.trend_dialog.size(),
+                    expected_trend_size,
+                )
+                self.assertEqual(
+                    restored.module_manager.size(),
+                    expected_manager_size,
+                )
+                self.assertEqual(
+                    restored.sequence_window.geometry(),
+                    expected_sequence,
+                )
+                self.assertFalse(
+                    restored.should_start_maximized()
+                )
+            finally:
+                restored.close()
+
+    def test_maximized_startup_mode_needs_no_saved_geometry(
+        self,
+    ) -> None:
+        window = MainWindow(
+            self.config,
+            ui_preferences=UiPreferences(
+                None,
+                1.0,
+                "maximized",
+            ),
+        )
+        try:
+            self.assertTrue(window.should_start_maximized())
         finally:
             window.close()
 

@@ -185,4 +185,23 @@ def fit_initial_window_width(
     )
 
 
-__all__ = ["fit_initial_window_width"]
+def preserve_restored_window_size(target: QWidget) -> None:
+    """窗口已恢复用户几何时，取消首次内容宽度适配。
+
+    首次适配只负责提供默认尺寸；若它在 ``restoreGeometry`` 后继续运行，会在 Show
+    事件中覆盖用户上次保存的宽度。
+    """
+
+    fitter = getattr(
+        target,
+        "_openlab_initial_width_fitter",
+        None,
+    )
+    if isinstance(fitter, _InitialWidthFitter):
+        fitter._finish()
+
+
+__all__ = [
+    "fit_initial_window_width",
+    "preserve_restored_window_size",
+]

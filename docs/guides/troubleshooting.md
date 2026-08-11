@@ -72,6 +72,9 @@ timeout。
 不要写死像素宽度。使用 Qt layout 和 sizeHint，让核心窗口尺寸工具计算“没有横向滚动条的
 最小宽度”。长地址和路径应使用可收缩控件或省略显示，而不是撑大整个窗口。
 
+使用者可在 **View → Appearance** 把整体大小设为 Automatic，并单独调整 70%–150% 的
+文字倍率。更换显示器后若窗口位置异常，点击 `Reset Window Positions`、保存并重启。
+
 ## 报警 HTTP 失败
 
 报警报告不是安全控制链。网络失败只形成去重的本地 Warning，不应阻塞 SEQ 或代替 Error

@@ -82,7 +82,11 @@ def _plugin_python_executable(config) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def configure_qt_appearance(application, requested_scale: float | None = None) -> float:
+def configure_qt_appearance(
+    application,
+    requested_scale: float | None = None,
+    font_scale: float = 1.0,
+) -> float:
     """为正式 GUI 和视觉回归工具应用同一套主题、字体与缩放系数。"""
     from PySide6.QtGui import QColor, QPalette
     from .ui.input_policy import install_wheel_input_policy
@@ -91,6 +95,7 @@ def configure_qt_appearance(application, requested_scale: float | None = None) -
     scale = requested_scale if requested_scale is not None else screen_ui_scale(application.primaryScreen())
     application.setProperty("openlabUiScale", scale)
     application.setProperty("openlabUiScaleMode", "manual" if requested_scale is not None else "auto")
+    application.setProperty("openlabFontScale", float(font_scale))
 
     application.setStyle("Fusion")
     palette = application.palette()
@@ -98,7 +103,10 @@ def configure_qt_appearance(application, requested_scale: float | None = None) -
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
     palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f7f9fa"))
     application.setPalette(palette)
-    configure_qt_font(application, 10.0 * scale)
+    configure_qt_font(
+        application,
+        10.0 * scale * float(font_scale),
+    )
     # 输入策略安装在 QApplication 上，因此核心界面和按需加载的模块窗口自动保持一致。
     install_wheel_input_policy(application)
     return scale
@@ -364,6 +372,11 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtWidgets import QApplication, QMessageBox
         from .ui.main_window import MainWindow
         from .ui.plugin_trust import confirm_device_plugin_trust
+        from .ui.preferences import (
+            UiPreferences,
+            UiPreferenceStore,
+            default_ui_preferences_path,
+        )
     except ImportError as exc:
         print(f"Missing GUI dependency: {exc}. Run setup.bat first.", file=sys.stderr)
         return 2
@@ -371,7 +384,19 @@ def main(argv: list[str] | None = None) -> int:
     application = QApplication(sys.argv[:1])
     application.setApplicationName("OpenLab Control")
     application.setOrganizationName("OpenLab")
-    configure_qt_appearance(application, config.ui_scale)
+    preference_store = UiPreferenceStore(
+        default_ui_preferences_path()
+    )
+    ui_preferences = (
+        UiPreferences(config.ui_scale, 1.0, "default")
+        if args.gui_smoke
+        else preference_store.load(config.ui_scale)
+    )
+    configure_qt_appearance(
+        application,
+        ui_preferences.ui_scale,
+        ui_preferences.font_scale,
+    )
     for descriptor in selected_device_plugins:
         try:
             trusted = confirm_device_plugin_trust(None, trust_store, descriptor)
@@ -450,13 +475,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
     try:
-        window = MainWindow(config, device_descriptors)
+        window = MainWindow(
+            config,
+            device_descriptors,
+            ui_preferences=ui_preferences,
+            ui_preference_store=preference_store,
+        )
     except Exception as exc:
         QMessageBox.critical(None, "OpenLab Control - Startup Failed", str(exc))
         return 1
     if args.data_file is not None:
         window._show_data_browser(args.data_file)
-    window.show()
+    if window.should_start_maximized():
+        window.showMaximized()
+    else:
+        window.show()
     if not args.gui_smoke:
         return application.exec()
 

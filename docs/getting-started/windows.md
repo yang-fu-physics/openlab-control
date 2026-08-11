@@ -29,6 +29,16 @@ Get-Content .\OpenLabControl-v0.13.2-windows-x64.zip.sha256
 5. 点击 Run，完成后检查 `runs/<时间>_nested_scan/`。无模块 Warning 是预期结果。
 6. 再按下一节安装 `simulated_transport`，练习 Enable/Disable 和模块数据写入。
 
+## 调整字号和窗口大小
+
+打开 **View → Appearance**。整体界面可选自动或 75%–200%，文字还可独立选择
+70%–150%；例如按钮保持 100%，文字选择 80%。窗口启动方式可以选择记住上次位置、始终
+最大化或恢复默认布局。
+
+点击 Save 后关闭并重新打开程序。这个设置只保存在当前 Windows 用户目录，不会修改
+`configs/*.toml`、仪表安全上下限、SEQ 或 DAT。模块窗口也会自动继承同一字号，不需要在
+每个模块中重复设置。
+
 !!! note "VISA 资源发现"
 
     PyVISA 是框架共享依赖，但它不是 GPIB 硬件驱动。若提示找不到 VISA implementation，

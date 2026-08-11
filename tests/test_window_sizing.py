@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from labcontrol.ui.window_sizing import (  # noqa: E402
     fit_initial_window_width,
+    preserve_restored_window_size,
 )
 
 
@@ -129,6 +130,27 @@ class InitialWindowWidthTests(unittest.TestCase):
         self.assertTrue(
             table.horizontalScrollBar().isVisible()
         )
+        dialog.close()
+
+    def test_restored_geometry_skips_default_width_fit(
+        self,
+    ) -> None:
+        dialog = QDialog()
+        layout = QVBoxLayout(dialog)
+        content = QWidget(dialog)
+        content.setMinimumWidth(220)
+        layout.addWidget(content)
+        fit_initial_window_width(dialog)
+        # 用户保存的宽度必须大于布局最低值；恢复一个低于内容下限的宽度时，Qt
+        # 自身仍会正确扩大窗口，这不属于首次适配器覆盖。
+        dialog.resize(700, 277)
+        preserve_restored_window_size(dialog)
+
+        dialog.show()
+        self._settle_layout()
+
+        self.assertEqual(dialog.width(), 700)
+        self.assertEqual(dialog.height(), 277)
         dialog.close()
 
 

@@ -39,7 +39,7 @@ from ..module_commands import ModuleCommandSpec
 from ..sequence.model import Command, CommandSpec, CommandType
 from ..sequence.parser import format_temperature_points, parse_temperature_points
 from ..units import UnitConversionError, convert_value
-from .scaling import scaled
+from .scaling import scaled, scaled_text
 from .window_sizing import fit_initial_window_width
 
 
@@ -599,7 +599,7 @@ class AlertDialog(QDialog):
         layout = QVBoxLayout(self)
         title = QLabel("Operation Stopped" if is_error else "Operation Continues")
         title.setStyleSheet(
-            f"font-size: {scaled(18)}px; font-weight: 600; "
+            f"font-size: {scaled_text(18)}px; font-weight: 600; "
             f"color: {'#b42318' if is_error else '#a15c00'};"
         )
         layout.addWidget(title)

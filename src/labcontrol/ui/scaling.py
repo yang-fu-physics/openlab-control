@@ -54,10 +54,44 @@ def current_ui_scale() -> float:
         return 1.0
 
 
+def current_font_scale() -> float:
+    """读取独立文字倍率；它不改变控件、间距或窗口几何。"""
+
+    application = QApplication.instance()
+    if application is None:
+        return 1.0
+    value = application.property("openlabFontScale")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def scaled(value: float, scale: float | None = None) -> int:
     """缩放固定像素并返回至少为 1 的整数，供 Qt 几何尺寸使用。"""
 
     return max(1, round(value * (current_ui_scale() if scale is None else scale)))
+
+
+def scaled_text(
+    value: float,
+    scale: float | None = None,
+    font_scale: float | None = None,
+) -> int:
+    """同时应用整体与文字倍率，供样式表中的显式字号使用。"""
+
+    return max(
+        1,
+        round(
+            value
+            * (current_ui_scale() if scale is None else scale)
+            * (
+                current_font_scale()
+                if font_scale is None
+                else font_scale
+            )
+        ),
+    )
 
 
 def scaled_float(value: float, scale: float | None = None) -> float:

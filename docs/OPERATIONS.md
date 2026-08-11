@@ -94,6 +94,24 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 - `Run Log`：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。
 - `Live Trend`：保留最近设备快照，最多每 250 ms 合并一次可见重绘；只影响显示。
 
+### 外观、字号与窗口大小
+
+打开 **View → Appearance**：
+
+- `Overall size` 同时调整按钮、图标、间距、窗口最低尺寸和文字，范围 75%–200%；
+- `Text size` 在整体缩放上再单独调整文字，范围 70%–150%；
+- `At startup` 可选择记住上次窗口尺寸与位置、始终最大化或始终使用默认布局；
+- `Reset Window Positions` 会在保存后清除主窗口、SEQ、Data Browser、Live Trend、
+  手动控制和 Measurement Module 窗口的旧位置。
+
+保存后重启生效。程序不会在运行中重建模块窗口，因此不会因为改字号产生重复信号、重复
+worker 或短暂仪表连接。个人外观值保存在操作系统用户配置目录，不进入主 TOML、SEQ、
+DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同规则。
+
+若尚未保存过 Appearance，主配置的 `application.ui_scale` 仍是整体缩放默认值；在对话框
+中保存后，个人选择优先。点击 `Restore Defaults` 会恢复主配置默认缩放、100% 文字和窗口
+记忆模式，并清除旧窗口位置。
+
 温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，
 不弹控制窗口。每种 temperature/field 最多一个 primary 供 SEQ 使用；其他 secondary
 默认只读显示。即使 secondary 显式允许手动控制，SEQ 也不会自动选择它。
@@ -459,8 +477,12 @@ address、上下限、速率和超时，然后重启。不要为不同仪表维�
 
 ### 4K 字体不合适
 
-使用 `ui_scale = "auto"`；也可在当前启动配置（现场通常是
-`configs/site.local.toml`）设置 0.75–2.0 的手动倍率后重启。
+先使用 **View → Appearance**：整体大小保持 `Automatic`，再单独选择 70%–150% 的
+`Text size`。如果个人外观文件尚未建立，也可以在当前启动配置（现场通常是
+`configs/site.local.toml`）用 `ui_scale = "auto"` 或 0.75–2.0 设定现场默认值后重启。
+
+多显示器更换后若窗口落在不可见区域，选择 `Reset Window Positions` 并保存；下次启动会
+使用当前屏幕的默认布局。
 
 ### DAT 图不刷新
 
