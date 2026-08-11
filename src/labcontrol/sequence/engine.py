@@ -866,7 +866,9 @@ class SequenceEngine:
                 "stabilize",
             ):
                 return
-            await self._interruptible_sleep(self.config.poll_interval_seconds)
+            await self._interruptible_sleep(
+                self.config.control_poll_interval_seconds
+            )
 
     async def _wait_for_target(self, device_id: str) -> None:
         config = self.devices.device_configs[device_id]
@@ -888,7 +890,9 @@ class SequenceEngine:
                 "reach its target",
             ):
                 return
-            await self._interruptible_sleep(self.config.poll_interval_seconds)
+            await self._interruptible_sleep(
+                self.config.control_poll_interval_seconds
+            )
 
     def _control_wait_timed_out(
         self,

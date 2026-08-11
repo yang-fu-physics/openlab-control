@@ -250,6 +250,18 @@ max_rate_per_minute = 10.0
             with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
                 load_config(invalid_poll)
 
+            invalid_control_poll = temp_root / "invalid-control-poll.toml"
+            invalid_control_poll.write_text(
+                source.replace(
+                    "control_poll_interval_seconds = 0.20",
+                    "control_poll_interval_seconds = 0",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
+                load_config(invalid_control_poll)
+
             invalid_timeout = temp_root / "invalid-timeout.toml"
             invalid_timeout.write_text(
                 source.replace(

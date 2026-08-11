@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import queue
 import threading
+import time
 from concurrent.futures import Future
 from copy import deepcopy
 from typing import Any
@@ -18,7 +19,7 @@ from .alarm_reporting import AlarmReporter
 from .config import AppConfig
 from .datafile import DatRunLogger
 from .events import EventManager
-from .models import EventNotice, RunProgress, RuntimeMessage, Severity
+from .models import EventNotice, RunProgress, RunState, RuntimeMessage, Severity
 from .measurement.manifest import ModuleDescriptor, discover_modules
 from .measurement.service import MeasurementModuleService
 from .devices.manifest import DevicePluginDescriptor, discover_device_plugins
@@ -136,7 +137,11 @@ class RuntimeService:
 
     async def _poll_loop(self) -> None:
         assert self.devices is not None
+        # 启动阶段已经发布过一次初始快照。运行 SEQ 时可以更快采样用于独立判稳，
+        # 但前面板与 Live Trend 仍按常规周期接收消息，避免把控制采样频率变成界面刷新率。
+        last_published = time.monotonic()
         while True:
+            await asyncio.sleep(self._device_poll_interval())
             try:
                 snapshots = await self.devices.poll_all()
                 if self.logger is not None:
@@ -157,13 +162,26 @@ class RuntimeService:
                                     else ""
                                 ),
                             )
-                self.messages.put(RuntimeMessage("snapshots", snapshots))
+                now = time.monotonic()
+                if now - last_published >= self.config.poll_interval_seconds:
+                    self.messages.put(RuntimeMessage("snapshots", snapshots))
+                    last_published = now
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 if self.events is not None:
                     self.events.report(Severity.ERROR, "runtime", "POLL_LOOP_FAILED", str(exc))
-            await asyncio.sleep(self.config.poll_interval_seconds)
+
+    def _device_poll_interval(self) -> float:
+        """返回当前设备采样周期；前面板消息仍由常规周期单独节流。"""
+
+        if self.engine is not None and self.engine.state in {
+            RunState.RUNNING,
+            RunState.PAUSED,
+            RunState.STOPPING,
+        }:
+            return self.config.control_poll_interval_seconds
+        return self.config.poll_interval_seconds
 
     def _on_event(self, notice: EventNotice) -> None:
         self.messages.put(RuntimeMessage("event", notice))

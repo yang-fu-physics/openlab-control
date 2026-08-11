@@ -157,6 +157,7 @@ class AppConfig:
     ui_scale: float | None
     ui_refresh_ms: int
     poll_interval_seconds: float
+    control_poll_interval_seconds: float
     simulation_speed: float
     default_sequence: str
     language: str
@@ -538,6 +539,10 @@ def load_config(path: str | Path) -> AppConfig:
         application.get("poll_interval_seconds", 1.0),
         "application.poll_interval_seconds",
     )
+    control_poll_interval_seconds = _positive_float(
+        application.get("control_poll_interval_seconds", 0.2),
+        "application.control_poll_interval_seconds",
+    )
     simulation_speed = _positive_float(
         application.get("simulation_speed", 1.0),
         "application.simulation_speed",
@@ -669,6 +674,7 @@ def load_config(path: str | Path) -> AppConfig:
         ui_scale=_ui_scale(application.get("ui_scale", "auto")),
         ui_refresh_ms=ui_refresh_ms,
         poll_interval_seconds=poll_interval_seconds,
+        control_poll_interval_seconds=control_poll_interval_seconds,
         simulation_speed=simulation_speed,
         default_sequence=str(application.get("default_sequence", "")),
         language=str(application.get("language", "en_US")),

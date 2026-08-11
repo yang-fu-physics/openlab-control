@@ -23,6 +23,7 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 `site.example.toml
 | `ui_scale` | `auto` | `auto` 或 0.75–2.0；用于 1080p/2K/4K 缩放 |
 | `ui_refresh_ms` | `200` | GUI 消息刷新周期 |
 | `poll_interval_seconds` | `1.0` | 前面板和常规状态的设备轮询周期；测量时的即时采样不受此值限制 |
+| `control_poll_interval_seconds` | `0.20` | SEQ 正在运行、暂停或停止收尾时的设备判稳采样周期；不会提高前面板刷新率 |
 | `simulation_speed` | `120.0` | 仿真控制器的时间倍率 |
 | `default_sequence` | `examples/nested_scan.seq` | 启动时打开的 SEQ |
 | `language` | `en_US` | 预留语言标识；当前 UI 以英文为主 |
@@ -34,6 +35,8 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 `site.example.toml
 
 Measurement Module 在测量时调用 `api.devices()` 会请求一次即时设备采样，不会复用最多
 一个常规周期以前的前面板缓存，也不会永久改变 `poll_interval_seconds`。
+SEQ 控制期间则使用 `control_poll_interval_seconds` 更新安全状态和稳定性；快照消息仍按
+`poll_interval_seconds` 节流，所以界面不会因为内部判稳而快速闪动。
 
 ## `[logging]`
 

@@ -6,12 +6,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.config import load_config  # noqa: E402
+from labcontrol.models import RunState  # noqa: E402
 from labcontrol.runtime import RuntimeService  # noqa: E402
 from labcontrol.sequence.model import (  # noqa: E402
     Command,
@@ -21,6 +23,27 @@ from labcontrol.sequence.model import (  # noqa: E402
 
 
 class RuntimeShutdownTests(unittest.TestCase):
+    def test_control_states_use_faster_polling_without_changing_idle_rate(
+        self,
+    ) -> None:
+        runtime = RuntimeService(
+            load_config(ROOT / "configs" / "default.toml"),
+            module_descriptors=(),
+        )
+        self.assertEqual(runtime._device_poll_interval(), 1.0)
+
+        for state in (
+            RunState.RUNNING,
+            RunState.PAUSED,
+            RunState.STOPPING,
+        ):
+            with self.subTest(state=state):
+                runtime.engine = SimpleNamespace(state=state)
+                self.assertEqual(runtime._device_poll_interval(), 0.2)
+
+        runtime.engine = SimpleNamespace(state=RunState.COMPLETED)
+        self.assertEqual(runtime._device_poll_interval(), 1.0)
+
     def test_shutdown_stops_active_sequence_thread_and_device_workers(
         self,
     ) -> None:
@@ -37,6 +60,10 @@ class RuntimeShutdownTests(unittest.TestCase):
                 .replace(
                     "poll_interval_seconds = 1.0",
                     "poll_interval_seconds = 0.05",
+                )
+                .replace(
+                    "control_poll_interval_seconds = 0.20",
+                    "control_poll_interval_seconds = 0.05",
                 )
                 .replace(
                     "device_status_interval_seconds = 1.0",

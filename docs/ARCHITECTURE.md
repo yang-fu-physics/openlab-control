@@ -136,6 +136,10 @@ runs/<timestamp>_<sequence>/
 另行节流写入 `device_status.dat`。同一物理设备的辅助读数随主快照使用一个连接，并在
 Run 开始时冻结为固定列。Data Browser 只跟踪用户打开的 DAT，不与当前 Run 绑定。
 
+空闲时设备与前面板按 `poll_interval_seconds` 采样；SEQ 控制期间用较短的
+`control_poll_interval_seconds` 做判稳，但发给前面板和 Live Trend 的快照仍按前者节流。
+Measurement Module 的即时读取独立于这两个周期。
+
 事件键为 `source + code + context`。重复活动 Warning/Error 只增加 Count；resolve 后才可
 再次弹窗。Warning 继续运行，Error 在 Running/Paused 时请求 fatal Stop。报警 HTTP
 失败只形成本地 Warning，不参与仪表安全动作。
