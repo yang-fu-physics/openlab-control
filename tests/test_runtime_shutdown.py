@@ -33,7 +33,12 @@ class RuntimeShutdownTests(unittest.TestCase):
                 config_path,
             )
             config_path.write_text(
-                config_path.read_text(encoding="utf-8").replace(
+                config_path.read_text(encoding="utf-8")
+                .replace(
+                    "poll_interval_seconds = 1.0",
+                    "poll_interval_seconds = 0.05",
+                )
+                .replace(
                     "device_status_interval_seconds = 1.0",
                     "device_status_interval_seconds = 0.05",
                 ),

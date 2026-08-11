@@ -147,6 +147,9 @@ rawdata 只保存模块明确提交的仪表读数，不改变正式 DAT Schema�
 ### 值格式
 
 - 温度固定三位；Oe 固定两位；T 固定六位。
+- Device Plugin 附加读数使用 `设备ID.metric_key(单位)` 列，例如
+  `temperature.second_stage(K)`、`temperature.heater_output(%FS)` 和
+  `temperature.heater_range`。这些列在 Run 开始时冻结，缺失读数留空。
 - 模块 float 使用最多 9 位有效数字。
 - 一般模块列可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。
 - `StatusCode` 的整数编码、必填关系以及异常时应清空哪些测量值，必须由模块 README 和
@@ -188,7 +191,7 @@ Timestamp(s),ISO8601,Severity,Source,Code,State,Count,Context,Message
 ; OpenLab Control Device Status Log
 ...
 [Data]
-Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.Connection,temperature.Connected,temperature.ReadingAge(s),temperature.Message,...
+Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.InstrumentStable,temperature.Connection,temperature.Connected,temperature.ReadingAge(s),temperature.Message,...
 ```
 
 每个配置设备拥有同一组固定列：
@@ -197,9 +200,11 @@ Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Ra
 - `Activity`：`idle`、`moving`、`holding`、`fault` 等设备动作；
 - `Stability`：`moving`、`settling`、`stable`、`timed_out`、`stale` 或
   `not_applicable`；
+- `InstrumentStable`：仪表提供该状态时为 `true/false`；空值表示该插件没有独立状态位；
 - `Connection`：连接生命周期，例如 `connected`、`reconnecting`、`faulted`；
 - `Connected`：本次快照是否有效连接；
 - `ReadingAge(s)`：写入时刻与设备单调采样时间的差，用于定位排队或旧读数；
+- 插件声明的附加读数紧随该设备固定列，例如辅助温度、加热输出和量程；
 - `Message`：驱动、恢复或状态说明。
 
 文件使用和实验 DAT 相同的绝对时间 epoch、数值精度与逐行 Flush 策略。它只记录 Run
@@ -210,8 +215,8 @@ Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Ra
 - 默认每行 Flush。
 - 同一模块的行顺序保持。
 - 多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。
-- 设备轮询仍按 `poll_interval_seconds` 运行；状态日志按自己的周期节流，不会为了写日志
-  增加仪表查询。
+- 前面板常规轮询仍按 `poll_interval_seconds` 运行；状态日志按自己的周期节流，不会为了
+  写日志增加仪表查询。Measurement Module 明确调用 `api.devices()` 时会即时增加一次采样。
 - Error/Stop/完成都会在模块 `run_end` 收束后关闭文件。
 - 异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。
 

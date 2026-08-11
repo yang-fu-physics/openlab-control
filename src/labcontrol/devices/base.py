@@ -40,7 +40,7 @@ class DevicePlugin(ABC):
     不能创建 GUI 对象或把可变底层句柄暴露给主程序。
     """
 
-    api_version = "1.0"
+    api_version = "1.1"
 
     def __init__(self, config: DeviceConfig, simulation_speed: float = 1.0) -> None:
         """保存已验证配置；真实连接应推迟到 :meth:`connect`。"""

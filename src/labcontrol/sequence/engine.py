@@ -196,6 +196,7 @@ class SequenceEngine:
                 descriptors,
                 module_settings or {},
                 module_status,
+                self.devices.snapshots(),
             )
             # 即使 SEQ 只有 End Sequence、尚未来得及等到下一次后台 poll，也保留
             # 一行通过 Run 前新鲜读回检查的初始设备状态。

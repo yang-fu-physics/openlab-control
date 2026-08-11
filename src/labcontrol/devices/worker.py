@@ -28,10 +28,11 @@ from ..models import (
     DeviceActivity,
     DeviceConnectionState,
     DeviceKind,
+    DeviceMetric,
     DeviceSnapshot,
     StabilityState,
 )
-from .base import DeviceError, DevicePlugin, DeviceWarning
+from .base import DeviceError, DevicePlugin, DeviceWarning, SafetyViolation
 
 
 MAX_DEVICE_MESSAGE_BYTES = 1024 * 1024
@@ -124,6 +125,53 @@ def _receive_message(connection: Connection) -> dict[str, Any]:
 def _snapshot_payload(snapshot: DeviceSnapshot) -> dict[str, Any]:
     """把设备快照转换为仅含 JSON 标量的 IPC 载荷。"""
 
+    if snapshot.instrument_stable is not None and not isinstance(
+        snapshot.instrument_stable,
+        bool,
+    ):
+        raise DeviceError(
+            "instrument_stable must be boolean or null",
+            "INVALID_DEVICE_SNAPSHOT",
+        )
+    if not isinstance(snapshot.metrics, tuple):
+        raise DeviceError(
+            "metrics must be a tuple of DeviceMetric values",
+            "INVALID_DEVICE_SNAPSHOT",
+        )
+    metric_payloads: list[dict[str, Any]] = []
+    for metric in snapshot.metrics:
+        if not isinstance(metric, DeviceMetric):
+            raise DeviceError(
+                "metrics must contain only DeviceMetric values",
+                "INVALID_DEVICE_SNAPSHOT",
+            )
+        if not isinstance(metric.value, (int, float, str, bool, type(None))):
+            raise DeviceError(
+                "metric values must be JSON scalars",
+                "INVALID_DEVICE_SNAPSHOT",
+            )
+        if (
+            isinstance(metric.value, (int, float))
+            and not isinstance(metric.value, bool)
+        ):
+            try:
+                finite = math.isfinite(metric.value)
+            except OverflowError:
+                finite = False
+            if not finite:
+                raise DeviceError(
+                    "metric numeric values must be finite",
+                    "NONFINITE_DEVICE_READING",
+                )
+        metric_payloads.append(
+            {
+                "key": metric.key,
+                "display_name": metric.display_name,
+                "value": metric.value,
+                "unit": metric.unit,
+                "decimals": metric.decimals,
+            }
+        )
     return {
         "device_id": snapshot.device_id,
         "display_name": snapshot.display_name,
@@ -138,6 +186,8 @@ def _snapshot_payload(snapshot: DeviceSnapshot) -> dict[str, Any]:
         "stability": snapshot.stability.value,
         "message": snapshot.message,
         "connection_state": snapshot.connection_state.value,
+        "instrument_stable": snapshot.instrument_stable,
+        "metrics": metric_payloads,
     }
 
 
@@ -145,6 +195,36 @@ def snapshot_from_payload(payload: dict[str, Any]) -> DeviceSnapshot:
     """严格重建父进程使用的设备快照；枚举或必需字段错误即拒绝。"""
 
     try:
+        raw_instrument_stable = payload.get("instrument_stable")
+        if raw_instrument_stable is not None and not isinstance(
+            raw_instrument_stable,
+            bool,
+        ):
+            raise TypeError("instrument_stable must be boolean or null")
+        raw_metrics = payload.get("metrics", [])
+        if not isinstance(raw_metrics, list):
+            raise TypeError("metrics must be a list")
+        metrics: list[DeviceMetric] = []
+        for raw_metric in raw_metrics:
+            if not isinstance(raw_metric, dict):
+                raise TypeError("each metric must be an object")
+            value = raw_metric.get("value")
+            if not isinstance(value, (int, float, str, bool, type(None))):
+                raise TypeError("metric value must be a JSON scalar")
+            decimals = raw_metric.get("decimals")
+            if decimals is not None and (
+                isinstance(decimals, bool) or not isinstance(decimals, int)
+            ):
+                raise TypeError("metric decimals must be an integer or null")
+            metrics.append(
+                DeviceMetric(
+                    key=str(raw_metric["key"]),
+                    display_name=str(raw_metric["display_name"]),
+                    value=value,
+                    unit=str(raw_metric.get("unit", "")),
+                    decimals=decimals,
+                )
+            )
         return DeviceSnapshot(
             device_id=str(payload["device_id"]),
             display_name=str(payload["display_name"]),
@@ -180,6 +260,8 @@ def snapshot_from_payload(payload: dict[str, Any]) -> DeviceSnapshot:
                     )
                 )
             ),
+            instrument_stable=raw_instrument_stable,
+            metrics=tuple(metrics),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise DeviceWorkerError(
@@ -331,6 +413,19 @@ def device_worker_main(connection: Connection, spec: DeviceWorkerSpec) -> None:
                     "id": request_id,
                     "ok": True,
                     "result": result,
+                },
+            )
+        except SafetyViolation as exc:
+            _send_message(
+                connection,
+                {
+                    "type": "response",
+                    "id": request_id,
+                    "ok": False,
+                    "severity": "safety",
+                    "message": str(exc),
+                    "code": exc.code,
+                    "context": exc.context,
                 },
             )
         except DeviceWarning as exc:
@@ -701,7 +796,10 @@ class IsolatedDeviceClient:
     def _translate(exc: DeviceWorkerError) -> DeviceError | DeviceWarning:
         """把 IPC 错误恢复为框架统一的 Error/Warning 语义。"""
 
-        error_type = DeviceWarning if exc.severity == "warning" else DeviceError
+        error_type = {
+            "warning": DeviceWarning,
+            "safety": SafetyViolation,
+        }.get(exc.severity, DeviceError)
         return error_type(str(exc), exc.code, exc.context)
 
     async def _request(

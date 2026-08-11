@@ -25,7 +25,7 @@ class StabilityResult:
 
 
 class StabilityEvaluator:
-    """只依据实际采样值计算稳定状态，不直接信任仪表报告的稳定标志。"""
+    """以实际采样计算为主，并允许仪表稳定标志作为额外必要条件。"""
 
     def __init__(self, config: StabilityConfig) -> None:
         self.config = config
@@ -47,8 +47,20 @@ class StabilityEvaluator:
         self._last_sample_at = None
         self._history.clear()
 
-    def update(self, current: float, target: float, now: float) -> StabilityResult:
-        """加入新样本并计算 MOVING、SETTLING、STABLE 或 TIMED_OUT。"""
+    def update(
+        self,
+        current: float,
+        target: float,
+        now: float,
+        *,
+        instrument_stable: bool | None = None,
+    ) -> StabilityResult:
+        """加入新样本并计算 MOVING、SETTLING、STABLE 或 TIMED_OUT。
+
+        ``instrument_stable`` 为 ``False`` 时禁止开始或继续 dwell；``True`` 也不能
+        单独判稳，仍必须通过核心的误差、斜率和驻留时间检查。``None`` 保留没有该
+        状态位的设备原有行为。
+        """
 
         if self._target is None or target != self._target:
             self.reset(target, now)
@@ -66,8 +78,9 @@ class StabilityEvaluator:
         slope_ok = slope is not None and abs(slope) <= self.config.max_slope_per_minute
         elapsed = now - self._target_started_at if self._target_started_at is not None else 0.0
 
-        # 必须同时满足误差、最小历史长度和斜率；仅偶然落入容差带不能开始稳定计时。
-        if within and enough_history and slope_ok:
+        # 仪表状态只作附加门槛，不能绕过软件独立计算的误差、历史和斜率条件。
+        qualified_by_instrument = instrument_stable is not False
+        if within and enough_history and slope_ok and qualified_by_instrument:
             if self._qualified_at is None:
                 self._qualified_at = now
             qualified = now - self._qualified_at

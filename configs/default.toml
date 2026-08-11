@@ -2,7 +2,7 @@
 title = "OpenLab Control"
 ui_scale = "auto"
 ui_refresh_ms = 200
-poll_interval_seconds = 0.20
+poll_interval_seconds = 1.0
 simulation_speed = 120.0
 default_sequence = "examples/nested_scan.seq"
 language = "en_US"

@@ -535,7 +535,7 @@ def load_config(path: str | Path) -> AppConfig:
         "application.ui_refresh_ms",
     )
     poll_interval_seconds = _positive_float(
-        application.get("poll_interval_seconds", 0.2),
+        application.get("poll_interval_seconds", 1.0),
         "application.poll_interval_seconds",
     )
     simulation_speed = _positive_float(

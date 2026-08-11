@@ -9,7 +9,7 @@ from labcontrol.models import DeviceActivity, DeviceSnapshot
 class ExampleMonitor(DevicePlugin):
     """Read-only skeleton for a stage thermometer, pressure, or level."""
 
-    api_version = "1.0"
+    api_version = "1.1"
 
     def __init__(self, config, simulation_speed: float = 1.0) -> None:
         super().__init__(config, simulation_speed)

@@ -76,7 +76,7 @@ class StatusTile(QFrame):
         self.setObjectName("statusTile")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
-        self.setMaximumHeight(scaled(105))
+        self.setMaximumHeight(scaled(140))
         self.setCursor(
             Qt.CursorShape.ArrowCursor
             if not self.controllable
@@ -107,12 +107,21 @@ class StatusTile(QFrame):
         self.detail_label.setObjectName("tileDetail")
         self.detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.detail_label)
+        self.metrics_label = QLabel("")
+        self.metrics_label.setObjectName("tileDetail")
+        self.metrics_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.metrics_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.metrics_label.setWordWrap(True)
+        self.metrics_label.hide()
+        layout.addWidget(self.metrics_label)
         self._set_state_style("disconnected")
 
     def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
         """用一次完整快照更新文本与状态颜色。"""
 
         if not snapshot.connected:
+            self.metrics_label.clear()
+            self.metrics_label.hide()
             self.value_label.setText("—")
             state_text = {
                 DeviceConnectionState.STARTING: "Starting",
@@ -131,11 +140,52 @@ class StatusTile(QFrame):
             )
             self._set_state_style(snapshot.connection_state.value)
             return
+        metric_parts: list[str] = []
+        for metric in snapshot.metrics:
+            if metric.value is None:
+                value = "—"
+            elif isinstance(metric.value, bool):
+                value = "On" if metric.value else "Off"
+            elif isinstance(metric.value, (int, float)):
+                value = (
+                    fixed_number(float(metric.value), metric.decimals)
+                    if metric.decimals is not None
+                    else f"{metric.value:.9g}"
+                )
+            else:
+                value = str(metric.value)
+            metric_parts.append(
+                f"{metric.display_name} {value}"
+                + (f" {metric.unit}" if metric.unit else "")
+            )
+        if metric_parts:
+            midpoint = (len(metric_parts) + 1) // 2
+            lines = [" · ".join(metric_parts[:midpoint])]
+            if midpoint < len(metric_parts):
+                lines.append(" · ".join(metric_parts[midpoint:]))
+            self.metrics_label.setText("\n".join(lines))
+            self.metrics_label.show()
+        else:
+            self.metrics_label.clear()
+            self.metrics_label.hide()
         if snapshot.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
             precision = control_decimals(snapshot.kind, snapshot.unit)
-            current = "—" if snapshot.current is None else f"{fixed_number(snapshot.current, precision)} {snapshot.unit}"
-            target = "—" if snapshot.target is None else f"{fixed_number(snapshot.target, precision)} {snapshot.unit}"
-            rate = "—" if snapshot.rate_per_minute is None else f"{fixed_number(snapshot.rate_per_minute, precision)} {snapshot.unit}/min"
+            current = (
+                "—"
+                if snapshot.current is None
+                else f"{fixed_number(snapshot.current, precision)} {snapshot.unit}"
+            )
+            target = (
+                "—"
+                if snapshot.target is None
+                else f"{fixed_number(snapshot.target, precision)} {snapshot.unit}"
+            )
+            rate = (
+                "—"
+                if snapshot.rate_per_minute is None
+                else f"{fixed_number(snapshot.rate_per_minute, precision)} "
+                f"{snapshot.unit}/min"
+            )
             self.value_label.setText(current)
             self.detail_label.setText(
                 f"Target {target}  ·  {rate}"

@@ -20,7 +20,8 @@ OpenLab Control 不控制 PPMS。这里的插件用于连接程序自己管理�
 ```text
 device_plugins/my_controller/
 ├─ device.toml
-└─ backend.py
+├─ backend.py
+└─ my_instrument.py       # 可选：VISA 会话、仪表命令和响应解析
 ```
 
 `device.toml` 写名称、版本和设备种类：
@@ -29,7 +30,7 @@ device_plugins/my_controller/
 id = "my_controller"
 name = "My Temperature Controller"
 version = "0.1.0"
-api_version = "1.0"
+api_version = "1.1"
 core_requires = ">=0.13,<0.14"
 backend = "backend:MyController"
 kinds = ["temperature"]
@@ -44,7 +45,8 @@ dependencies = []
 
 需要标准 Temperature/Field 状态和数据列、但不参与 SEQ 控制时，使用
 `role = "secondary"` 且默认 `control_enabled = false`。一般辅助读数使用 `kind = "monitor"`；
-Monitor 永远只读，也不参与标准温度控制。
+Monitor 永远只读，也不参与标准温度控制。例外是同一物理仪表、同一连接返回的辅助值，
+它应使用下文的 `DeviceMetric`，避免重复打开通讯口。
 
 ## 后台代码需要做的事情
 
@@ -69,6 +71,36 @@ class MyController(DevicePlugin):
 | `disconnect` | 关闭连接 |
 
 只读设备只需要连接、读取和断开；它不能接受目标值。
+
+如果同一台仪表同时返回主温度和辅助读数，不要为了辅助读数再创建一个设备实例，否则
+可能对同一个 USB/GPIB 地址打开两个并发会话。一个 `DeviceSnapshot` 可以附带多个
+`DeviceMetric`：
+
+```python
+from labcontrol.models import DeviceMetric, DeviceSnapshot
+
+
+return DeviceSnapshot(
+    # 主值仍放在 current/target/rate_per_minute 中
+    ...,
+    instrument_stable=not ramping,
+    metrics=(
+        DeviceMetric("second_stage", "2nd Stage", temp_a, "K", 3),
+        DeviceMetric(
+            "heater_output",
+            "Heater Output",
+            heater_percent,
+            "%FS",
+            2,
+        ),
+        DeviceMetric("heater_range", "Range", heater_range),
+    ),
+)
+```
+
+`key` 是固定 DAT 列名，运行中不能改变；`display_name` 只用于界面。附加值会显示在同一
+设备卡片，并写入实验 DAT 和 `device_status.dat`。`instrument_stable=False` 只会阻止
+判稳；即使它为 True，核心仍要独立通过误差、斜率和 dwell 检查。
 
 ## 连接时不要自动改变仪表
 
@@ -115,6 +147,10 @@ address = "GPIB0::12::INSTR"
 
 停止 SEQ 后，温度和磁场保持当前状态，不自动回零。需要 Hold 时，必须先读取当前真实值，
 不能使用很久以前保存的数值。写命令等待超时后，也不要直接重发危险命令。
+
+如果仪表会把未读取的响应留在队列里，使用“写入 + 查询回读”的复合命令并验证回读，
+不要只写不读。插件抛出的 `SafetyViolation` 会跨进程保留为立即停止的安全错误；普通
+通讯失败才进入配置的断线恢复窗。
 
 可以复制的例子位于：
 

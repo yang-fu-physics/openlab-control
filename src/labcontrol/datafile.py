@@ -23,7 +23,7 @@ from . import __version__
 from .config import AppConfig
 from .events import EventManager
 from .formatting import control_decimals, fixed_number
-from .models import DeviceKind, DeviceSnapshot, EventNotice, Severity
+from .models import DeviceKind, DeviceMetric, DeviceSnapshot, EventNotice, Severity
 from .measurement.manifest import ModuleDescriptor
 from .measurement.settings import save_settings
 
@@ -66,6 +66,7 @@ class DatRunLogger:
         self._columns: list[str] = []
         self._data_file_initialized = False
         self._module_descriptors: tuple[ModuleDescriptor, ...] = ()
+        self._device_metric_schemas: dict[str, tuple[DeviceMetric, ...]] = {}
         self._raw_handles: dict[tuple[Path, str], TextIO] = {}
         self._raw_writers: dict[tuple[Path, str], csv.writer] = {}
         self._pending_events: list[EventNotice] = []
@@ -78,6 +79,7 @@ class DatRunLogger:
         module_descriptors: tuple[ModuleDescriptor, ...] = (),
         module_settings: Mapping[str, Mapping[str, Any]] | None = None,
         module_status: Mapping[str, Mapping[str, Any]] | None = None,
+        device_snapshots: Mapping[str, DeviceSnapshot] | None = None,
     ) -> RunPaths:
         """创建唯一运行目录并先写入配置、SEQ 与模块启动快照。
 
@@ -114,6 +116,20 @@ class DatRunLogger:
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot)
         self._module_descriptors = tuple(module_descriptors)
+        initial_snapshots = device_snapshots or {}
+        self._device_metric_schemas = {}
+        for device in self.config.devices:
+            snapshot = initial_snapshots.get(device.id)
+            self._device_metric_schemas[device.id] = tuple(
+                DeviceMetric(
+                    key=metric.key,
+                    display_name=metric.display_name,
+                    value=None,
+                    unit=metric.unit,
+                    decimals=metric.decimals,
+                )
+                for metric in (() if snapshot is None else snapshot.metrics)
+            )
         desired = module_settings or {}
         actual = module_status or {}
         for descriptor in self._module_descriptors:
@@ -394,6 +410,9 @@ class DatRunLogger:
                 columns.extend([f"{prefix}({device.unit})", f"{prefix}Target({device.unit})"])
             elif device.kind is DeviceKind.MONITOR:
                 columns.append(f"{device.id}({device.unit})" if device.unit else device.id)
+            columns.extend(
+                self._metric_columns(device.id)
+            )
         for module in self._module_descriptors:
             columns.extend(f"{module.id}.{column.label}" for column in module.columns)
         return columns
@@ -478,13 +497,57 @@ class DatRunLogger:
                     f"{prefix}.Rate{rate_suffix}",
                     f"{prefix}.Activity",
                     f"{prefix}.Stability",
+                    f"{prefix}.InstrumentStable",
                     f"{prefix}.Connection",
                     f"{prefix}.Connected",
                     f"{prefix}.ReadingAge(s)",
                     f"{prefix}.Message",
                 ]
             )
+            columns.extend(self._metric_columns(prefix))
         return columns
+
+    def _metric_columns(self, device_id: str) -> list[str]:
+        """按 Run 开始时冻结的附加读数 Schema 构造列名。"""
+
+        return [
+            (
+                f"{device_id}.{metric.key}({metric.unit})"
+                if metric.unit
+                else f"{device_id}.{metric.key}"
+            )
+            for metric in self._device_metric_schemas.get(device_id, ())
+        ]
+
+    def _metric_values(
+        self,
+        device_id: str,
+        snapshot: DeviceSnapshot | None,
+    ) -> list[str]:
+        """按冻结列顺序提取附加读数；缺失值留空而不沿用旧样本。"""
+
+        actual = {
+            metric.key: metric.value
+            for metric in (() if snapshot is None else snapshot.metrics)
+        }
+        return [
+            self._format_metric_value(actual.get(metric.key), metric.decimals)
+            for metric in self._device_metric_schemas.get(device_id, ())
+        ]
+
+    @staticmethod
+    def _format_metric_value(value: Any, decimals: int | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, (int, float)):
+            return (
+                fixed_number(float(value), decimals)
+                if decimals is not None
+                else f"{value:.9g}"
+            )
+        return str(value)
 
     def write_device_status(
         self,
@@ -532,11 +595,13 @@ class DatRunLogger:
                         "",
                         "",
                         "",
+                        "",
                         "false",
                         "",
                         "No snapshot",
                     ]
                 )
+                row.extend(self._metric_values(device.id, None))
                 continue
             decimals = (
                 control_decimals(device.kind, device.unit)
@@ -572,12 +637,18 @@ class DatRunLogger:
                     ),
                     snapshot.activity.value,
                     snapshot.stability.value,
+                    (
+                        ""
+                        if snapshot.instrument_stable is None
+                        else str(snapshot.instrument_stable).lower()
+                    ),
                     snapshot.connection_state.value,
                     str(snapshot.connected).lower(),
                     f"{max(0.0, now - snapshot.timestamp):.3f}",
                     snapshot.message,
                 ]
             )
+            row.extend(self._metric_values(device.id, snapshot))
         self._device_status_writer.writerow(row)
         self._last_device_status_monotonic = now
         if (
@@ -758,21 +829,49 @@ class DatRunLogger:
             if self.config.logging.timestamp_epoch == "labview_1904"
             else unix_now
         )
-        row: list[object] = [f"{absolute:.2f}", f"{time.monotonic() - self._started_monotonic:.2f}", sequence_step]
+        row: list[object] = [
+            f"{absolute:.2f}",
+            f"{time.monotonic() - self._started_monotonic:.2f}",
+            sequence_step,
+        ]
         for device in self.config.devices:
             snapshot = snapshots.get(device.id)
+            usable_snapshot = (
+                snapshot
+                if snapshot is not None and snapshot.connected
+                else None
+            )
             if device.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
                 decimals = control_decimals(device.kind, device.unit)
-                row.extend([
-                    "" if snapshot is None or snapshot.current is None else fixed_number(snapshot.current, decimals),
-                    "" if snapshot is None or snapshot.target is None else fixed_number(snapshot.target, decimals),
-                ])
+                row.extend(
+                    [
+                        (
+                            ""
+                            if usable_snapshot is None
+                            or usable_snapshot.current is None
+                            else fixed_number(
+                                usable_snapshot.current,
+                                decimals,
+                            )
+                        ),
+                        (
+                            ""
+                            if usable_snapshot is None
+                            or usable_snapshot.target is None
+                            else fixed_number(
+                                usable_snapshot.target,
+                                decimals,
+                            )
+                        ),
+                    ]
+                )
             elif device.kind is DeviceKind.MONITOR:
                 row.append(
                     ""
-                    if snapshot is None or snapshot.current is None
-                    else fixed_number(snapshot.current, 3)
+                    if usable_snapshot is None or usable_snapshot.current is None
+                    else fixed_number(usable_snapshot.current, 3)
                 )
+            row.extend(self._metric_values(device.id, usable_snapshot))
         for module in self._module_descriptors:
             values = module_values.get(module.id, {})
             for column in module.columns:

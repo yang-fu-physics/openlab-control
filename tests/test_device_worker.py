@@ -40,7 +40,7 @@ def _external_plugin(
             'id = "isolated_test"\n'
             'name = "Isolated Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "1.0"\n'
+            'api_version = "1.1"\n'
             'backend = "backend:IsolatedTestDevice"\n'
             f"kinds = [{kinds}]\n"
             + (
@@ -128,6 +128,56 @@ class DeviceWorkerTests(unittest.TestCase):
                 self.assertNotEqual(child_pid, os.getpid())
                 snapshots = await manager.poll_all()
                 self.assertEqual(snapshots["temperature"].current, 12.5)
+                await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_external_safety_violation_survives_ipc_and_does_not_reconnect(
+        self,
+    ) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = (
+                    "from labcontrol.devices.base import DevicePlugin, SafetyViolation\n"
+                    "class IsolatedTestDevice(DevicePlugin):\n"
+                    "    async def connect(self): pass\n"
+                    "    async def disconnect(self): pass\n"
+                    "    async def poll(self):\n"
+                    "        raise SafetyViolation('sensor fault', 'SENSOR_FAULT', 'A')\n"
+                    "    async def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
+                    "    async def hold(self): pass\n"
+                )
+                _external_plugin(root / "plugins", source)
+                state = root / "state"
+                device = replace(
+                    self.config.devices[0],
+                    plugin="isolated_test",
+                )
+                config = replace(
+                    self.config,
+                    plugins=replace(
+                        self.config.plugins,
+                        device_directory=str(root / "plugins"),
+                        state_directory=str(state),
+                    ),
+                    devices=(device,),
+                )
+                descriptors = discover_device_plugins(config)
+                PluginTrustStore(state / "trusted_plugins.json").trust(
+                    "device",
+                    descriptors[0],
+                )
+                manager = DeviceManager(config, EventManager(), descriptors)
+                await manager.connect_all()
+                snapshots = await manager.poll_all()
+
+                self.assertFalse(snapshots[device.id].connected)
+                self.assertEqual(
+                    manager.connection_state(device.id).value,
+                    "faulted",
+                )
+                self.assertNotIn(device.id, manager._recovery_tasks)
                 await manager.disconnect_all()
 
         asyncio.run(scenario())

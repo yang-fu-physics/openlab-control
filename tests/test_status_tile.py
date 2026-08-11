@@ -23,6 +23,7 @@ from labcontrol.models import (  # noqa: E402
     DeviceActivity,
     DeviceConnectionState,
     DeviceKind,
+    DeviceMetric,
     DeviceRole,
     DeviceSnapshot,
     LabEvent,
@@ -74,6 +75,37 @@ class StatusTileTests(unittest.TestCase):
         )
         self.assertFalse(trend._redraw_timer.isActive())
         trend.close()
+        tile.close()
+
+    def test_temperature_tile_shows_same_connection_auxiliary_metrics(self) -> None:
+        tile = StatusTile(
+            "temperature",
+            "Temperature",
+            DeviceKind.TEMPERATURE,
+        )
+        tile.update_snapshot(
+            DeviceSnapshot(
+                device_id="temperature",
+                display_name="Temperature",
+                kind=DeviceKind.TEMPERATURE,
+                timestamp=time.monotonic(),
+                connected=True,
+                unit="K",
+                current=4.2,
+                target=4.0,
+                rate_per_minute=1.0,
+                metrics=(
+                    DeviceMetric("second_stage", "2nd Stage", 20.1254, "K", 3),
+                    DeviceMetric("heater_output", "Heater", 12.345, "%", 2),
+                    DeviceMetric("heater_range", "Range", "LOW"),
+                ),
+            )
+        )
+        self.assertFalse(tile.metrics_label.isHidden())
+        self.assertEqual(
+            tile.metrics_label.text(),
+            "2nd Stage 20.125 K · Heater 12.35 %\nRange LOW",
+        )
         tile.close()
 
     def test_live_trend_coalesces_visible_redraws_and_stops_them_when_hidden(

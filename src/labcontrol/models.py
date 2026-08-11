@@ -79,6 +79,23 @@ class RunState(str, Enum):
     FAULTED = "faulted"
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceMetric:
+    """同一物理设备随主快照返回的一项附加读数。
+
+    一个 Device Plugin 仍只拥有一个连接和一个主 ``DeviceSnapshot``。温控器的辅助
+    温度、加热功率、量程等值通过本对象附在主快照上，避免为了显示第二个数值而对同一
+    USB/GPIB 仪表再打开一个并发会话。``key`` 用作稳定的 DAT 列名，``display_name``
+    只用于界面；``decimals`` 仅控制显示和写盘格式，不改变原始浮点值。
+    """
+
+    key: str
+    display_name: str
+    value: float | int | str | bool | None
+    unit: str = ""
+    decimals: int | None = None
+
+
 @dataclass(slots=True)
 class DeviceSnapshot:
     """某一时刻的设备读数快照。
@@ -100,6 +117,8 @@ class DeviceSnapshot:
     stability: StabilityState = StabilityState.NOT_APPLICABLE
     message: str = ""
     connection_state: DeviceConnectionState = DeviceConnectionState.CONNECTED
+    instrument_stable: bool | None = None
+    metrics: tuple[DeviceMetric, ...] = ()
 
 
 @dataclass(slots=True)

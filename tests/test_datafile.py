@@ -23,11 +23,93 @@ sys.path.insert(0, str(ROOT / "src"))
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.models import DeviceActivity, DeviceKind, DeviceSnapshot, Severity  # noqa: E402
+from labcontrol.models import (  # noqa: E402
+    DeviceActivity,
+    DeviceKind,
+    DeviceMetric,
+    DeviceSnapshot,
+    Severity,
+)
 from labcontrol.measurement.manifest import ModuleColumn, load_manifest  # noqa: E402
 
 
 class DatafileTests(unittest.TestCase):
+    def test_device_metrics_have_frozen_columns_in_measurement_and_status_files(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            (temp_root / "configs").mkdir()
+            config_path = temp_root / "configs" / "default.toml"
+            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config = load_config(config_path)
+            logger = DatRunLogger(config, EventManager())
+            now = time.monotonic()
+            snapshots = {
+                "temperature": DeviceSnapshot(
+                    "temperature",
+                    "Temperature",
+                    DeviceKind.TEMPERATURE,
+                    now,
+                    True,
+                    "K",
+                    4.2,
+                    4.0,
+                    1.0,
+                    DeviceActivity.HOLDING,
+                    metrics=(
+                        DeviceMetric(
+                            "second_stage",
+                            "2nd Stage",
+                            20.1254,
+                            "K",
+                            3,
+                        ),
+                        DeviceMetric(
+                            "heater_output",
+                            "Heater",
+                            12.345,
+                            "%",
+                            2,
+                        ),
+                        DeviceMetric(
+                            "heater_range",
+                            "Range",
+                            "LOW",
+                        ),
+                    ),
+                )
+            }
+            paths = logger.open_run(
+                "metrics.seq",
+                "T Measure\nT End Sequence\n",
+                device_snapshots=snapshots,
+            )
+            logger.write_system_row(snapshots, "Measure")
+            logger.write_device_status(snapshots, force=True)
+            snapshots["temperature"].connected = False
+            disconnected_row = dict(
+                zip(
+                    logger._build_columns(),
+                    logger._row(snapshots, {}, "Disconnected"),
+                    strict=True,
+                )
+            )
+            self.assertEqual(disconnected_row["Temp(K)"], "")
+            self.assertEqual(
+                disconnected_row["temperature.second_stage(K)"],
+                "",
+            )
+            logger.close()
+
+            data = paths.data_file.read_text(encoding="utf-8")
+            status = paths.device_status_file.read_text(encoding="utf-8")
+            for text in (data, status):
+                self.assertIn("temperature.second_stage(K)", text)
+                self.assertIn("temperature.heater_output(%)", text)
+                self.assertIn("temperature.heater_range", text)
+                self.assertIn("20.125,12.35,LOW", text)
+
     def test_writes_header_sparse_rows_and_event_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
@@ -129,6 +211,7 @@ class DatafileTests(unittest.TestCase):
                 "temperature.Rate(K/min),"
                 "temperature.Activity,"
                 "temperature.Stability,"
+                "temperature.InstrumentStable,"
                 "temperature.Connection,"
                 "temperature.Connected,"
                 "temperature.ReadingAge(s),"
@@ -137,7 +220,7 @@ class DatafileTests(unittest.TestCase):
             )
             self.assertIn(
                 ",3.124,3.000,1.000,holding,"
-                "not_applicable,connected,true,",
+                "not_applicable,,connected,true,",
                 device_status,
             )
             self.assertIn(

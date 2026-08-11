@@ -99,6 +99,37 @@ class StabilityTests(unittest.TestCase):
         result = evaluator.update(0.1, 10.0, 2.1)
         self.assertEqual(result.state, StabilityState.TIMED_OUT)
 
+    def test_instrument_flag_is_an_extra_gate_not_a_stability_shortcut(self) -> None:
+        evaluator = StabilityEvaluator(StabilityConfig(
+            tolerance=0.1,
+            max_slope_per_minute=0.05,
+            dwell_seconds=0.5,
+            timeout_seconds=10.0,
+            window_seconds=1.0,
+        ))
+        for moment in (0.0, 0.5, 1.0, 1.5):
+            blocked = evaluator.update(
+                10.0,
+                10.0,
+                moment,
+                instrument_stable=False,
+            )
+        self.assertEqual(blocked.state, StabilityState.SETTLING)
+        first_allowed = evaluator.update(
+            10.0,
+            10.0,
+            2.0,
+            instrument_stable=True,
+        )
+        stable = evaluator.update(
+            10.0,
+            10.0,
+            2.5,
+            instrument_stable=True,
+        )
+        self.assertEqual(first_allowed.state, StabilityState.SETTLING)
+        self.assertEqual(stable.state, StabilityState.STABLE)
+
 
 if __name__ == "__main__":
     unittest.main()

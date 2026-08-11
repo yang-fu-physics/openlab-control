@@ -36,7 +36,7 @@ def _write_plugin(
             'id = "recovery_test"\n'
             'name = "Recovery Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "1.0"\n'
+            'api_version = "1.1"\n'
             'backend = "backend:RecoveryDevice"\n'
             f"kinds = [{kinds}]\n"
         ),

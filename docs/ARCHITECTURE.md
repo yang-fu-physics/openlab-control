@@ -97,8 +97,9 @@ Disable: close → shutdown worker
 sidecar。
 
 `ModuleAPI` 仅提供可中断等待/`checkpoint()`、只读设备快照、Warning、状态更新和本次
-总 timeout。Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O
-仍必须由模块设置有限 timeout。
+总 timeout。`api.devices()` 会触发一次即时设备采样，与前面板常规轮询分开；并发模块
+请求合并为一次采样。Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商
+阻塞 I/O 仍必须由模块设置有限 timeout。
 
 ## SEQ 与安全收尾
 
@@ -130,8 +131,10 @@ runs/<timestamp>_<sequence>/
 └─ events.dat
 ```
 
-`DatRunLogger` 是唯一写入者。每条测量行只采一份温场快照；设备轮询另行节流写入
-`device_status.dat`。Data Browser 只跟踪用户打开的 DAT，不与当前 Run 绑定。
+`DatRunLogger` 是唯一写入者。每条测量行写入前由核心取得即时温场快照；若模块刚在
+0.1 秒内读取则复用该样本。常规设备轮询
+另行节流写入 `device_status.dat`。同一物理设备的辅助读数随主快照使用一个连接，并在
+Run 开始时冻结为固定列。Data Browser 只跟踪用户打开的 DAT，不与当前 Run 绑定。
 
 事件键为 `source + code + context`。重复活动 Warning/Error 只增加 Count；resolve 后才可
 再次弹窗。Warning 继续运行，Error 在 Running/Paused 时请求 fatal Stop。报警 HTTP

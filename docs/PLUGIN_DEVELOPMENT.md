@@ -256,7 +256,8 @@ return (
 
 - `api.sleep(seconds)`：Pause 不计时、Stop 可打断；`sleep(0)` 只做一次检查。
 - `api.checkpoint()`：长循环或两次仪表 I/O 之间立即检查 Pause/Stop。
-- `api.devices()`：获取最新温度、磁场和 Monitor 快照的副本。
+- `api.devices()`：让核心立即采样一次温度、磁场和 Monitor，再返回快照副本；它不受
+  前面板的常规刷新周期限制，同一时刻多个模块请求会合并为一次设备轮询。
 - `api.warn(code, message, key="")`：报告可恢复 Warning；`message=None` 解除同一告警。
 - `api.status(mapping)`：更新模块只读状态。
 - `api.timeout`：本次核心操作总上限，用于给安全清理预留时间。
@@ -266,6 +267,9 @@ return (
 
 每个 VISA、串口或厂商 SDK 调用仍必须设置有限 I/O timeout。核心终止 worker 只能回收
 本机进程，不能证明真实仪表已经关闭输出。
+
+即使模块没有调用 `api.devices()`，核心也会在每个测量槽位写 DAT 前取得即时系统快照。
+如果模块刚在 0.1 秒内读过，写行会复用该样本，避免连续重复查询慢速温控器。
 
 ## 可选界面
 
@@ -334,6 +338,10 @@ class MyController(DevicePlugin):
 
 GUI 不直接操作设备。主配置限制手动控制、SEQ 参数窗口和运行时执行；插件还应再次检查
 设备自身边界。写命令超时视为结果不确定，不自动重发。
+
+同一物理仪表的辅助温度、加热功率或量程使用 `DeviceSnapshot.metrics` 返回，不能为了多
+显示一个值而对同一地址创建第二个插件会话。`instrument_stable` 可作为核心独立误差、
+斜率和 dwell 判定的附加必要条件，但不能替代这些条件。
 
 ## 依赖与离线安装
 

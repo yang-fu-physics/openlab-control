@@ -41,7 +41,7 @@ def _write_plugin(
             f'id = "{plugin_id}"\n'
             'name = "Example Temperature"\n'
             'version = "0.1.0"\n'
-            'api_version = "1.0"\n'
+            'api_version = "1.1"\n'
             'backend = "backend:ExampleTemperature"\n'
             'kinds = ["temperature"]\n'
             f"{dependency_block}"

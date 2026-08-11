@@ -241,7 +241,7 @@ max_rate_per_minute = 10.0
             invalid_poll = temp_root / "invalid-poll.toml"
             invalid_poll.write_text(
                 source.replace(
-                    "poll_interval_seconds = 0.20",
+                    "poll_interval_seconds = 1.0",
                     "poll_interval_seconds = 0",
                     1,
                 ),

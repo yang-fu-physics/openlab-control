@@ -52,7 +52,7 @@ class ModuleAPI:
 
     - :meth:`sleep`：Pause 不计时、Stop 可打断的等待。
     - :meth:`checkpoint`：在长循环或两次仪表 I/O 之间响应 Pause/Stop。
-    - :meth:`devices`：读取最新温度、磁场和 Monitor 快照。
+    - :meth:`devices`：请求核心立即采样温度、磁场和 Monitor，再返回快照。
     - :meth:`warn`：报告或解除可恢复告警。
     - :meth:`status`：更新模块窗口中的只读状态。
     - :attr:`timeout`：本次调用的核心总时限，供模块预留安全清理时间。
@@ -131,7 +131,12 @@ class ModuleAPI:
         self,
         timeout: float = 5.0,
     ) -> Mapping[str, Mapping[str, Any]]:
-        """返回最新设备快照的深拷贝；纯单元测试回退到调用开始时的快照。"""
+        """请求一次即时设备采样并返回深拷贝。
+
+        这条路径与约 1 秒一次的前面板刷新分离。真实测量模块在需要记录温度/场的
+        时刻调用本方法，核心会立即轮询；同一时刻多个模块的请求会合并为一次轮询。
+        纯单元测试没有核心回调时才回退到调用开始时的快照。
+        """
 
         request_timeout = self._positive_finite(timeout, "Device snapshot timeout")
         self._checkpoint(min(request_timeout, 1.0))

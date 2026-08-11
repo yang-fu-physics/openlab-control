@@ -26,7 +26,7 @@ from ..extensions.trust import ExtensionTrustError, extension_tree_digest
 from ..models import DeviceKind
 
 
-DEVICE_PLUGIN_API_VERSION = "1.0"
+DEVICE_PLUGIN_API_VERSION = "1.1"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENTRYPOINT = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$"

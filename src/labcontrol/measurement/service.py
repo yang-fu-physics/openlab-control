@@ -39,6 +39,7 @@ from .worker import ModuleWorkerClient, WorkerRequestError
 ModuleMessageCallback = Callable[[str, dict[str, Any]], None]
 _MAX_RAW_VALUES = 32_768
 _MAX_LOGICAL_SLOTS = 1024
+_MEASUREMENT_SAMPLE_REUSE_SECONDS = 0.1
 
 
 @dataclass(slots=True)
@@ -105,6 +106,10 @@ class MeasurementModuleService:
         self._sequence_active = False
         self._operation_state = "idle"
         self._operation_state_lock = threading.RLock()
+        self._fresh_system_task: asyncio.Task[
+            dict[str, DeviceSnapshot]
+        ] | None = None
+        self._fresh_system_completed_at: float | None = None
 
     def _ensure_sequence_idle(self) -> None:
         if self._sequence_active:
@@ -272,8 +277,50 @@ class MeasurementModuleService:
                 "stability": snapshot.stability.value,
                 "message": snapshot.message,
                 "connection_state": snapshot.connection_state.value,
+                "instrument_stable": snapshot.instrument_stable,
+                "metrics": {
+                    metric.key: {
+                        "display_name": metric.display_name,
+                        "value": metric.value,
+                        "unit": metric.unit,
+                        "decimals": metric.decimals,
+                    }
+                    for metric in snapshot.metrics
+                },
             }
         return payload
+
+    async def _fresh_system_payload(
+        self,
+        *,
+        reuse_within_seconds: float = 0.0,
+    ) -> dict[str, dict[str, Any]]:
+        """立即采样设备，并合并同一时刻多个模块发起的并发请求。
+
+        模块显式调用 ``api.devices()`` 时 ``reuse_within_seconds`` 保持为零，因此连续
+        两次调用一定代表两个采样点。核心写测量行前允许复用最多 0.1 秒前由模块触发的
+        样本，既避免紧接着重复查询，也不会退回约 1 秒一次的前面板缓存。
+        """
+
+        completed_at = self._fresh_system_completed_at
+        if (
+            reuse_within_seconds > 0.0
+            and completed_at is not None
+            and time.monotonic() - completed_at <= reuse_within_seconds
+        ):
+            return self._system_payload()
+
+        task = self._fresh_system_task
+        if task is None or task.done():
+            task = asyncio.create_task(self.devices.poll_all())
+            self._fresh_system_task = task
+        try:
+            await asyncio.shield(task)
+        finally:
+            if self._fresh_system_task is task and task.done():
+                self._fresh_system_task = None
+        self._fresh_system_completed_at = time.monotonic()
+        return self._system_payload()
 
     async def _worker_event(
         self,
@@ -287,7 +334,7 @@ class MeasurementModuleService:
         if kind == "context_request":
             request_kind = str(message.get("kind", ""))
             if request_kind == "system":
-                return {"system": self._system_payload()}
+                return {"system": await self._fresh_system_payload()}
             if request_kind == "operation_state":
                 with self._operation_state_lock:
                     state = self._operation_state
@@ -1059,6 +1106,9 @@ class MeasurementModuleService:
                 "NO_ENABLED_MODULES",
                 "Measure continued without an enabled measurement module",
             )
+            await self._fresh_system_payload(
+                reuse_within_seconds=_MEASUREMENT_SAMPLE_REUSE_SECONDS,
+            )
             logger.write_system_row(self.devices.snapshots(), sequence_step)
             return
         self.events.resolve("modules", "NO_ENABLED_MODULES")
@@ -1221,9 +1271,12 @@ class MeasurementModuleService:
                 for item in results
                 if item.raw_values is not None
             }
+            await self._fresh_system_payload(
+                reuse_within_seconds=_MEASUREMENT_SAMPLE_REUSE_SECONDS,
+            )
             logger.write_measurement_row(
-                # 同一通道槽位只采一次核心系统快照，避免并行模块完成顺序改变 DAT 行数
-                # 或给一行制造多个互相矛盾的温场时间点。
+                # 每行使用写入前的即时系统快照；同一时刻并行模块发起的请求会合并，
+                # 且刚在 0.1 秒内读过时不会为了写行再次敲击慢速仪表。
                 self.devices.snapshots(),
                 values,
                 sequence_step,

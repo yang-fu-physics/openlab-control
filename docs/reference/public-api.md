@@ -53,6 +53,8 @@ Frontend 是普通 QWidget，只通过这个桥请求后端 Action 或状态刷�
 
 ::: labcontrol.models.DeviceSnapshot
 
+::: labcontrol.models.DeviceMetric
+
 ::: labcontrol.models.DeviceKind
 
 ::: labcontrol.models.DeviceRole

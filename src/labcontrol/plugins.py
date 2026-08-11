@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import time
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
@@ -48,6 +49,7 @@ from .stability import StabilityEvaluator
 
 
 T = TypeVar("T")
+_METRIC_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class DeviceManager:
@@ -82,6 +84,10 @@ class DeviceManager:
         self._generation: dict[str, int] = {}
         self._expected_targets: dict[str, float | None] = {}
         self._expected_rates: dict[str, float | None] = {}
+        self._metric_schemas: dict[
+            str,
+            tuple[tuple[str, str, str, int | None], ...],
+        ] = {}
         self._shutting_down = False
         self.latest: dict[str, DeviceSnapshot] = {}
         self._load_plugins()
@@ -325,7 +331,7 @@ class DeviceManager:
     def _recoverable_read_error(exc: DeviceError) -> bool:
         """判断读失败能否尝试重连；非法数据本身不能靠重连掩盖。"""
 
-        return exc.code not in {
+        return not isinstance(exc, SafetyViolation) and exc.code not in {
             "INVALID_DEVICE_SNAPSHOT",
             "NONFINITE_DEVICE_READING",
             "DEVICE_KIND_MISMATCH",
@@ -342,6 +348,7 @@ class DeviceManager:
             "DEVICE_WORKER_EXITED",
             "DEVICE_WORKER_NOT_RUNNING",
             "DEVICE_IPC_INVALID_MESSAGE",
+            "DEVICE_WRITE_RESULT_UNKNOWN",
         }
 
     def _begin_recovery(self, device_id: str, exc: DeviceError) -> None:
@@ -843,7 +850,12 @@ class DeviceManager:
                 self._expected_rates[device_id] = snapshot.rate_per_minute
             evaluator = self._stability.get(device_id)
             if evaluator is not None and snapshot.current is not None and snapshot.target is not None:
-                result = evaluator.update(snapshot.current, snapshot.target, snapshot.timestamp)
+                result = evaluator.update(
+                    snapshot.current,
+                    snapshot.target,
+                    snapshot.timestamp,
+                    instrument_stable=snapshot.instrument_stable,
+                )
                 snapshot.stability = result.state
                 timeout_code = "STABILITY_TIMEOUT"
                 if result.state is StabilityState.TIMED_OUT:
@@ -882,6 +894,15 @@ class DeviceManager:
                 "DEVICE_REPORTED_DISCONNECTED",
                 device_id,
             )
+        if snapshot.instrument_stable is not None and not isinstance(
+            snapshot.instrument_stable,
+            bool,
+        ):
+            raise DeviceError(
+                f"{config.display_name} returned a non-boolean instrument stability flag",
+                "INVALID_DEVICE_SNAPSHOT",
+                device_id,
+            )
         numeric_values = {
             "timestamp": snapshot.timestamp,
             "current": snapshot.current,
@@ -897,6 +918,82 @@ class DeviceManager:
             raise DeviceError(
                 f"{config.display_name} returned non-finite {', '.join(invalid)}",
                 "NONFINITE_DEVICE_READING",
+                device_id,
+            )
+        metric_keys: set[str] = set()
+        metric_schema: list[tuple[str, str, str, int | None]] = []
+        for metric in snapshot.metrics:
+            if not _METRIC_KEY.fullmatch(metric.key) or metric.key in metric_keys:
+                raise DeviceError(
+                    f"{config.display_name} returned an invalid or duplicate metric key "
+                    f"{metric.key!r}",
+                    "INVALID_DEVICE_SNAPSHOT",
+                    device_id,
+                )
+            metric_keys.add(metric.key)
+            if (
+                not metric.display_name.strip()
+                or len(metric.display_name) > 64
+                or any(character in metric.display_name for character in "\r\n")
+                or len(metric.unit) > 24
+                or any(character in metric.unit for character in "\r\n")
+            ):
+                raise DeviceError(
+                    f"{config.display_name} returned invalid metadata for metric "
+                    f"{metric.key!r}",
+                    "INVALID_DEVICE_SNAPSHOT",
+                    device_id,
+                )
+            if metric.decimals is not None and (
+                isinstance(metric.decimals, bool)
+                or not isinstance(metric.decimals, int)
+                or not 0 <= metric.decimals <= 12
+            ):
+                raise DeviceError(
+                    f"{config.display_name} returned invalid decimals for metric "
+                    f"{metric.key!r}",
+                    "INVALID_DEVICE_SNAPSHOT",
+                    device_id,
+                )
+            value = metric.value
+            if not isinstance(value, (int, float, str, bool, type(None))):
+                raise DeviceError(
+                    f"{config.display_name} returned a non-scalar metric "
+                    f"{metric.key!r}",
+                    "INVALID_DEVICE_SNAPSHOT",
+                    device_id,
+                )
+            invalid_numeric_metric = False
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                try:
+                    invalid_numeric_metric = not math.isfinite(value)
+                except OverflowError:
+                    invalid_numeric_metric = True
+            if invalid_numeric_metric:
+                raise DeviceError(
+                    f"{config.display_name} returned non-finite metric "
+                    f"{metric.key!r}",
+                    "NONFINITE_DEVICE_READING",
+                    device_id,
+                )
+            if isinstance(value, str) and (
+                len(value) > 256 or any(character in value for character in "\r\n")
+            ):
+                raise DeviceError(
+                    f"{config.display_name} returned invalid text for metric "
+                    f"{metric.key!r}",
+                    "INVALID_DEVICE_SNAPSHOT",
+                    device_id,
+                )
+            metric_schema.append(
+                (metric.key, metric.display_name, metric.unit, metric.decimals)
+            )
+        frozen_schema = tuple(metric_schema)
+        previous_schema = self._metric_schemas.setdefault(device_id, frozen_schema)
+        if previous_schema != frozen_schema:
+            raise DeviceError(
+                f"{config.display_name} changed its metric schema while running",
+                "INVALID_DEVICE_SNAPSHOT",
                 device_id,
             )
 
