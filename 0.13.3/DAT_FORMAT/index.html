@@ -2041,6 +2041,9 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。</p>
 <h3 id="_7">值格式<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
 <ul>
 <li>温度固定三位；Oe 固定两位；T 固定六位。</li>
+<li>Device Plugin 附加读数使用 <code>设备ID.metric_key(单位)</code> 列，例如
+  <code>temperature.second_stage(K)</code>、<code>temperature.heater_output(%FS)</code> 和
+  <code>temperature.heater_range</code>。这些列在 Run 开始时冻结，缺失读数留空。</li>
 <li>模块 float 使用最多 9 位有效数字。</li>
 <li>一般模块列可写数字、bool、字符串或空值；复杂对象会触发 Schema/类型 Error。</li>
 <li><code>StatusCode</code> 的整数编码、必填关系以及异常时应清空哪些测量值，必须由模块 README 和
@@ -2102,7 +2105,7 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。</p>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>; OpenLab Control Device Status Log
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>...
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>[Data]
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.Connection,temperature.Connected,temperature.ReadingAge(s),temperature.Message,...
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.InstrumentStable,temperature.Connection,temperature.Connected,temperature.ReadingAge(s),temperature.Message,...
 </span></code></pre></div>
 <p>每个配置设备拥有同一组固定列：</p>
 <ul>
@@ -2110,9 +2113,11 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。</p>
 <li><code>Activity</code>：<code>idle</code>、<code>moving</code>、<code>holding</code>、<code>fault</code> 等设备动作；</li>
 <li><code>Stability</code>：<code>moving</code>、<code>settling</code>、<code>stable</code>、<code>timed_out</code>、<code>stale</code> 或
   <code>not_applicable</code>；</li>
+<li><code>InstrumentStable</code>：仪表提供该状态时为 <code>true/false</code>；空值表示该插件没有独立状态位；</li>
 <li><code>Connection</code>：连接生命周期，例如 <code>connected</code>、<code>reconnecting</code>、<code>faulted</code>；</li>
 <li><code>Connected</code>：本次快照是否有效连接；</li>
 <li><code>ReadingAge(s)</code>：写入时刻与设备单调采样时间的差，用于定位排队或旧读数；</li>
+<li>插件声明的附加读数紧随该设备固定列，例如辅助温度、加热输出和量程；</li>
 <li><code>Message</code>：驱动、恢复或状态说明。</li>
 </ul>
 <p>文件使用和实验 DAT 相同的绝对时间 epoch、数值精度与逐行 Flush 策略。它只记录 Run
@@ -2122,8 +2127,8 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。</p>
 <li>默认每行 Flush。</li>
 <li>同一模块的行顺序保持。</li>
 <li>多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。</li>
-<li>设备轮询仍按 <code>poll_interval_seconds</code> 运行；状态日志按自己的周期节流，不会为了写日志
-  增加仪表查询。</li>
+<li>前面板常规轮询仍按 <code>poll_interval_seconds</code> 运行；状态日志按自己的周期节流，不会为了
+  写日志增加仪表查询。Measurement Module 明确调用 <code>api.devices()</code> 时会即时增加一次采样。</li>
 <li>Error/Stop/完成都会在模块 <code>run_end</code> 收束后关闭文件。</li>
 <li>异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。</li>
 </ul>

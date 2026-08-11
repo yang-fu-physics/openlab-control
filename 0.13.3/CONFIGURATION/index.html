@@ -1931,8 +1931,8 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 <code>site.example
 </tr>
 <tr>
 <td><code>poll_interval_seconds</code></td>
-<td style="text-align: right;"><code>0.20</code></td>
-<td>控制/Monitor 轮询周期</td>
+<td style="text-align: right;"><code>1.0</code></td>
+<td>前面板和常规状态的设备轮询周期；测量时的即时采样不受此值限制</td>
 </tr>
 <tr>
 <td><code>simulation_speed</code></td>
@@ -1955,6 +1955,8 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 <code>site.example
 图标和窗口初始尺寸。它是现场默认值；用户在 <strong>View → Appearance</strong> 保存个人整体缩放后，
 个人值优先。Appearance 还提供独立的 70%–150% 文字倍率和窗口布局记忆，这些值保存在
 操作系统用户配置目录，不属于主配置，也不会进入运行快照。</p>
+<p>Measurement Module 在测量时调用 <code>api.devices()</code> 会请求一次即时设备采样，不会复用最多
+一个常规周期以前的前面板缓存，也不会永久改变 <code>poll_interval_seconds</code>。</p>
 <h2 id="logging"><code>[logging]</code><a class="headerlink" href="#logging" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
