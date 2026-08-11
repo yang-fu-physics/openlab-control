@@ -5,8 +5,8 @@ Python/PySide6 控制框架。它不控制 PPMS 本体。温控仪、磁体电�
 Device Plugin 提供；吉时利组合表、Lakeshore 372 AC Bridge 等完整测量方案由独立的
 Measurement Module 提供。
 
-当前稳定版本：`0.13.2`。该版本在主窗口增加 Enabled Measurement Module 状态与最近结果
-监视卡，并继续采用“默认关闭、用户选择后读回确认再保持”的安全输出生命周期；默认配置全部使用仿真设备。Lake Shore 372A、LR-700、Keithley
+当前稳定版本：`0.13.3`。该版本增加个人界面/文字缩放、窗口布局记忆和可调节的固定侧栏，
+并保留 Enabled Measurement Module 状态与最近结果监视卡；默认配置全部使用仿真设备。Lake Shore 372A、LR-700、Keithley
 6221/2182A/7001/3706A 等尚未完成真机验证的硬件扩展仍各自保持 Beta 状态。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站提供可搜索的中文
