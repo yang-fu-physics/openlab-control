@@ -151,10 +151,7 @@ jobs:
                 $forbiddenEntries |
                   ForEach-Object { $_.FullName.Replace("\", "/") }
               )
-              throw (
-                "Archive contains generated or local-only files: "
-                + ($forbiddenNames -join ", ")
-              )
+              throw "Archive contains generated or local-only files: $($forbiddenNames -join ', ')"
             }
             foreach ($entry in $entries) {
               if ($entry.FullName.EndsWith("/") -or $entry.FullName.EndsWith("\")) {
