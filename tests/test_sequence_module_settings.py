@@ -190,7 +190,7 @@ class SequenceModuleSettingsTests(unittest.TestCase):
             )
             self.assertEqual(
                 loaded.source,
-                snapshot,
+                snapshot.resolve(),
             )
             self.assertEqual(loaded.issues, ())
 

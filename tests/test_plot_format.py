@@ -43,7 +43,7 @@ class PlotFormatTests(unittest.TestCase):
                 y_scale=LOG_SCALE,
             )
             saved = save_plot_format(data_path, expected)
-            self.assertEqual(saved, Path(temp) / "sample.plt")
+            self.assertEqual(saved, (Path(temp) / "sample.plt").resolve())
             self.assertEqual(plot_format_path(data_path), saved)
             self.assertEqual(load_plot_format(saved), expected)
             payload = json.loads(saved.read_text(encoding="utf-8"))
@@ -78,7 +78,7 @@ class PlotFormatTests(unittest.TestCase):
             settings = PlotFormat("sample.dat", "overlay", None, ("Y",))
             additive = Path(str(data_path) + ".plt")
             additive.write_text(json.dumps(settings.to_dict()), encoding="utf-8")
-            self.assertEqual(find_plot_format(data_path), additive)
+            self.assertEqual(find_plot_format(data_path), additive.resolve())
             canonical = save_plot_format(data_path, settings)
             self.assertEqual(find_plot_format(data_path), canonical)
 

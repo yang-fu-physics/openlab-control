@@ -509,6 +509,7 @@ class DatafileTests(unittest.TestCase):
             shutil.copy2(ROOT / "configs" / "default.toml", config_path)
             config = load_config(config_path)
             runs_root = temp_root / "runs"
+            resolved_runs_root = runs_root.resolve()
             original_mkdir = Path.mkdir
             injected_race = False
 
@@ -516,7 +517,10 @@ class DatafileTests(unittest.TestCase):
                 nonlocal injected_race
                 if (
                     not injected_race
-                    and path.parent == runs_root
+                    # GitHub 的 Windows runner 可能让 tempfile 返回 8.3 短路径，
+                    # 而配置加载会把同一目录规范化成长路径。比较真实路径，避免把
+                    # C:\Users\RUNNER~1 与 C:\Users\runneradmin 误判为不同目录。
+                    and path.parent.resolve() == resolved_runs_root
                     and path.name.endswith("_race")
                 ):
                     injected_race = True
