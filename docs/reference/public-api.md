@@ -1,6 +1,7 @@
 # 公共 Python API
 
-这一页只列出扩展作者允许依赖的接口。`measurement.worker`、`measurement.service`、
+这一页只列出 System Instrument 和 Measurement Module 作者允许依赖的接口。
+`measurement.worker`、`measurement.service`、
 `sequence.engine`、UI 主窗口和 IPC 信封都是核心内部实现，不构成兼容承诺。
 
 ## Measurement Module 后端
@@ -13,7 +14,8 @@
         - timeout
         - sleep
         - checkpoint
-        - devices
+        - instruments
+        - resources
         - warn
         - status
 
@@ -30,45 +32,47 @@ Frontend 是普通 QWidget，只通过这个桥请求后端 Action 或状态刷�
       members:
         - action
         - refresh
+        - resources
 
-## Device Plugin
+## System Instrument
 
-::: labcontrol.devices.base.DevicePlugin
+::: labcontrol.instruments.base.SystemInstrument
     options:
       members:
         - __init__
         - connect
         - disconnect
         - poll
+        - poll_measurement
         - set_target
         - hold
 
-::: labcontrol.devices.base.DeviceWarning
+::: labcontrol.instruments.base.InstrumentWarning
 
-::: labcontrol.devices.base.DeviceError
+::: labcontrol.instruments.base.InstrumentError
 
-::: labcontrol.devices.base.SafetyViolation
+::: labcontrol.instruments.base.SafetyViolation
 
-## 设备状态模型
+## 仪表状态模型
 
-::: labcontrol.models.DeviceSnapshot
+::: labcontrol.models.InstrumentSnapshot
 
-::: labcontrol.models.DeviceMetric
+::: labcontrol.models.InstrumentMetric
 
-::: labcontrol.models.DeviceKind
+::: labcontrol.models.InstrumentKind
 
-::: labcontrol.models.DeviceRole
+::: labcontrol.models.InstrumentRole
 
-::: labcontrol.models.DeviceActivity
+::: labcontrol.models.InstrumentActivity
 
-::: labcontrol.models.DeviceConnectionState
+::: labcontrol.models.InstrumentConnectionState
 
 ::: labcontrol.models.StabilityState
 
 ## 公共接口使用原则
 
 - Module 只导入 `labcontrol.module_api` 和可选 `labcontrol.measurement.frontend_api`。
-- Device Plugin 只依赖 `labcontrol.devices.base`、配置对象和状态模型。
+- System Instrument 只依赖 `labcontrol.instruments.base`、配置对象和状态模型。
 - 不保存 API 对象供另一个调用或线程使用。
 - 不访问带下划线字段。
 - 不通过内部 service/worker 绕过生命周期、IPC 或安全限制。

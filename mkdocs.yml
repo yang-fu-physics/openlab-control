@@ -105,6 +105,7 @@ nav:
       - 源码环境: getting-started/source.md
   - 使用软件:
       - 第一条 SEQ: getting-started/first-sequence.md
+      - 扫描与配置仪表: guides/instrument-scanner.md
       - 操作手册: OPERATIONS.md
       - Data Browser: guides/data-browser.md
       - 常见问题: guides/troubleshooting.md
@@ -115,8 +116,12 @@ nav:
       - 设置与状态窗口: development/frontend.md
       - 模块自己的 SEQ 指令: development/sequence-commands.md
       - 一台仪表一个文件: development/instrument-drivers.md
-  - Device Plugin:
-      - 更换温度或磁场设备: development/device-plugin.md
+  - System Instrument:
+      - 从这里开始: development/system-instrument.md
+      - 写第一个仪表: development/first-system-instrument.md
+      - 读取、前面板与日志: development/instrument-reading.md
+      - 控制与安全: development/instrument-control-safety.md
+      - 测试与现场接入: development/instrument-testing.md
   - 测试与发布:
       - 怎样检查模块: development/testing.md
       - 离线安装与发布: guides/offline-packaging.md
@@ -128,4 +133,4 @@ nav:
       - DAT 与事件格式: DAT_FORMAT.md
       - 配置参考: CONFIGURATION.md
       - 系统架构: ARCHITECTURE.md
-      - 完整扩展规范: PLUGIN_DEVELOPMENT.md
+      - 完整开发规范: DEVELOPMENT_REFERENCE.md

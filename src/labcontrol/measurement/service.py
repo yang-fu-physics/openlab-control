@@ -18,19 +18,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..datafile import DatRunLogger
-from ..devices.base import DeviceError
+from ..instruments.base import InstrumentError
 from ..events import EventManager
-from ..extensions.trust import (
-    PluginTrustStore,
-    extension_tree_digest,
+from ..package_support.trust import (
+    ContentTrustStore,
+    content_tree_digest,
 )
-from ..models import DeviceSnapshot, Severity
+from ..models import InstrumentSnapshot, Severity
 from ..module_commands import (
     ModuleCommandSpec,
     module_command_key,
     validate_module_command_parameters,
 )
-from ..plugins import DeviceManager
+from ..instrument_manager import InstrumentManager
 from ..sequence.model import Command, CommandType
 from .manifest import ModuleDescriptor, module_dependency_errors, module_dependency_directory
 from .worker import ModuleWorkerClient, WorkerRequestError
@@ -61,7 +61,7 @@ class _ModuleSlotResult:
     module_id: str
     values: dict[str, Any] | None = None
     raw_values: tuple[float, ...] | None = None
-    error: DeviceError | None = None
+    error: InstrumentError | None = None
     cancelled: bool = False
 
 
@@ -81,18 +81,18 @@ class MeasurementModuleService:
         self,
         descriptors: tuple[ModuleDescriptor, ...],
         events: EventManager,
-        devices: DeviceManager,
+        instruments: InstrumentManager,
         message_callback: ModuleMessageCallback | None = None,
     ) -> None:
         self.events = events
-        self.devices = devices
-        self.app_config = devices.config
-        self.config = devices.config.modules
-        self.trust_store = PluginTrustStore(
-            devices.config.resolve_project_path(
-                devices.config.plugins.state_directory
+        self.instruments = instruments
+        self.app_config = instruments.config
+        self.config = instruments.config.modules
+        self.trust_store = ContentTrustStore(
+            instruments.config.resolve_project_path(
+                instruments.config.modules.state_directory
             )
-            / "trusted_plugins.json"
+            / "trusted_content.json"
         )
         self.message_callback = message_callback or (lambda _kind, _payload: None)
         self.records = {
@@ -107,13 +107,13 @@ class MeasurementModuleService:
         self._operation_state = "idle"
         self._operation_state_lock = threading.RLock()
         self._fresh_system_task: asyncio.Task[
-            dict[str, DeviceSnapshot]
+            dict[str, InstrumentSnapshot]
         ] | None = None
         self._fresh_system_completed_at: float | None = None
 
     def _ensure_sequence_idle(self) -> None:
         if self._sequence_active:
-            raise DeviceError(
+            raise InstrumentError(
                 "Module changes and manual actions are unavailable while a SEQ is running",
                 "MODULE_OPERATION_DURING_SEQUENCE",
             )
@@ -125,17 +125,17 @@ class MeasurementModuleService:
         """在每次 Enable 前重新核对内容、信任记录和隔离依赖。"""
 
         if not descriptor.can_enable:
-            raise DeviceError(
+            raise InstrumentError(
                 descriptor.error or descriptor.dependency_error,
                 "MODULE_NOT_ENABLEABLE",
                 descriptor.id,
             )
         # UI 发现与用户点击 Enable 之间可能隔很久；不能只相信发现阶段缓存的摘要。
-        current_fingerprint = extension_tree_digest(
+        current_fingerprint = content_tree_digest(
             descriptor.path
         )
         if current_fingerprint != descriptor.fingerprint:
-            raise DeviceError(
+            raise InstrumentError(
                 f"Measurement module {descriptor.id} changed "
                 "after discovery",
                 "MODULE_CHANGED_AFTER_DISCOVERY",
@@ -149,7 +149,7 @@ class MeasurementModuleService:
             "module",
             descriptor,
         ):
-            raise DeviceError(
+            raise InstrumentError(
                 f"Measurement module {descriptor.id} has not "
                 "been trusted",
                 "MODULE_NOT_TRUSTED",
@@ -160,7 +160,7 @@ class MeasurementModuleService:
             descriptor,
         )
         if dependency_errors:
-            raise DeviceError(
+            raise InstrumentError(
                 "Invalid isolated module dependencies: "
                 + "; ".join(dependency_errors),
                 "MODULE_DEPENDENCIES_INVALID",
@@ -172,7 +172,7 @@ class MeasurementModuleService:
 
         self._ensure_sequence_idle()
         if any(record.enabled or record.client is not None for record in self.records.values()):
-            raise DeviceError(
+            raise InstrumentError(
                 "Disable every module before refreshing module sources",
                 "MODULE_REFRESH_BLOCKED",
             )
@@ -247,25 +247,25 @@ class MeasurementModuleService:
         )
 
     def _system_payload(self) -> dict[str, dict[str, Any]]:
-        """把核心 DeviceSnapshot 转成只读、可 JSON 化的模块视图。"""
+        """把核心 InstrumentSnapshot 转成只读、可 JSON 化的模块视图。"""
 
         payload: dict[str, dict[str, Any]] = {}
-        for device_id, snapshot in self.devices.snapshots().items():
-            device_config = self.devices.device_configs.get(
-                device_id
+        for instrument_id, snapshot in self.instruments.snapshots().items():
+            instrument_config = self.instruments.instrument_configs.get(
+                instrument_id
             )
-            payload[device_id] = {
+            payload[instrument_id] = {
                 "display_name": snapshot.display_name,
                 "kind": snapshot.kind.value,
                 "role": (
                     ""
-                    if device_config is None
-                    else device_config.role.value
+                    if instrument_config is None
+                    else instrument_config.role.value
                 ),
                 "control_enabled": (
                     False
-                    if device_config is None
-                    else device_config.control_enabled
+                    if instrument_config is None
+                    else instrument_config.control_enabled
                 ),
                 "timestamp": snapshot.timestamp,
                 "connected": snapshot.connected,
@@ -279,13 +279,13 @@ class MeasurementModuleService:
                 "connection_state": snapshot.connection_state.value,
                 "instrument_stable": snapshot.instrument_stable,
                 "metrics": {
-                    metric.key: {
+                    metric_key: {
                         "display_name": metric.display_name,
                         "value": metric.value,
                         "unit": metric.unit,
                         "decimals": metric.decimals,
                     }
-                    for metric in snapshot.metrics
+                    for metric_key, metric in snapshot.metrics.items()
                 },
             }
         return payload
@@ -295,9 +295,9 @@ class MeasurementModuleService:
         *,
         reuse_within_seconds: float = 0.0,
     ) -> dict[str, dict[str, Any]]:
-        """立即采样设备，并合并同一时刻多个模块发起的并发请求。
+        """立即采样仪表，并合并同一时刻多个模块发起的并发请求。
 
-        模块显式调用 ``api.devices()`` 时 ``reuse_within_seconds`` 保持为零，因此连续
+        模块显式调用 ``api.instruments()`` 时 ``reuse_within_seconds`` 保持为零，因此连续
         两次调用一定代表两个采样点。核心写测量行前允许复用最多 0.1 秒前由模块触发的
         样本，既避免紧接着重复查询，也不会退回约 1 秒一次的前面板缓存。
         """
@@ -313,7 +313,7 @@ class MeasurementModuleService:
         task = self._fresh_system_task
         if task is None or task.done():
             task = asyncio.create_task(
-                self.devices.poll_measurement_all()
+                self.instruments.poll_measurement_all()
             )
             self._fresh_system_task = task
         try:
@@ -417,8 +417,11 @@ class MeasurementModuleService:
 
         request_payload = dict(payload or {})
         # 初始快照随每个请求发送；模块需要第二个时间点时再通过 context_request 获取
-        # 新快照。这样既支持两点平均，也不会把可变 DeviceManager 暴露给子进程。
+        # 新快照。这样既支持两点平均，也不会把可变 InstrumentManager 暴露给子进程。
         request_payload["system"] = self._system_payload()
+        request_payload["resources"] = self.app_config.resource_payload(
+            "measurement"
+        )
         request_payload["operation_timeout_seconds"] = timeout
         result = await asyncio.to_thread(
             record.client.request,
@@ -444,7 +447,7 @@ class MeasurementModuleService:
         *,
         warning_allowed: bool = False,
         disable_failed_worker: bool = True,
-    ) -> DeviceError | None:
+    ) -> InstrumentError | None:
         """报告 worker 错误，并在连接状态不可信时同步失效模块记录。"""
 
         severity = Severity.WARNING if error.severity == "warning" else Severity.ERROR
@@ -470,7 +473,7 @@ class MeasurementModuleService:
             self._publish(record, str(error))
         if warning_allowed and severity is Severity.WARNING:
             return None
-        return DeviceError(str(error), error.code, error.context)
+        return InstrumentError(str(error), error.code, error.context)
 
     async def _reset_failed_enable(
         self,
@@ -559,7 +562,7 @@ class MeasurementModuleService:
             )
             assert error is not None
             raise error from exc
-        except DeviceError as exc:
+        except InstrumentError as exc:
             await self._reset_failed_enable(
                 record,
                 client,
@@ -590,7 +593,7 @@ class MeasurementModuleService:
                 message,
                 module_id,
             )
-            raise DeviceError(
+            raise InstrumentError(
                 message,
                 "MODULE_ENABLE_FAILED",
                 module_id,
@@ -617,7 +620,7 @@ class MeasurementModuleService:
         record.state = "disabling"
         self._publish(record, f"Stopping {record.descriptor.name}...")
         client = record.client
-        failure: DeviceError | None = None
+        failure: InstrumentError | None = None
         try:
             result = await self._request(
                 record,
@@ -655,7 +658,7 @@ class MeasurementModuleService:
         self._ensure_sequence_idle()
         record = self.records[module_id]
         if not record.enabled:
-            raise DeviceError("Module is disabled", "MODULE_DISABLED", module_id)
+            raise InstrumentError("Module is disabled", "MODULE_DISABLED", module_id)
         try:
             result = await self._request(record, "configure", {"settings": dict(settings)})
         except WorkerRequestError as exc:
@@ -694,7 +697,7 @@ class MeasurementModuleService:
         self._ensure_sequence_idle()
         record = self.records[module_id]
         if not record.enabled:
-            raise DeviceError("Module is disabled", "MODULE_DISABLED", module_id)
+            raise InstrumentError("Module is disabled", "MODULE_DISABLED", module_id)
         try:
             result = await self._request(
                 record,
@@ -781,13 +784,13 @@ class MeasurementModuleService:
 
         key = module_command_key(command)
         if key is None:
-            raise DeviceError(
+            raise InstrumentError(
                 "The core supplied a non-module sequence command",
                 "MODULE_SEQUENCE_COMMAND_INVALID",
             )
         module_id, command_id = key
         if not self._sequence_active or module_id not in self._sequence_modules:
-            raise DeviceError(
+            raise InstrumentError(
                 f"Module sequence command requires the Enabled run snapshot: {module_id}",
                 "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
                 module_id,
@@ -795,7 +798,7 @@ class MeasurementModuleService:
         record = self.records[module_id]
         spec = self.sequence_command_spec(module_id, command_id)
         if spec is None:
-            raise DeviceError(
+            raise InstrumentError(
                 f"Module sequence command is unavailable: {module_id}.{command_id}",
                 "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
                 f"{module_id}.{command_id}",
@@ -810,7 +813,7 @@ class MeasurementModuleService:
             if str(name) not in allowed_names
         )
         if extra_names:
-            raise DeviceError(
+            raise InstrumentError(
                 "Invalid module sequence command parameters: Unknown parameters: "
                 + ", ".join(extra_names),
                 "MODULE_SEQUENCE_COMMAND_INVALID",
@@ -820,7 +823,7 @@ class MeasurementModuleService:
             spec.kind == "scan"
             and spec.point_parameter not in values
         ):
-            raise DeviceError(
+            raise InstrumentError(
                 "Invalid module sequence command parameters: Missing scan point parameter "
                 f"{spec.point_parameter}",
                 "MODULE_SEQUENCE_COMMAND_INVALID",
@@ -834,7 +837,7 @@ class MeasurementModuleService:
         }
         issues = validate_module_command_parameters(spec, declared_values)
         if issues:
-            raise DeviceError(
+            raise InstrumentError(
                 "Invalid module sequence command parameters: " + "; ".join(issues),
                 "MODULE_SEQUENCE_COMMAND_INVALID",
                 f"{module_id}.{command_id}",
@@ -884,7 +887,7 @@ class MeasurementModuleService:
         for descriptor in descriptors:
             try:
                 statuses[descriptor.id] = await self.refresh_status(descriptor.id)
-            except DeviceError:
+            except InstrumentError:
                 # Error 事件会阻止 Run 继续，但仍返回最后已知状态，让运行目录留下可诊断
                 # 的 status-at-start 快照，而不是在准备失败时丢掉现场。
                 statuses[descriptor.id] = deepcopy(self.records[descriptor.id].status)
@@ -895,7 +898,7 @@ class MeasurementModuleService:
 
         begin_cancelled = False
 
-        async def begin(module_id: str) -> DeviceError | None:
+        async def begin(module_id: str) -> InstrumentError | None:
             nonlocal begin_cancelled
             record = self.records[module_id]
             try:
@@ -941,7 +944,7 @@ class MeasurementModuleService:
 
         async def read_slots(
             module_id: str,
-        ) -> tuple[str, frozenset[int] | None, DeviceError | None]:
+        ) -> tuple[str, frozenset[int] | None, InstrumentError | None]:
             record = self.records[module_id]
             try:
                 result = await self._request(
@@ -952,13 +955,13 @@ class MeasurementModuleService:
                 if raw_slots is None:
                     return module_id, None, None
                 if not isinstance(raw_slots, list):
-                    raise DeviceError(
+                    raise InstrumentError(
                         "Module.slots must be a JSON array",
                         "MODULE_MEASUREMENT_SLOTS_INVALID",
                         module_id,
                     )
                 if not raw_slots or len(raw_slots) > _MAX_LOGICAL_SLOTS:
-                    raise DeviceError(
+                    raise InstrumentError(
                         "Module.slots must expose 1 to "
                         f"{_MAX_LOGICAL_SLOTS} logical slots",
                         "MODULE_MEASUREMENT_SLOTS_INVALID",
@@ -971,14 +974,14 @@ class MeasurementModuleService:
                         or not isinstance(value, int)
                         or value < 1
                     ):
-                        raise DeviceError(
+                        raise InstrumentError(
                             "Logical slots must be positive integers",
                             "MODULE_MEASUREMENT_SLOTS_INVALID",
                             module_id,
                         )
                     normalized.append(value)
                 if len(normalized) != len(set(normalized)):
-                    raise DeviceError(
+                    raise InstrumentError(
                         "Logical slots must not contain duplicates",
                         "MODULE_MEASUREMENT_SLOTS_INVALID",
                         module_id,
@@ -989,7 +992,7 @@ class MeasurementModuleService:
                     record,
                     exc,
                 )
-            except DeviceError as exc:
+            except InstrumentError as exc:
                 self.events.report(
                     Severity.ERROR,
                     f"module:{module_id}",
@@ -1026,7 +1029,7 @@ class MeasurementModuleService:
         allowed = {column.name for column in descriptor.columns}
         unknown = set(values) - allowed
         if unknown:
-            raise DeviceError(
+            raise InstrumentError(
                 f"Module emitted undeclared columns: {', '.join(sorted(unknown))}",
                 "MODULE_SCHEMA_VIOLATION",
                 descriptor.id,
@@ -1034,13 +1037,13 @@ class MeasurementModuleService:
         result: dict[str, Any] = {}
         for key, value in values.items():
             if value is not None and not isinstance(value, (str, int, float, bool)):
-                raise DeviceError(
+                raise InstrumentError(
                     f"Column {key} has unsupported value type {type(value).__name__}",
                     "MODULE_ROW_TYPE_ERROR",
                     descriptor.id,
                 )
             if isinstance(value, float) and not math.isfinite(value):
-                raise DeviceError(
+                raise InstrumentError(
                     f"Column {key} contains NaN or infinity",
                     "MODULE_ROW_VALUE_ERROR",
                     descriptor.id,
@@ -1063,13 +1066,13 @@ class MeasurementModuleService:
         if values is None:
             return None
         if not isinstance(values, list):
-            raise DeviceError(
+            raise InstrumentError(
                 "Module raw data must be a JSON array",
                 "MODULE_RAW_DATA_TYPE_ERROR",
                 module_id,
             )
         if len(values) > _MAX_RAW_VALUES:
-            raise DeviceError(
+            raise InstrumentError(
                 "Module raw data must contain at most "
                 f"{_MAX_RAW_VALUES} values",
                 "MODULE_RAW_DATA_SIZE_ERROR",
@@ -1078,14 +1081,14 @@ class MeasurementModuleService:
         result: list[float] = []
         for index, value in enumerate(values, start=1):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise DeviceError(
+                raise InstrumentError(
                     f"Raw value {index} is not numeric",
                     "MODULE_RAW_DATA_TYPE_ERROR",
                     module_id,
                 )
             normalized = float(value)
             if not math.isfinite(normalized):
-                raise DeviceError(
+                raise InstrumentError(
                     f"Raw value {index} contains NaN or infinity",
                     "MODULE_RAW_DATA_VALUE_ERROR",
                     module_id,
@@ -1111,7 +1114,7 @@ class MeasurementModuleService:
             await self._fresh_system_payload(
                 reuse_within_seconds=_MEASUREMENT_SAMPLE_REUSE_SECONDS,
             )
-            logger.write_system_row(self.devices.snapshots(), sequence_step)
+            logger.write_system_row(self.instruments.snapshots(), sequence_step)
             return
         self.events.resolve("modules", "NO_ENABLED_MODULES")
         # 每个 T Measure 都是一组新的可见结果。先清空上一组缓存，防止本轮某个
@@ -1158,7 +1161,7 @@ class MeasurementModuleService:
                 )
                 raw_values = result.get("values")
                 if not isinstance(raw_values, dict):
-                    missing = DeviceError(
+                    missing = InstrumentError(
                         "Module.measure() did not return a row mapping",
                         "MODULE_MEASUREMENT_ROW_MISSING",
                         module_id,
@@ -1213,7 +1216,7 @@ class MeasurementModuleService:
                         warning_allowed=True,
                     ),
                 )
-            except DeviceError as exc:
+            except InstrumentError as exc:
                 self.events.report(Severity.ERROR, f"module:{module_id}", exc.code, str(exc), exc.context)
                 self._publish_measurement_result(
                     record,
@@ -1279,7 +1282,7 @@ class MeasurementModuleService:
             logger.write_measurement_row(
                 # 每行使用写入前的即时系统快照；同一时刻并行模块发起的请求会合并，
                 # 且刚在 0.1 秒内读过时不会为了写行再次敲击慢速仪表。
-                self.devices.snapshots(),
+                self.instruments.snapshots(),
                 values,
                 sequence_step,
                 raw_values=raw_values,

@@ -1,8 +1,8 @@
 """SEQ 参数、手动控制和事件提示对话框。
 
-``CommandDialog`` 与 ``ManualControlDialog`` 都直接读取同一个 ``DeviceConfig`` 的目标上下限
+``CommandDialog`` 与 ``ManualControlDialog`` 都直接读取同一个 ``InstrumentConfig`` 的目标上下限
 和最大速率；磁场切换 T/Oe 时先转换当前值再重建范围。UI 限制用于提前阻止误输入，但不是
-最终安全边界，所有写入仍由 ``DeviceManager.validate_target`` 在后台再次校验。
+最终安全边界，所有写入仍由 ``InstrumentManager.validate_target`` 在后台再次校验。
 """
 
 from __future__ import annotations
@@ -32,9 +32,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import DeviceConfig
+from ..config import InstrumentConfig
 from ..formatting import control_decimals, field_decimals, fixed_number
-from ..models import DeviceKind, DeviceSnapshot, LabEvent, Severity
+from ..models import InstrumentKind, InstrumentSnapshot, LabEvent, Severity
 from ..module_commands import ModuleCommandSpec
 from ..sequence.model import Command, CommandSpec, CommandType
 from ..sequence.parser import format_temperature_points, parse_temperature_points
@@ -58,7 +58,7 @@ def _command_decimals(command: Command, field_name: str) -> int:
 
 
 class CommandDialog(QDialog):
-    """根据 ``CommandSpec`` 动态生成参数窗口，并绑定对应设备配置限制。"""
+    """根据 ``CommandSpec`` 动态生成参数窗口，并绑定对应仪表配置限制。"""
 
     def __init__(
         self,
@@ -66,13 +66,13 @@ class CommandDialog(QDialog):
         spec: CommandSpec | ModuleCommandSpec,
         parent: QWidget | None = None,
         *,
-        device_configs: tuple[DeviceConfig, ...] = (),
+        instrument_configs: tuple[InstrumentConfig, ...] = (),
         data_directory: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.command = command
         self.spec = spec
-        self._device_configs = {item.id: item for item in device_configs}
+        self._instrument_configs = {item.id: item for item in instrument_configs}
         self._data_directory = Path(data_directory or Path.cwd()).resolve()
         self.inputs: dict[str, QWidget] = {}
         self.limit_label: QLabel | None = None
@@ -90,18 +90,18 @@ class CommandDialog(QDialog):
         for field in spec.fields:
             value = command.params.get(field.name, field.default)
             expected_kind = (
-                DeviceKind.TEMPERATURE
+                InstrumentKind.TEMPERATURE
                 if command.type in TEMPERATURE_COMMANDS
-                else DeviceKind.FIELD
+                else InstrumentKind.FIELD
             )
             if (
-                field.name == "device_id"
+                field.name == "instrument_id"
                 and command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS
             ):
                 widget = QComboBox()
                 candidates = [
                     item.id
-                    for item in device_configs
+                    for item in instrument_configs
                     if item.kind is expected_kind and item.control_enabled
                 ]
                 widget.addItems(candidates)
@@ -200,12 +200,12 @@ class CommandDialog(QDialog):
             self.limit_label.setWordWrap(True)
             self.limit_label.setStyleSheet("color: #59636e;")
             layout.addWidget(self.limit_label)
-            device_input = self.inputs.get("device_id")
-            if isinstance(device_input, QLineEdit):
-                device_input.textChanged.connect(self._apply_device_limits)
-            elif isinstance(device_input, QComboBox):
-                device_input.currentTextChanged.connect(self._apply_device_limits)
-            self._apply_device_limits()
+            instrument_input = self.inputs.get("instrument_id")
+            if isinstance(instrument_input, QLineEdit):
+                instrument_input.textChanged.connect(self._apply_instrument_limits)
+            elif isinstance(instrument_input, QComboBox):
+                instrument_input.currentTextChanged.connect(self._apply_instrument_limits)
+            self._apply_instrument_limits()
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -276,7 +276,7 @@ class CommandDialog(QDialog):
         self._set_field_visible("points", is_list)
 
     def accept(self) -> None:
-        """关闭前验证列表语法，以及温度列表的设备范围。"""
+        """关闭前验证列表语法，以及温度列表的仪表范围。"""
 
         for field in self.spec.fields:
             if field.field_type != "list":
@@ -325,21 +325,21 @@ class CommandDialog(QDialog):
                     return
         super().accept()
 
-    def _selected_device_config(self) -> DeviceConfig | None:
-        """返回当前选择且类型匹配的可配置设备。"""
+    def _selected_instrument_config(self) -> InstrumentConfig | None:
+        """返回当前选择且类型匹配的可配置仪表。"""
 
-        device_input = self.inputs.get("device_id")
-        if isinstance(device_input, QLineEdit):
-            device_id = device_input.text().strip()
-        elif isinstance(device_input, QComboBox):
-            device_id = device_input.currentText().strip()
+        instrument_input = self.inputs.get("instrument_id")
+        if isinstance(instrument_input, QLineEdit):
+            instrument_id = instrument_input.text().strip()
+        elif isinstance(instrument_input, QComboBox):
+            instrument_id = instrument_input.currentText().strip()
         else:
-            device_id = str(self.command.params.get("device_id", "")).strip()
-        config = self._device_configs.get(device_id)
+            instrument_id = str(self.command.params.get("instrument_id", "")).strip()
+        config = self._instrument_configs.get(instrument_id)
         expected_kind = (
-            DeviceKind.TEMPERATURE
+            InstrumentKind.TEMPERATURE
             if self.command.type in TEMPERATURE_COMMANDS
-            else DeviceKind.FIELD
+            else InstrumentKind.FIELD
         )
         return config if config is not None and config.kind is expected_kind else None
 
@@ -350,7 +350,7 @@ class CommandDialog(QDialog):
         return unit_input.currentText() if isinstance(unit_input, QComboBox) else self._field_unit
 
     def _reset_control_ranges(self) -> None:
-        """先恢复命令通用范围，再叠加具体设备限制。"""
+        """先恢复命令通用范围，再叠加具体仪表限制。"""
 
         for field in self.spec.fields:
             widget = self.inputs.get(field.name)
@@ -367,22 +367,22 @@ class CommandDialog(QDialog):
     def _finite_limit(value: float, fallback: float) -> float:
         return value if math.isfinite(value) else fallback
 
-    def _apply_device_limits(self, *_args: object) -> None:
+    def _apply_instrument_limits(self, *_args: object) -> None:
         """把主配置中的目标和速率限制实时应用到当前 SEQ 参数控件。
 
-        设备单位与命令单位不同时显式换算。没有匹配配置时仅提示，不能伪造一个宽松安全范围；
-        运行前后台验证仍会拒绝未知或越界设备命令。
+        仪表单位与命令单位不同时显式换算。没有匹配配置时仅提示，不能伪造一个宽松安全范围；
+        运行前后台验证仍会拒绝未知或越界仪表命令。
         """
 
         self._reset_control_ranges()
         unit = self._command_unit()
         self._set_control_suffixes(unit)
-        config = self._selected_device_config()
+        config = self._selected_instrument_config()
         if config is None:
             if self.limit_label is not None:
                 self.limit_label.setText(
-                    "No matching configured device limits; the sequence will still be "
-                    "validated before the device moves."
+                    "No matching configured instrument limits; the sequence will still be "
+                    "validated before the instrument moves."
                 )
             return
         try:
@@ -398,7 +398,7 @@ class CommandDialog(QDialog):
         maximum = self._finite_limit(maximum, 1e12)
         maximum_rate = self._finite_limit(maximum_rate, 1e12)
         limit_tooltip = (
-            f"From device '{config.id}' in the configuration file: "
+            f"From instrument '{config.id}' in the configuration file: "
             "min_value, max_value, and max_rate_per_minute."
         )
         for name in ("target", "start", "stop"):
@@ -429,17 +429,17 @@ class CommandDialog(QDialog):
             rate_input.setSuffix(f" {unit}/min")
 
     def _validate_temperature_points(self, points: tuple[float, ...]) -> None:
-        """逐点验证非线性温度列表，不允许某个中间点越过设备边界。"""
+        """逐点验证非线性温度列表，不允许某个中间点越过仪表边界。"""
 
-        config = self._selected_device_config()
+        config = self._selected_instrument_config()
         if config is None:
             return
         for index, point in enumerate(points, start=1):
             try:
-                device_value = convert_value(point, "K", config.unit)
+                instrument_value = convert_value(point, "K", config.unit)
             except UnitConversionError as exc:
                 raise ValueError(str(exc)) from exc
-            if not config.min_value <= device_value <= config.max_value:
+            if not config.min_value <= instrument_value <= config.max_value:
                 raise ValueError(
                     f"Temperature point {index} ({fixed_number(point, 3)} K) is outside "
                     f"the configured range {fixed_number(config.min_value, 3)} to "
@@ -461,14 +461,14 @@ class CommandDialog(QDialog):
             converted_values[name] = convert_value(widget.value(), old_unit, new_unit)
             widget.setDecimals(decimals)
         self._field_unit = new_unit
-        self._apply_device_limits()
+        self._apply_instrument_limits()
         for name, value in converted_values.items():
             widget = self.inputs.get(name)
             if isinstance(widget, QDoubleSpinBox):
                 widget.setValue(value)
 
     def values(self) -> dict[str, Any]:
-        """提取控件值供命令模型更新；本方法本身不执行设备操作。"""
+        """提取控件值供命令模型更新；本方法本身不执行仪表操作。"""
 
         result: dict[str, Any] = {}
         for field in self.spec.fields:
@@ -490,16 +490,16 @@ class CommandDialog(QDialog):
 
 
 class ManualControlDialog(QDialog):
-    """单台可控温度/磁场设备的手动 Set/Hold 窗口。
+    """单台可控温度/磁场仪表的手动 Set/Hold 窗口。
 
-    数值控件直接采用 ``DeviceConfig`` 的上下限和最大速率。SEQ 持有控制权或设备失联时，
+    数值控件直接采用 ``InstrumentConfig`` 的上下限和最大速率。SEQ 持有控制权或仪表失联时，
     主窗口通过 ``set_runtime_editable`` 与快照共同禁用按钮。
     """
 
     setRequested = Signal(str, float, float, str)
     holdRequested = Signal(str)
 
-    def __init__(self, config: DeviceConfig, parent: QWidget | None = None) -> None:
+    def __init__(self, config: InstrumentConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.config = config
         self.setWindowTitle(f"{config.display_name} - Manual Control")
@@ -510,10 +510,10 @@ class ManualControlDialog(QDialog):
         layout.addWidget(self.current_label)
 
         if (
-            config.kind not in (DeviceKind.TEMPERATURE, DeviceKind.FIELD)
+            config.kind not in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
             or not config.control_enabled
         ):
-            raise ValueError("Manual control is available only for temperature and field devices")
+            raise ValueError("Manual control is available only for temperature and field instruments")
         self._runtime_editable = True
         self._connected = False
         self._precision = control_decimals(config.kind, config.unit)
@@ -559,13 +559,13 @@ class ManualControlDialog(QDialog):
             self.mode_input.currentText(),
         )
 
-    def update_snapshot(self, snapshot: DeviceSnapshot) -> None:
+    def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
         """刷新连接状态和读数；用户正在编辑目标时不覆盖输入。"""
 
         self._connected = snapshot.connected
         self._update_control_state()
         if snapshot.current is not None:
-            if snapshot.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+            if snapshot.kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
                 precision = control_decimals(snapshot.kind, snapshot.unit)
                 value = fixed_number(snapshot.current, precision)
             else:

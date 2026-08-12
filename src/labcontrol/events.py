@@ -31,7 +31,7 @@ class EventManager:
 
     @staticmethod
     def make_key(source: str, code: str, context: str = "") -> str:
-        """构造稳定去重键；context 用于区分不同设备、通道或远端目标。"""
+        """构造稳定去重键；context 用于区分不同仪表、通道或远端目标。"""
 
         return f"{source.strip()}|{code.strip()}|{context.strip()}"
 

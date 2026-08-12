@@ -11,6 +11,7 @@
 
 ```python
 from PySide6.QtWidgets import (
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QLabel,
@@ -67,6 +68,26 @@ class Frontend(QWidget):
 
 “加载设置”和“应用设置”故意分开。打开模块或载入 SEQ 时，不会因为旧设置而自动改变
 仪表。
+
+## 从统一资源表选择测量仪表
+
+设置窗口不要自己扫描 VISA。独立扫描工具已经让用户确认过 Measurement 资源，前端只需
+把稳定 ID 放进下拉框：
+
+```python
+self.resource_input = QComboBox()
+for resource_id, info in api.resources().items():
+    identity = info.get("identity") or info["address"]
+    self.resource_input.addItem(
+        f"{resource_id} — {identity}",
+        resource_id,
+    )
+settings_layout.addRow("Instrument", self.resource_input)
+```
+
+`dump()` 保存 `resource_id`，不要保存原始 GPIB/USB 地址。后台在 `open` 或 `configure`
+中调用同名 `api.resources()` 取得本次不可变资源快照，再解析
+`api.resource_address(resource_id)`。前端和后台都只能得到深拷贝，不能修改核心配置。
 
 ## 在 backend.py 应用设置
 
@@ -147,6 +168,7 @@ api.status({"Connection": "Connected", "State": "Ready"})
 ## 窗口代码不要做这些事
 
 - 不要打开 VISA、串口或厂商软件连接；
+- 不要自行枚举全部 VISA 地址；只显示 `api.resources()`；
 - 不要创建线程访问仪表；
 - 不要直接写配置或 DAT 文件；
 - 不要控制 SEQ 或其他仪表；
@@ -155,5 +177,5 @@ api.status({"Connection": "Connected", "State": "Ready"})
 ??? example "展开教学模块的完整 frontend.py"
 
     ```python
-    --8<-- "plugin_templates/measurement-modules-repository/modules/tutorial_resistance/frontend.py"
+    --8<-- "templates/measurement-modules-repository/modules/tutorial_resistance/frontend.py"
     ```

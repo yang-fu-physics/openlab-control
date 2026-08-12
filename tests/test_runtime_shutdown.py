@@ -30,7 +30,7 @@ class RuntimeShutdownTests(unittest.TestCase):
             load_config(ROOT / "configs" / "default.toml"),
             module_descriptors=(),
         )
-        self.assertEqual(runtime._device_poll_interval(), 1.0)
+        self.assertEqual(runtime._instrument_poll_interval(), 1.0)
 
         for state in (
             RunState.RUNNING,
@@ -39,12 +39,12 @@ class RuntimeShutdownTests(unittest.TestCase):
         ):
             with self.subTest(state=state):
                 runtime.engine = SimpleNamespace(state=state)
-                self.assertEqual(runtime._device_poll_interval(), 0.2)
+                self.assertEqual(runtime._instrument_poll_interval(), 0.2)
 
         runtime.engine = SimpleNamespace(state=RunState.COMPLETED)
-        self.assertEqual(runtime._device_poll_interval(), 1.0)
+        self.assertEqual(runtime._instrument_poll_interval(), 1.0)
 
-    def test_shutdown_stops_active_sequence_thread_and_device_workers(
+    def test_shutdown_stops_active_sequence_thread_and_instrument_workers(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -66,8 +66,8 @@ class RuntimeShutdownTests(unittest.TestCase):
                     "control_poll_interval_seconds = 0.05",
                 )
                 .replace(
-                    "device_status_interval_seconds = 1.0",
-                    "device_status_interval_seconds = 0.05",
+                    "instrument_status_interval_seconds = 1.0",
+                    "instrument_status_interval_seconds = 0.05",
                 ),
                 encoding="utf-8",
             )
@@ -99,9 +99,9 @@ class RuntimeShutdownTests(unittest.TestCase):
                 )
             )
             time.sleep(0.35)
-            devices = runtime.devices
-            self.assertIsNotNone(devices)
-            clients = tuple(devices.devices.values())
+            instruments = runtime.instruments
+            self.assertIsNotNone(instruments)
+            clients = tuple(instruments.instruments.values())
             self.assertIsNotNone(runtime.logger)
             self.assertIsNotNone(runtime.logger.paths)
             run_paths = runtime.logger.paths
@@ -115,11 +115,11 @@ class RuntimeShutdownTests(unittest.TestCase):
                     for client in clients
                 )
             )
-            device_status = run_paths.device_status_file.read_text(
+            instrument_status = run_paths.instrument_status_file.read_text(
                 encoding="utf-8"
             )
             status_rows = (
-                device_status.split("[Data]\n", 1)[1]
+                instrument_status.split("[Data]\n", 1)[1]
                 .strip()
                 .splitlines()
             )

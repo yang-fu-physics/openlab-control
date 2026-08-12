@@ -29,11 +29,13 @@ def automatic_ui_scale(pixel_width: float, pixel_height: float) -> float:
 
 
 def screen_ui_scale(screen: QScreen | None) -> float:
-    """结合可用区域和 devicePixelRatio 计算一块实际屏幕的缩放。"""
+    """结合可用区域和 Qt 设备像素比计算一块实际屏幕的缩放。"""
 
     if screen is None:
         return MIN_AUTO_SCALE
     geometry = screen.availableGeometry()
+    # ``devicePixelRatio`` 是 Qt API 的固定名称，与项目中的 System
+    # Instrument 概念无关，不能随项目术语一起改名。
     pixel_ratio = max(1.0, float(screen.devicePixelRatio()))
     return automatic_ui_scale(
         geometry.width() * pixel_ratio,

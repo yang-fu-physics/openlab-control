@@ -16,7 +16,7 @@
 
 ```powershell
 Copy-Item -Recurse `
-  .\plugin_templates\measurement-modules-repository\modules\tutorial_resistance `
+  .\templates\measurement-modules-repository\modules\tutorial_resistance `
   .\modules\tutorial_resistance
 ```
 
@@ -34,7 +34,7 @@ Copy-Item -Recurse `
 ??? example "展开完整 backend.py"
 
     ```python
-    --8<-- "plugin_templates/measurement-modules-repository/modules/tutorial_resistance/backend.py"
+    --8<-- "templates/measurement-modules-repository/modules/tutorial_resistance/backend.py"
     ```
 
 ## 路线 B：从两个文件开始
@@ -124,9 +124,14 @@ api.sleep(0.5)                              # 等待 0.5 秒，可被 Pause/Stop
 api.checkpoint()                            # 检查是否 Pause 或 Stop
 api.warn("OVER_RANGE", "R1 超量程", "R1") # 报告一次可继续运行的问题
 api.status({"State": "Measuring"})        # 更新模块状态窗口
+resources = api.resources()              # 读取已确认的测量仪表地址表
 ```
 
 不要在文件刚被读取时连接仪表，也不要在 `__init__` 中连接。必须等到 `open`，这样模块
 保持 Disabled 时不会碰真实仪表。
+
+真实模块把资源 ID 保存到设置中，后台用 `api.resource_address(id)` 取得当前地址。不要在
+每个模块里重复做一套 VISA 全盘扫描；先用
+[仪表扫描工具](../guides/instrument-scanner.md)统一确认物理仪表。
 
 下一步阅读 [多通道数据](results-and-slots.md)。

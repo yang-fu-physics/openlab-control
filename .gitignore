@@ -20,9 +20,9 @@ runs/*
 !/module_data/.gitkeep
 /wheels/*
 !/wheels/.gitkeep
-/device_plugins/*
-!/device_plugins/.gitkeep
-/plugin_state/*
-!/plugin_state/.gitkeep
-/plugin_runtime/*
-!/plugin_runtime/.gitkeep
+/system_instruments/*
+!/system_instruments/.gitkeep
+/trust_state/*
+!/trust_state/.gitkeep
+/runtime_packages/*
+!/runtime_packages/.gitkeep

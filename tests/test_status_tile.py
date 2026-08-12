@@ -20,12 +20,12 @@ from PySide6.QtWidgets import QApplication, QCheckBox  # noqa: E402
 
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.models import (  # noqa: E402
-    DeviceActivity,
-    DeviceConnectionState,
-    DeviceKind,
-    DeviceMetric,
-    DeviceRole,
-    DeviceSnapshot,
+    InstrumentActivity,
+    InstrumentConnectionState,
+    InstrumentKind,
+    InstrumentMetric,
+    InstrumentRole,
+    InstrumentSnapshot,
     LabEvent,
     Severity,
 )
@@ -45,18 +45,18 @@ class StatusTileTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_monitor_tile_is_display_only(self) -> None:
-        tile = StatusTile("second_stage", "2nd Stage", DeviceKind.MONITOR)
+        tile = StatusTile("second_stage", "2nd Stage", InstrumentKind.MONITOR)
         emitted: list[str] = []
         tile.doubleClicked.connect(emitted.append)
-        snapshot = DeviceSnapshot(
-            device_id="second_stage",
+        snapshot = InstrumentSnapshot(
+            instrument_id="second_stage",
             display_name="2nd Stage",
-            kind=DeviceKind.MONITOR,
+            kind=InstrumentKind.MONITOR,
             timestamp=time.monotonic(),
             connected=True,
             unit="K",
             current=4.2345,
-            activity=DeviceActivity.IDLE,
+            activity=InstrumentActivity.IDLE,
         )
         tile.update_snapshot(snapshot)
         tile.show()
@@ -81,41 +81,50 @@ class StatusTileTests(unittest.TestCase):
         tile = StatusTile(
             "temperature",
             "Temperature",
-            DeviceKind.TEMPERATURE,
+            InstrumentKind.TEMPERATURE,
         )
         tile.update_snapshot(
-            DeviceSnapshot(
-                device_id="temperature",
+            InstrumentSnapshot(
+                instrument_id="temperature",
                 display_name="Temperature",
-                kind=DeviceKind.TEMPERATURE,
+                kind=InstrumentKind.TEMPERATURE,
                 timestamp=time.monotonic(),
                 connected=True,
                 unit="K",
                 current=4.2,
                 target=4.0,
                 rate_per_minute=1.0,
-                metrics=(
-                    DeviceMetric("second_stage", "2nd Stage", 20.1254, "K", 3),
-                    DeviceMetric("heater_output", "Heater", 12.345, "%", 2),
-                    DeviceMetric("heater_range", "Range", "LOW"),
-                ),
+                metrics={
+                    "second_stage": InstrumentMetric(
+                        "2nd Stage", 20.1254, "K", 3
+                    ),
+                    "heater_output": InstrumentMetric(
+                        "Heater", 12.345, "%", 2
+                    ),
+                    "heater_range": InstrumentMetric("Range", "LOW"),
+                },
             )
         )
-        self.assertFalse(tile.metrics_label.isHidden())
+        self.assertFalse(tile.metrics_widget.isHidden())
         self.assertEqual(
-            tile.metrics_label.text(),
-            "2nd Stage 20.125 K · Heater 12.35 %\nRange LOW",
+            tile.metric_text("second_stage"),
+            "2nd Stage\n20.125 K",
         )
+        self.assertEqual(
+            tile.metric_text("heater_output"),
+            "Heater\n12.35 %",
+        )
+        self.assertEqual(tile.metric_text("heater_range"), "Range\nLOW")
         tile.close()
 
     def test_live_trend_coalesces_visible_redraws_and_stops_them_when_hidden(
         self,
     ) -> None:
         trend = TrendCanvas()
-        snapshot = DeviceSnapshot(
-            device_id="temperature",
+        snapshot = InstrumentSnapshot(
+            instrument_id="temperature",
             display_name="Temperature",
-            kind=DeviceKind.TEMPERATURE,
+            kind=InstrumentKind.TEMPERATURE,
             timestamp=123.0,
             connected=True,
             unit="K",
@@ -148,22 +157,22 @@ class StatusTileTests(unittest.TestCase):
         tile = StatusTile(
             "temperature",
             "Temperature",
-            DeviceKind.TEMPERATURE,
+            InstrumentKind.TEMPERATURE,
         )
-        snapshot = DeviceSnapshot(
+        snapshot = InstrumentSnapshot(
             "temperature",
             "Temperature",
-            DeviceKind.TEMPERATURE,
+            InstrumentKind.TEMPERATURE,
             time.monotonic(),
             False,
             "K",
             message="Retrying for up to 60 seconds",
-            connection_state=DeviceConnectionState.RECONNECTING,
+            connection_state=InstrumentConnectionState.RECONNECTING,
         )
         tile.update_snapshot(snapshot)
         self.assertEqual(tile.state_label.text(), "Reconnecting")
         self.assertIn("Retrying", tile.detail_label.text())
-        snapshot.connection_state = DeviceConnectionState.FAULTED
+        snapshot.connection_state = InstrumentConnectionState.FAULTED
         snapshot.message = "Reconnect deadline exceeded"
         tile.update_snapshot(snapshot)
         self.assertEqual(tile.state_label.text(), "Faulted")
@@ -173,9 +182,9 @@ class StatusTileTests(unittest.TestCase):
     def test_secondary_temperature_tile_and_dialog_are_display_only(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
         secondary = replace(
-            config.device("temperature"),
+            config.instrument("temperature"),
             id="temperature_backup",
-            role=DeviceRole.SECONDARY,
+            role=InstrumentRole.SECONDARY,
             control_enabled=False,
         )
         tile = StatusTile(
@@ -187,7 +196,7 @@ class StatusTileTests(unittest.TestCase):
         emitted: list[str] = []
         tile.doubleClicked.connect(emitted.append)
         tile.update_snapshot(
-            DeviceSnapshot(
+            InstrumentSnapshot(
                 secondary.id,
                 secondary.display_name,
                 secondary.kind,
@@ -211,9 +220,9 @@ class StatusTileTests(unittest.TestCase):
     def test_alert_dialog_is_deleted_after_close(self) -> None:
         dialog = AlertDialog(
             LabEvent(
-                key="device|FAULT|",
+                key="instrument|FAULT|",
                 severity=Severity.ERROR,
-                source="device",
+                source="instrument",
                 code="FAULT",
                 message="fault",
             )
@@ -225,16 +234,16 @@ class StatusTileTests(unittest.TestCase):
 
     def test_temperature_and_oe_field_use_requested_precision(self) -> None:
         now = time.monotonic()
-        temperature = DeviceSnapshot(
-            "temperature", "Temperature", DeviceKind.TEMPERATURE, now, True, "K",
-            300.1236, 299.9, 10.0, DeviceActivity.MOVING,
+        temperature = InstrumentSnapshot(
+            "temperature", "Temperature", InstrumentKind.TEMPERATURE, now, True, "K",
+            300.1236, 299.9, 10.0, InstrumentActivity.MOVING,
         )
-        field = DeviceSnapshot(
-            "field", "Magnetic Field", DeviceKind.FIELD, now, True, "Oe",
-            123.456, 200.0, 5000.0, DeviceActivity.MOVING,
+        field = InstrumentSnapshot(
+            "field", "Magnetic Field", InstrumentKind.FIELD, now, True, "Oe",
+            123.456, 200.0, 5000.0, InstrumentActivity.MOVING,
         )
-        temperature_tile = StatusTile("temperature", "Temperature", DeviceKind.TEMPERATURE)
-        field_tile = StatusTile("field", "Magnetic Field", DeviceKind.FIELD)
+        temperature_tile = StatusTile("temperature", "Temperature", InstrumentKind.TEMPERATURE)
+        field_tile = StatusTile("field", "Magnetic Field", InstrumentKind.FIELD)
         temperature_tile.update_snapshot(temperature)
         field_tile.update_snapshot(field)
         self.assertEqual(temperature_tile.value_label.text(), "300.124 K")
@@ -247,8 +256,8 @@ class StatusTileTests(unittest.TestCase):
 
     def test_control_dialogs_match_unit_precision_and_convert_field_unit(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
-        temperature_config = next(device for device in config.devices if device.id == "temperature")
-        field_config = next(device for device in config.devices if device.id == "field")
+        temperature_config = next(instrument for instrument in config.instruments if instrument.id == "temperature")
+        field_config = next(instrument for instrument in config.instruments if instrument.id == "field")
         temperature_dialog = ManualControlDialog(temperature_config)
         field_dialog = ManualControlDialog(field_config)
         self.assertEqual(temperature_dialog.target_input.decimals(), 3)
@@ -306,7 +315,7 @@ class StatusTileTests(unittest.TestCase):
         temperature_dialog = CommandDialog(
             temperature_spec.create(),
             temperature_spec,
-            device_configs=config.devices,
+            instrument_configs=config.instruments,
         )
         self.assertAlmostEqual(temperature_dialog.inputs["target"].minimum(), 1.8)
         self.assertAlmostEqual(temperature_dialog.inputs["target"].maximum(), 400.0)
@@ -317,7 +326,7 @@ class StatusTileTests(unittest.TestCase):
         temperature_scan_dialog = CommandDialog(
             temperature_scan_spec.create(),
             temperature_scan_spec,
-            device_configs=config.devices,
+            instrument_configs=config.instruments,
         )
         for name in ("start", "stop"):
             self.assertAlmostEqual(temperature_scan_dialog.inputs[name].minimum(), 1.8)
@@ -328,7 +337,7 @@ class StatusTileTests(unittest.TestCase):
         field_dialog = CommandDialog(
             field_spec.create(),
             field_spec,
-            device_configs=config.devices,
+            instrument_configs=config.instruments,
         )
         self.assertAlmostEqual(field_dialog.inputs["target"].minimum(), -90000.0)
         self.assertAlmostEqual(field_dialog.inputs["target"].maximum(), 90000.0)
@@ -343,7 +352,7 @@ class StatusTileTests(unittest.TestCase):
         field_scan_dialog = CommandDialog(
             field_scan_spec.create(),
             field_scan_spec,
-            device_configs=config.devices,
+            instrument_configs=config.instruments,
         )
         for name in ("start", "stop"):
             self.assertAlmostEqual(field_scan_dialog.inputs[name].minimum(), -90000.0)
@@ -355,18 +364,18 @@ class StatusTileTests(unittest.TestCase):
         field_dialog.close()
         field_scan_dialog.close()
 
-    def test_sequence_dialog_selects_custom_device_ids_and_their_limits(self) -> None:
+    def test_sequence_dialog_selects_custom_instrument_ids_and_their_limits(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
         temperature = next(
-            device for device in config.devices
-            if device.kind is DeviceKind.TEMPERATURE
+            instrument for instrument in config.instruments
+            if instrument.kind is InstrumentKind.TEMPERATURE
         )
-        custom_devices = (
+        custom_instruments = (
             replace(temperature, id="cryostat_primary"),
             replace(
                 temperature,
                 id="cryostat_backup",
-                role=DeviceRole.SECONDARY,
+                role=InstrumentRole.SECONDARY,
                 control_enabled=False,
                 min_value=2.0,
                 max_value=350.0,
@@ -377,13 +386,13 @@ class StatusTileTests(unittest.TestCase):
         dialog = CommandDialog(
             spec.create(),
             spec,
-            device_configs=custom_devices,
+            instrument_configs=custom_instruments,
         )
-        device_input = dialog.inputs["device_id"]
-        self.assertEqual(device_input.currentText(), "cryostat_primary")
-        self.assertEqual(device_input.count(), 1)
+        instrument_input = dialog.inputs["instrument_id"]
+        self.assertEqual(instrument_input.currentText(), "cryostat_primary")
+        self.assertEqual(instrument_input.count(), 1)
         self.assertEqual(dialog.inputs["target"].maximum(), 400.0)
-        self.assertEqual(dialog.values()["device_id"], "cryostat_primary")
+        self.assertEqual(dialog.values()["instrument_id"], "cryostat_primary")
         dialog.close()
 
     def test_set_datafile_dialog_uses_native_file_chooser_for_save_and_open(
@@ -436,7 +445,7 @@ class StatusTileTests(unittest.TestCase):
     def test_temperature_list_dialog_rejects_points_outside_configured_limits(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
         spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
-        dialog = CommandDialog(spec.create(), spec, device_configs=config.devices)
+        dialog = CommandDialog(spec.create(), spec, instrument_configs=config.instruments)
         dialog.inputs["point_mode"].setCurrentText("List")
         dialog.inputs["points"].setText("300, 500")
 

@@ -1,9 +1,9 @@
-"""一次 SEQ 运行的目录、快照、DAT 数据、设备状态和事件日志写入。
+"""一次 SEQ 运行的目录、快照、DAT 数据、仪表状态和事件日志写入。
 
-运行开始即复制规范化 SEQ、主配置、各模块期望设置和启动状态。DAT 列由全部设备与已启用
+运行开始即复制规范化 SEQ、主配置、各模块期望设置和启动状态。DAT 列由全部仪表与已启用
 模块清单一次构造；一次 ``T Measure`` 按逻辑通道槽位写多行，同一槽位中各模块的结果
 合并到该槽位对应的一行，未参与该槽位的模块列留空。
-设备状态按独立节流周期写入固定宽表，不受 Measure 数量影响。追加已有 DAT 前必须验证完整
+仪表状态按独立节流周期写入固定宽表，不受 Measure 数量影响。追加已有 DAT 前必须验证完整
 列结构一致，防止动态列变化造成静默错位。
 """
 
@@ -23,7 +23,8 @@ from . import __version__
 from .config import AppConfig
 from .events import EventManager
 from .formatting import control_decimals, fixed_number
-from .models import DeviceKind, DeviceMetric, DeviceSnapshot, EventNotice, Severity
+from .instrument_resources import write_instrument_resources
+from .models import InstrumentKind, InstrumentMetric, InstrumentSnapshot, EventNotice, Severity
 from .measurement.manifest import ModuleDescriptor
 from .measurement.settings import save_settings
 
@@ -39,9 +40,10 @@ class RunPaths:
     directory: Path
     data_file: Path
     event_file: Path
-    device_status_file: Path
+    instrument_status_file: Path
     sequence_snapshot: Path
     configuration_snapshot: Path
+    instrument_resources_snapshot: Path
     module_settings_directory: Path
     raw_data_directory: Path
 
@@ -60,13 +62,16 @@ class DatRunLogger:
         self._data_writer: csv.writer | None = None
         self._event_handle: TextIO | None = None
         self._event_writer: csv.writer | None = None
-        self._device_status_handle: TextIO | None = None
-        self._device_status_writer: csv.writer | None = None
-        self._last_device_status_monotonic: float | None = None
+        self._instrument_status_handle: TextIO | None = None
+        self._instrument_status_writer: csv.writer | None = None
+        self._last_instrument_status_monotonic: float | None = None
         self._columns: list[str] = []
         self._data_file_initialized = False
         self._module_descriptors: tuple[ModuleDescriptor, ...] = ()
-        self._device_metric_schemas: dict[str, tuple[DeviceMetric, ...]] = {}
+        self._instrument_metric_schemas: dict[
+            str,
+            tuple[tuple[str, InstrumentMetric], ...],
+        ] = {}
         self._raw_handles: dict[tuple[Path, str], TextIO] = {}
         self._raw_writers: dict[tuple[Path, str], csv.writer] = {}
         self._pending_events: list[EventNotice] = []
@@ -79,7 +84,7 @@ class DatRunLogger:
         module_descriptors: tuple[ModuleDescriptor, ...] = (),
         module_settings: Mapping[str, Mapping[str, Any]] | None = None,
         module_status: Mapping[str, Mapping[str, Any]] | None = None,
-        device_snapshots: Mapping[str, DeviceSnapshot] | None = None,
+        instrument_snapshots: Mapping[str, InstrumentSnapshot] | None = None,
     ) -> RunPaths:
         """创建唯一运行目录并先写入配置、SEQ 与模块启动快照。
 
@@ -104,31 +109,42 @@ class DatRunLogger:
             break
         data_file = directory / self.config.logging.data_file_name
         event_file = directory / self.config.logging.event_file_name
-        device_status_file = (
+        instrument_status_file = (
             directory
-            / self.config.logging.device_status_file_name
+            / self.config.logging.instrument_status_file_name
         )
         sequence_snapshot = directory / "sequence.seq"
         config_snapshot = directory / "configuration.toml"
+        instrument_resources_snapshot = (
+            directory / "instrument-resources.toml"
+        )
         module_settings_directory = directory / "module_settings"
         module_settings_directory.mkdir()
         raw_data_directory = directory / "rawdata"
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot)
+        write_instrument_resources(
+            instrument_resources_snapshot,
+            self.config.instrument_resources,
+        )
         self._module_descriptors = tuple(module_descriptors)
-        initial_snapshots = device_snapshots or {}
-        self._device_metric_schemas = {}
-        for device in self.config.devices:
-            snapshot = initial_snapshots.get(device.id)
-            self._device_metric_schemas[device.id] = tuple(
-                DeviceMetric(
-                    key=metric.key,
-                    display_name=metric.display_name,
-                    value=None,
-                    unit=metric.unit,
-                    decimals=metric.decimals,
+        initial_snapshots = instrument_snapshots or {}
+        self._instrument_metric_schemas = {}
+        for instrument in self.config.instruments:
+            snapshot = initial_snapshots.get(instrument.id)
+            self._instrument_metric_schemas[instrument.id] = tuple(
+                (
+                    metric_key,
+                    InstrumentMetric(
+                        display_name=metric.display_name,
+                        value=None,
+                        unit=metric.unit,
+                        decimals=metric.decimals,
+                    ),
                 )
-                for metric in (() if snapshot is None else snapshot.metrics)
+                for metric_key, metric in (
+                    () if snapshot is None else snapshot.metrics.items()
+                )
             )
         desired = module_settings or {}
         actual = module_status or {}
@@ -146,17 +162,20 @@ class DatRunLogger:
             directory=directory,
             data_file=data_file,
             event_file=event_file,
-            device_status_file=device_status_file,
+            instrument_status_file=instrument_status_file,
             sequence_snapshot=sequence_snapshot,
             configuration_snapshot=config_snapshot,
+            instrument_resources_snapshot=(
+                instrument_resources_snapshot
+            ),
             module_settings_directory=module_settings_directory,
             raw_data_directory=raw_data_directory,
         )
         self._data_file_initialized = False
         self._started_monotonic = time.monotonic()
-        self._last_device_status_monotonic = None
+        self._last_instrument_status_monotonic = None
         self._open_event_file(event_file)
-        self._open_device_status_file(device_status_file)
+        self._open_instrument_status_file(instrument_status_file)
         for notice in self._pending_events:
             self._write_event(notice)
         self._pending_events.clear()
@@ -212,9 +231,10 @@ class DatRunLogger:
         reserved_paths = {
             self.paths.directory.resolve(),
             self.paths.event_file.resolve(),
-            self.paths.device_status_file.resolve(),
+            self.paths.instrument_status_file.resolve(),
             self.paths.sequence_snapshot.resolve(),
             self.paths.configuration_snapshot.resolve(),
+            self.paths.instrument_resources_snapshot.resolve(),
             module_settings_resolved,
             raw_data_resolved,
         }
@@ -251,9 +271,12 @@ class DatRunLogger:
             directory=self.paths.directory,
             data_file=destination,
             event_file=self.paths.event_file,
-            device_status_file=self.paths.device_status_file,
+            instrument_status_file=self.paths.instrument_status_file,
             sequence_snapshot=self.paths.sequence_snapshot,
             configuration_snapshot=self.paths.configuration_snapshot,
+            instrument_resources_snapshot=(
+                self.paths.instrument_resources_snapshot
+            ),
             module_settings_directory=self.paths.module_settings_directory,
             raw_data_directory=self.paths.raw_data_directory,
         )
@@ -304,15 +327,15 @@ class DatRunLogger:
                     self.config.logging.timestamp_epoch,
                 ]
             )
-            self._data_writer.writerow(["INFO", "Plugin-oriented laboratory control framework"])
+            self._data_writer.writerow(["INFO", "System Instrument and Measurement Module framework"])
             self._data_writer.writerow(["INFO", f"Started: {datetime.now().astimezone().isoformat()}"])
-            for device in self.config.devices:
+            for instrument in self.config.instruments:
                 self._data_writer.writerow([
                     "INFO",
-                    f"Device {device.id}: {device.display_name}; "
-                    f"kind={device.kind.value}; role={device.role.value}; "
-                    f"control={str(device.control_enabled).lower()}; "
-                    f"plugin={device.plugin}",
+                    f"Instrument {instrument.id}: {instrument.display_name}; "
+                    f"kind={instrument.kind.value}; role={instrument.role.value}; "
+                    f"control={str(instrument.control_enabled).lower()}; "
+                    f"backend={instrument.backend}",
                 ])
             for module in self._module_descriptors:
                 self._data_writer.writerow([
@@ -394,60 +417,60 @@ class DatRunLogger:
             return handle.read(1) in {b"\n", b"\r"}
 
     def _build_columns(self) -> list[str]:
-        """按设备配置和模块清单确定本次运行固定的 DAT 列顺序。"""
+        """按仪表配置和模块清单确定本次运行固定的 DAT 列顺序。"""
 
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]
         temperature_count = sum(
-            item.kind is DeviceKind.TEMPERATURE for item in self.config.devices
+            item.kind is InstrumentKind.TEMPERATURE for item in self.config.instruments
         )
-        field_count = sum(item.kind is DeviceKind.FIELD for item in self.config.devices)
-        for device in self.config.devices:
-            if device.kind is DeviceKind.TEMPERATURE:
-                prefix = "Temp" if temperature_count == 1 else f"{device.id}.Temp"
-                columns.extend([f"{prefix}({device.unit})", f"{prefix}Target({device.unit})"])
-            elif device.kind is DeviceKind.FIELD:
-                prefix = "Field" if field_count == 1 else f"{device.id}.Field"
-                columns.extend([f"{prefix}({device.unit})", f"{prefix}Target({device.unit})"])
-            elif device.kind is DeviceKind.MONITOR:
-                columns.append(f"{device.id}({device.unit})" if device.unit else device.id)
+        field_count = sum(item.kind is InstrumentKind.FIELD for item in self.config.instruments)
+        for instrument in self.config.instruments:
+            if instrument.kind is InstrumentKind.TEMPERATURE:
+                prefix = "Temp" if temperature_count == 1 else f"{instrument.id}.Temp"
+                columns.extend([f"{prefix}({instrument.unit})", f"{prefix}Target({instrument.unit})"])
+            elif instrument.kind is InstrumentKind.FIELD:
+                prefix = "Field" if field_count == 1 else f"{instrument.id}.Field"
+                columns.extend([f"{prefix}({instrument.unit})", f"{prefix}Target({instrument.unit})"])
+            elif instrument.kind is InstrumentKind.MONITOR:
+                columns.append(f"{instrument.id}({instrument.unit})" if instrument.unit else instrument.id)
             columns.extend(
-                self._metric_columns(device.id)
+                self._metric_columns(instrument.id)
             )
         for module in self._module_descriptors:
             columns.extend(f"{module.id}.{column.label}" for column in module.columns)
         return columns
 
-    def _open_device_status_file(self, path: Path) -> None:
-        """创建每次 Run 独立的设备状态宽表并写入固定列头。"""
+    def _open_instrument_status_file(self, path: Path) -> None:
+        """创建每次 Run 独立的仪表状态宽表并写入固定列头。"""
 
-        self._device_status_handle = path.open(
+        self._instrument_status_handle = path.open(
             "w",
             encoding="utf-8",
             newline="",
         )
-        self._device_status_handle.write("[Header]\n")
-        self._device_status_handle.write(
-            "; OpenLab Control Device Status Log\n"
+        self._instrument_status_handle.write("[Header]\n")
+        self._instrument_status_handle.write(
+            "; OpenLab Control Instrument Status Log\n"
         )
-        self._device_status_handle.write(
-            "; One row records all configured devices; "
+        self._instrument_status_handle.write(
+            "; One row records all configured instruments; "
             "the default interval is controlled by "
-            "logging.device_status_interval_seconds.\n"
+            "logging.instrument_status_interval_seconds.\n"
         )
-        self._device_status_writer = csv.writer(
-            self._device_status_handle,
+        self._instrument_status_writer = csv.writer(
+            self._instrument_status_handle,
             lineterminator="\n",
         )
-        self._device_status_writer.writerow(
+        self._instrument_status_writer.writerow(
             ["BYAPP", "OpenLab Control", __version__]
         )
-        self._device_status_writer.writerow(
+        self._instrument_status_writer.writerow(
             [
                 "TIMESTAMP_EPOCH",
                 self.config.logging.timestamp_epoch,
             ]
         )
-        self._device_status_writer.writerow(
+        self._instrument_status_writer.writerow(
             [
                 "INFO",
                 (
@@ -456,38 +479,38 @@ class DatRunLogger:
                 ),
             ]
         )
-        for device in self.config.devices:
-            self._device_status_writer.writerow(
+        for instrument in self.config.instruments:
+            self._instrument_status_writer.writerow(
                 [
                     "INFO",
                     (
-                        f"Device {device.id}: {device.display_name}; "
-                        f"kind={device.kind.value}; "
-                        f"role={device.role.value}; "
-                        f"unit={device.unit}"
+                        f"Instrument {instrument.id}: {instrument.display_name}; "
+                        f"kind={instrument.kind.value}; "
+                        f"role={instrument.role.value}; "
+                        f"unit={instrument.unit}"
                     ),
                 ]
             )
-        self._device_status_handle.write("\n[Data]\n")
-        self._device_status_writer.writerow(
-            self._device_status_columns()
+        self._instrument_status_handle.write("\n[Data]\n")
+        self._instrument_status_writer.writerow(
+            self._instrument_status_columns()
         )
-        self._device_status_handle.flush()
+        self._instrument_status_handle.flush()
 
-    def _device_status_columns(self) -> list[str]:
+    def _instrument_status_columns(self) -> list[str]:
         """按配置顺序构造稳定且可直接导入表格软件的状态列。"""
 
         columns = ["Timestamp(s)", "Time(s)"]
-        for device in self.config.devices:
-            prefix = device.id
+        for instrument in self.config.instruments:
+            prefix = instrument.id
             unit_suffix = (
-                f"({device.unit})"
-                if device.unit
+                f"({instrument.unit})"
+                if instrument.unit
                 else ""
             )
             rate_suffix = (
-                f"({device.unit}/min)"
-                if device.unit
+                f"({instrument.unit}/min)"
+                if instrument.unit
                 else ""
             )
             columns.extend(
@@ -507,32 +530,40 @@ class DatRunLogger:
             columns.extend(self._metric_columns(prefix))
         return columns
 
-    def _metric_columns(self, device_id: str) -> list[str]:
+    def _metric_columns(self, instrument_id: str) -> list[str]:
         """按 Run 开始时冻结的附加读数 Schema 构造列名。"""
 
         return [
             (
-                f"{device_id}.{metric.key}({metric.unit})"
+                f"{instrument_id}.{metric_key}({metric.unit})"
                 if metric.unit
-                else f"{device_id}.{metric.key}"
+                else f"{instrument_id}.{metric_key}"
             )
-            for metric in self._device_metric_schemas.get(device_id, ())
+            for metric_key, metric in self._instrument_metric_schemas.get(
+                instrument_id,
+                (),
+            )
         ]
 
     def _metric_values(
         self,
-        device_id: str,
-        snapshot: DeviceSnapshot | None,
+        instrument_id: str,
+        snapshot: InstrumentSnapshot | None,
     ) -> list[str]:
         """按冻结列顺序提取附加读数；缺失值留空而不沿用旧样本。"""
 
         actual = {
-            metric.key: metric.value
-            for metric in (() if snapshot is None else snapshot.metrics)
+            metric_key: metric.value
+            for metric_key, metric in (
+                () if snapshot is None else snapshot.metrics.items()
+            )
         }
         return [
-            self._format_metric_value(actual.get(metric.key), metric.decimals)
-            for metric in self._device_metric_schemas.get(device_id, ())
+            self._format_metric_value(actual.get(metric_key), metric.decimals)
+            for metric_key, metric in self._instrument_metric_schemas.get(
+                instrument_id,
+                (),
+            )
         ]
 
     @staticmethod
@@ -549,28 +580,28 @@ class DatRunLogger:
             )
         return str(value)
 
-    def write_device_status(
+    def write_instrument_status(
         self,
-        snapshots: Mapping[str, DeviceSnapshot],
+        snapshots: Mapping[str, InstrumentSnapshot],
         *,
         force: bool = False,
     ) -> bool:
-        """在 Run 活动时按独立周期记录全部设备状态。
+        """在 Run 活动时按独立周期记录全部仪表状态。
 
         返回值说明本次是否真正写入。Run 尚未开始或刚写过一行时安静返回
         ``False``，因此后台轮询可以无条件调用而不创建空闲期文件。
         """
 
-        if self._device_status_writer is None:
+        if self._instrument_status_writer is None:
             return False
         now = time.monotonic()
-        previous = self._last_device_status_monotonic
+        previous = self._last_instrument_status_monotonic
         if (
             not force
             and previous is not None
             and (
                 now - previous
-                < self.config.logging.device_status_interval_seconds
+                < self.config.logging.instrument_status_interval_seconds
             )
         ):
             return False
@@ -584,8 +615,8 @@ class DatRunLogger:
             f"{absolute:.2f}",
             f"{now - self._started_monotonic:.2f}",
         ]
-        for device in self.config.devices:
-            snapshot = snapshots.get(device.id)
+        for instrument in self.config.instruments:
+            snapshot = snapshots.get(instrument.id)
             if snapshot is None:
                 row.extend(
                     [
@@ -601,12 +632,12 @@ class DatRunLogger:
                         "No snapshot",
                     ]
                 )
-                row.extend(self._metric_values(device.id, None))
+                row.extend(self._metric_values(instrument.id, None))
                 continue
             decimals = (
-                control_decimals(device.kind, device.unit)
-                if device.kind
-                in (DeviceKind.TEMPERATURE, DeviceKind.FIELD)
+                control_decimals(instrument.kind, instrument.unit)
+                if instrument.kind
+                in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
                 else 3
             )
             row.extend(
@@ -648,19 +679,19 @@ class DatRunLogger:
                     snapshot.message,
                 ]
             )
-            row.extend(self._metric_values(device.id, snapshot))
-        self._device_status_writer.writerow(row)
-        self._last_device_status_monotonic = now
+            row.extend(self._metric_values(instrument.id, snapshot))
+        self._instrument_status_writer.writerow(row)
+        self._last_instrument_status_monotonic = now
         if (
             self.config.logging.flush_every_row
-            and self._device_status_handle is not None
+            and self._instrument_status_handle is not None
         ):
-            self._device_status_handle.flush()
+            self._instrument_status_handle.flush()
         return True
 
     def write_module_row(
         self,
-        snapshots: dict[str, DeviceSnapshot],
+        snapshots: dict[str, InstrumentSnapshot],
         module_id: str,
         values: Mapping[str, Any],
         sequence_step: str,
@@ -687,7 +718,7 @@ class DatRunLogger:
 
     def write_measurement_row(
         self,
-        snapshots: dict[str, DeviceSnapshot],
+        snapshots: dict[str, InstrumentSnapshot],
         module_values: Mapping[str, Mapping[str, Any]],
         sequence_step: str,
         *,
@@ -803,10 +834,10 @@ class DatRunLogger:
 
     def write_system_row(
         self,
-        snapshots: dict[str, DeviceSnapshot],
+        snapshots: dict[str, InstrumentSnapshot],
         sequence_step: str,
     ) -> None:
-        """写入只含系统设备快照、不含模块结果的行。"""
+        """写入只含系统仪表快照、不含模块结果的行。"""
 
         self.ensure_data_file()
         assert self._data_writer is not None
@@ -817,11 +848,11 @@ class DatRunLogger:
 
     def _row(
         self,
-        snapshots: dict[str, DeviceSnapshot],
+        snapshots: dict[str, InstrumentSnapshot],
         module_values: Mapping[str, Mapping[str, Any]],
         sequence_step: str,
     ) -> list[object]:
-        """按固定列结构组装单行，并使用规定精度处理设备和模块数值。"""
+        """按固定列结构组装单行，并使用规定精度处理仪表和模块数值。"""
 
         unix_now = time.time()
         absolute = (
@@ -834,15 +865,15 @@ class DatRunLogger:
             f"{time.monotonic() - self._started_monotonic:.2f}",
             sequence_step,
         ]
-        for device in self.config.devices:
-            snapshot = snapshots.get(device.id)
+        for instrument in self.config.instruments:
+            snapshot = snapshots.get(instrument.id)
             usable_snapshot = (
                 snapshot
                 if snapshot is not None and snapshot.connected
                 else None
             )
-            if device.kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
-                decimals = control_decimals(device.kind, device.unit)
+            if instrument.kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
+                decimals = control_decimals(instrument.kind, instrument.unit)
                 row.extend(
                     [
                         (
@@ -865,13 +896,13 @@ class DatRunLogger:
                         ),
                     ]
                 )
-            elif device.kind is DeviceKind.MONITOR:
+            elif instrument.kind is InstrumentKind.MONITOR:
                 row.append(
                     ""
                     if usable_snapshot is None or usable_snapshot.current is None
                     else fixed_number(usable_snapshot.current, 3)
                 )
-            row.extend(self._metric_values(device.id, usable_snapshot))
+            row.extend(self._metric_values(instrument.id, usable_snapshot))
         for module in self._module_descriptors:
             values = module_values.get(module.id, {})
             for column in module.columns:
@@ -966,14 +997,14 @@ class DatRunLogger:
             first_error = first_error or failure
         self._raw_handles.clear()
         self._raw_writers.clear()
-        if self._device_status_handle is not None:
+        if self._instrument_status_handle is not None:
             failure = self._flush_and_close_handle(
-                self._device_status_handle
+                self._instrument_status_handle
             )
             first_error = first_error or failure
-        self._device_status_handle = None
-        self._device_status_writer = None
-        self._last_device_status_monotonic = None
+        self._instrument_status_handle = None
+        self._instrument_status_writer = None
+        self._last_instrument_status_monotonic = None
         if self._event_handle is not None:
             failure = self._flush_and_close_handle(
                 self._event_handle

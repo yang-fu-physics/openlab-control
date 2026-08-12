@@ -1,8 +1,8 @@
-"""Qt/UI 线程与 asyncio 设备运行时之间的总边界。
+"""Qt/UI 线程与 asyncio 仪表运行时之间的总边界。
 
-RuntimeService 在独立线程中拥有唯一 asyncio loop、DeviceManager、SequenceEngine 和
+RuntimeService 在独立线程中拥有唯一 asyncio loop、InstrumentManager、SequenceEngine 和
 MeasurementModuleService。UI 只通过线程安全提交与消息队列交互，避免 Qt 线程直接等待
-仪表 I/O。关闭顺序集中在本文件，保证先停止 SEQ，再回收模块、设备、报警线程和日志。
+仪表 I/O。关闭顺序集中在本文件，保证先停止 SEQ，再回收模块、仪表、报警线程和日志。
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from .events import EventManager
 from .models import EventNotice, RunProgress, RunState, RuntimeMessage, Severity
 from .measurement.manifest import ModuleDescriptor, discover_modules
 from .measurement.service import MeasurementModuleService
-from .devices.manifest import DevicePluginDescriptor, discover_device_plugins
-from .plugins import DeviceManager
+from .instruments.manifest import SystemInstrumentDescriptor, discover_system_instruments
+from .instrument_manager import InstrumentManager
 from .sequence.engine import SequenceEngine
 from .sequence.model import SequenceDocument
 
@@ -35,7 +35,7 @@ class RuntimeService:
         self,
         config: AppConfig,
         module_descriptors: tuple[ModuleDescriptor, ...] | None = None,
-        device_descriptors: tuple[DevicePluginDescriptor, ...] | None = None,
+        instrument_descriptors: tuple[SystemInstrumentDescriptor, ...] | None = None,
     ) -> None:
         self.config = config
         self.messages: queue.Queue[RuntimeMessage] = queue.Queue()
@@ -45,7 +45,7 @@ class RuntimeService:
         self._sequence_task: asyncio.Task[Any] | None = None
         self._poll_task: asyncio.Task[Any] | None = None
         self.events: EventManager | None = None
-        self.devices: DeviceManager | None = None
+        self.instruments: InstrumentManager | None = None
         self.logger: DatRunLogger | None = None
         self.engine: SequenceEngine | None = None
         self.modules: MeasurementModuleService | None = None
@@ -53,10 +53,10 @@ class RuntimeService:
         self.module_descriptors = (
             discover_modules(config) if module_descriptors is None else module_descriptors
         )
-        self.device_descriptors = (
-            discover_device_plugins(config)
-            if device_descriptors is None
-            else device_descriptors
+        self.instrument_descriptors = (
+            discover_system_instruments(config)
+            if instrument_descriptors is None
+            else instrument_descriptors
         )
 
     def start(self, timeout: float = 10.0) -> None:
@@ -67,7 +67,7 @@ class RuntimeService:
         self._thread = threading.Thread(target=self._thread_main, name="OpenLabRuntime", daemon=True)
         self._thread.start()
         if not self._ready.wait(timeout):
-            raise TimeoutError("Device runtime startup timed out")
+            raise TimeoutError("Instrument runtime startup timed out")
 
     def _thread_main(self) -> None:
         """运行时线程入口：创建、运行并最终销毁该线程专属 event loop。"""
@@ -88,32 +88,32 @@ class RuntimeService:
         self.events.subscribe(
             self.alarm_reporter.handle_notice
         )
-        # 报警线程先启动，但它只订阅事件，不参与任何设备安全决策。
+        # 报警线程先启动，但它只订阅事件，不参与任何仪表安全决策。
         self.alarm_reporter.start()
         try:
-            self.devices = DeviceManager(
+            self.instruments = InstrumentManager(
                 self.config,
                 self.events,
-                self.device_descriptors,
+                self.instrument_descriptors,
             )
             self.logger = DatRunLogger(self.config, self.events)
             self.modules = MeasurementModuleService(
                 self.module_descriptors,
                 self.events,
-                self.devices,
+                self.instruments,
                 message_callback=self._on_module_message,
             )
             self.engine = SequenceEngine(
                 self.config,
-                self.devices,
+                self.instruments,
                 self.events,
                 self.logger,
                 self.modules,
                 progress_callback=self._on_progress,
             )
-            loop.run_until_complete(self.devices.connect_all())
+            loop.run_until_complete(self.instruments.connect_all())
             initial_snapshots = loop.run_until_complete(
-                self.devices.poll_all()
+                self.instruments.poll_all()
             )
             self.messages.put(
                 RuntimeMessage("snapshots", initial_snapshots)
@@ -136,17 +136,17 @@ class RuntimeService:
             loop.close()
 
     async def _poll_loop(self) -> None:
-        assert self.devices is not None
+        assert self.instruments is not None
         # 启动阶段已经发布过一次初始快照。运行 SEQ 时可以更快采样用于独立判稳，
         # 但前面板与 Live Trend 仍按常规周期接收消息，避免把控制采样频率变成界面刷新率。
         last_published = time.monotonic()
         while True:
-            await asyncio.sleep(self._device_poll_interval())
+            await asyncio.sleep(self._instrument_poll_interval())
             try:
-                snapshots = await self.devices.poll_all()
+                snapshots = await self.instruments.poll_all()
                 if self.logger is not None:
                     try:
-                        self.logger.write_device_status(
+                        self.logger.write_instrument_status(
                             snapshots
                         )
                     except Exception as exc:
@@ -154,10 +154,10 @@ class RuntimeService:
                             self.events.report(
                                 Severity.ERROR,
                                 "logging",
-                                "DEVICE_STATUS_WRITE_FAILED",
+                                "INSTRUMENT_STATUS_WRITE_FAILED",
                                 str(exc),
                                 str(
-                                    self.logger.paths.device_status_file
+                                    self.logger.paths.instrument_status_file
                                     if self.logger.paths is not None
                                     else ""
                                 ),
@@ -172,8 +172,8 @@ class RuntimeService:
                 if self.events is not None:
                     self.events.report(Severity.ERROR, "runtime", "POLL_LOOP_FAILED", str(exc))
 
-    def _device_poll_interval(self) -> float:
-        """返回当前设备采样周期；前面板消息仍由常规周期单独节流。"""
+    def _instrument_poll_interval(self) -> float:
+        """返回当前仪表采样周期；前面板消息仍由常规周期单独节流。"""
 
         if self.engine is not None and self.engine.state in {
             RunState.RUNNING,
@@ -248,7 +248,7 @@ class RuntimeService:
         """从 UI/调用线程把协程提交到唯一 runtime loop。"""
 
         if self._loop is None or not self._loop.is_running():
-            raise RuntimeError("Device runtime has not started")
+            raise RuntimeError("Instrument runtime has not started")
         return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
 
     def run_sequence(
@@ -270,9 +270,9 @@ class RuntimeService:
         if self._sequence_task is not None and not self._sequence_task.done():
             raise RuntimeError("A sequence is already running")
         assert self.engine is not None
-        assert self.devices is not None
+        assert self.instruments is not None
         # lease 让手动 Set/Hold 在 SEQ 期间被运行时拒绝，不能只依赖 UI 按钮变灰。
-        self.devices.acquire_sequence_control()
+        self.instruments.acquire_sequence_control()
         self._sequence_task = asyncio.create_task(
             self.engine.run(document, module_settings)
         )
@@ -280,7 +280,7 @@ class RuntimeService:
             return await self._sequence_task
         finally:
             self._sequence_task = None
-            self.devices.release_sequence_control()
+            self.instruments.release_sequence_control()
 
     def pause_sequence(self) -> None:
         if self._loop is not None and self.engine is not None:
@@ -296,15 +296,15 @@ class RuntimeService:
 
     def set_target(
         self,
-        device_id: str,
+        instrument_id: str,
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
     ) -> Future[Any]:
-        assert self.devices is not None
+        assert self.instruments is not None
         return self._submit(
-            self.devices.set_target(
-                device_id,
+            self.instruments.set_target(
+                instrument_id,
                 value,
                 rate_per_minute,
                 mode,
@@ -312,9 +312,9 @@ class RuntimeService:
             )
         )
 
-    def hold_device(self, device_id: str) -> Future[Any]:
-        assert self.devices is not None
-        return self._submit(self.devices.hold_device(device_id, origin="manual"))
+    def hold_instrument(self, instrument_id: str) -> Future[Any]:
+        assert self.instruments is not None
+        return self._submit(self.instruments.hold_instrument(instrument_id, origin="manual"))
 
     def enable_module(self, module_id: str) -> Future[Any]:
         assert self.modules is not None
@@ -392,7 +392,7 @@ class RuntimeService:
 
         1. 请求 SEQ Stop，使正常路径有机会 Hold 并发送模块 run_end；
         2. 最多等待 3 秒，超时才取消 task；
-        3. 停止轮询，避免清理期间又产生新设备请求；
+        3. 停止轮询，避免清理期间又产生新仪表请求；
         4. 调用模块 close 并回收 worker；
         5. 断开温场和 Monitor；
         6. 有界关闭非关键报警线程，最后关闭日志和 event loop。
@@ -430,11 +430,11 @@ class RuntimeService:
             self._poll_task.cancel()
             await asyncio.gather(self._poll_task, return_exceptions=True)
         if self.modules is not None:
-            # 模块先于设备断开，因为模块 close 仍需要自己的仪表连接；二者都在设备
+            # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
             # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
             await self.modules.shutdown()
-        if self.devices is not None:
-            await self.devices.disconnect_all()
+        if self.instruments is not None:
+            await self.instruments.disconnect_all()
         if self.alarm_reporter is not None:
             reporter = self.alarm_reporter
             self.alarm_reporter = None

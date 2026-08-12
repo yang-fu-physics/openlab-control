@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_REPOSITORY = (
     ROOT
-    / "plugin_templates"
+    / "templates"
     / "measurement-modules-repository"
 )
 sys.path.insert(0, str(ROOT / "src"))
@@ -21,20 +21,20 @@ sys.path.insert(0, str(ROOT / "src"))
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.extensions.trust import PluginTrustStore  # noqa: E402
+from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.models import (  # noqa: E402
-    DeviceActivity,
-    DeviceConnectionState,
-    DeviceKind,
-    DeviceSnapshot,
+    InstrumentActivity,
+    InstrumentConnectionState,
+    InstrumentKind,
+    InstrumentSnapshot,
     RunState,
     Severity,
     StabilityState,
 )
 from labcontrol.measurement.manifest import discover_modules  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
-from labcontrol.plugins import DeviceManager  # noqa: E402
-from labcontrol.devices.base import DeviceError  # noqa: E402
+from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
+from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.sequence.engine import SequenceAbort, SequenceEngine  # noqa: E402
 from labcontrol.sequence.model import Command, CommandType, SequenceDocument  # noqa: E402
 
@@ -73,17 +73,17 @@ class SequenceEngineTests(unittest.TestCase):
                 encoding="utf-8",
             )
         config = load_config(target)
-        trust_store = PluginTrustStore(
+        trust_store = ContentTrustStore(
             config.resolve_project_path(
-                config.plugins.state_directory
+                config.modules.state_directory
             )
-            / "trusted_plugins.json"
+            / "trusted_content.json"
         )
         for descriptor in discover_modules(config):
             trust_store.trust("module", descriptor)
-        devices = []
-        for device in config.devices:
-            stability = device.stability
+        instruments = []
+        for instrument in config.instruments:
+            stability = instrument.stability
             if stability is not None:
                 stability = replace(
                     stability,
@@ -93,20 +93,20 @@ class SequenceEngineTests(unittest.TestCase):
                     timeout_seconds=3.0,
                     window_seconds=0.05,
                 )
-            extras = dict(device.extras)
+            extras = dict(instrument.extras)
             extras["noise"] = 0.0
-            devices.append(replace(device, stability=stability, extras=extras))
+            instruments.append(replace(instrument, stability=stability, extras=extras))
         return replace(
             config,
             simulation_speed=1000.0,
             poll_interval_seconds=0.01,
-            devices=tuple(devices),
+            instruments=tuple(instruments),
         )
 
     async def _run(self, config, document, notices, progresses=None):
         events = EventManager()
         events.subscribe(notices.append)
-        manager = DeviceManager(config, events, isolate_processes=False)
+        manager = InstrumentManager(config, events, isolate_processes=False)
         logger = DatRunLogger(config, events)
         modules = MeasurementModuleService(discover_modules(config), events, manager)
         engine = SequenceEngine(
@@ -146,11 +146,11 @@ class SequenceEngineTests(unittest.TestCase):
             config = self._fast_config(Path(temp))
             measure = Command(CommandType.MEASURE)
             field_scan = Command(CommandType.SCAN_FIELD, {
-                "device_id": "field", "start": 0.0, "stop": 0.01, "unit": "T",
+                "instrument_id": "field", "start": 0.0, "stop": 0.01, "unit": "T",
                 "steps": 2, "rate": 0.5, "mode": "Settle",
             }, [measure])
             temperature_scan = Command(CommandType.SCAN_TEMPERATURE, {
-                "device_id": "temperature", "start": 300.0, "stop": 299.9,
+                "instrument_id": "temperature", "start": 300.0, "stop": 299.9,
                 "steps": 2, "rate": 10.0, "mode": "Settle",
             }, [field_scan])
             document = SequenceDocument([temperature_scan], "nested.seq")
@@ -162,17 +162,17 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertEqual(state, RunState.COMPLETED)
             self.assertIsNotNone(paths)
             data = paths.data_file.read_text(encoding="utf-8")
-            device_status = paths.device_status_file.read_text(
+            instrument_status = paths.instrument_status_file.read_text(
                 encoding="utf-8"
             )
             self.assertGreaterEqual(data.count("Measure"), 16)
             self.assertIn(
                 "temperature.Stability",
-                device_status,
+                instrument_status,
             )
             self.assertGreaterEqual(
                 len(
-                    device_status.split("[Data]\n", 1)[1]
+                    instrument_status.split("[Data]\n", 1)[1]
                     .strip()
                     .splitlines()
                 ),
@@ -198,7 +198,7 @@ class SequenceEngineTests(unittest.TestCase):
                     Command(
                         CommandType.SET_FIELD,
                         {
-                            "device_id": "field",
+                            "instrument_id": "field",
                             "target": -6.0,
                             "unit": "T",
                             "rate": 1.0,
@@ -208,7 +208,7 @@ class SequenceEngineTests(unittest.TestCase):
                     Command(
                         CommandType.SCAN_FIELD,
                         {
-                            "device_id": "field",
+                            "instrument_id": "field",
                             "start": 9.0,
                             "stop": 3.0,
                             "unit": "T",
@@ -253,7 +253,7 @@ class SequenceEngineTests(unittest.TestCase):
             scan = Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "device_id": "field",
+                    "instrument_id": "field",
                     "start": 1.0,
                     "stop": 0.5,
                     "unit": "T",
@@ -288,7 +288,7 @@ class SequenceEngineTests(unittest.TestCase):
     def test_field_scan_nearest_polarity_refuses_missing_actual_field(self) -> None:
         async def scenario(config) -> None:
             events = EventManager()
-            manager = DeviceManager(config, events, isolate_processes=False)
+            manager = InstrumentManager(config, events, isolate_processes=False)
             engine = SequenceEngine(
                 config,
                 manager,
@@ -304,7 +304,7 @@ class SequenceEngineTests(unittest.TestCase):
             scan = Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "device_id": "field",
+                    "instrument_id": "field",
                     "start": 9.0,
                     "stop": 3.0,
                     "unit": "T",
@@ -315,10 +315,10 @@ class SequenceEngineTests(unittest.TestCase):
                 },
             )
             try:
-                with self.assertRaises(DeviceError) as raised:
+                with self.assertRaises(InstrumentError) as raised:
                     await engine._scan_controlled(
                         scan,
-                        DeviceKind.FIELD,
+                        InstrumentKind.FIELD,
                         ["1:Scan Field"],
                     )
                 self.assertEqual(
@@ -355,7 +355,7 @@ class SequenceEngineTests(unittest.TestCase):
             config = self._fast_config(Path(temp))
             document = SequenceDocument([
                 Command(CommandType.SET_FIELD, {
-                    "device_id": "field", "target": 1.0, "unit": "T", "rate": 0.5, "mode": "Sweep",
+                    "instrument_id": "field", "target": 1.0, "unit": "T", "rate": 0.5, "mode": "Sweep",
                 }),
                 Command(CommandType.WAIT, {"seconds": 0.03}),
                 Command(CommandType.INJECT_ERROR, {"code": "FATAL", "message": "fatal"}),
@@ -372,10 +372,10 @@ class SequenceEngineTests(unittest.TestCase):
         engine = SequenceEngine(
             object(), object(), events, object(), object()  # type: ignore[arg-type]
         )
-        events.report(Severity.ERROR, "device", "FAULT", "fault")
+        events.report(Severity.ERROR, "instrument", "FAULT", "fault")
         self.assertEqual(engine.state, RunState.IDLE)
         engine.state = RunState.RUNNING
-        events.report(Severity.ERROR, "device", "FAULT", "fault persists")
+        events.report(Severity.ERROR, "instrument", "FAULT", "fault persists")
         self.assertEqual(engine.state, RunState.STOPPING)
         self.assertTrue(engine._abort_requested)
         self.assertTrue(engine._fatal_abort)
@@ -402,10 +402,10 @@ class SequenceEngineTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_device_recovery_freezes_interruptible_wait_deadline(
+    def test_instrument_recovery_freezes_interruptible_wait_deadline(
         self,
     ) -> None:
-        class RecoveringDevices:
+        class RecoveringInstruments:
             control_ready = True
 
             @staticmethod
@@ -414,20 +414,20 @@ class SequenceEngineTests(unittest.TestCase):
 
         async def scenario() -> None:
             events = EventManager()
-            devices = RecoveringDevices()
+            instruments = RecoveringInstruments()
             engine = SequenceEngine(
-                object(), devices, events, object(), object()  # type: ignore[arg-type]
+                object(), instruments, events, object(), object()  # type: ignore[arg-type]
             )
             engine.state = RunState.RUNNING
             wait_task = asyncio.create_task(
                 engine._interruptible_sleep(0.16)
             )
             await asyncio.sleep(0.03)
-            devices.control_ready = False
+            instruments.control_ready = False
             await asyncio.sleep(0.20)
             self.assertFalse(wait_task.done())
             restored_at = asyncio.get_running_loop().time()
-            devices.control_ready = True
+            instruments.control_ready = True
             await asyncio.wait_for(wait_task, timeout=0.5)
             self.assertGreaterEqual(
                 asyncio.get_running_loop().time() - restored_at,
@@ -441,7 +441,7 @@ class SequenceEngineTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(
+            manager = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -459,7 +459,7 @@ class SequenceEngineTests(unittest.TestCase):
             )
             self.assertEqual(state, RunState.FAULTED)
             self.assertIn(
-                "PRIMARY_DEVICE_NOT_READY",
+                "PRIMARY_INSTRUMENT_NOT_READY",
                 [notice.event.code for notice in notices],
             )
             await manager.disconnect_all()
@@ -472,7 +472,7 @@ class SequenceEngineTests(unittest.TestCase):
     def test_task_cancellation_attempts_hold_before_exiting(self) -> None:
         async def scenario(config) -> None:
             events = EventManager()
-            manager = DeviceManager(
+            manager = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -505,8 +505,8 @@ class SequenceEngineTests(unittest.TestCase):
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
-            for device_id in ("temperature", "field"):
-                snapshot = manager.latest[device_id]
+            for instrument_id in ("temperature", "field"):
+                snapshot = manager.latest[instrument_id]
                 self.assertAlmostEqual(
                     snapshot.target or 0.0,
                     snapshot.current or 0.0,
@@ -519,9 +519,9 @@ class SequenceEngineTests(unittest.TestCase):
                 scenario(self._fast_config(Path(temp)))
             )
 
-    def test_control_waits_timeout_without_new_device_readings(self) -> None:
+    def test_control_waits_timeout_without_new_instrument_readings(self) -> None:
         async def scenario(config) -> None:
-            temperature = config.device("temperature")
+            temperature = config.instrument("temperature")
             temperature = replace(
                 temperature,
                 stability=replace(
@@ -532,33 +532,33 @@ class SequenceEngineTests(unittest.TestCase):
             config = replace(
                 config,
                 poll_interval_seconds=0.005,
-                devices=tuple(
-                    temperature if device.id == temperature.id else device
-                    for device in config.devices
+                instruments=tuple(
+                    temperature if instrument.id == temperature.id else instrument
+                    for instrument in config.instruments
                 ),
             )
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events, isolate_processes=False)
+            manager = InstrumentManager(config, events, isolate_processes=False)
             await manager.connect_all()
             await manager.poll_all()
             now = asyncio.get_running_loop().time()
-            manager.latest["temperature"] = DeviceSnapshot(
-                device_id="temperature",
+            manager.latest["temperature"] = InstrumentSnapshot(
+                instrument_id="temperature",
                 display_name=temperature.display_name,
-                kind=DeviceKind.TEMPERATURE,
+                kind=InstrumentKind.TEMPERATURE,
                 timestamp=now,
                 connected=True,
                 unit=temperature.unit,
                 current=300.0,
                 target=299.0,
                 rate_per_minute=1.0,
-                activity=DeviceActivity.MOVING,
+                activity=InstrumentActivity.MOVING,
                 stability=StabilityState.MOVING,
             )
             manager._connection_states["temperature"] = (
-                DeviceConnectionState.CONNECTED
+                InstrumentConnectionState.CONNECTED
             )
             engine = SequenceEngine(
                 config,
@@ -603,7 +603,7 @@ class SequenceEngineTests(unittest.TestCase):
             Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "device_id": "field",
+                    "instrument_id": "field",
                     "start": 0.0,
                     "stop": 1.0,
                     "unit": "Oe",
@@ -615,7 +615,7 @@ class SequenceEngineTests(unittest.TestCase):
             Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "device_id": "field",
+                    "instrument_id": "field",
                     "start": 0.0,
                     "stop": 1.0,
                     "unit": "Oe",
@@ -653,7 +653,7 @@ class SequenceEngineTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            manager = DeviceManager(config, events, isolate_processes=False)
+            manager = InstrumentManager(config, events, isolate_processes=False)
             logger = DatRunLogger(config, events)
             modules = MeasurementModuleService((), events, manager)
             engine = SequenceEngine(config, manager, events, logger, modules)
@@ -691,7 +691,7 @@ class SequenceEngineTests(unittest.TestCase):
     def test_stop_interrupts_an_inflight_module_measurement(self) -> None:
         async def scenario(config) -> None:
             events = EventManager()
-            manager = DeviceManager(
+            manager = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -825,7 +825,7 @@ class SequenceEngineTests(unittest.TestCase):
             temperature_scan = Command(
                 CommandType.SCAN_TEMPERATURE,
                 {
-                    "device_id": "temperature",
+                    "instrument_id": "temperature",
                     "point_mode": "List",
                     "points": "300, 299.9, 300",
                     "rate": 10.0,
@@ -851,7 +851,7 @@ class SequenceEngineTests(unittest.TestCase):
             temperature_scan = Command(
                 CommandType.SCAN_TEMPERATURE,
                 {
-                    "device_id": "temperature",
+                    "instrument_id": "temperature",
                     "point_mode": "List",
                     "points": "299.9, 500",
                     "rate": 10.0,
@@ -909,7 +909,7 @@ class SequenceEngineTests(unittest.TestCase):
 
             async def measure_all(self, logger, sequence_step):
                 del logger, sequence_step
-                raise DeviceError("module equipment alarm", "MODULE_EQUIPMENT_ALARM")
+                raise InstrumentError("module equipment alarm", "MODULE_EQUIPMENT_ALARM")
 
             async def end_sequence(self, reason):
                 self.end_reasons.append(reason)
@@ -917,7 +917,7 @@ class SequenceEngineTests(unittest.TestCase):
 
         async def scenario(config):
             events = EventManager()
-            manager = DeviceManager(config, events, isolate_processes=False)
+            manager = InstrumentManager(config, events, isolate_processes=False)
             logger = DatRunLogger(config, events)
             modules = FailingModules()
             engine = SequenceEngine(config, manager, events, logger, modules)  # type: ignore[arg-type]

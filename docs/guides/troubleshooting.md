@@ -47,14 +47,14 @@ Enable 只应打开模块安全初态，不应把保存设置自动写入仪表�
 SEQ 可以保留缺失模块指令，但执行时必须满足：模块已安装、Enabled、仍声明相同稳定
 `command_id`，并且参数通过当前声明校验。框架不会自动 Enable 或跳过。
 
-## Live Trend 打开后设备超时
+## Live Trend 打开后仪表超时
 
-Live Trend 只应消费已有设备快照，不增加仪表轮询。若打开图表改变 timeout：
+Live Trend 只应消费已有仪表快照，不增加仪表轮询。若打开图表改变 timeout：
 
-1. 检查 GUI 是否直接查询设备；
+1. 检查 GUI 是否直接查询仪表；
 2. 检查重绘是否阻塞 Runtime 消息处理；
 3. 限制绘制点数并合并刷新；
-4. 对比打开前后的 `device_status.dat` 采样间隔和事件日志。
+4. 对比打开前后的 `instrument_status.dat` 采样间隔和事件日志。
 
 ## Data Browser 不自动刷新
 

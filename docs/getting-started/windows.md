@@ -22,7 +22,9 @@ Get-Content .\OpenLabControl-v0.14.1-windows-x64.zip.sha256
 
 ## 第一次启动
 
-1. 双击 `OpenLabControl.exe`。
+1. 双击 `OpenLabControl.exe`。需要确认仪表地址时，双击同目录的
+   `tools\InstrumentScanner.exe`。扫描器是独立单文件程序；主程序仍须和自己的
+   `_internal` 目录一起保留。
 2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
 3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。
 4. 保持列表为空，打开 `examples/nested_scan.seq`。
@@ -49,7 +51,7 @@ Get-Content .\OpenLabControl-v0.14.1-windows-x64.zip.sha256
 把一个完整目录复制到程序旁边的 `modules/`：
 
 ```text
-plugin_templates/measurement-modules-repository/modules/simulated_transport/
+templates/measurement-modules-repository/modules/simulated_transport/
     ↓
 modules/simulated_transport/
 ```
@@ -61,7 +63,7 @@ modules/simulated_transport/
 基线。单独下载第三方模块时，应与作者发布的摘要或签名比较。
 
 `simulated_transport` 用于体验最小 Enable/Measure/Disable 流程，没有自定义设置。开发者
-教程中的 `tutorial_resistance` 是另一个示例，用来学习设置窗口、四行结果和扩展功能。
+教程中的 `tutorial_resistance` 是另一个示例，用来学习设置窗口、四行结果和模块附加功能。
 
 需要现场配置时，把 `configs/default.toml` 复制为 `configs/site.local.toml`，然后用
 `OpenLabControl.exe --config configs\site.local.toml` 启动。不要把含真实地址的配置上传到
@@ -69,13 +71,13 @@ modules/simulated_transport/
 
 !!! danger "改地址不等于可以控制真机"
 
-    先取得与实际型号、固件和接线匹配的 [Device Plugin](../development/device-plugin.md)，
+    先取得与实际型号、固件和接线匹配的 [System Instrument](../development/system-instrument.md)，
     审查其命令与安全行为，并完成 [仪表安全清单](../guides/safety-checklist.md)。之后才进行
-    有人在场的低风险真机测试；示例插件不能直接用于任意仪表。
+    有人在场的低风险真机测试；System Instrument 示例不能直接用于任意仪表。
 
 ## Windows 包不会改变的规则
 
-- 模块和设备实例仍各自在独立子进程运行。
+- 模块和仪表实例仍各自在独立子进程运行。
 - Warning 继续 SEQ，Error 中止 SEQ。
 - Load SEQ 只导入模块界面值，不自动 Enable、连接或 Apply。
 - Data Browser 可打开任意 DAT，不强制绑定当前 Run。

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 import time
 from typing import Any
@@ -52,7 +52,8 @@ class ModuleAPI:
 
     - :meth:`sleep`：Pause 不计时、Stop 可打断的等待。
     - :meth:`checkpoint`：在长循环或两次仪表 I/O 之间响应 Pause/Stop。
-    - :meth:`devices`：请求核心立即采样温度、磁场和 Monitor，再返回快照。
+    - :meth:`instruments`：请求核心立即采样温度、磁场和 Monitor，再返回快照。
+    - :meth:`resources`：读取扫描工具确认过的物理仪表地址表。
     - :meth:`warn`：报告或解除可恢复告警。
     - :meth:`status`：更新模块窗口中的只读状态。
     - :attr:`timeout`：本次调用的核心总时限，供模块预留安全清理时间。
@@ -60,13 +61,19 @@ class ModuleAPI:
     以下带下划线字段由 worker 注入，模块不得直接访问。
     """
 
-    _initial_devices: Mapping[str, Mapping[str, Any]]
+    _initial_instruments: Mapping[str, Mapping[str, Any]]
     _emit: Callable[[str, dict[str, Any]], None]
-    _sample_devices: (
+    _sample_instruments: (
         Callable[[float], Mapping[str, Mapping[str, Any]]] | None
     ) = None
     _operation_state: Callable[[float], str] | None = None
     _operation_timeout_seconds: float = 120.0
+    # 放在现有运行上下文字段之后。生产 worker 始终用关键字注入；保留这一顺序还可
+    # 避免测试辅助类或第三方测试夹具把原来的 sample/state/timeout 位置参数错认成
+    # 资源映射。模块作者不应直接访问带下划线字段，只调用 resources()。
+    _instrument_resources: Mapping[str, Mapping[str, Any]] = field(
+        default_factory=dict
+    )
 
     @property
     def timeout(self) -> float:
@@ -127,38 +134,104 @@ class ModuleAPI:
         )
         self._checkpoint(request_timeout)
 
-    def devices(
+    def instruments(
         self,
         timeout: float = 5.0,
     ) -> Mapping[str, Mapping[str, Any]]:
-        """请求一次即时设备采样并返回深拷贝。
+        """请求一次即时仪表采样并返回深拷贝。
 
         这条路径与约 1 秒一次的前面板刷新分离。真实测量模块在需要记录温度/场的
         时刻调用本方法，核心会立即轮询；同一时刻多个模块的请求会合并为一次轮询。
         纯单元测试没有核心回调时才回退到调用开始时的快照。
         """
 
-        request_timeout = self._positive_finite(timeout, "Device snapshot timeout")
+        request_timeout = self._positive_finite(timeout, "Instrument snapshot timeout")
         self._checkpoint(min(request_timeout, 1.0))
-        if self._sample_devices is None:
-            return deepcopy(dict(self._initial_devices))
-        latest = self._sample_devices(request_timeout)
+        if self._sample_instruments is None:
+            return deepcopy(dict(self._initial_instruments))
+        latest = self._sample_instruments(request_timeout)
         if not isinstance(latest, Mapping):
             raise ModuleError(
-                "The core returned an invalid device snapshot",
+                "The core returned an invalid instrument snapshot",
                 "MODULE_SYSTEM_SNAPSHOT_INVALID",
             )
         normalized: dict[str, dict[str, Any]] = {}
-        for device_id, values in latest.items():
+        for instrument_id, values in latest.items():
             if not isinstance(values, Mapping):
                 raise ModuleError(
-                    "The core returned an invalid device snapshot",
+                    "The core returned an invalid instrument snapshot",
                     "MODULE_SYSTEM_SNAPSHOT_INVALID",
-                    str(device_id),
+                    str(instrument_id),
                 )
-            normalized[str(device_id)] = dict(values)
-        self._initial_devices = normalized
+            normalized[str(instrument_id)] = dict(values)
+        self._initial_instruments = normalized
         return deepcopy(normalized)
+
+    def resources(self) -> Mapping[str, Mapping[str, Any]]:
+        """返回扫描并人工确认过的 Measurement 仪表资源。
+
+        模块应把资源 ``id`` 保存到自己的设置中，在真正 ``open``/``configure`` 时再从
+        本映射取得当前地址。返回值始终是深拷贝，模块不能修改核心配置，也不会获得
+        System Instrument 地址；温度和磁场读数只能通过 :meth:`instruments`。
+        """
+
+        source = self._instrument_resources or {}
+        if not isinstance(source, Mapping):
+            raise ModuleError(
+                "The core returned an invalid instrument resource table",
+                "MODULE_INSTRUMENT_RESOURCE_INVALID",
+            )
+        result: dict[str, dict[str, Any]] = {}
+        for resource_id, raw in source.items():
+            if not isinstance(raw, Mapping):
+                raise ModuleError(
+                    "The core returned an invalid instrument resource",
+                    "MODULE_INSTRUMENT_RESOURCE_INVALID",
+                    str(resource_id),
+                )
+            values = dict(raw)
+            if str(values.get("purpose", "")) != "measurement":
+                raise ModuleError(
+                    "The core exposed a non-measurement instrument resource",
+                    "MODULE_INSTRUMENT_RESOURCE_INVALID",
+                    str(resource_id),
+                )
+            result[str(resource_id)] = values
+        return deepcopy(result)
+
+    def resource(self, resource_id: str) -> Mapping[str, Any]:
+        """按稳定 ID 返回一个 Measurement 仪表资源的深拷贝。"""
+
+        selected = str(resource_id).strip()
+        if not selected:
+            raise ModuleError(
+                "Select a measurement instrument resource",
+                "MODULE_INSTRUMENT_RESOURCE_REQUIRED",
+            )
+        resource = self.resources().get(selected)
+        if resource is None:
+            raise ModuleError(
+                f"Measurement instrument resource {selected!r} is unavailable",
+                "MODULE_INSTRUMENT_RESOURCE_UNAVAILABLE",
+                selected,
+            )
+        address = resource.get("address")
+        if (
+            not isinstance(address, str)
+            or not address.strip()
+            or any(not character.isprintable() for character in address)
+        ):
+            raise ModuleError(
+                f"Measurement instrument resource {selected!r} has no valid address",
+                "MODULE_INSTRUMENT_RESOURCE_INVALID",
+                selected,
+            )
+        return deepcopy(dict(resource))
+
+    def resource_address(self, resource_id: str) -> str:
+        """解析稳定资源 ID；模块设置中不得保存原始 VISA 地址。"""
+
+        return str(self.resource(resource_id)["address"]).strip()
 
     def warn(
         self,

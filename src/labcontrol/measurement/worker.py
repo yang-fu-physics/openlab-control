@@ -24,9 +24,9 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
-from ..extensions.dependencies import dependency_runtime_errors
-from ..extensions.loading import load_source_object
-from ..extensions.trust import extension_tree_digest
+from ..package_support.dependencies import dependency_runtime_errors
+from ..package_support.loading import load_source_object
+from ..package_support.trust import content_tree_digest
 from ..module_api import (
     ModuleAPI,
     ModuleError,
@@ -246,7 +246,7 @@ def module_worker_main(
     descriptor: ModuleDescriptor,
     dependency_directory: str,
 ) -> None:
-    """子进程入口：验证扩展、加载后端并串行执行生命周期请求。"""
+    """子进程入口：验证 Measurement Module、加载后端并串行执行生命周期请求。"""
 
     backend: Any = None
     sequence_commands: tuple[ModuleCommandSpec, ...] = ()
@@ -263,7 +263,7 @@ def module_worker_main(
         # 否则攻击者可在用户确认后、worker 启动前替换文件。
         if (
             descriptor.fingerprint
-            and extension_tree_digest(descriptor.path)
+            and content_tree_digest(descriptor.path)
             != descriptor.fingerprint
         ):
             raise PermissionError(
@@ -456,9 +456,10 @@ def module_worker_main(
 
         try:
             api = ModuleAPI(
-                _initial_devices=dict(payload.get("system", {})),
+                _initial_instruments=dict(payload.get("system", {})),
                 _emit=emit,
-                _sample_devices=sample_system,
+                _instrument_resources=dict(payload.get("resources", {})),
+                _sample_instruments=sample_system,
                 _operation_state=operation_state,
                 _operation_timeout_seconds=float(
                     payload.get("operation_timeout_seconds", 120.0)

@@ -1,7 +1,8 @@
 """严格读取并验证主配置文件。
 
-配置对象在启动时一次性构造为不可变 dataclass，之后由 UI、运行时和插件服务共同读取。
-所有影响真实仪表安全的值（上下限、速率、超时、主设备角色）都在进入运行时前验证；不能
+配置对象在启动时一次性构造为不可变 dataclass，之后由 UI、运行时、System Instrument 和
+Measurement Module 共同读取。
+所有影响真实仪表安全的值（上下限、速率、超时、主仪表角色）都在进入运行时前验证；不能
 依赖某个对话框临时校验，因为无界面模式和第三方调用同样会使用这些配置。
 """
 
@@ -11,12 +12,17 @@ import math
 import ipaddress
 import re
 import tomllib
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .models import DeviceKind, DeviceRole, Severity
+from .instrument_resources import (
+    InstrumentResource,
+    InstrumentResourceError,
+    load_instrument_resources,
+)
+from .models import InstrumentKind, InstrumentRole, Severity
 
 
 class ConfigurationError(ValueError):
@@ -39,7 +45,7 @@ _WINDOWS_RESERVED_FILE_STEMS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class StabilityConfig:
-    """框架独立稳定性判定参数，单位沿用对应设备的显示单位。"""
+    """框架独立稳定性判定参数，单位沿用对应仪表的显示单位。"""
 
     tolerance: float
     max_slope_per_minute: float
@@ -50,19 +56,21 @@ class StabilityConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class DeviceConfig:
-    """一个逻辑设备实例的驱动选择、角色、限制和超时。
+class InstrumentConfig:
+    """一个逻辑系统仪表实例的后端选择、角色、限制和超时。
 
-    ``plugin`` 可以指向内置 ``module:class``，也可以是外部 Device Plugin 的清单 ID。
-    ``control_enabled`` 是运行时的最终授权边界：Monitor 和只读设备不能因 UI 操作而绕过它。
+    ``backend`` 可以指向内置 ``module:class``，也可以是外部 System Instrument 的清单 ID。
+    ``control_enabled`` 是运行时的最终授权边界：Monitor 和只读仪表不能因 UI 操作而绕过它。
     ``extras`` 原样传递给具体驱动，便于更换仪表时只改 TOML。
     """
 
     id: str
     display_name: str
-    kind: DeviceKind
-    plugin: str
-    role: DeviceRole = DeviceRole.SECONDARY
+    kind: InstrumentKind
+    backend: str
+    resource_id: str = ""
+    address: str = ""
+    role: InstrumentRole = InstrumentRole.SECONDARY
     control_enabled: bool = False
     unit: str = ""
     initial_value: float = 0.0
@@ -79,13 +87,13 @@ class DeviceConfig:
 
 @dataclass(frozen=True, slots=True)
 class LoggingConfig:
-    """每次运行的数据、事件、设备状态文件以及落盘策略。"""
+    """每次运行的数据、事件、仪表状态文件以及落盘策略。"""
 
     directory: str = "runs"
     data_file_name: str = "experiment.dat"
     event_file_name: str = "events.dat"
-    device_status_file_name: str = "device_status.dat"
-    device_status_interval_seconds: float = 1.0
+    instrument_status_file_name: str = "instrument_status.dat"
+    instrument_status_interval_seconds: float = 1.0
     timestamp_epoch: str = "labview_1904"
     flush_every_row: bool = True
     allow_external_paths: bool = False
@@ -126,26 +134,28 @@ class ModuleConfig:
 
     directory: str = "modules"
     data_directory: str = "module_data"
+    state_directory: str = "trust_state"
     shared_wheels_directory: str = "wheels"
     python_executable: str = ""
-    runtime_directory: str = "plugin_runtime"
+    runtime_directory: str = "runtime_packages"
     startup_timeout_seconds: float = 10.0
     operation_timeout_seconds: float = 120.0
     shutdown_timeout_seconds: float = 3.0
 
 
 @dataclass(frozen=True, slots=True)
-class PluginConfig:
-    """Device Plugin 的发现目录、信任状态、依赖目录和重连策略。"""
+class SystemInstrumentConfig:
+    """System Instrument 的发现目录、信任状态、依赖目录和重连策略。"""
 
-    device_directory: str = "device_plugins"
-    state_directory: str = "plugin_state"
-    runtime_directory: str = "plugin_runtime"
+    directory: str = "system_instruments"
+    resource_file: str = "configs/instruments.local.toml"
+    state_directory: str = "trust_state"
+    runtime_directory: str = "runtime_packages"
     shared_wheels_directory: str = "wheels"
     python_executable: str = ""
-    device_startup_timeout_seconds: float = 10.0
-    device_reconnect_timeout_seconds: float = 60.0
-    device_reconnect_interval_seconds: float = 2.0
+    startup_timeout_seconds: float = 10.0
+    reconnect_timeout_seconds: float = 60.0
+    reconnect_interval_seconds: float = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,10 +174,11 @@ class AppConfig:
     logging: LoggingConfig
     alarms: AlarmConfig
     modules: ModuleConfig
-    plugins: PluginConfig
+    system_instruments: SystemInstrumentConfig
+    instrument_resources: tuple[InstrumentResource, ...]
     abort_temperature: str
     abort_field: str
-    devices: tuple[DeviceConfig, ...]
+    instruments: tuple[InstrumentConfig, ...]
 
     @property
     def project_root(self) -> Path:
@@ -183,13 +194,38 @@ class AppConfig:
             return path
         return (self.project_root / path).resolve()
 
-    def device(self, device_id: str) -> DeviceConfig:
-        """按 ID 返回设备配置；不存在时明确抛出 ``KeyError``。"""
+    def instrument(self, instrument_id: str) -> InstrumentConfig:
+        """按 ID 返回仪表配置；不存在时明确抛出 ``KeyError``。"""
 
-        for item in self.devices:
-            if item.id == device_id:
+        for item in self.instruments:
+            if item.id == instrument_id:
                 return item
-        raise KeyError(device_id)
+        raise KeyError(instrument_id)
+
+    def resource(self, resource_id: str) -> InstrumentResource:
+        """按稳定 ID 返回一台物理仪表资源。"""
+
+        for item in self.instrument_resources:
+            if item.id == resource_id:
+                return item
+        raise KeyError(resource_id)
+
+    def resource_payload(
+        self,
+        purpose: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """按用途返回物理仪表资源的 JSON 副本。"""
+
+        if purpose not in {None, "system", "measurement"}:
+            raise ValueError(
+                "Instrument resource purpose must be system or measurement"
+            )
+
+        return {
+            item.id: item.public_payload()
+            for item in self.instrument_resources
+            if purpose is None or item.purpose == purpose
+        }
 
 
 def _severity(value: str, key: str) -> Severity:
@@ -268,7 +304,7 @@ def _boolean(value: object, key: str) -> bool:
 
 
 def _windows_file_name(value: object, key: str) -> str:
-    """验证单个 Windows 文件名，禁止目录穿越、设备名和保留字符。"""
+    """验证单个 Windows 文件名，禁止目录穿越、Windows 保留设备名和保留字符。"""
 
     result = str(value)
     path = Path(result)
@@ -289,8 +325,8 @@ def _windows_file_name(value: object, key: str) -> str:
     return result
 
 
-def _device_identifier(value: object) -> str:
-    """验证可安全用于映射键和事件上下文的设备 ID。"""
+def _instrument_identifier(value: object) -> str:
+    """验证可安全用于映射键和事件上下文的仪表 ID。"""
 
     result = str(value)
     if (
@@ -299,57 +335,60 @@ def _device_identifier(value: object) -> str:
         or any(not character.isprintable() for character in result)
     ):
         raise ConfigurationError(
-            "Device id must be non-empty printable text without surrounding whitespace"
+            "Instrument id must be non-empty printable text without surrounding whitespace"
         )
     return result
 
 
-def _device_config(raw: dict[str, Any]) -> DeviceConfig:
-    """把一个 ``[[devices]]`` 表转换为经过角色与安全限制校验的配置。"""
+def _instrument_config(
+    raw: dict[str, Any],
+    resources: dict[str, InstrumentResource],
+) -> InstrumentConfig:
+    """把一个 ``[[instruments]]`` 表转换为经过角色与安全限制校验的配置。"""
 
-    required = ("id", "display_name", "kind", "plugin")
+    required = ("id", "display_name", "kind", "backend")
     missing = [key for key in required if key not in raw]
     if missing:
-        raise ConfigurationError(f"Device configuration is missing fields: {', '.join(missing)}")
+        raise ConfigurationError(f"Instrument configuration is missing fields: {', '.join(missing)}")
     try:
-        kind = DeviceKind(str(raw["kind"]).lower())
+        kind = InstrumentKind(str(raw["kind"]).lower())
     except ValueError as exc:
-        raise ConfigurationError(f"Unknown device kind: {raw['kind']}") from exc
+        raise ConfigurationError(f"Unknown instrument kind: {raw['kind']}") from exc
 
-    device_id = _device_identifier(raw["id"])
-    prefix = f"Device {device_id}"
+    instrument_id = _instrument_identifier(raw["id"])
+    prefix = f"Instrument {instrument_id}"
     default_role = (
-        DeviceRole.MONITOR
-        if kind is DeviceKind.MONITOR
-        else DeviceRole.SECONDARY
+        InstrumentRole.MONITOR
+        if kind is InstrumentKind.MONITOR
+        else InstrumentRole.SECONDARY
     )
     try:
-        role = DeviceRole(str(raw.get("role", default_role.value)).strip().casefold())
+        role = InstrumentRole(str(raw.get("role", default_role.value)).strip().casefold())
     except ValueError as exc:
         raise ConfigurationError(
             f"{prefix} role must be primary, secondary, or monitor"
         ) from exc
     control_enabled = _boolean(
-        raw.get("control_enabled", role is DeviceRole.PRIMARY),
+        raw.get("control_enabled", role is InstrumentRole.PRIMARY),
         f"{prefix} control_enabled",
     )
-    if kind is DeviceKind.MONITOR:
-        if role is not DeviceRole.MONITOR:
+    if kind is InstrumentKind.MONITOR:
+        if role is not InstrumentRole.MONITOR:
             raise ConfigurationError(
                 f"{prefix} kind=monitor requires role=monitor"
             )
         if control_enabled:
             raise ConfigurationError(
-                f"{prefix} monitor devices cannot enable control"
+                f"{prefix} monitor instruments cannot enable control"
             )
     else:
-        if role is DeviceRole.MONITOR:
+        if role is InstrumentRole.MONITOR:
             raise ConfigurationError(
-                f"{prefix} temperature/field devices use primary or secondary role"
+                f"{prefix} temperature/field instruments use primary or secondary role"
             )
-        if role is DeviceRole.PRIMARY and not control_enabled:
+        if role is InstrumentRole.PRIMARY and not control_enabled:
             raise ConfigurationError(
-                f"{prefix} primary devices must enable control"
+                f"{prefix} primary instruments must enable control"
             )
     initial_value = _finite_float(
         raw.get("initial_value", 0.0),
@@ -359,7 +398,7 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         raw.get("default_rate_per_minute", 1.0),
         f"{prefix} default_rate_per_minute",
     )
-    if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+    if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
         min_value = _finite_float(
             raw.get("min_value", float("-inf")),
             f"{prefix} min_value",
@@ -390,7 +429,7 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
     )
 
     stability = None
-    if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+    if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
         tolerance = _finite_float(
             raw.get("stability_tolerance", 0.01),
             f"{prefix} stability_tolerance",
@@ -422,8 +461,46 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
             stale_after_seconds=stale_after,
         )
 
+    backend = str(raw["backend"]).strip()
+    if "address" in raw:
+        raise ConfigurationError(
+            f"{prefix} must store its physical address in the instrument "
+            "resource file and select it with resource"
+        )
+    resource_id = str(raw.get("resource", "")).strip()
+    resource = None
+    if resource_id:
+        if ":" in backend:
+            raise ConfigurationError(
+                f"{prefix} uses a built-in backend and cannot select a "
+                "physical instrument resource"
+            )
+        resource = resources.get(resource_id)
+        if resource is None:
+            raise ConfigurationError(
+                f"{prefix} selects unknown resource {resource_id!r}"
+            )
+        if resource.purpose != "system":
+            raise ConfigurationError(
+                f"{prefix} resource {resource_id!r} is reserved for a Measurement Module"
+            )
+        if resource.system_instrument != backend:
+            raise ConfigurationError(
+                f"{prefix} backend {backend!r} does not match resource System "
+                f"Instrument {resource.system_instrument!r}"
+            )
+        address = resource.address
+    else:
+        if ":" not in backend:
+            raise ConfigurationError(
+                f"{prefix} selects external System Instrument {backend!r} "
+                "but has no resource"
+            )
+        address = ""
+
     known = {
-        "id", "display_name", "kind", "plugin", "role", "control_enabled",
+        "id", "display_name", "kind", "backend", "role", "control_enabled",
+        "resource",
         "unit", "initial_value",
         "default_rate_per_minute", "min_value", "max_value",
         "max_rate_per_minute", "stability_tolerance",
@@ -432,11 +509,13 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         "stale_after_seconds", "operation_timeout_seconds",
         "shutdown_timeout_seconds",
     }
-    device = DeviceConfig(
-        id=device_id,
+    instrument = InstrumentConfig(
+        id=instrument_id,
         display_name=str(raw["display_name"]),
         kind=kind,
-        plugin=str(raw["plugin"]),
+        backend=backend,
+        resource_id=resource_id,
+        address=address,
         role=role,
         control_enabled=control_enabled,
         unit=str(raw.get("unit", "")),
@@ -449,30 +528,36 @@ def _device_config(raw: dict[str, Any]) -> DeviceConfig:
         operation_timeout_seconds=operation_timeout,
         shutdown_timeout_seconds=shutdown_timeout,
         stability=stability,
-        extras={key: value for key, value in raw.items() if key not in known},
+        extras={
+            **({
+                "primary_reading": resource.primary_reading,
+                "monitor_readings": list(resource.monitor_readings),
+            } if resource is not None else {}),
+            **{key: value for key, value in raw.items() if key not in known},
+        },
     )
-    if kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
-        if device.min_value >= device.max_value:
-            raise ConfigurationError(f"Device {device.id}: min_value must be less than max_value")
-        if device.default_rate_per_minute <= 0 or device.max_rate_per_minute <= 0:
-            raise ConfigurationError(f"Device {device.id}: rates must be greater than zero")
-        if device.default_rate_per_minute > device.max_rate_per_minute:
+    if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
+        if instrument.min_value >= instrument.max_value:
+            raise ConfigurationError(f"Instrument {instrument.id}: min_value must be less than max_value")
+        if instrument.default_rate_per_minute <= 0 or instrument.max_rate_per_minute <= 0:
+            raise ConfigurationError(f"Instrument {instrument.id}: rates must be greater than zero")
+        if instrument.default_rate_per_minute > instrument.max_rate_per_minute:
             raise ConfigurationError(
-                f"Device {device.id}: default rate must not exceed max_rate_per_minute"
+                f"Instrument {instrument.id}: default rate must not exceed max_rate_per_minute"
             )
-        if not device.min_value <= device.initial_value <= device.max_value:
+        if not instrument.min_value <= instrument.initial_value <= instrument.max_value:
             raise ConfigurationError(
-                f"Device {device.id}: initial_value must be within min_value and max_value"
+                f"Instrument {instrument.id}: initial_value must be within min_value and max_value"
             )
-    return device
+    return instrument
 
 
 def load_config(path: str | Path) -> AppConfig:
     """加载 TOML 并返回完整 :class:`AppConfig`。
 
-    该函数是配置的唯一入口。它会拒绝重复设备 ID、多个同类主控设备、不可控的 primary、
+    该函数是配置的唯一入口。它会拒绝重复仪表 ID、多个同类主控仪表、不可控的 primary、
     可控的 monitor、无效文件名、越界初始值和不安全的报警地址。调用方可以假定返回对象的
-    结构约束已经成立，但实际目标值仍必须由 ``DeviceManager.validate_target`` 再检查。
+    结构约束已经成立，但实际目标值仍必须由 ``InstrumentManager.validate_target`` 再检查。
     """
 
     source = Path(path).resolve()
@@ -485,49 +570,54 @@ def load_config(path: str | Path) -> AppConfig:
     reporting_raw = alarm_raw.get("reporting", {})
     abort_raw = raw.get("abort", {})
     module_raw = raw.get("modules", {})
-    plugin_raw = raw.get("plugins", {})
-    raw_devices = list(raw.get("devices", []))
-    parsed_devices = [_device_config(item) for item in raw_devices]
-    # Compatibility for pre-0.11 configurations: when no role is declared for
-    # a controlled quantity, the first device of that kind remains primary.
-    for kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
-        matching_indices = [
-            index
-            for index, device in enumerate(parsed_devices)
-            if device.kind is kind
-        ]
-        if not matching_indices:
-            continue
-        explicit_role = any(
-            "role" in raw_devices[index]
-            for index in matching_indices
+    system_instrument_raw = raw.get("system_instruments", {})
+    resource_file_value = str(
+        system_instrument_raw.get(
+            "resource_file",
+            "configs/instruments.local.toml",
         )
-        has_primary = any(
-            parsed_devices[index].role is DeviceRole.PRIMARY
-            for index in matching_indices
-        )
-        if not explicit_role and not has_primary:
-            first = matching_indices[0]
-            parsed_devices[first] = replace(
-                parsed_devices[first],
-                role=DeviceRole.PRIMARY,
-                control_enabled=True,
-            )
-    devices = tuple(parsed_devices)
-    if not devices:
-        raise ConfigurationError("Configuration must contain at least one [[devices]] entry")
-    ids = [device.id for device in devices]
+    )
+    resource_path = Path(resource_file_value)
+    if not resource_path.is_absolute():
+        resource_path = source.parent.parent / resource_path
+    try:
+        instrument_resources = load_instrument_resources(resource_path)
+    except InstrumentResourceError as exc:
+        raise ConfigurationError(str(exc)) from exc
+    resources_by_id = {
+        item.id: item
+        for item in instrument_resources
+    }
+    raw_instruments = list(raw.get("instruments", []))
+    parsed_instruments = [
+        _instrument_config(item, resources_by_id)
+        for item in raw_instruments
+    ]
+    instruments = tuple(parsed_instruments)
+    if not instruments:
+        raise ConfigurationError("Configuration must contain at least one [[instruments]] entry")
+    ids = [instrument.id for instrument in instruments]
     if len(ids) != len(set(ids)):
-        raise ConfigurationError("Device IDs must be unique")
-    for kind in (DeviceKind.TEMPERATURE, DeviceKind.FIELD):
+        raise ConfigurationError("Instrument IDs must be unique")
+    selected_resources = [
+        instrument.resource_id
+        for instrument in instruments
+        if instrument.resource_id
+    ]
+    if len(selected_resources) != len(set(selected_resources)):
+        raise ConfigurationError(
+            "A physical instrument resource can be selected by only one "
+            "[[instruments]] entry; return its additional readings as metrics"
+        )
+    for kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
         primary = [
-            device.id
-            for device in devices
-            if device.kind is kind and device.role is DeviceRole.PRIMARY
+            instrument.id
+            for instrument in instruments
+            if instrument.kind is kind and instrument.role is InstrumentRole.PRIMARY
         ]
         if len(primary) > 1:
             raise ConfigurationError(
-                f"Only one primary {kind.value} device is allowed: "
+                f"Only one primary {kind.value} instrument is allowed: "
                 + ", ".join(primary)
             )
 
@@ -572,27 +662,27 @@ def load_config(path: str | Path) -> AppConfig:
         logging_raw.get("event_file_name", "events.dat"),
         "logging.event_file_name",
     )
-    device_status_file_name = _windows_file_name(
+    instrument_status_file_name = _windows_file_name(
         logging_raw.get(
-            "device_status_file_name",
-            "device_status.dat",
+            "instrument_status_file_name",
+            "instrument_status.dat",
         ),
-        "logging.device_status_file_name",
+        "logging.instrument_status_file_name",
     )
     if len({
         data_file_name.casefold(),
         event_file_name.casefold(),
-        device_status_file_name.casefold(),
+        instrument_status_file_name.casefold(),
     }) != 3:
         raise ConfigurationError(
-            "logging data, event, and device status file names must be different"
+            "logging data, event, and instrument status file names must be different"
         )
-    device_status_interval_seconds = _positive_float(
+    instrument_status_interval_seconds = _positive_float(
         logging_raw.get(
-            "device_status_interval_seconds",
+            "instrument_status_interval_seconds",
             1.0,
         ),
-        "logging.device_status_interval_seconds",
+        "logging.instrument_status_interval_seconds",
     )
     if not isinstance(reporting_raw, dict):
         raise ConfigurationError(
@@ -682,9 +772,9 @@ def load_config(path: str | Path) -> AppConfig:
             directory=str(logging_raw.get("directory", "runs")),
             data_file_name=data_file_name,
             event_file_name=event_file_name,
-            device_status_file_name=device_status_file_name,
-            device_status_interval_seconds=(
-                device_status_interval_seconds
+            instrument_status_file_name=instrument_status_file_name,
+            instrument_status_interval_seconds=(
+                instrument_status_interval_seconds
             ),
             timestamp_epoch=timestamp_epoch,
             flush_every_row=bool(logging_raw.get("flush_every_row", True)),
@@ -738,22 +828,11 @@ def load_config(path: str | Path) -> AppConfig:
         modules=ModuleConfig(
             directory=str(module_raw.get("directory", "modules")),
             data_directory=str(module_raw.get("data_directory", "module_data")),
+            state_directory=str(module_raw.get("state_directory", "trust_state")),
             shared_wheels_directory=str(module_raw.get("shared_wheels_directory", "wheels")),
             python_executable=str(module_raw.get("python_executable", "")),
             runtime_directory=str(
-                module_raw.get(
-                    "runtime_directory",
-                    str(
-                        Path(
-                            str(
-                                module_raw.get(
-                                    "site_packages_directory",
-                                    "plugin_runtime/site-packages",
-                                )
-                            )
-                        ).parent
-                    ),
-                )
+                module_raw.get("runtime_directory", "runtime_packages")
             ),
             startup_timeout_seconds=_positive_float(
                 module_raw.get("startup_timeout_seconds", 10.0),
@@ -768,34 +847,36 @@ def load_config(path: str | Path) -> AppConfig:
                 "modules.shutdown_timeout_seconds",
             ),
         ),
-        plugins=PluginConfig(
-            device_directory=str(
-                plugin_raw.get("device_directory", "device_plugins")
+        system_instruments=SystemInstrumentConfig(
+            directory=str(
+                system_instrument_raw.get("directory", "system_instruments")
             ),
+            resource_file=resource_file_value,
             state_directory=str(
-                plugin_raw.get("state_directory", "plugin_state")
+                system_instrument_raw.get("state_directory", "trust_state")
             ),
             runtime_directory=str(
-                plugin_raw.get("runtime_directory", "plugin_runtime")
+                system_instrument_raw.get("runtime_directory", "runtime_packages")
             ),
             shared_wheels_directory=str(
-                plugin_raw.get("shared_wheels_directory", "wheels")
+                system_instrument_raw.get("shared_wheels_directory", "wheels")
             ),
-            python_executable=str(plugin_raw.get("python_executable", "")),
-            device_startup_timeout_seconds=_positive_float(
-                plugin_raw.get("device_startup_timeout_seconds", 10.0),
-                "plugins.device_startup_timeout_seconds",
+            python_executable=str(system_instrument_raw.get("python_executable", "")),
+            startup_timeout_seconds=_positive_float(
+                system_instrument_raw.get("startup_timeout_seconds", 10.0),
+                "system_instruments.startup_timeout_seconds",
             ),
-            device_reconnect_timeout_seconds=_positive_float(
-                plugin_raw.get("device_reconnect_timeout_seconds", 60.0),
-                "plugins.device_reconnect_timeout_seconds",
+            reconnect_timeout_seconds=_positive_float(
+                system_instrument_raw.get("reconnect_timeout_seconds", 60.0),
+                "system_instruments.reconnect_timeout_seconds",
             ),
-            device_reconnect_interval_seconds=_positive_float(
-                plugin_raw.get("device_reconnect_interval_seconds", 2.0),
-                "plugins.device_reconnect_interval_seconds",
+            reconnect_interval_seconds=_positive_float(
+                system_instrument_raw.get("reconnect_interval_seconds", 2.0),
+                "system_instruments.reconnect_interval_seconds",
             ),
         ),
+        instrument_resources=instrument_resources,
         abort_temperature=abort_temperature,
         abort_field=abort_field,
-        devices=devices,
+        instruments=instruments,
     )

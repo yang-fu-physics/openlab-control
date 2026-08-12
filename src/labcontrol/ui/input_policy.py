@@ -93,6 +93,8 @@ class WheelInputPolicy(QObject):
             event.phase(),
             event.inverted(),
             event.source(),
+            # ``pointingDevice`` 是 Qt 对鼠标、触控板等输入硬件的称呼，
+            # 不是 OpenLab Control 的 System Instrument。
             event.pointingDevice(),
         )
         QCoreApplication.sendEvent(viewport, forwarded)

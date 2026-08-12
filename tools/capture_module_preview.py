@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
-from labcontrol.extensions.trust import PluginTrustStore  # noqa: E402
+from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.measurement.manifest import discover_modules  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 
@@ -46,7 +46,7 @@ def main() -> int:
     )
     shutil.copytree(
         ROOT
-        / "plugin_templates"
+        / "templates"
         / "measurement-modules-repository"
         / "modules",
         project_root / "modules",
@@ -54,11 +54,11 @@ def main() -> int:
     application = QApplication([])
     config = load_config(project_root / "configs" / "default.toml")
     descriptor = discover_modules(config)[0]
-    PluginTrustStore(
+    ContentTrustStore(
         config.resolve_project_path(
-            config.plugins.state_directory
+            config.modules.state_directory
         )
-        / "trusted_plugins.json"
+        / "trusted_content.json"
     ).trust("module", descriptor)
     configure_qt_appearance(
         application,

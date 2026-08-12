@@ -256,7 +256,7 @@ class ModuleCommandWorkerTests(unittest.TestCase):
 
 class ModuleCommandEngineTests(unittest.TestCase):
     def test_runtime_preflight_requires_enabled_matching_declaration(self) -> None:
-        class Devices:
+        class Instruments:
             def __init__(self) -> None:
                 self.config = load_config(ROOT / "configs" / "default.toml")
 
@@ -269,7 +269,7 @@ class ModuleCommandEngineTests(unittest.TestCase):
         service = MeasurementModuleService(
             (descriptor,),
             EventManager(),
-            Devices(),  # type: ignore[arg-type]
+            Instruments(),  # type: ignore[arg-type]
         )
         spec = normalize_module_commands("test_meter", DECLARATIONS)[0]
         command = spec.create()
@@ -320,7 +320,7 @@ class ModuleCommandEngineTests(unittest.TestCase):
                 ))
                 return True
 
-        class Devices:
+        class Instruments:
             control_ready = True
 
         class Logger:
@@ -330,7 +330,7 @@ class ModuleCommandEngineTests(unittest.TestCase):
             modules = Modules()
             engine = SequenceEngine(
                 load_config(ROOT / "configs" / "default.toml"),
-                Devices(),  # type: ignore[arg-type]
+                Instruments(),  # type: ignore[arg-type]
                 EventManager(),
                 Logger(),  # type: ignore[arg-type]
                 modules,  # type: ignore[arg-type]

@@ -1,7 +1,7 @@
 """SEQ 的执行状态机、任意嵌套扫描和 Pause/Stop 安全检查点。
 
 SequenceEngine 只在核心 asyncio 线程运行。所有耗时等待都基于“活动逻辑时间”，主动
-扣除用户 Pause 和主设备重连等待，因此恢复后不会把暂停时间误判为 dwell/settle 已完成
+扣除用户 Pause 和主仪表重连等待，因此恢复后不会把暂停时间误判为 dwell/settle 已完成
 或稳定超时。
 
 Stop/Error 都沿协作路径退出当前命令，再尝试温度和磁场 Hold Current；Stop 不把目标
@@ -19,12 +19,12 @@ from pathlib import Path
 
 from ..config import AppConfig
 from ..datafile import DatRunLogger
-from ..devices.base import DeviceError
+from ..instruments.base import InstrumentError
 from ..events import EventManager
 from ..formatting import control_decimals, fixed_number
-from ..models import DeviceKind, EventNotice, RunProgress, RunState, Severity, StabilityState
+from ..models import InstrumentKind, EventNotice, RunProgress, RunState, Severity, StabilityState
 from ..measurement.service import MeasurementModuleService
-from ..plugins import DeviceManager
+from ..instrument_manager import InstrumentManager
 from ..units import convert_value
 from .model import (
     Command,
@@ -43,33 +43,33 @@ ProgressCallback = Callable[[RunProgress], None]
 
 
 class SequenceEngine:
-    """执行一个已解析的 SEQ，并协调设备、模块、DAT 和事件状态。"""
+    """执行一个已解析的 SEQ，并协调仪表、模块、DAT 和事件状态。"""
 
     def __init__(
         self,
         config: AppConfig,
-        devices: DeviceManager,
+        instruments: InstrumentManager,
         events: EventManager,
         logger: DatRunLogger,
         modules: MeasurementModuleService | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> None:
         self.config = config
-        self.devices = devices
+        self.instruments = instruments
         self.events = events
         self.logger = logger
-        self.modules = modules or MeasurementModuleService((), events, devices)
+        self.modules = modules or MeasurementModuleService((), events, instruments)
         self.progress_callback = progress_callback or (lambda _: None)
         self.state = RunState.IDLE
         # gate 被 clear 时，所有经过 _checkpoint 的 SEQ 调度都停住。它不会主动关闭
-        # 模块输出或设备连接；这些物理策略由具体模块/设备定义。
+        # 模块输出或仪表连接；这些物理策略由具体模块/仪表定义。
         self._pause_gate = asyncio.Event()
         self._pause_gate.set()
-        # 以下累计量共同构成逻辑时钟：Pause 和主设备恢复等待都不计入实验计时。
+        # 以下累计量共同构成逻辑时钟：Pause 和主仪表恢复等待都不计入实验计时。
         self._paused_at: float | None = None
         self._paused_total = 0.0
-        self._device_wait_total = 0.0
-        self._waiting_for_devices = False
+        self._instrument_wait_total = 0.0
+        self._waiting_for_instruments = False
         self._abort_requested = False
         self._fatal_abort = False
         self._abort_message = ""
@@ -108,13 +108,13 @@ class SequenceEngine:
         self._pause_gate.set()
         self._paused_at = None
         self._paused_total = 0.0
-        self._device_wait_total = 0.0
-        self._waiting_for_devices = False
+        self._instrument_wait_total = 0.0
+        self._waiting_for_instruments = False
         self._completed_steps = 0
         self._call_stack.clear()
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
-        # 在连接设备、创建运行目录或移动第一个设定点之前递归验证全部参数，防止后段的
+        # 在连接仪表、创建运行目录或移动第一个设定点之前递归验证全部参数，防止后段的
         # 非法点让实验只执行一半。
         invalid_parameter = self._find_invalid_parameter(document.commands)
         if invalid_parameter is not None:
@@ -171,8 +171,8 @@ class SequenceEngine:
         try:
             # 新鲜读回预检确保 primary 温度/磁场可用，不能仅凭缓存的 Connected UI
             # 状态开始 Run。
-            self.devices.ensure_run_ready()
-        except DeviceError as exc:
+            self.instruments.ensure_run_ready()
+        except InstrumentError as exc:
             self.state = RunState.FAULTED
             self._fatal_abort = True
             self._abort_message = str(exc)
@@ -196,12 +196,12 @@ class SequenceEngine:
                 descriptors,
                 module_settings or {},
                 module_status,
-                self.devices.snapshots(),
+                self.instruments.snapshots(),
             )
             # 即使 SEQ 只有 End Sequence、尚未来得及等到下一次后台 poll，也保留
-            # 一行通过 Run 前新鲜读回检查的初始设备状态。
-            self.logger.write_device_status(
-                self.devices.snapshots(),
+            # 一行通过 Run 前新鲜读回检查的初始仪表状态。
+            self.logger.write_instrument_status(
+                self.instruments.snapshots(),
                 force=True,
             )
         except Exception as exc:
@@ -236,12 +236,12 @@ class SequenceEngine:
             # 用户 Stop 和事件 Error 共用这里。二者都 Hold Current，区别只在最终
             # STOPPED/FAULTED；Hold 无法确认时必须升级为 FAULTED。
             self.state = RunState.FAULTED if self._fatal_abort else RunState.STOPPED
-            hold_succeeded = await self.devices.hold_all()
+            hold_succeeded = await self.instruments.hold_all()
             if not hold_succeeded:
                 self.state = RunState.FAULTED
                 self._fatal_abort = True
                 self._abort_message = (
-                    "Sequence stopped, but one or more control devices "
+                    "Sequence stopped, but one or more control instruments "
                     "could not confirm Hold Current"
                 )
             code = "RUN_FAULTED" if self._fatal_abort else "RUN_STOPPED"
@@ -259,10 +259,10 @@ class SequenceEngine:
                 "Sequence task was cancelled during shutdown"
             )
             self.state = RunState.FAULTED
-            hold_succeeded = await self.devices.hold_all()
+            hold_succeeded = await self.instruments.hold_all()
             if not hold_succeeded:
                 self._abort_message += (
-                    "; one or more control devices could not confirm "
+                    "; one or more control instruments could not confirm "
                     "Hold Current"
                 )
             self.events.report(
@@ -272,17 +272,17 @@ class SequenceEngine:
                 self._abort_message,
             )
             raise
-        except DeviceError as exc:
+        except InstrumentError as exc:
             self._fatal_abort = True
             self._abort_message = str(exc)
             self.state = RunState.FAULTED
-            await self.devices.hold_all()
+            await self.instruments.hold_all()
             self.events.report(Severity.ERROR, "sequence", exc.code, str(exc), exc.context)
         except Exception as exc:
             self._fatal_abort = True
             self._abort_message = str(exc)
             self.state = RunState.FAULTED
-            await self.devices.hold_all()
+            await self.instruments.hold_all()
             self.events.report(Severity.ERROR, "sequence", "UNHANDLED_EXCEPTION", str(exc))
         else:
             self.state = RunState.COMPLETED
@@ -297,7 +297,7 @@ class SequenceEngine:
             if not cleanup_succeeded:
                 self.state = RunState.FAULTED
                 self._abort_message = "One or more modules failed to end the sequence safely"
-                await self.devices.hold_all()
+                await self.instruments.hold_all()
                 self.events.report(
                     Severity.INFO,
                     "sequence",
@@ -374,14 +374,14 @@ class SequenceEngine:
 
     async def _execute_commands(self, commands: list[Command], prefix: list[str]) -> None:
         for index, command in enumerate(commands, start=1):
-            # 每条命令（包括嵌套 Scan 子命令）前都有统一 Pause/Stop/设备恢复检查点。
+            # 每条命令（包括嵌套 Scan 子命令）前都有统一 Pause/Stop/仪表恢复检查点。
             await self._checkpoint()
             parameter_issues = validate_command_parameters(command)
             if parameter_issues:
                 self._current_path = " / ".join(
                     prefix + [f"{index}:{command.type.value}"]
                 )
-                raise DeviceError(
+                raise InstrumentError(
                     "Invalid sequence parameter: " + "; ".join(parameter_issues),
                     "INVALID_SEQUENCE_PARAMETER",
                     self._current_path,
@@ -422,7 +422,7 @@ class SequenceEngine:
         p = command.params
         parameter_issues = validate_command_parameters(command)
         if parameter_issues:
-            raise DeviceError(
+            raise InstrumentError(
                 "Invalid sequence parameter: " + "; ".join(parameter_issues),
                 "INVALID_SEQUENCE_PARAMETER",
                 self._current_path,
@@ -445,48 +445,48 @@ class SequenceEngine:
             await self._interruptible_sleep(float(p.get("seconds", 0.0)))
             return
         if command.type is CommandType.SET_TEMPERATURE:
-            device_id = self.devices.resolve_device_id(
-                DeviceKind.TEMPERATURE,
-                p.get("device_id"),
+            instrument_id = self.instruments.resolve_instrument_id(
+                InstrumentKind.TEMPERATURE,
+                p.get("instrument_id"),
             )
-            applied = await self.devices.set_target_by_kind(
-                DeviceKind.TEMPERATURE,
+            applied = await self.instruments.set_target_by_kind(
+                InstrumentKind.TEMPERATURE,
                 float(p.get("target", 300.0)),
                 float(p.get("rate", 5.0)),
                 str(p.get("mode", "Settle")),
-                device_id,
+                instrument_id,
             )
             if not applied:
                 return
             if "settle" in str(p.get("mode", "Settle")).lower():
-                await self._wait_for_stability(device_id)
+                await self._wait_for_stability(instrument_id)
             return
         if command.type is CommandType.SET_FIELD:
-            device_id = self.devices.resolve_device_id(
-                DeviceKind.FIELD,
-                p.get("device_id"),
+            instrument_id = self.instruments.resolve_instrument_id(
+                InstrumentKind.FIELD,
+                p.get("instrument_id"),
             )
-            device_unit = self.devices.device_configs[device_id].unit
-            source_unit = str(p.get("unit", device_unit))
-            target = convert_value(float(p.get("target", 0.0)), source_unit, device_unit)
-            rate = convert_value(float(p.get("rate", 0.5)), source_unit, device_unit)
-            applied = await self.devices.set_target_by_kind(
-                DeviceKind.FIELD,
+            instrument_unit = self.instruments.instrument_configs[instrument_id].unit
+            source_unit = str(p.get("unit", instrument_unit))
+            target = convert_value(float(p.get("target", 0.0)), source_unit, instrument_unit)
+            rate = convert_value(float(p.get("rate", 0.5)), source_unit, instrument_unit)
+            applied = await self.instruments.set_target_by_kind(
+                InstrumentKind.FIELD,
                 target,
                 rate,
                 str(p.get("mode", "Settle")),
-                device_id,
+                instrument_id,
             )
             if not applied:
                 return
             if "settle" in str(p.get("mode", "Settle")).lower():
-                await self._wait_for_stability(device_id)
+                await self._wait_for_stability(instrument_id)
             return
         if command.type is CommandType.SCAN_TEMPERATURE:
-            await self._scan_controlled(command, DeviceKind.TEMPERATURE, path)
+            await self._scan_controlled(command, InstrumentKind.TEMPERATURE, path)
             return
         if command.type is CommandType.SCAN_FIELD:
-            await self._scan_controlled(command, DeviceKind.FIELD, path)
+            await self._scan_controlled(command, InstrumentKind.FIELD, path)
             return
         if command.type is CommandType.SCAN_TIME:
             await self._scan_time(command, path)
@@ -536,23 +536,23 @@ class SequenceEngine:
     async def _scan_controlled(
         self,
         command: Command,
-        kind: DeviceKind,
+        kind: InstrumentKind,
         path: list[str],
     ) -> None:
         p = command.params
-        device_id = self.devices.resolve_device_id(kind, p.get("device_id"))
-        config = self.devices.device_configs[device_id]
-        source_unit = "K" if kind is DeviceKind.TEMPERATURE else str(p.get("unit", config.unit))
+        instrument_id = self.instruments.resolve_instrument_id(kind, p.get("instrument_id"))
+        config = self.instruments.instrument_configs[instrument_id]
+        source_unit = "K" if kind is InstrumentKind.TEMPERATURE else str(p.get("unit", config.unit))
         rate = convert_value(float(p.get("rate", config.default_rate_per_minute)), source_unit, config.unit)
         mode = str(p.get("mode", "Settle"))
-        if kind is DeviceKind.TEMPERATURE and str(p.get("point_mode", "Linear")).casefold() == "list":
+        if kind is InstrumentKind.TEMPERATURE and str(p.get("point_mode", "Linear")).casefold() == "list":
             try:
                 source_points = parse_temperature_points(p.get("points", ""))
             except ValueError as exc:
-                raise DeviceError(
+                raise InstrumentError(
                     f"Invalid Scan Temperature list: {exc}",
                     "INVALID_TEMPERATURE_LIST",
-                    device_id,
+                    instrument_id,
                 ) from exc
             points = [convert_value(point, source_unit, config.unit) for point in source_points]
             steps = len(points)
@@ -563,15 +563,15 @@ class SequenceEngine:
             points = self._linspace(start, stop, steps)
 
         if (
-            kind is DeviceKind.FIELD
+            kind is InstrumentKind.FIELD
             and p.get("nearest_polarity", False) is True
         ):
             # 极性必须在这条 Scan 真正运行到时决定。先经过统一 Pause/Stop/恢复检查，
-            # 再取得后台设备轮询刚发布的实际场；不能使用加载 SEQ 或启动 Run 时的值。
+            # 再取得后台仪表轮询刚发布的实际场；不能使用加载 SEQ 或启动 Run 时的值。
             # _checkpoint 已保证 primary 读数未超过配置的新鲜度期限，这里仍复核快照，
-            # 防止自定义 DeviceManager 或极短竞态把空值带入极性判断。
+            # 防止自定义 InstrumentManager 或极短竞态把空值带入极性判断。
             await self._checkpoint()
-            snapshot = self.devices.snapshots().get(device_id)
+            snapshot = self.instruments.snapshots().get(instrument_id)
             current = None if snapshot is None else snapshot.current
             snapshot_age = (
                 math.inf
@@ -585,11 +585,11 @@ class SequenceEngine:
                 or current is None
                 or not math.isfinite(current)
             ):
-                raise DeviceError(
+                raise InstrumentError(
                     f"{config.display_name} has no fresh finite current field for "
                     "nearest-polarity scan",
                     "FIELD_SCAN_CURRENT_UNAVAILABLE",
-                    device_id,
+                    instrument_id,
                 )
             entered_start = points[0]
             inverted_start = -entered_start
@@ -598,7 +598,7 @@ class SequenceEngine:
                 # 整条扫描路径一起反号，不能只改变起点；显式消除 -0.0，避免日志和
                 # 数据路径出现容易误读的负零。
                 points = [0.0 if point == 0.0 else -point for point in points]
-            decimals = control_decimals(DeviceKind.FIELD, config.unit)
+            decimals = control_decimals(InstrumentKind.FIELD, config.unit)
             chosen = "sign-inverted" if invert else "entered"
             self.events.report(
                 Severity.INFO,
@@ -614,16 +614,16 @@ class SequenceEngine:
         # 在移动第一个设定点之前验证完整路径。后面的坏点不能让实验停在“已执行一半”
         # 的中间状态。
         for point in points:
-            self.devices.validate_target(device_id, point, rate)
+            self.instruments.validate_target(instrument_id, point, rate)
         for point_index, point in enumerate(points, start=1):
             await self._checkpoint()
-            applied = await self.devices.set_target(device_id, point, rate, mode)
+            applied = await self.instruments.set_target(instrument_id, point, rate, mode)
             if not applied:
                 continue
             if "settle" in mode.lower():
-                await self._wait_for_stability(device_id)
+                await self._wait_for_stability(instrument_id)
             else:
-                await self._wait_for_target(device_id)
+                await self._wait_for_target(instrument_id)
             decimals = control_decimals(kind, config.unit)
             point_path = path + [
                 f"point {point_index}/{steps}={fixed_number(point, decimals)} {config.unit}"
@@ -656,14 +656,14 @@ class SequenceEngine:
             command.module_command_id,
         )
         if spec is None or spec.kind != "scan":
-            raise DeviceError(
+            raise InstrumentError(
                 f"Module scan is unavailable: {command.module_id}.{command.module_command_id}",
                 "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
                 f"{command.module_id}.{command.module_command_id}",
             )
         points = command.params.get(spec.points_field)
         if not isinstance(points, list) or not points:
-            raise DeviceError(
+            raise InstrumentError(
                 f"Module scan field {spec.points_field!r} must contain at least one point",
                 "MODULE_SEQUENCE_COMMAND_INVALID",
                 f"{command.module_id}.{command.module_command_id}",
@@ -704,13 +704,13 @@ class SequenceEngine:
             base = self._call_stack[-1].parent if self._call_stack else self.config.project_root
             source = (base / source).resolve()
         if source in self._call_stack:
-            raise DeviceError(f"Circular sequence call detected: {source}", "SEQUENCE_CALL_CYCLE", str(source))
+            raise InstrumentError(f"Circular sequence call detected: {source}", "SEQUENCE_CALL_CYCLE", str(source))
         if not source.exists():
-            raise DeviceError(f"Subsequence does not exist: {source}", "SEQUENCE_NOT_FOUND", str(source))
+            raise InstrumentError(f"Subsequence does not exist: {source}", "SEQUENCE_NOT_FOUND", str(source))
         result = load_sequence(source)
         if result.has_errors:
             details = "; ".join(issue.message for issue in result.issues if issue.level == "error")
-            raise DeviceError(f"Subsequence parsing failed: {details}", "SEQUENCE_PARSE_ERROR", str(source))
+            raise InstrumentError(f"Subsequence parsing failed: {details}", "SEQUENCE_PARSE_ERROR", str(source))
         self._call_stack.append(source)
         try:
             await self._execute_commands(result.document.commands, path + [f"call {source.name}"])
@@ -848,11 +848,11 @@ class SequenceEngine:
                 return invalid_child
         return None
 
-    async def _wait_for_stability(self, device_id: str) -> None:
+    async def _wait_for_stability(self, instrument_id: str) -> None:
         started = self._active_time()
         while True:
             await self._checkpoint()
-            snapshot = self.devices.latest.get(device_id)
+            snapshot = self.instruments.latest.get(instrument_id)
             if snapshot is not None:
                 if snapshot.stability is StabilityState.STABLE:
                     return
@@ -861,7 +861,7 @@ class SequenceEngine:
                     if self.config.alarms.stability_timeout is not Severity.ERROR:
                         return
             if self._control_wait_timed_out(
-                device_id,
+                instrument_id,
                 started,
                 "stabilize",
             ):
@@ -870,13 +870,13 @@ class SequenceEngine:
                 self.config.control_poll_interval_seconds
             )
 
-    async def _wait_for_target(self, device_id: str) -> None:
-        config = self.devices.device_configs[device_id]
+    async def _wait_for_target(self, instrument_id: str) -> None:
+        config = self.instruments.instrument_configs[instrument_id]
         tolerance = config.stability.tolerance if config.stability else 0.0
         started = self._active_time()
         while True:
             await self._checkpoint()
-            snapshot = self.devices.latest.get(device_id)
+            snapshot = self.instruments.latest.get(instrument_id)
             if (
                 snapshot is not None
                 and snapshot.current is not None
@@ -885,7 +885,7 @@ class SequenceEngine:
             ):
                 return
             if self._control_wait_timed_out(
-                device_id,
+                instrument_id,
                 started,
                 "reach its target",
             ):
@@ -896,11 +896,11 @@ class SequenceEngine:
 
     def _control_wait_timed_out(
         self,
-        device_id: str,
+        instrument_id: str,
         started: float,
         action: str,
     ) -> bool:
-        config = self.devices.device_configs[device_id]
+        config = self.instruments.instrument_configs[instrument_id]
         timeout = (
             config.stability.timeout_seconds
             if config.stability is not None
@@ -911,7 +911,7 @@ class SequenceEngine:
             return False
         self.events.report(
             self.config.alarms.stability_timeout,
-            device_id,
+            instrument_id,
             "STABILITY_TIMEOUT",
             f"{config.display_name} did not {action} within {elapsed:.1f} seconds",
         )
@@ -919,11 +919,11 @@ class SequenceEngine:
         return True
 
     async def _checkpoint(self) -> None:
-        """统一等待用户 Pause 和 primary 设备恢复，并随时响应 Stop/Error。
+        """统一等待用户 Pause 和 primary 仪表恢复，并随时响应 Stop/Error。
 
         先检查 Stop，再等待 pause gate，gate 打开后再检查一次，避免 Stop 与 Resume
-        竞态漏过。主设备恢复期间每 100 ms 检查 Stop；整段恢复等待累计到
-        ``_device_wait_total``，不消耗 Settle/Wait/Scan Time 的逻辑时限。
+        竞态漏过。主仪表恢复期间每 100 ms 检查 Stop；整段恢复等待累计到
+        ``_instrument_wait_total``，不消耗 Settle/Wait/Scan Time 的逻辑时限。
         """
 
         while True:
@@ -931,19 +931,19 @@ class SequenceEngine:
             await self._pause_gate.wait()
             self._check_control()
             control_ready = bool(
-                getattr(self.devices, "control_ready", True)
+                getattr(self.instruments, "control_ready", True)
             )
             if control_ready:
-                if self._waiting_for_devices:
-                    self._waiting_for_devices = False
+                if self._waiting_for_instruments:
+                    self._waiting_for_instruments = False
                     self._publish(
-                        "Primary device communication restored"
+                        "Primary instrument communication restored"
                     )
                 return
-            if not self._waiting_for_devices:
-                self._waiting_for_devices = True
+            if not self._waiting_for_instruments:
+                self._waiting_for_instruments = True
                 reason_callback = getattr(
-                    self.devices,
+                    self.instruments,
                     "control_block_reason",
                     None,
                 )
@@ -953,7 +953,7 @@ class SequenceEngine:
                     else None
                 )
                 self._publish(
-                    "Waiting for primary device recovery"
+                    "Waiting for primary instrument recovery"
                     + (f": {reason}" if reason else "")
                 )
             wait_started = time.monotonic()
@@ -962,7 +962,7 @@ class SequenceEngine:
                     self._pause_gate.is_set()
                     and not bool(
                         getattr(
-                            self.devices,
+                            self.instruments,
                             "control_ready",
                             True,
                         )
@@ -971,7 +971,7 @@ class SequenceEngine:
                     self._check_control()
                     await asyncio.sleep(0.1)
             finally:
-                self._device_wait_total += max(
+                self._instrument_wait_total += max(
                     0.0,
                     time.monotonic() - wait_started,
                 )
@@ -983,7 +983,7 @@ class SequenceEngine:
             raise SequenceAbort(self._abort_message)
 
     async def _interruptible_sleep(self, seconds: float) -> None:
-        """按活动逻辑时间等待，最长约 100 ms 响应 Pause/Stop/设备失联。"""
+        """按活动逻辑时间等待，最长约 100 ms 响应 Pause/Stop/仪表失联。"""
 
         deadline = self._active_time() + max(0.0, seconds)
         while True:
@@ -997,10 +997,10 @@ class SequenceEngine:
         await self._interruptible_sleep(max(0.0, deadline - self._active_time()))
 
     def _active_time(self) -> float:
-        """返回扣除 Pause 与主设备恢复等待后的单调逻辑时间。
+        """返回扣除 Pause 与主仪表恢复等待后的单调逻辑时间。
 
         使用 ``time.monotonic`` 避免系统时钟校时影响实验时限。当前仍在进行的 Pause
-        单独即时扣除，已结束 Pause 和设备等待使用累计值扣除。
+        单独即时扣除，已结束 Pause 和仪表等待使用累计值扣除。
         """
 
         now = time.monotonic()
@@ -1013,7 +1013,7 @@ class SequenceEngine:
             now
             - self._paused_total
             - current_pause
-            - self._device_wait_total
+            - self._instrument_wait_total
         )
 
     def _finish_pause(self) -> None:

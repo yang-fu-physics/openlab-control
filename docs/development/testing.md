@@ -7,11 +7,11 @@
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover `
-  -s plugin_templates\measurement-modules-repository\tests -v
+  -s templates\measurement-modules-repository\tests -v
 ```
 
 这些测试会检查教学模块能否启动、应用设置、逐通道测量、报告超量程并安全关闭。完整例子在
-`plugin_templates/measurement-modules-repository/tests/test_tutorial_resistance.py`。
+`templates/measurement-modules-repository/tests/test_tutorial_resistance.py`。
 
 ## 每个模块至少检查这些情况
 

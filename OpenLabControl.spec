@@ -24,10 +24,9 @@ from labcontrol import __version__
 
 
 hiddenimports = (
-    ["labcontrol.devices.simulated"]
-    + collect_submodules("labcontrol_plugins")
-    # 仪表模块会在独立 worker 中动态 import PyVISA，PyInstaller 静态分析看不到。
-    # 由核心统一收集后，所有模块使用同一个 1.16.2 版本，不再各自安装 wheel。
+    ["labcontrol.instruments.simulated"]
+    # System Instrument 与 Measurement Module 会在独立 worker 中动态 import PyVISA，
+    # PyInstaller 静态分析看不到。由核心统一收集后，两者使用同一个 1.16.2 版本。
     + collect_submodules(
         "pyvisa",
         filter=lambda name: not name.startswith(
@@ -43,7 +42,7 @@ for distribution in (
     "PyVISA",
     "typing_extensions",
 ):
-    # 扩展可用 importlib.metadata 核对实际共享版本；否则 PyInstaller 中
+    # System Instrument 与 Measurement Module 可用 importlib.metadata 核对实际共享版本；否则 PyInstaller 中
     # PyVISA.__version__ 会退化为 unknown，无法证明锁定契约。
     framework_metadata += copy_metadata(distribution)
 parsed_version = Version(__version__)
@@ -55,36 +54,49 @@ prerelease_number = (
     else 0
 )
 version_numbers = tuple(release_numbers + [prerelease_number])
-version_info = VSVersionInfo(
-    ffi=FixedFileInfo(
-        filevers=version_numbers,
-        prodvers=version_numbers,
-        mask=0x3F,
-        flags=0x0,
-        OS=0x40004,
-        fileType=0x1,
-        subtype=0x0,
-        date=(0, 0),
-    ),
-    kids=[
-        StringFileInfo(
-            [
-                StringTable(
-                    "040904B0",
-                    [
-                        StringStruct("CompanyName", "OpenLab"),
-                        StringStruct("FileDescription", "OpenLab Control"),
-                        StringStruct("FileVersion", __version__),
-                        StringStruct("InternalName", "OpenLabControl"),
-                        StringStruct("OriginalFilename", "OpenLabControl.exe"),
-                        StringStruct("ProductName", "OpenLab Control"),
-                        StringStruct("ProductVersion", __version__),
-                    ],
-                )
-            ]
+def make_version_info(description, internal_name, filename):
+    return VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=version_numbers,
+            prodvers=version_numbers,
+            mask=0x3F,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0),
         ),
-        VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
-    ],
+        kids=[
+            StringFileInfo(
+                [
+                    StringTable(
+                        "040904B0",
+                        [
+                            StringStruct("CompanyName", "OpenLab"),
+                            StringStruct("FileDescription", description),
+                            StringStruct("FileVersion", __version__),
+                            StringStruct("InternalName", internal_name),
+                            StringStruct("OriginalFilename", filename),
+                            StringStruct("ProductName", "OpenLab Control"),
+                            StringStruct("ProductVersion", __version__),
+                        ],
+                    )
+                ]
+            ),
+            VarFileInfo([VarStruct("Translation", [0x0409, 1200])]),
+        ],
+    )
+
+
+version_info = make_version_info(
+    "OpenLab Control",
+    "OpenLabControl",
+    "OpenLabControl.exe",
+)
+scanner_version_info = make_version_info(
+    "OpenLab Control Instrument Scanner",
+    "InstrumentScanner",
+    "InstrumentScanner.exe",
 )
 
 a = Analysis(
@@ -122,6 +134,47 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version=version_info,
+)
+
+# Release 中的扫描器位于 ``tools/`` 且该目录只允许有一个 EXE，因此它必须是独立 onefile
+# 程序，不能依赖相邻的 ``_internal``。源码版仍直接使用主项目 .venv 中的同一组锁定依赖。
+scanner_analysis = Analysis(
+    ["tools/instrument_scanner.py"],
+    pathex=["src"],
+    binaries=[],
+    datas=framework_metadata,
+    hiddenimports=collect_submodules(
+        "pyvisa",
+        filter=lambda name: not name.startswith(
+            "pyvisa.testsuite"
+        ),
+    ),
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+scanner_pyz = PYZ(scanner_analysis.pure)
+scanner_exe = EXE(
+    scanner_pyz,
+    scanner_analysis.scripts,
+    scanner_analysis.binaries,
+    scanner_analysis.datas,
+    [],
+    name="InstrumentScanner",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    version=scanner_version_info,
 )
 
 coll = COLLECT(

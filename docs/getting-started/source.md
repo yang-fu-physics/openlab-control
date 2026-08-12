@@ -19,7 +19,7 @@ cd openlab-control
 
 ## 使用本机配置
 
-默认配置只用于仿真。接入真实设备时先创建不会进入 Git 的本机副本：
+默认配置只用于仿真。接入真实仪表时先创建不会进入 Git 的本机副本：
 
 ```powershell
 Copy-Item .\configs\default.toml .\configs\site.local.toml
@@ -62,6 +62,6 @@ Copy-Item .\configs\default.toml .\configs\site.local.toml
 
 !!! danger "不要提交实验室秘密"
 
-    仪表地址、令牌、私钥、真实实验 DAT、`module_data/`、`plugin_state/` 和本机 runtime
+    仪表地址、令牌、私钥、真实实验 DAT、`module_data/`、`trust_state/` 和本机 runtime
     都不应进入 Git。每次 Run 保存的 `runs/**/configuration.toml` 是本机配置的完整快照，
     也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。

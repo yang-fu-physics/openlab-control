@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..extensions.loading import load_source_object
+from ..package_support.loading import load_source_object
 from ..measurement.frontend_api import ModuleUIAPI
 from ..measurement.manifest import ModuleDescriptor
 from .scaling import scaled
@@ -40,7 +40,7 @@ MODULE_WINDOW_MIN_HEIGHT = 260
 
 
 class _GenericFrontend(QWidget):
-    """没有自定义界面时使用的核心占位页；不是第三方扩展 API。"""
+    """没有自定义界面时使用的核心占位页；不是 Measurement Module API。"""
 
     def __init__(self, _api: ModuleUIAPI) -> None:
         super().__init__()
@@ -71,13 +71,19 @@ class ModuleWindow(QDialog):
     actionRequested = Signal(str, str, dict)
     statusRefreshRequested = Signal(str)
 
-    def __init__(self, descriptor: ModuleDescriptor, parent: QWidget) -> None:
+    def __init__(
+        self,
+        descriptor: ModuleDescriptor,
+        parent: QWidget,
+        *,
+        resources: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.descriptor = descriptor
         self._allow_close = False
         self._dirty = False
-        self.ui_api = ModuleUIAPI(self)
+        self.ui_api = ModuleUIAPI(self, resources=resources)
         self._has_frontend = (descriptor.path / "frontend.py").is_file()
         frontend_class: type[Any] = _GenericFrontend
         if self._has_frontend:

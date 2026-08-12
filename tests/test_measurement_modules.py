@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_REPOSITORY = (
     ROOT
-    / "plugin_templates"
+    / "templates"
     / "measurement-modules-repository"
 )
 sys.path.insert(0, str(ROOT / "src"))
@@ -33,9 +33,9 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
-from labcontrol.devices.base import DeviceError  # noqa: E402
+from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.extensions.trust import PluginTrustStore  # noqa: E402
+from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.measurement.manifest import (  # noqa: E402
     ModuleColumn,
     ModuleDescriptor,
@@ -45,7 +45,7 @@ from labcontrol.measurement.manifest import (  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.measurement.settings import load_settings, save_settings  # noqa: E402
 from labcontrol.measurement.worker import ModuleWorkerClient, WorkerRequestError  # noqa: E402
-from labcontrol.plugins import DeviceManager  # noqa: E402
+from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
 from labcontrol.ui.measurement_modules import (  # noqa: E402
     MODULE_WINDOW_MIN_HEIGHT,
     MODULE_WINDOW_MIN_WIDTH,
@@ -68,11 +68,11 @@ def copied_project(temp_root: Path):
         temp_root / "modules",
     )
     config = load_config(temp_root / "configs" / "default.toml")
-    store = PluginTrustStore(
+    store = ContentTrustStore(
         config.resolve_project_path(
-            config.plugins.state_directory
+            config.modules.state_directory
         )
-        / "trusted_plugins.json"
+        / "trusted_content.json"
     )
     for descriptor in discover_modules(config):
         if descriptor.valid:
@@ -381,7 +381,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(
+            instruments = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -390,13 +390,13 @@ class ModuleServiceTests(unittest.TestCase):
             modules = MeasurementModuleService(
                 (descriptor,),
                 events,
-                devices,
+                instruments,
             )
             modules.trust_store.revoke(
                 "module",
                 descriptor.id,
             )
-            with self.assertRaises(DeviceError) as untrusted:
+            with self.assertRaises(InstrumentError) as untrusted:
                 await modules.enable(descriptor.id)
             self.assertEqual(
                 untrusted.exception.code,
@@ -419,7 +419,7 @@ class ModuleServiceTests(unittest.TestCase):
                 + "\n# changed after trust\n",
                 encoding="utf-8",
             )
-            with self.assertRaises(DeviceError) as changed:
+            with self.assertRaises(InstrumentError) as changed:
                 await modules.enable(descriptor.id)
             self.assertEqual(
                 changed.exception.code,
@@ -437,7 +437,7 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config = copied_project(Path(temp))
             events = EventManager()
-            devices = DeviceManager(config, events, isolate_processes=False)
+            instruments = InstrumentManager(config, events, isolate_processes=False)
             descriptor = ModuleDescriptor(
                 id="finite_values",
                 name="Finite Values",
@@ -445,10 +445,10 @@ class ModuleServiceTests(unittest.TestCase):
                 path=Path(temp),
                 columns=(ModuleColumn("Value", "V"),),
             )
-            modules = MeasurementModuleService((descriptor,), events, devices)
+            modules = MeasurementModuleService((descriptor,), events, instruments)
             for invalid in (math.nan, math.inf, -math.inf):
                 with self.subTest(value=invalid):
-                    with self.assertRaises(DeviceError) as captured:
+                    with self.assertRaises(InstrumentError) as captured:
                         modules._validated_row(
                             descriptor,
                             {"Value": invalid},
@@ -468,7 +468,7 @@ class ModuleServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config = copied_project(Path(temp))
             events = EventManager()
-            devices = DeviceManager(
+            instruments = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -486,7 +486,7 @@ class ModuleServiceTests(unittest.TestCase):
             modules = MeasurementModuleService(
                 (descriptor,),
                 events,
-                devices,
+                instruments,
             )
             self.assertEqual(
                 modules._validated_row(
@@ -536,13 +536,13 @@ class ModuleServiceTests(unittest.TestCase):
             ([math.inf], "MODULE_RAW_DATA_VALUE_ERROR"),
         ):
             with self.subTest(value=invalid):
-                with self.assertRaises(DeviceError) as captured:
+                with self.assertRaises(InstrumentError) as captured:
                     MeasurementModuleService._validated_raw_values(
                         "meter",
                         invalid,
                     )
                 self.assertEqual(captured.exception.code, code)
-        with self.assertRaises(DeviceError) as captured:
+        with self.assertRaises(InstrumentError) as captured:
             MeasurementModuleService._validated_raw_values(
                 "meter",
                 [0.0] * 32_769,
@@ -558,19 +558,19 @@ class ModuleServiceTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            devices = DeviceManager(config, events, isolate_processes=False)
+            instruments = InstrumentManager(config, events, isolate_processes=False)
             runtime_messages: list[tuple[str, dict[str, object]]] = []
             modules = MeasurementModuleService(
                 discover_modules(config),
                 events,
-                devices,
+                instruments,
                 lambda kind, payload: runtime_messages.append(
                     (kind, payload)
                 ),
             )
             logger = DatRunLogger(config, events)
-            await devices.connect_all()
-            await devices.poll_all()
+            await instruments.connect_all()
+            await instruments.poll_all()
             settings = {}
             try:
                 await modules.enable("simulated_transport")
@@ -648,7 +648,7 @@ class ModuleServiceTests(unittest.TestCase):
             finally:
                 logger.close()
                 await modules.shutdown()
-                await devices.disconnect_all()
+                await instruments.disconnect_all()
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
@@ -659,11 +659,11 @@ class ModuleServiceTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            devices = DeviceManager(config, events, isolate_processes=False)
-            modules = MeasurementModuleService(discover_modules(config), events, devices)
+            instruments = InstrumentManager(config, events, isolate_processes=False)
+            modules = MeasurementModuleService(discover_modules(config), events, instruments)
             logger = DatRunLogger(config, events)
-            await devices.connect_all()
-            await devices.poll_all()
+            await instruments.connect_all()
+            await instruments.poll_all()
             try:
                 descriptors, statuses = await modules.prepare_sequence()
                 paths = logger.open_run("empty.seq", "T Measure\nT End Sequence\n", descriptors, {}, statuses)
@@ -684,7 +684,7 @@ class ModuleServiceTests(unittest.TestCase):
             finally:
                 logger.close()
                 await modules.shutdown()
-                await devices.disconnect_all()
+                await instruments.disconnect_all()
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
@@ -693,9 +693,9 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(config, events, isolate_processes=False)
+            instruments = InstrumentManager(config, events, isolate_processes=False)
 
-            end_service = MeasurementModuleService(discover_modules(config), events, devices)
+            end_service = MeasurementModuleService(discover_modules(config), events, instruments)
             end_record = end_service.records["simulated_transport"]
             end_client = self._FailingClient(
                 "event",
@@ -711,13 +711,13 @@ class ModuleServiceTests(unittest.TestCase):
             self.assertEqual(end_record.state, "faulted")
             self.assertEqual(end_client.actions, ["event"])
 
-            close_service = MeasurementModuleService(discover_modules(config), events, devices)
+            close_service = MeasurementModuleService(discover_modules(config), events, instruments)
             close_record = close_service.records["simulated_transport"]
             close_client = self._FailingClient("module_close")
             close_record.client = close_client  # type: ignore[assignment]
             close_record.enabled = True
             close_record.state = "enabled"
-            with self.assertRaises(DeviceError):
+            with self.assertRaises(InstrumentError):
                 await close_service.disable("simulated_transport")
             self.assertFalse(close_record.enabled)
             self.assertEqual(close_record.state, "disabled")
@@ -738,7 +738,7 @@ class ModuleServiceTests(unittest.TestCase):
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
-            devices = DeviceManager(
+            instruments = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -746,7 +746,7 @@ class ModuleServiceTests(unittest.TestCase):
             modules = MeasurementModuleService(
                 discover_modules(config),
                 events,
-                devices,
+                instruments,
             )
             record = modules.records[
                 "simulated_transport"
@@ -791,7 +791,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(config, events, isolate_processes=False)
+            instruments = InstrumentManager(config, events, isolate_processes=False)
             descriptors = tuple(
                 ModuleDescriptor(
                     id=module_id,
@@ -802,7 +802,7 @@ class ModuleServiceTests(unittest.TestCase):
                 )
                 for module_id in ("module_a", "module_b")
             )
-            modules = MeasurementModuleService(descriptors, events, devices)
+            modules = MeasurementModuleService(descriptors, events, instruments)
             barrier = threading.Barrier(2)
             for index, module_id in enumerate(("module_a", "module_b"), start=1):
                 record = modules.records[module_id]
@@ -810,8 +810,8 @@ class ModuleServiceTests(unittest.TestCase):
                 record.state = "enabled"
                 record.client = self._BarrierClient(barrier, float(index))  # type: ignore[assignment]
             logger = DatRunLogger(config, events)
-            await devices.connect_all()
-            await devices.poll_all()
+            await instruments.connect_all()
+            await instruments.poll_all()
             discovered, statuses = await modules.prepare_sequence()
             paths = logger.open_run("parallel.seq", "T Measure\n", discovered, {}, statuses)
             await modules.begin_sequence()
@@ -837,7 +837,7 @@ class ModuleServiceTests(unittest.TestCase):
                 },
                 {"1.0000000000000001e-09", "2.0000000000000001e-09"},
             )
-            await devices.disconnect_all()
+            await instruments.disconnect_all()
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
@@ -846,7 +846,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(
+            instruments = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -864,7 +864,7 @@ class ModuleServiceTests(unittest.TestCase):
             modules = MeasurementModuleService(
                 descriptors,
                 events,
-                devices,
+                instruments,
             )
             clients = {
                 "scan_a": self._PlannedClient((1, 3, 4), 10.0),
@@ -877,8 +877,8 @@ class ModuleServiceTests(unittest.TestCase):
                 record.state = "enabled"
                 record.client = client  # type: ignore[assignment]
             logger = DatRunLogger(config, events)
-            await devices.connect_all()
-            await devices.poll_all()
+            await instruments.connect_all()
+            await instruments.poll_all()
             discovered, statuses = await modules.prepare_sequence()
             paths = logger.open_run(
                 "aligned.seq",
@@ -932,7 +932,7 @@ class ModuleServiceTests(unittest.TestCase):
                 "slots",
                 clients["single_meter"].actions,
             )
-            await devices.disconnect_all()
+            await instruments.disconnect_all()
 
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(Path(temp)))
@@ -945,7 +945,7 @@ class ModuleServiceTests(unittest.TestCase):
         ) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(
+            instruments = InstrumentManager(
                 config,
                 events,
                 isolate_processes=False,
@@ -960,15 +960,15 @@ class ModuleServiceTests(unittest.TestCase):
             modules = MeasurementModuleService(
                 (descriptor,),
                 events,
-                devices,
+                instruments,
             )
             record = modules.records[descriptor.id]
             record.enabled = True
             record.state = "enabled"
             record.client = self._RowContractClient(behavior)  # type: ignore[assignment]
             logger = DatRunLogger(config, events)
-            await devices.connect_all()
-            await devices.poll_all()
+            await instruments.connect_all()
+            await instruments.poll_all()
             discovered, statuses = await modules.prepare_sequence()
             logger.open_run(
                 "row-contract.seq",
@@ -978,7 +978,7 @@ class ModuleServiceTests(unittest.TestCase):
                 statuses,
             )
             await modules.begin_sequence()
-            with self.assertRaises(DeviceError) as raised:
+            with self.assertRaises(InstrumentError) as raised:
                 await modules.measure_all(logger, "1:Measure")
             self.assertEqual(
                 raised.exception.code,
@@ -986,7 +986,7 @@ class ModuleServiceTests(unittest.TestCase):
             )
             self.assertTrue(await modules.end_sequence("error"))
             logger.close()
-            await devices.disconnect_all()
+            await instruments.disconnect_all()
 
         for behavior, expected_code in (
             ("no_row", "MODULE_MEASUREMENT_ROW_MISSING"),
@@ -1007,7 +1007,7 @@ class ModuleServiceTests(unittest.TestCase):
         async def scenario(temp_root: Path) -> None:
             config = copied_project(temp_root)
             events = EventManager()
-            devices = DeviceManager(config, events, isolate_processes=False)
+            instruments = InstrumentManager(config, events, isolate_processes=False)
             descriptors = tuple(
                 ModuleDescriptor(
                     id=module_id,
@@ -1017,7 +1017,7 @@ class ModuleServiceTests(unittest.TestCase):
                 )
                 for module_id in ("module_a", "module_b")
             )
-            modules = MeasurementModuleService(descriptors, events, devices)
+            modules = MeasurementModuleService(descriptors, events, instruments)
             module_close_barrier = threading.Barrier(2)
             close_barrier = threading.Barrier(2)
             clients = []
@@ -1211,11 +1211,11 @@ class ModuleWorkerContextTests(unittest.TestCase):
                 "        return {}",
                 "",
                 "    def measure(self, slot, api):",
-                "        first = api.devices()",
+                "        first = api.instruments()",
                 "        api.sleep(",
                 "            0.02, poll_interval=0.005",
                 "        )",
-                "        second = api.devices()",
+                "        second = api.instruments()",
                 "        return {",
                 "            'Average': (",
                 "                first['temperature']['current']",

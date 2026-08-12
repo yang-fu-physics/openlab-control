@@ -9,13 +9,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.devices.manifest import load_device_manifest  # noqa: E402
+from labcontrol.instruments.manifest import load_instrument_manifest  # noqa: E402
 from labcontrol.measurement.manifest import load_manifest  # noqa: E402
 
 
-TEMPLATES = ROOT / "plugin_templates"
+TEMPLATES = ROOT / "templates"
 MODULE_REPOSITORY = TEMPLATES / "measurement-modules-repository"
-DEVICE_REPOSITORY = TEMPLATES / "device-plugins-repository"
+INSTRUMENT_REPOSITORY = TEMPLATES / "system-instruments-repository"
 
 
 class RepositoryTemplateTests(unittest.TestCase):
@@ -36,10 +36,10 @@ class RepositoryTemplateTests(unittest.TestCase):
         with (module_path / "module.toml").open("rb") as handle:
             self.assertEqual(set(tomllib.load(handle)), {"name", "version"})
 
-    def test_device_repository_plugins_are_independently_installable(self) -> None:
+    def test_instrument_repository_instruments_are_independently_installable(self) -> None:
         paths = sorted(
             path
-            for path in (DEVICE_REPOSITORY / "plugins").iterdir()
+            for path in (INSTRUMENT_REPOSITORY / "instruments").iterdir()
             if path.is_dir()
         )
         self.assertEqual(
@@ -47,7 +47,7 @@ class RepositoryTemplateTests(unittest.TestCase):
             ["example_controller", "example_monitor"],
         )
         descriptors = [
-            load_device_manifest(path)
+            load_instrument_manifest(path)
             for path in paths
         ]
         self.assertTrue(
@@ -62,13 +62,13 @@ class RepositoryTemplateTests(unittest.TestCase):
     def test_templates_contain_no_generated_runtime_or_secret_files(self) -> None:
         forbidden_names = {
             "runtime.json",
-            "trusted_plugins.json",
+            "trusted_content.json",
             "settings.toml",
             ".env",
         }
         observed = {
             path.name
-            for repository in (MODULE_REPOSITORY, DEVICE_REPOSITORY)
+            for repository in (MODULE_REPOSITORY, INSTRUMENT_REPOSITORY)
             for path in repository.rglob("*")
             if path.is_file()
         }

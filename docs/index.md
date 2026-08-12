@@ -16,7 +16,7 @@ hide:
     <div class="olc-actions">
       <a class="md-button md-button--primary" href="getting-started/">第一次使用</a>
       <a class="md-button" href="development/first-module/">写第一个测量模块</a>
-      <a class="md-button" href="development/device-plugin/">更换温度或磁场设备</a>
+      <a class="md-button" href="development/system-instrument/">编写 System Instrument</a>
     </div>
   </div>
   <div class="olc-terminal" aria-label="最小测量模块示例">
@@ -79,13 +79,13 @@ Measurement Module 是“完成一次测量”的小程序，例如读取电阻�
   </a>
 </div>
 
-## 温度和磁场设备是另一条路线
+## 温度和磁场仪表是另一条路线
 
 温控仪和磁场控制器不属于 Measurement Module。只有需要更换主温度、主磁场或只读监视
-设备时，才阅读 [Device Plugin 教程](development/device-plugin.md)。普通测量模块作者可以
+仪表时，才阅读 [System Instrument 教程](development/system-instrument.md)。普通测量模块作者可以
 完全跳过那一章。一个温控器同时给出样品温度、冷头温度、加热输出等值时，0.14.1 可以
 让它们共用一个通讯连接；前面板按普通周期刷新，测量模块需要温场时则会即时读取。同一
-设备不会同时执行两次通讯；当前完整指令完成后，测量读取会先于等待中的后台刷新。
+仪表不会同时执行两次通讯；当前完整指令完成后，测量读取会先于等待中的后台刷新。
 
 ## 先记住一条原则
 

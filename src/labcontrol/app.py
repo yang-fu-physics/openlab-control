@@ -1,9 +1,9 @@
 """应用程序入口以及源码版、打包版共用的启动流程。
 
-本文件负责命令行参数、Qt 外观、插件信任与离线依赖预检，然后才创建
-:class:`~labcontrol.runtime.RuntimeService`。无界面演示和 GUI 共用同一套配置、设备清单与
+本文件负责命令行参数、Qt 外观、内容信任与离线依赖预检，然后才创建
+:class:`~labcontrol.runtime.RuntimeService`。无界面演示和 GUI 共用同一套配置、仪表清单与
 SEQ 解析器，因此发布验证不会绕过正式运行路径。这里不实现仪表控制逻辑；所有 I/O 都交给
-后台运行时，防止 GUI 线程直接接触设备。
+后台运行时，防止 GUI 线程直接接触仪表。
 """
 
 from __future__ import annotations
@@ -16,19 +16,19 @@ import time
 from pathlib import Path
 
 from .config import ConfigurationError, load_config
-from .devices.manifest import (
-    DevicePluginDescriptor,
-    configured_device_plugins,
-    device_dependency_directory,
-    discover_device_plugins,
+from .instruments.manifest import (
+    SystemInstrumentDescriptor,
+    configured_system_instruments,
+    instrument_dependency_directory,
+    discover_system_instruments,
 )
-from .extensions.dependencies import (
+from .package_support.dependencies import (
     DependencyInstallError,
     dependency_runtime_errors,
     install_offline_dependencies,
     missing_dependencies,
 )
-from .extensions.trust import ExtensionTrustError, PluginTrustStore
+from .package_support.trust import ContentTrustError, ContentTrustStore
 from .models import RunProgress, RunState
 from .measurement.settings import load_settings
 from .paths import default_config_path
@@ -60,14 +60,14 @@ def configure_qt_font(application, point_size: float = 10.0) -> None:
     application.setFont(font)
 
 
-def _plugin_python_executable(config) -> Path | None:
-    """选择离线安装插件额外依赖时使用的 Python。
+def _instrument_python_executable(config) -> Path | None:
+    """选择离线安装 System Instrument 额外依赖时使用的 Python。
 
     源码版可以复用当前解释器；冻结后的 EXE 不能把自己当作 Python，因此只接受配置中明确
     指定的解释器，或随安装包携带的 ``runtime/python/python.exe``。
     """
 
-    configured = config.plugins.python_executable.strip()
+    configured = config.system_instruments.python_executable.strip()
     if configured:
         candidate = config.resolve_project_path(configured)
         return candidate if candidate.is_file() else None
@@ -142,11 +142,11 @@ def _headless_demo(
     sequence_path: Path,
     timeout: float,
     module_ids: list[str] | None = None,
-    device_descriptors: tuple[DevicePluginDescriptor, ...] = (),
+    instrument_descriptors: tuple[SystemInstrumentDescriptor, ...] = (),
 ) -> int:
     """在没有 Qt 窗口的情况下运行一条真实 SEQ，供自动化和发布冒烟验证使用。
 
-    ``--enable-module`` 仍需通过插件信任检查，SEQ 配套设置也只会应用到明确请求启用的模块；
+    ``--enable-module`` 仍需通过模块内容信任检查，SEQ 配套设置也只会应用到明确请求启用的模块；
     文件中出现其他模块不会造成隐式初始化。无论成功、失败或超时，``finally`` 都会关闭完整
     运行时。
     """
@@ -165,7 +165,7 @@ def _headless_demo(
             emit(f"{issue.level}: line {issue.line_number}: {issue.message}")
         diagnostic.close()
         return 2
-    runtime = RuntimeService(config, device_descriptors=device_descriptors)
+    runtime = RuntimeService(config, instrument_descriptors=instrument_descriptors)
     imported = load_sequence_module_settings(
         sequence_path
     )
@@ -286,7 +286,7 @@ def _headless_demo(
 def main(argv: list[str] | None = None) -> int:
     """启动 OpenLab Control，并把可预期的启动失败转换为稳定的进程退出码。"""
 
-    # Windows 冻结程序创建插件/设备子进程前必须调用 freeze_support，否则子进程可能再次
+    # Windows 冻结程序创建模块/仪表子进程前必须调用 freeze_support，否则子进程可能再次
     # 执行 GUI 入口并形成递归启动。
     multiprocessing.freeze_support()
     args = _arguments(argv)
@@ -296,17 +296,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
     try:
-        device_descriptors = discover_device_plugins(config)
-        selected_device_plugins = configured_device_plugins(
+        instrument_descriptors = discover_system_instruments(config)
+        selected_system_instruments = configured_system_instruments(
             config,
-            device_descriptors,
+            instrument_descriptors,
         )
-        trust_store = PluginTrustStore(
-            config.resolve_project_path(config.plugins.state_directory)
-            / "trusted_plugins.json"
+        trust_store = ContentTrustStore(
+            config.resolve_project_path(config.system_instruments.state_directory)
+            / "trusted_content.json"
         )
-    except (OSError, ValueError, ExtensionTrustError) as exc:
-        print(f"Device plugin error: {exc}", file=sys.stderr)
+    except (OSError, ValueError, ContentTrustError) as exc:
+        print(f"System Instrument error: {exc}", file=sys.stderr)
         return 2
     sequence_path = args.sequence or (
         config.resolve_project_path(config.default_sequence)
@@ -316,41 +316,41 @@ def main(argv: list[str] | None = None) -> int:
     if args.headless_demo:
         untrusted = [
             descriptor.id
-            for descriptor in selected_device_plugins
-            if not trust_store.is_trusted("device", descriptor)
+            for descriptor in selected_system_instruments
+            if not trust_store.is_trusted("instrument", descriptor)
         ]
         if untrusted:
             print(
-                "Device plugin error: untrusted plugins cannot run headlessly: "
+                "System Instrument error: untrusted instruments cannot run headlessly: "
                 + ", ".join(untrusted),
                 file=sys.stderr,
             )
             return 2
-        invalid_runtime_by_plugin = {
+        invalid_runtime_by_instrument = {
             descriptor.id: dependency_runtime_errors(
                 descriptor.dependencies,
-                device_dependency_directory(
+                instrument_dependency_directory(
                     config,
                     descriptor,
                 ),
                 descriptor.fingerprint,
             )
-            for descriptor in selected_device_plugins
+            for descriptor in selected_system_instruments
         }
-        invalid_runtime_by_plugin = {
-            plugin_id: errors
-            for plugin_id, errors
-            in invalid_runtime_by_plugin.items()
+        invalid_runtime_by_instrument = {
+            instrument_id: errors
+            for instrument_id, errors
+            in invalid_runtime_by_instrument.items()
             if errors
         }
-        if invalid_runtime_by_plugin:
+        if invalid_runtime_by_instrument:
             print(
-                "Device plugin error: isolated dependencies are "
+                "System Instrument error: isolated dependencies are "
                 "missing; prepare them in the GUI first: "
                 + "; ".join(
-                    f"{plugin_id}: {'; '.join(errors)}"
-                    for plugin_id, errors
-                    in invalid_runtime_by_plugin.items()
+                    f"{instrument_id}: {'; '.join(errors)}"
+                    for instrument_id, errors
+                    in invalid_runtime_by_instrument.items()
                 ),
                 file=sys.stderr,
             )
@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> int:
             sequence_path,
             args.timeout,
             list(args.enable_module),
-            device_descriptors,
+            instrument_descriptors,
         )
 
     if args.gui_smoke:
@@ -371,7 +371,7 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication, QMessageBox
         from .ui.main_window import MainWindow
-        from .ui.plugin_trust import confirm_device_plugin_trust
+        from .ui.trust_dialogs import confirm_system_instrument_trust
         from .ui.preferences import (
             UiPreferences,
             UiPreferenceStore,
@@ -397,53 +397,53 @@ def main(argv: list[str] | None = None) -> int:
         ui_preferences.ui_scale,
         ui_preferences.font_scale,
     )
-    for descriptor in selected_device_plugins:
+    for descriptor in selected_system_instruments:
         try:
-            trusted = confirm_device_plugin_trust(None, trust_store, descriptor)
-        except ExtensionTrustError as exc:
-            QMessageBox.critical(None, "Plugin Trust Failed", str(exc))
+            trusted = confirm_system_instrument_trust(None, trust_store, descriptor)
+        except ContentTrustError as exc:
+            QMessageBox.critical(None, "Content Trust Failed", str(exc))
             return 1
         if not trusted:
             QMessageBox.warning(
                 None,
-                "Device Plugin Not Trusted",
+                "System Instrument Not Trusted",
                 f"OpenLab Control will not load {descriptor.name}.",
             )
             return 1
         runtime_errors = dependency_runtime_errors(
             descriptor.dependencies,
-            device_dependency_directory(config, descriptor),
+            instrument_dependency_directory(config, descriptor),
             descriptor.fingerprint,
         )
         if not runtime_errors:
             continue
         missing = missing_dependencies(
             descriptor.dependencies,
-            device_dependency_directory(config, descriptor),
+            instrument_dependency_directory(config, descriptor),
         )
-        python = _plugin_python_executable(config)
+        python = _instrument_python_executable(config)
         if python is None:
             QMessageBox.critical(
                 None,
-                "Device Plugin Dependencies Missing",
+                "System Instrument Dependencies Missing",
                 f"{descriptor.name} requires:\n\n"
                 + "\n".join(
                     missing or descriptor.dependencies
                 )
-                + "\n\nConfigure plugins.python_executable or "
+                + "\n\nConfigure system_instruments.python_executable or "
                 "add runtime/python/python.exe.",
             )
             return 1
         answer = QMessageBox.question(
             None,
-            "Prepare Device Plugin Dependencies?",
+            "Prepare System Instrument Dependencies?",
             f"{descriptor.name} requires:\n\n"
             + "\n".join(
                 missing or descriptor.dependencies
             )
             + "\n\nCurrent runtime issue:\n"
             + "\n".join(runtime_errors)
-            + "\n\nInstall from local wheels into this plugin's "
+            + "\n\nInstall from local wheels into this instrument's "
             "isolated runtime? No network access will be used.",
             QMessageBox.StandardButton.Yes
             | QMessageBox.StandardButton.No,
@@ -454,14 +454,14 @@ def main(argv: list[str] | None = None) -> int:
         try:
             install_offline_dependencies(
                 python_executable=python,
-                extension_directory=descriptor.path,
-                site_packages=device_dependency_directory(
+                package_directory=descriptor.path,
+                site_packages=instrument_dependency_directory(
                     config,
                     descriptor,
                 ),
                 shared_wheels_directory=(
                     config.resolve_project_path(
-                        config.plugins.shared_wheels_directory
+                        config.system_instruments.shared_wheels_directory
                     )
                 ),
                 dependencies=descriptor.dependencies,
@@ -477,7 +477,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         window = MainWindow(
             config,
-            device_descriptors,
+            instrument_descriptors,
             ui_preferences=ui_preferences,
             ui_preference_store=preference_store,
         )

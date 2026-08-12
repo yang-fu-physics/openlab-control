@@ -12,8 +12,8 @@ language = "en_US"
 directory = "runs"
 data_file_name = "experiment.dat"
 event_file_name = "events.dat"
-device_status_file_name = "device_status.dat"
-device_status_interval_seconds = 1.0
+instrument_status_file_name = "instrument_status.dat"
+instrument_status_interval_seconds = 1.0
 timestamp_epoch = "labview_1904"
 flush_every_row = true
 allow_external_paths = false
@@ -43,28 +43,30 @@ allow_insecure_http = false
 [modules]
 directory = "modules"
 data_directory = "module_data"
+state_directory = "trust_state"
 shared_wheels_directory = "wheels"
 python_executable = ""
-runtime_directory = "plugin_runtime"
+runtime_directory = "runtime_packages"
 startup_timeout_seconds = 10.0
 operation_timeout_seconds = 120.0
 shutdown_timeout_seconds = 3.0
 
-[plugins]
-device_directory = "device_plugins"
-state_directory = "plugin_state"
-runtime_directory = "plugin_runtime"
+[system_instruments]
+directory = "system_instruments"
+resource_file = "configs/instruments.local.toml"
+state_directory = "trust_state"
+runtime_directory = "runtime_packages"
 shared_wheels_directory = "wheels"
 python_executable = ""
-device_startup_timeout_seconds = 10.0
-device_reconnect_timeout_seconds = 60.0
-device_reconnect_interval_seconds = 2.0
+startup_timeout_seconds = 10.0
+reconnect_timeout_seconds = 60.0
+reconnect_interval_seconds = 2.0
 
-[[devices]]
+[[instruments]]
 id = "temperature"
 display_name = "Temperature"
 kind = "temperature"
-plugin = "labcontrol.devices.simulated:SimulatedTemperatureController"
+backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"
 role = "primary"
 control_enabled = true
 unit = "K"
@@ -82,11 +84,11 @@ stability_timeout_seconds = 120.0
 stability_window_seconds = 1.0
 noise = 0.00005
 
-[[devices]]
+[[instruments]]
 id = "field"
 display_name = "Magnetic Field"
 kind = "field"
-plugin = "labcontrol.devices.simulated:SimulatedFieldController"
+backend = "labcontrol.instruments.simulated:SimulatedFieldController"
 role = "primary"
 control_enabled = true
 unit = "Oe"
@@ -104,11 +106,11 @@ stability_timeout_seconds = 120.0
 stability_window_seconds = 0.8
 noise = 0.01
 
-[[devices]]
+[[instruments]]
 id = "second_stage"
 display_name = "2nd Stage"
 kind = "monitor"
-plugin = "labcontrol.devices.simulated:SimulatedReadOnlyMonitor"
+backend = "labcontrol.instruments.simulated:SimulatedReadOnlyMonitor"
 role = "monitor"
 control_enabled = false
 unit = "K"

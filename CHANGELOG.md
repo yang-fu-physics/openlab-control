@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- 采用不兼容的新命名：核心源码、配置、SEQ 参数、DAT 状态文件和公共 API 全部统一使用
+  `instrument`。`labcontrol.devices`、`Device*` 类型、`device.toml`、`device_plugins/`、
+  `[plugins]` 与 `plugin = ...` 均已删除，不提供旧名称映射。
+- System Instrument 使用 `system_instruments/<id>/instrument.toml`、`[[instruments]]` 和
+  `backend`；Measurement Module 继续使用独立的 `modules/<id>/module.toml` 与按需 Enable
+  生命周期。两者不再共用旧的插件/扩展术语。
+- 共用的哈希信任、离线额外依赖和受控 Python 加载代码移到中性的 `package_support`，
+  但不会合并 System Instrument 与 Measurement Module 的接口、清单或生命周期。
+- 重写 System Instrument 开发网站，增加第一个仪表、读取与状态日志、控制安全和现场测试
+  四页初学者教程；同步 README、配置参考、模板、打包目录和三个仓库测试。
+- System Instrument API 升级到 1.2：一个物理仪表实例使用一个地址和一个进程，附加读数
+  改为有序 `metrics` 字典；监控卡自动扩展，多台物理仪表按可用宽度换行并并发轮询。
+- 新增 `tools/instrument_scanner.py`。它只列出 VISA 资源并发送一次 `*IDN?`，由用户确认
+  System/Measurement 用途、实现和主/辅助读数后，原子写入
+  `configs/instruments.local.toml`。
+- Windows 包新增独立的 `tools/InstrumentScanner.exe`；Release 的 `tools/` 不携带 Python
+  源码。缺少 NI-VISA 等 VISA implementation 时会给出明确提示。
+- 主配置通过稳定 `resource` ID 选择 System Instrument；Measurement Module 只获得
+  Measurement 地址的只读深拷贝，不能取得或绕开 System Instrument 地址。每次 Run 会
+  额外保存 `instrument-resources.toml`。
+- 所有随附 Measurement Module 已移除各自的 VISA 枚举和地址刷新逻辑；设置页只选择扫描器
+  确认过的 Measurement 资源 ID，后台在真正连接和重连时再由核心解析当前地址。
+- 外部 System Instrument 必须引用资源表，主配置中的内联地址和未绑定资源都会在启动前
+  被拒绝；资源表使用明确的 `system_instrument` 字段，不保留旧字段迁移。
+
 ## 0.14.1 - 2026-08-12
 
 - Device Plugin 新增可选 `poll_measurement()`：写测量行和 Module `api.devices()` 时可只

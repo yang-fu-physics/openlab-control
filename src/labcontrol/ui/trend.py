@@ -12,7 +12,7 @@ from PySide6.QtCore import QPointF, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
-from ..models import DeviceKind, DeviceSnapshot
+from ..models import InstrumentKind, InstrumentSnapshot
 from .scaling import scaled
 from .window_sizing import fit_initial_window_width
 
@@ -28,23 +28,23 @@ class TrendCanvas(QWidget):
         self.setMinimumSize(scaled(760), scaled(430))
         self.history: dict[str, deque[tuple[float, float]]] = defaultdict(lambda: deque(maxlen=900))
         self.setAutoFillBackground(True)
-        # 设备通常每 200 ms 推送一次快照。直接在每次推送后重绘，会反复遍历全部
+        # 仪表通常每 200 ms 推送一次快照。直接在每次推送后重绘，会反复遍历全部
         # 历史点并在 GUI 线程创建 QPainterPath。单次定时器把短时间内的多次更新
-        # 合并为最多 4 FPS；它只影响显示，不降低设备轮询和 DAT 的采样频率。
+        # 合并为最多 4 FPS；它只影响显示，不降低仪表轮询和 DAT 的采样频率。
         self._redraw_timer = QTimer(self)
         self._redraw_timer.setSingleShot(True)
         self._redraw_timer.setInterval(self.REDRAW_INTERVAL_MS)
         self._redraw_timer.timeout.connect(self.update)
 
-    def add_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
-        """追加有数值的设备快照，并合并安排下一次可见重绘。"""
+    def add_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
+        """追加有数值的仪表快照，并合并安排下一次可见重绘。"""
 
         appended = False
         for snapshot in snapshots.values():
             if snapshot.kind in (
-                DeviceKind.TEMPERATURE,
-                DeviceKind.FIELD,
-                DeviceKind.MONITOR,
+                InstrumentKind.TEMPERATURE,
+                InstrumentKind.FIELD,
+                InstrumentKind.MONITOR,
             ) and snapshot.current is not None:
                 # 使用读数本身的单调时间，避免 GUI 消息排队时把延迟错误画成采样时间。
                 self.history[snapshot.display_name].append(
@@ -145,7 +145,7 @@ class TrendDialog(QDialog):
             preferred_height=scaled(540),
         )
 
-    def add_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
+    def add_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         """把主窗口收到的快照转交给画布。"""
 
         self.canvas.add_snapshots(snapshots)

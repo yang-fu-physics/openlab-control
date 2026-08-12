@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol import __version__  # noqa: E402
-from labcontrol.extensions.dependencies import (  # noqa: E402
+from labcontrol.package_support.dependencies import (  # noqa: E402
     FRAMEWORK_DEPENDENCY_VERSIONS,
 )
 
@@ -123,21 +123,31 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn("collect_submodules(", specification)
         self.assertIn('"pyvisa"', specification)
         self.assertIn('"pyvisa.testsuite"', specification)
+        self.assertEqual(specification.count("Analysis("), 2)
+        self.assertEqual(specification.count("COLLECT("), 1)
+        self.assertIn('["tools/instrument_scanner.py"]', specification)
+        self.assertIn('name="InstrumentScanner"', specification)
+        self.assertNotIn("scanner_exe,\n    a.binaries", specification)
         build_script = (ROOT / "build.bat").read_text(encoding="utf-8")
+        self.assertIn(
+            r"dist\OpenLabControl\tools\InstrumentScanner.exe",
+            build_script,
+        )
+        self.assertNotIn('xcopy /E /I /Y "tools"', build_script)
         for name in (
             "configs",
             "examples",
             "docs",
-            "plugin_templates",
+            "templates",
             "integrations",
             "modules",
         ):
             self.assertIn(f'"{name}" "dist\\OpenLabControl\\{name}"', build_script)
         self.assertNotIn("module_runtime", build_script)
         for name in (
-            "device_plugins",
-            "plugin_runtime",
-            "plugin_state",
+            "system_instruments",
+            "runtime_packages",
+            "trust_state",
         ):
             self.assertIn(
                 f'dist\\OpenLabControl\\{name}',
@@ -166,7 +176,7 @@ class ReleaseContractTests(unittest.TestCase):
                 "docs/ARCHITECTURE.md",
                 "docs/CONFIGURATION.md",
                 "docs/OPERATIONS.md",
-                "docs/PLUGIN_DEVELOPMENT.md",
+                "docs/DEVELOPMENT_REFERENCE.md",
             )
         )
         for obsolete in (
@@ -174,19 +184,29 @@ class ReleaseContractTests(unittest.TestCase):
             "Online Install",
             "在线 pip",
             "module_runtime/site-packages",
+            "device_plugins",
+            "plugin_runtime",
+            "plugin_state",
+            "[plugins]",
+            "labcontrol.devices",
+            "api.devices()",
+            "device.toml",
         ):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, current_documents)
         for required in (
-            "plugin_runtime",
+            "runtime_packages",
             "--no-index",
             "requirements.lock",
             "fingerprint",
             "PyVISA",
             "框架共享",
             "额外依赖",
-            "Device Plugin 示例",
             "measurement-modules-repository",
+            "system-instruments-repository",
+            "instrument.toml",
+            "[[instruments]]",
+            "backend",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, current_documents)

@@ -59,7 +59,7 @@ class StabilityEvaluator:
 
         ``instrument_stable`` 为 ``False`` 时禁止开始或继续 dwell；``True`` 也不能
         单独判稳，仍必须通过核心的误差、斜率和驻留时间检查。``None`` 保留没有该
-        状态位的设备原有行为。
+        状态位的仪表原有行为。
         """
 
         if self._target is None or target != self._target:

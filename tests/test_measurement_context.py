@@ -33,7 +33,7 @@ class ModuleAPITests(unittest.TestCase):
             timeout,
         )
 
-    def test_devices_returns_each_fresh_snapshot_as_a_copy(self) -> None:
+    def test_instruments_returns_each_fresh_snapshot_as_a_copy(self) -> None:
         samples = iter(
             (
                 {"temperature": {"kind": "temperature", "current": 1.0}},
@@ -42,13 +42,13 @@ class ModuleAPITests(unittest.TestCase):
         )
         api = self._api(sample=lambda _timeout: next(samples))
 
-        first = api.devices()
-        second = api.devices()
+        first = api.instruments()
+        second = api.instruments()
 
         self.assertEqual(first["temperature"]["current"], 1.0)
         self.assertEqual(second["temperature"]["current"], 2.0)
         second["temperature"]["current"] = 99.0
-        self.assertEqual(api._initial_devices["temperature"]["current"], 2.0)
+        self.assertEqual(api._initial_instruments["temperature"]["current"], 2.0)
 
     def test_sleep_excludes_paused_time(self) -> None:
         state = {"value": "running"}

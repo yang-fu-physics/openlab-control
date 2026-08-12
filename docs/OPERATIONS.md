@@ -5,7 +5,7 @@
 1. 启动后检查温度、磁场和 Monitor 的实际状态。
 2. 打开 SEQ；需要测量模块时再 Enable，并核对 Status 和 Settings。
 3. 有未 Apply 的设置时优先选择 **Apply and Run**；真机首跑不要跳过 Apply。
-4. 核对数据文件位置，点击 Run；结束后检查 DAT、`events.dat` 和 `device_status.dat`。
+4. 核对数据文件位置，点击 Run；结束后检查 DAT、`events.dat` 和 `instrument_status.dat`。
 5. 分享运行目录前检查 `configuration.toml`，其中可能含真实仪表地址和本机路径。
 
 下面各节再解释安装、模块管理、异常和维护操作。
@@ -20,8 +20,8 @@
 OpenLabControl.exe
 ```
 
-不要只复制 EXE；`configs/`、`docs/`、`plugin_templates/`、`modules/`、
-`device_plugins/`、`plugin_runtime/`、`plugin_state/`、`module_data/`、`wheels/` 和
+不要只复制 EXE；`configs/`、`docs/`、`templates/`、`modules/`、
+`system_instruments/`、`runtime_packages/`、`trust_state/`、`module_data/`、`wheels/` 和
 `runs/` 等目录应和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，
 不会恢复上次 Enable 状态。
 
@@ -89,10 +89,10 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
   Run/Pause/Stop。
 - 中央：浮动 SEQ 和 Data Browser 窗口。
 - 右侧 `Sequence Command Bar`：双击命令后设置参数并插入。
-- 底部 `Device Status`：Temperature、Magnetic Field、`2nd Stage` 等控制/Monitor；不再显示测量 Transport 块。
+- 底部 `Instrument Status`：Temperature、Magnetic Field、`2nd Stage` 等控制/Monitor；不再显示测量 Transport 块。
 - 工具栏 `Modules`：测量模块管理。
 - `Run Log`：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。
-- `Live Trend`：保留最近设备快照，最多每 250 ms 合并一次可见重绘；只影响显示。
+- `Live Trend`：保留最近仪表快照，最多每 250 ms 合并一次可见重绘；只影响显示。
 
 ### 外观、字号与窗口大小
 
@@ -129,7 +129,7 @@ DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同�
 6. 初始化失败会弹 Error，仍保持 Disabled。
 
 首次指纹用于建立这台电脑上的信任基线。发布包自带模板的来源由整个 ZIP 的 SHA-256
-校验保证；单独取得的第三方扩展，应与发布者提供的摘要或签名比较。内容变化后必须重新
+校验保证；单独取得的第三方 Measurement Module，应与发布者提供的摘要或签名比较。内容变化后必须重新
 确认，不能只因为名称相同就继续信任。
 
 如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 `Sequence Command Bar` 会新增一个
@@ -304,7 +304,7 @@ Run 开始后：
 
 ### Pause
 
-Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也不会断开设备。模块自定义
+Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也不会断开仪表。模块自定义
 长循环须调用 `api.checkpoint()` 或 `api.sleep()` 才能在循环中响应；已经进入厂商驱动的
 阻塞调用只能等待其有限 I/O timeout。Resume 从原位置继续。
 
@@ -316,7 +316,7 @@ Stop 后：
 - 模块收到 `run_end`，reason 为 `stopped`；
 - 不执行模块 close，模块仍 Enabled，窗口保持可用。
 
-如果主温度或磁场设备读链路中断，状态显示 `Reconnecting`。默认每 2 秒重连，最长
+如果主温度或磁场仪表读链路中断，状态显示 `Reconnecting`。默认每 2 秒重连，最长
 1 分钟；SEQ 在这段时间冻结当前 Wait/Settle 计时。成功后核对仪表实际 target/rate 再
 继续；超时或核对失败进入 Error。写操作超时不会自动重发。
 
@@ -354,7 +354,7 @@ Stop 后：
 - 模块收到 reason 为 `error` 的 `run_end`，不调用 close；
 - 已写数据保留。
 
-典型：设备掉线、互锁、二级冷头过温、源表硬件报警、模块 Schema 违规。
+典型：仪表掉线、互锁、二级冷头过温、源表硬件报警、模块 Schema 违规。
 
 如果同一故障被轮询/多次测量反复报告，只会更新计数，不会连续弹窗轰炸。恢复后事件 RESOLVED；再次发生才重新弹。
 
@@ -395,7 +395,7 @@ configuration.toml
 module_settings/*.settings.toml
 module_settings/*.status-at-start.json
 experiment.dat
-device_status.dat
+instrument_status.dat
 events.dat
 ```
 
@@ -406,7 +406,7 @@ Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，
 运行目录中的 `configuration.toml` 是本次主配置的完整副本，可能含真实仪表地址和本机
 路径。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。
 
-`device_status.dat` 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
+`instrument_status.dat` 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
 稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
 记录频率或增加仪表查询。
 
@@ -432,8 +432,8 @@ Refresh。
 
 ### 发布包提示没有 Python Runtime
 
-只有扩展声明额外依赖时才会显示 Install Dependencies，并需要配置
-`modules.python_executable` / `plugins.python_executable`，或放置
+只有 Measurement Module 或 System Instrument 声明额外依赖时才会显示 Install Dependencies，
+并需要配置 `modules.python_executable` / `system_instruments.python_executable`，或放置
 `runtime/python/python.exe`。框架共享依赖（包括 PyVISA）已经在 EXE 内，不需要便携
 Python；只有离线准备额外依赖需要，且便携 Python 必须自带 pip。
 
@@ -461,14 +461,14 @@ Modules Manager Enable 相应测量方案。
 
 ### 更换温控仪或磁体电源
 
-取得并审查与目标设备匹配的 Device Plugin 后，把完整插件目录复制到
-`device_plugins/`，在一个配置文件中修改对应设备的 `plugin = "<plugin-id>"`、
+取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
+`system_instruments/`，在现场配置中修改对应仪表的 `backend = "<instrument-id>"`、
 address、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
-会要求确认插件内容指纹；修改插件后必须重新确认。核心自带内容只作为实现示例。
+会要求确认内容指纹；修改 System Instrument 后必须重新确认。核心自带内容只作为实现示例。
 
-### 设备一直 Reconnecting
+### 仪表一直 Reconnecting
 
-不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立设备
+不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立仪表
 进程并读取实际状态。1 分钟仍失败时会 Fault，不会无限重试或猜测安全状态。
 
 ### 左栏被长文件名撑宽

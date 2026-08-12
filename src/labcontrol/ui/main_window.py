@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QToolBar,
     QTreeWidget,
@@ -40,21 +41,21 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..config import AppConfig
-from ..devices.manifest import DevicePluginDescriptor
-from ..extensions.dependencies import (
+from ..instruments.manifest import SystemInstrumentDescriptor
+from ..package_support.dependencies import (
     DependencyInstallError,
     install_offline_dependencies,
 )
-from ..extensions.trust import (
-    ExtensionTrustError,
-    PluginTrustStore,
-    extension_tree_digest,
+from ..package_support.trust import (
+    ContentTrustError,
+    ContentTrustStore,
+    content_tree_digest,
 )
 from ..formatting import control_decimals, fixed_number
 from ..models import (
-    DeviceConnectionState,
-    DeviceKind,
-    DeviceSnapshot,
+    InstrumentConnectionState,
+    InstrumentKind,
+    InstrumentSnapshot,
     EventNotice,
     RunProgress,
     RunState,
@@ -99,7 +100,7 @@ from .measurement_modules import (
     ModuleWindow,
 )
 from .module_monitor import ModuleMonitorPanel
-from .plugin_trust import confirm_module_plugin_trust
+from .trust_dialogs import confirm_measurement_module_trust
 from .preferences import UiPreferences, UiPreferenceStore
 from .scaling import (
     current_font_scale,
@@ -109,7 +110,7 @@ from .scaling import (
 )
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
-from .widgets import ElidedLabel, StatusTile
+from .widgets import ElidedLabel, InstrumentStatusPanel, StatusTile
 from .window_sizing import (
     fit_initial_window_width,
     preserve_restored_window_size,
@@ -122,7 +123,7 @@ class MainWindow(QMainWindow):
     def __init__(
         self,
         config: AppConfig,
-        device_descriptors: tuple[DevicePluginDescriptor, ...] = (),
+        instrument_descriptors: tuple[SystemInstrumentDescriptor, ...] = (),
         *,
         ui_preferences: UiPreferences | None = None,
         ui_preference_store: UiPreferenceStore | None = None,
@@ -139,17 +140,17 @@ class MainWindow(QMainWindow):
         self._start_maximized = (
             self.ui_preferences.window_mode == "maximized"
         )
-        self.plugin_trust_store = PluginTrustStore(
+        self.content_trust_store = ContentTrustStore(
             config.resolve_project_path(
-                config.plugins.state_directory
+                config.modules.state_directory
             )
-            / "trusted_plugins.json"
+            / "trusted_content.json"
         )
         self.module_descriptors = self._discover_module_descriptors()
         self.runtime = RuntimeService(
             config,
             self.module_descriptors,
-            device_descriptors,
+            instrument_descriptors,
         )
         self.document = SequenceDocument()
         self.sequence_path: Path | None = None
@@ -171,7 +172,7 @@ class MainWindow(QMainWindow):
         ] = []
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
-        self.current_snapshots: dict[str, DeviceSnapshot] = {}
+        self.current_snapshots: dict[str, InstrumentSnapshot] = {}
         self.current_run_state = RunState.IDLE
         self.status_tiles: dict[str, StatusTile] = {}
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
@@ -287,7 +288,7 @@ class MainWindow(QMainWindow):
 
         project_group = QGroupBox("Experiment")
         project_layout = QVBoxLayout(project_group)
-        project_layout.addWidget(QLabel("External Device Simulation"))
+        project_layout.addWidget(QLabel("External Instrument Simulation"))
         self.measure_status_label = QLabel(
             f"0 of {len(self.module_descriptors)} measurement modules enabled"
         )
@@ -499,27 +500,33 @@ class MainWindow(QMainWindow):
         )
 
     def _build_status_dock(self) -> None:
-        dock = QDockWidget("Device Status", self)
+        dock = QDockWidget("Instrument Status", self)
         dock.setObjectName("statusDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        panel = QWidget()
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
-        for device in self.config.devices:
+        panel = InstrumentStatusPanel()
+        for instrument in self.config.instruments:
             tile = StatusTile(
-                device.id,
-                device.display_name,
-                device.kind,
-                device.control_enabled,
+                instrument.id,
+                instrument.display_name,
+                instrument.kind,
+                instrument.control_enabled,
             )
-            if device.control_enabled:
+            if instrument.control_enabled:
                 tile.doubleClicked.connect(self._open_manual_control)
-            self.status_tiles[device.id] = tile
-            layout.addWidget(tile)
-        layout.addStretch(1)
-        dock.setWidget(panel)
+            self.status_tiles[instrument.id] = tile
+            panel.add_tile(tile)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setWidget(panel)
+        dock.setWidget(scroll)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+        self.status_panel = panel
+        self.status_scroll = scroll
         self.status_dock = dock
 
     def _build_log_dock(self) -> None:
@@ -599,11 +606,11 @@ class MainWindow(QMainWindow):
         graph_menu = menu.addMenu("Graph")
         graph_menu.addActions([self.graph_action, self.data_browser_action])
         instrument_menu = menu.addMenu("Instrument")
-        for device in self.config.devices:
-            if not device.control_enabled:
+        for instrument in self.config.instruments:
+            if not instrument.control_enabled:
                 continue
-            action = instrument_menu.addAction(device.display_name)
-            action.triggered.connect(lambda checked=False, device_id=device.id: self._open_manual_control(device_id))
+            action = instrument_menu.addAction(instrument.display_name)
+            action.triggered.connect(lambda checked=False, instrument_id=instrument.id: self._open_manual_control(instrument_id))
         modules_menu = menu.addMenu("Modules")
         modules_menu.addAction(self.modules_action)
         simulation_menu = menu.addMenu("Simulation")
@@ -713,9 +720,9 @@ class MainWindow(QMainWindow):
             "module_manager",
             self.module_manager.saveGeometry(),
         )
-        for device_id, dialog in self.manual_dialogs.items():
+        for instrument_id, dialog in self.manual_dialogs.items():
             store.set_geometry(
-                f"manual/{device_id}",
+                f"manual/{instrument_id}",
                 dialog.saveGeometry(),
             )
         for module_id, window in self.module_windows.items():
@@ -1208,7 +1215,7 @@ class MainWindow(QMainWindow):
             command,
             spec,
             self,
-            device_configs=self.config.devices,
+            instrument_configs=self.config.instruments,
             data_directory=self._last_data_directory,
         )
         try:
@@ -1264,7 +1271,7 @@ class MainWindow(QMainWindow):
             command,
             spec,
             self,
-            device_configs=self.config.devices,
+            instrument_configs=self.config.instruments,
             data_directory=self._last_data_directory,
         )
         try:
@@ -1596,7 +1603,7 @@ class MainWindow(QMainWindow):
             result = future.result()
             if result is False:
                 self.statusBar().showMessage(
-                    "Manual request was not confirmed by the device",
+                    "Manual request was not confirmed by the instrument",
                     5000,
                 )
             else:
@@ -1623,13 +1630,13 @@ class MainWindow(QMainWindow):
                 window.mark_applied()
         self._start_sequence(settings)
 
-    def _handle_snapshots(self, snapshots: dict[str, DeviceSnapshot]) -> None:
+    def _handle_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         self.current_snapshots = snapshots
-        for device_id, snapshot in snapshots.items():
-            tile = self.status_tiles.get(device_id)
+        for instrument_id, snapshot in snapshots.items():
+            tile = self.status_tiles.get(instrument_id)
             if tile is not None:
                 tile.update_snapshot(snapshot)
-            dialog = self.manual_dialogs.get(device_id)
+            dialog = self.manual_dialogs.get(instrument_id)
             if dialog is not None:
                 dialog.update_snapshot(snapshot)
         self.trend_dialog.add_snapshots(snapshots)
@@ -1643,7 +1650,7 @@ class MainWindow(QMainWindow):
             self.run_button.setEnabled(False)
             return
         reason = ""
-        for config in self.config.devices:
+        for config in self.config.instruments:
             if not config.control_enabled:
                 continue
             snapshot = self.current_snapshots.get(config.id)
@@ -1653,7 +1660,7 @@ class MainWindow(QMainWindow):
             if (
                 not snapshot.connected
                 or snapshot.connection_state
-                is not DeviceConnectionState.CONNECTED
+                is not InstrumentConnectionState.CONNECTED
             ):
                 reason = (
                     snapshot.message
@@ -1861,17 +1868,17 @@ class MainWindow(QMainWindow):
         try:
             if enabled:
                 descriptor = self._module_descriptor(module_id)
-                current_fingerprint = extension_tree_digest(
+                current_fingerprint = content_tree_digest(
                     descriptor.path
                 )
                 if current_fingerprint != descriptor.fingerprint:
-                    raise ExtensionTrustError(
+                    raise ContentTrustError(
                         f"{descriptor.name} changed after discovery; "
                         "refresh modules before enabling it"
                     )
-                if not confirm_module_plugin_trust(
+                if not confirm_measurement_module_trust(
                     self,
-                    self.plugin_trust_store,
+                    self.content_trust_store,
                     descriptor,
                 ):
                     self.module_manager.update_state(
@@ -1910,9 +1917,9 @@ class MainWindow(QMainWindow):
             return window
         descriptor = self._module_descriptor(module_id)
         if (
-            extension_tree_digest(descriptor.path)
+            content_tree_digest(descriptor.path)
             != descriptor.fingerprint
-            or not self.plugin_trust_store.is_trusted(
+            or not self.content_trust_store.is_trusted(
                 "module",
                 descriptor,
             )
@@ -1920,7 +1927,11 @@ class MainWindow(QMainWindow):
             raise PermissionError(
                 f"{descriptor.name} changed or is not trusted"
             )
-        window = ModuleWindow(descriptor, self)
+        window = ModuleWindow(
+            descriptor,
+            self,
+            resources=self.config.resource_payload("measurement"),
+        )
         window.load_settings(
             self._saved_module_settings(module_id),
             mark_unapplied=(
@@ -2109,10 +2120,10 @@ class MainWindow(QMainWindow):
             return
         descriptor = self._module_descriptor(module_id)
         try:
-            current_fingerprint = extension_tree_digest(
+            current_fingerprint = content_tree_digest(
                 descriptor.path
             )
-        except ExtensionTrustError as exc:
+        except ContentTrustError as exc:
             QMessageBox.critical(
                 self,
                 "Module Validation Failed",
@@ -2126,9 +2137,9 @@ class MainWindow(QMainWindow):
                 "Refresh modules before preparing dependencies.",
             )
             return
-        if not confirm_module_plugin_trust(
+        if not confirm_measurement_module_trust(
             self,
-            self.plugin_trust_store,
+            self.content_trust_store,
             descriptor,
         ):
             return
@@ -2174,7 +2185,7 @@ class MainWindow(QMainWindow):
         try:
             install_offline_dependencies(
                 python_executable=python,
-                extension_directory=descriptor.path,
+                package_directory=descriptor.path,
                 site_packages=module_dependency_directory(
                     self.config,
                     descriptor,
@@ -2201,50 +2212,50 @@ class MainWindow(QMainWindow):
         )
         self._refresh_modules()
 
-    def _open_manual_control(self, device_id: str) -> None:
-        config = self.config.device(device_id)
+    def _open_manual_control(self, instrument_id: str) -> None:
+        config = self.config.instrument(instrument_id)
         if not config.control_enabled:
             self.statusBar().showMessage(f"{config.display_name} is display only", 3000)
             return
-        dialog = self.manual_dialogs.get(device_id)
+        dialog = self.manual_dialogs.get(instrument_id)
         if dialog is None:
             dialog = ManualControlDialog(config, self)
             dialog.setRequested.connect(self._manual_set_target)
-            dialog.holdRequested.connect(self._manual_hold_device)
+            dialog.holdRequested.connect(self._manual_hold_instrument)
             self._restore_dialog_geometry(
                 dialog,
-                f"manual/{device_id}",
+                f"manual/{instrument_id}",
             )
-            self.manual_dialogs[device_id] = dialog
+            self.manual_dialogs[instrument_id] = dialog
         dialog.set_runtime_editable(
             self.current_run_state in self.TERMINAL_STATES
             and self._pending_run is None
         )
-        snapshot = self.current_snapshots.get(device_id)
+        snapshot = self.current_snapshots.get(instrument_id)
         if snapshot is not None:
             dialog.update_snapshot(snapshot)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
 
-    def _manual_set_target(self, device_id: str, value: float, rate: float, mode: str) -> None:
-        future = self.runtime.set_target(device_id, value, rate, mode)
-        snapshot = self.current_snapshots.get(device_id)
+    def _manual_set_target(self, instrument_id: str, value: float, rate: float, mode: str) -> None:
+        future = self.runtime.set_target(instrument_id, value, rate, mode)
+        snapshot = self.current_snapshots.get(instrument_id)
         precision = control_decimals(snapshot.kind, snapshot.unit) if snapshot is not None else 3
         self._pending_manual_operations.append(
             (
                 future,
-                f"Confirmed target {fixed_number(value, precision)} for {device_id}",
+                f"Confirmed target {fixed_number(value, precision)} for {instrument_id}",
             )
         )
-        self.statusBar().showMessage(f"Sending target to {device_id}...")
+        self.statusBar().showMessage(f"Sending target to {instrument_id}...")
 
-    def _manual_hold_device(self, device_id: str) -> None:
-        future = self.runtime.hold_device(device_id)
+    def _manual_hold_instrument(self, instrument_id: str) -> None:
+        future = self.runtime.hold_instrument(instrument_id)
         self._pending_manual_operations.append(
-            (future, f"Hold Current confirmed for {device_id}")
+            (future, f"Hold Current confirmed for {instrument_id}")
         )
-        self.statusBar().showMessage(f"Requesting Hold Current for {device_id}...")
+        self.statusBar().showMessage(f"Requesting Hold Current for {instrument_id}...")
 
     def _show_graph(self) -> None:
         self.trend_dialog.show()
@@ -2330,9 +2341,9 @@ class MainWindow(QMainWindow):
             self,
             "About OpenLab Control",
             f"OpenLab Control {__version__}\n\n"
-            "Control framework for external temperature and magnetic-field devices, "
+            "Control framework for external temperature and magnetic-field instruments, "
             "with process-isolated measurement modules.\n"
-            "Configured plugins may communicate with external instruments. "
+            "Configured System Instruments and Measurement Modules may communicate with external instruments. "
             "This application does not control PPMS.\n"
             f"UI scale: {self.ui_scale:.2f}x ({self.ui_scale_mode}).\n"
             f"Text scale: {self.font_scale:.0%}.",

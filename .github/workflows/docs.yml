@@ -5,10 +5,10 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - "plugin_templates/**"
+      - "templates/**"
       - "src/labcontrol/module_api.py"
       - "src/labcontrol/measurement/frontend_api.py"
-      - "src/labcontrol/devices/base.py"
+      - "src/labcontrol/instruments/base.py"
       - "src/labcontrol/models.py"
       - "mkdocs.yml"
       - "requirements-docs.txt"

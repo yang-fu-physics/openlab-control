@@ -86,11 +86,11 @@ class SequenceParserTests(unittest.TestCase):
             "Scan Field 0.00 Oe to 10000.00 Oe in 11 steps at 5000.00 Oe/min, Settle",
         )
 
-    def test_field_scan_nearest_polarity_round_trips_with_device_suffix(self) -> None:
+    def test_field_scan_nearest_polarity_round_trips_with_instrument_suffix(self) -> None:
         source = (
             "T Scan Field 9.000000 T to 3.000000 T in 4 steps at "
             "1.000000 T/min, Settle, Nearest +/- Polarity "
-            'using device "magnet A"\n'
+            'using instrument "magnet A"\n'
             "T     Measure\n"
             "T End Scan\n"
             "T End Sequence\n"
@@ -99,7 +99,7 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(result.issues, ())
         command = result.document.commands[0]
         self.assertTrue(command.params["nearest_polarity"])
-        self.assertEqual(command.params["device_id"], "magnet A")
+        self.assertEqual(command.params["instrument_id"], "magnet A")
         self.assertEqual(serialize_sequence(result.document), source)
 
         command.update_params(dict(command.params))
@@ -107,7 +107,7 @@ class SequenceParserTests(unittest.TestCase):
             format_command(command),
             "Scan Field 9.000000 T to 3.000000 T in 4 steps at "
             "1.000000 T/min, Settle, Nearest +/- Polarity "
-            'using device "magnet A"',
+            'using instrument "magnet A"',
         )
 
     def test_field_scan_accepts_unicode_plus_minus_alias(self) -> None:
@@ -162,7 +162,7 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(serialize_sequence(result.document), source)
 
     def test_measure_parameters_are_rejected(self) -> None:
-        result = parse_sequence("T Measure devices=transport\nT End Sequence\n")
+        result = parse_sequence("T Measure instruments=transport\nT End Sequence\n")
         self.assertTrue(result.has_errors)
         self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
         self.assertIn("has no parameters", result.issues[0].message)
@@ -171,7 +171,7 @@ class SequenceParserTests(unittest.TestCase):
         command = Command(
             CommandType.SCAN_TEMPERATURE,
             {
-                "device_id": "temperature",
+                "instrument_id": "temperature",
                 "point_mode": "List",
                 "points": "300, 299.9, 300",
                 "rate": 10.0,
@@ -274,29 +274,29 @@ class SequenceParserTests(unittest.TestCase):
                 self.assertTrue(result.has_errors)
                 self.assertIn(expected, result.issues[0].message)
 
-    def test_explicit_device_ids_round_trip_and_remark_text_is_unchanged(self) -> None:
+    def test_explicit_instrument_ids_round_trip_and_remark_text_is_unchanged(self) -> None:
         result = parse_sequence(
             'T Set Temperature 20.000 K at 5.000 K/min in Settle mode '
-            'using device "cryostat temperature"\n'
+            'using instrument "cryostat temperature"\n'
             "T Scan Field 0.00 Oe to 100.00 Oe in 2 steps at "
-            "50.00 Oe/min, Sweep using device magnet_primary\n"
+            "50.00 Oe/min, Sweep using instrument magnet_primary\n"
             "T     Measure\n"
             "T End Scan\n"
-            "T Remark calibrated using device field\n"
+            "T Remark calibrated using instrument field\n"
             "T End Sequence\n"
         )
         self.assertFalse(result.has_errors)
         self.assertEqual(
-            result.document.commands[0].params["device_id"],
+            result.document.commands[0].params["instrument_id"],
             "cryostat temperature",
         )
         self.assertEqual(
-            result.document.commands[1].params["device_id"],
+            result.document.commands[1].params["instrument_id"],
             "magnet_primary",
         )
         self.assertEqual(
             result.document.commands[2].params["text"],
-            "calibrated using device field",
+            "calibrated using instrument field",
         )
 
         result.document.commands[0].update_params(
@@ -306,16 +306,16 @@ class SequenceParserTests(unittest.TestCase):
             dict(result.document.commands[1].params)
         )
         serialized = serialize_sequence(result.document)
-        self.assertIn('using device "cryostat temperature"', serialized)
-        self.assertIn('using device "magnet_primary"', serialized)
+        self.assertIn('using instrument "cryostat temperature"', serialized)
+        self.assertIn('using instrument "magnet_primary"', serialized)
         reparsed = parse_sequence(serialized)
         self.assertFalse(reparsed.has_errors)
         self.assertEqual(
-            reparsed.document.commands[0].params["device_id"],
+            reparsed.document.commands[0].params["instrument_id"],
             "cryostat temperature",
         )
         self.assertEqual(
-            reparsed.document.commands[1].params["device_id"],
+            reparsed.document.commands[1].params["instrument_id"],
             "magnet_primary",
         )
 

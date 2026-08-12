@@ -13,13 +13,13 @@ GUI 主线程
             │
             ▼
 后台 asyncio 线程
-├─ DeviceManager：设备角色、限制、恢复和快照
+├─ InstrumentManager：仪表角色、限制、恢复和快照
 ├─ SequenceEngine：SEQ、Pause、Stop 和 Error
 ├─ MeasurementModuleService：模块调度与结果校验
 ├─ DatRunLogger：所有运行文件的唯一写入者
 └─ EventManager / AlarmReporter
             │ 受限 JSON IPC
-            ├─ 每个设备实例一个 spawn 子进程
+            ├─ 每个仪表实例一个 spawn 子进程
             └─ 每个 Enabled 模块一个 spawn 子进程
 ```
 
@@ -29,11 +29,11 @@ GUI 不直接操作仪表。每个模块内部请求串行，不同模块可并�
 进程隔离限制阻塞、崩溃和依赖影响，但不是恶意代码沙箱。模块 Frontend 仍在 GUI
 进程，因此首次加载必须核对来源、版本、路径和内容指纹。
 
-## 扩展边界
+## 两套接入边界
 
-Device Plugin 与 Measurement Module 分开：
+System Instrument 与 Measurement Module 分开：
 
-- Device Plugin 提供温度、磁场或 Monitor；核心负责角色、上下限、速率、失联恢复和
+- System Instrument 提供温度、磁场或 Monitor；核心负责角色、上下限、速率、失联恢复和
   Hold 策略。
 - Measurement Module 拥有完成一次测量所需的仪表、切换器、时序、状态码和安全动作；
   它只能读取温场快照，不能控制温度或磁场。
@@ -42,7 +42,7 @@ Device Plugin 与 Measurement Module 分开：
 来自 `Module.columns`。发现阶段不导入模块源码，Enable 前再次验证完整目录指纹和依赖。
 
 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享依赖。只有额外
-依赖进入 `plugin_runtime/<type>/<id>/<fingerprint>/site-packages`；离线安装固定使用
+依赖进入 `runtime_packages/<type>/<id>/<fingerprint>/site-packages`；离线安装固定使用
 `--no-index --only-binary=:all: --require-hashes`，并验证 `requirements.lock`、wheel、
 runtime marker 和依赖树摘要。
 
@@ -96,23 +96,23 @@ Disable: close → shutdown worker
 流式 `emit_row`。模块可额外返回最多 32,768 个有限 rawdata 数值，由核心写入模块独立
 sidecar。
 
-`ModuleAPI` 仅提供可中断等待/`checkpoint()`、只读设备快照、Warning、状态更新和本次
-总 timeout。`api.devices()` 会触发一次测量专用即时设备采样，与前面板常规轮询分开；
-并发模块请求合并为一次采样。Device Plugin 未实现 `poll_measurement()` 时自动使用完整
+`ModuleAPI` 仅提供可中断等待/`checkpoint()`、只读仪表快照、Warning、状态更新和本次
+总 timeout。`api.instruments()` 会触发一次测量专用即时仪表采样，与前面板常规轮询分开；
+并发模块请求合并为一次采样。System Instrument 未实现 `poll_measurement()` 时自动使用完整
 `poll()`。Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O 仍
 必须由模块设置有限 timeout。
 
 ## SEQ 与安全收尾
 
 SEQ 解析为树；Scan 可任意嵌套，Call Sequence 在预检时展开并检查递归。Pause 不主动
-改变输出。Stop、Error、任务取消和应用退出都会让可控温场设备尝试 Hold Current；Hold
+改变输出。Stop、Error、任务取消和应用退出都会让可控温场仪表尝试 Hold Current；Hold
 必须基于新鲜读回，无法确认时最终状态为 Faulted。
 
 模块在 `run_end` 中按自身协议完成一次 Run 的输出关闭或状态保持，`close` 只在 Disable
 和应用退出执行。若 `run_end` 或 `close` 失败，核心报告 Error 并有界回收 worker；进程
 被终止不等于外部仪表已安全。
 
-读链路失联时，DeviceManager 关闭旧 worker 并按配置重连；默认恢复窗为 60 秒。恢复后
+读链路失联时，InstrumentManager 关闭旧 worker 并按配置重连；默认恢复窗为 60 秒。恢复后
 读取实际 target/rate，不自动重放写命令。写命令 timeout 属于“可能已经执行”的歧义
 状态，立即 Faulted，不自动重试。
 
@@ -128,21 +128,21 @@ runs/<timestamp>_<sequence>/
 ├─ module_settings/*.status-at-start.json
 ├─ rawdata/*.rawdata
 ├─ experiment.dat
-├─ device_status.dat
+├─ instrument_status.dat
 └─ events.dat
 ```
 
 `DatRunLogger` 是唯一写入者。每条测量行写入前由核心取得测量专用即时温场快照；若模块刚在
-0.1 秒内读取则复用该样本。常规设备轮询
-另行节流写入 `device_status.dat`。同一物理设备的辅助读数随主快照使用一个连接，并在
+0.1 秒内读取则复用该样本。常规仪表轮询
+另行节流写入 `instrument_status.dat`。同一物理仪表的辅助读数随主快照使用一个连接，并在
 Run 开始时冻结为固定列。Data Browser 只跟踪用户打开的 DAT，不与当前 Run 绑定。
 
-空闲时设备与前面板按 `poll_interval_seconds` 采样；SEQ 控制期间用较短的
+空闲时仪表与前面板按 `poll_interval_seconds` 采样；SEQ 控制期间用较短的
 `control_poll_interval_seconds` 做判稳，但发给前面板和 Live Trend 的快照仍按前者节流。
 Measurement Module 的即时读取独立于这两个周期。
 
-同一台物理设备的 `connect`、写控制、Hold、测量读取、后台轮询和断开均经过同一个优先
-串行入口，不会同时访问仪表。入口不抢占已经开始的插件调用：当前完整仪表事务返回或超时
+同一台物理仪表的 `connect`、写控制、Hold、测量读取、后台轮询和断开均经过同一个优先
+串行入口，不会同时访问仪表。入口不抢占已经开始的后台调用：当前完整仪表事务返回或超时
 后，控制与安全操作先执行，等待中的 `poll_measurement()` 再先于后台 `poll()`。因此后台
 状态刷新不会把测量用即时读数长期压在队尾。
 
@@ -152,6 +152,6 @@ Measurement Module 的即时读取独立于这两个周期。
 
 ## 真实仪表边界
 
-OpenLab Control 0.14.1 尚未完成真实仪表验证。软件进程隔离不能替代设备限流、限压、
+OpenLab Control 0.14.1 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
 限温、磁体保护、硬件互锁或人工急停。接入真机前必须保留并通过模块自己的命令顺序、
 读回、量程、timeout、异常清理与协议解析测试，再进行低风险现场验证。

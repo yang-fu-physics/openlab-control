@@ -92,19 +92,19 @@ T Wait For 10.0 secs
 Pause 会冻结等待进度；Stop/Error 可在最多约一个运行时检查周期内打断。
 等待时间必须在 0 到 31536000 秒之间；手写 SEQ 与运行时使用同一限制。
 
-### 设备选择
+### 仪表选择
 
-温度/磁场 Set 和 Scan 都可在末尾显式选择配置中的设备：
+温度/磁场 Set 和 Scan 都可在末尾显式选择配置中的仪表：
 
 ```text
-T Set Temperature 20.000 K at 5.000 K/min in Settle mode using device "cryostat_primary"
-T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using device "magnet A"
+T Set Temperature 20.000 K at 5.000 K/min in Settle mode using instrument "cryostat_primary"
+T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using instrument "magnet A"
 ```
 
-参数窗口按设备类型列出允许控制的配置 ID，并随选择项切换上下限和最大速率。省略
-`using device` 时选择该类型唯一的 primary；旧文件中的 `temperature`/`field` 角色名也
-按此规则兼容。显式 ID 会随保存和重新打开保持，ID 不得指向错误类型、只读设备或未连接
-设备。
+参数窗口按仪表类型列出允许控制的配置 ID，并随选择项切换上下限和最大速率。省略
+`using instrument` 时选择该类型唯一的 primary；旧文件中的 `temperature`/`field` 角色名也
+按此规则兼容。显式 ID 会随保存和重新打开保持，ID 不得指向错误类型、只读仪表或未连接
+仪表。
 
 ### Set Temperature
 
@@ -125,7 +125,7 @@ T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
 T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 ```
 
-设备默认原生单位为 Oe；SEQ 可选 Oe 或 T，但 Target 与 Rate 必须同单位。中央换算到设备单位后再做限制检查。Oe 显示两位，T 显示六位。
+仪表默认原生单位为 Oe；SEQ 可选 Oe 或 T，但 Target 与 Rate 必须同单位。中央换算到仪表单位后再做限制检查。Oe 显示两位，T 显示六位。
 
 ### Scan Temperature — Linear
 
@@ -174,7 +174,7 @@ T     Measure
 T End Scan
 ```
 
-运行到该 Scan 时，框架会取得所选磁场设备已通过新鲜度检查的当前实际场读回，并比较它
+运行到该 Scan 时，框架会取得所选磁场仪表已通过新鲜度检查的当前实际场读回，并比较它
 到输入起点和输入起点负值的距离。更靠近负值时，整条路径同时反号；例如实际场为 `-6 T`，上例执行
 `-9 T` 到 `-3 T`。距离相同时保留输入路径。无法取得有限的实际场会 Error，且不会移动
 到第一个点；反号后的全部点仍会在首次写入前经过配置上下限和速率检查。
@@ -232,7 +232,7 @@ T Measure
 Measure 无参数。旧格式例如：
 
 ```text
-T Measure devices=transport repeats=3 interval=1s
+T Measure instruments=transport repeats=3 interval=1s
 ```
 
 会产生 Error 并阻止 Run，不做兼容转换。重复测量用 Scan Time 或重复插入 Measure；选择测量方案则在运行前通过 Modules Manager Enable/Disable。
@@ -255,7 +255,7 @@ T Measure devices=transport repeats=3 interval=1s
 T Remark Cooldown complete; begin transport scan
 ```
 
-写入事件日志，不改变设备。
+写入事件日志，不改变仪表。
 
 ### Call Sequence
 

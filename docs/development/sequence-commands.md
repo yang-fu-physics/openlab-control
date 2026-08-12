@@ -30,7 +30,7 @@ sequence_commands = [
 模块成功 Enable 后，程序会出现一个以模块名称命名的指令组。Disable 后，这组指令会消失。
 
 常用输入类型只有：文字、整数、小数、下拉选项、开关和列表。完整写法可在需要时查看
-[完整扩展规范](../PLUGIN_DEVELOPMENT.md)。
+[完整开发规范](../DEVELOPMENT_REFERENCE.md)。
 
 ## 2. 收到指令后执行动作
 
@@ -94,4 +94,4 @@ T End Scan
 不要提供“任意仪表命令”输入框。它很容易绕过范围检查和安全步骤。
 
 完整可运行例子在
-`plugin_templates/measurement-modules-repository/modules/tutorial_resistance/backend.py`。
+`templates/measurement-modules-repository/modules/tutorial_resistance/backend.py`。

@@ -10,13 +10,16 @@ if not exist ".venv\Scripts\python.exe" (
 if errorlevel 1 goto :error
 ".venv\Scripts\python.exe" -m PyInstaller --clean --noconfirm OpenLabControl.spec
 if errorlevel 1 goto :error
+if not exist "dist\OpenLabControl\tools" mkdir "dist\OpenLabControl\tools"
+copy /Y "dist\InstrumentScanner.exe" "dist\OpenLabControl\tools\InstrumentScanner.exe" >nul
+if errorlevel 1 goto :error
 xcopy /E /I /Y "configs" "dist\OpenLabControl\configs" >nul
 xcopy /E /I /Y "examples" "dist\OpenLabControl\examples" >nul
 xcopy /E /I /Y "docs" "dist\OpenLabControl\docs" >nul
-xcopy /E /I /Y "plugin_templates" "dist\OpenLabControl\plugin_templates" >nul
+xcopy /E /I /Y "templates" "dist\OpenLabControl\templates" >nul
 xcopy /E /I /Y "integrations" "dist\OpenLabControl\integrations" >nul
 xcopy /E /I /Y "modules" "dist\OpenLabControl\modules" >nul
-for %%R in (configs examples docs plugin_templates integrations modules) do call :remove_python_caches "dist\OpenLabControl\%%R"
+for %%R in (configs examples docs templates integrations modules) do call :remove_python_caches "dist\OpenLabControl\%%R"
 copy /Y "README.md" "dist\OpenLabControl\README.md" >nul
 copy /Y "CHANGELOG.md" "dist\OpenLabControl\CHANGELOG.md" >nul
 copy /Y "SECURITY.md" "dist\OpenLabControl\SECURITY.md" >nul
@@ -24,11 +27,12 @@ if not exist "dist\OpenLabControl\runs" mkdir "dist\OpenLabControl\runs"
 if not exist "dist\OpenLabControl\module_data" mkdir "dist\OpenLabControl\module_data"
 if not exist "dist\OpenLabControl\wheels" mkdir "dist\OpenLabControl\wheels"
 if not exist "dist\OpenLabControl\modules" mkdir "dist\OpenLabControl\modules"
-if not exist "dist\OpenLabControl\device_plugins" mkdir "dist\OpenLabControl\device_plugins"
-if not exist "dist\OpenLabControl\plugin_runtime" mkdir "dist\OpenLabControl\plugin_runtime"
-if not exist "dist\OpenLabControl\plugin_state" mkdir "dist\OpenLabControl\plugin_state"
+if not exist "dist\OpenLabControl\system_instruments" mkdir "dist\OpenLabControl\system_instruments"
+if not exist "dist\OpenLabControl\runtime_packages" mkdir "dist\OpenLabControl\runtime_packages"
+if not exist "dist\OpenLabControl\trust_state" mkdir "dist\OpenLabControl\trust_state"
 echo.
 echo Build completed: dist\OpenLabControl\OpenLabControl.exe
+echo Instrument scanner: dist\OpenLabControl\tools\InstrumentScanner.exe
 pause
 exit /b 0
 

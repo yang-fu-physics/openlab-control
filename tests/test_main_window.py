@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_REPOSITORY = (
     ROOT
-    / "plugin_templates"
+    / "templates"
     / "measurement-modules-repository"
 )
 sys.path.insert(0, str(ROOT / "src"))
@@ -134,7 +134,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_sequence_edit_popup_receives_device_limits_from_main_config(self) -> None:
+    def test_sequence_edit_popup_receives_instrument_limits_from_main_config(self) -> None:
         window = MainWindow(self.config)
         try:
             command = next(
@@ -341,7 +341,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertTrue(window.trend_dialog.isVisible())
             self.assertEqual(
                 set(window.current_snapshots),
-                {device.id for device in self.config.devices},
+                {instrument.id for instrument in self.config.instruments},
             )
             self.assertTrue(
                 all(
@@ -438,7 +438,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                 # 这里模拟用户随后第一次确认模块，确保后台能立即看见新记录，而
                 # 不是必须关闭并重开应用后才能 Enable。
                 with patch(
-                    "labcontrol.ui.plugin_trust."
+                    "labcontrol.ui.trust_dialogs."
                     "QMessageBox.question",
                     return_value=(
                         QMessageBox.StandardButton.Yes
@@ -520,7 +520,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                 with (
                     patch(
                         "labcontrol.ui.main_window."
-                        "confirm_module_plugin_trust",
+                        "confirm_measurement_module_trust",
                         return_value=True,
                     ),
                     patch.object(
@@ -817,7 +817,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         window = MainWindow(self.config)
         try:
             document = parse_sequence(
-                "T Measure devices=transport\nT End Sequence\n", "legacy.seq"
+                "T Measure instruments=transport\nT End Sequence\n", "legacy.seq"
             ).document
             window._set_document(document)
             with (

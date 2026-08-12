@@ -13,7 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 SIMULATED_MODULE = (
     ROOT
-    / "plugin_templates"
+    / "templates"
     / "measurement-modules-repository"
     / "modules"
     / "simulated_transport"
@@ -24,17 +24,17 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import (  # noqa: E402
-    DeviceActivity,
-    DeviceKind,
-    DeviceMetric,
-    DeviceSnapshot,
+    InstrumentActivity,
+    InstrumentKind,
+    InstrumentMetric,
+    InstrumentSnapshot,
     Severity,
 )
 from labcontrol.measurement.manifest import ModuleColumn, load_manifest  # noqa: E402
 
 
 class DatafileTests(unittest.TestCase):
-    def test_device_metrics_have_frozen_columns_in_measurement_and_status_files(
+    def test_instrument_metrics_have_frozen_columns_in_measurement_and_status_files(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -46,69 +46,66 @@ class DatafileTests(unittest.TestCase):
             logger = DatRunLogger(config, EventManager())
             now = time.monotonic()
             snapshots = {
-                "temperature": DeviceSnapshot(
+                "temperature": InstrumentSnapshot(
                     "temperature",
                     "Temperature",
-                    DeviceKind.TEMPERATURE,
+                    InstrumentKind.TEMPERATURE,
                     now,
                     True,
                     "K",
                     4.2,
                     4.0,
                     1.0,
-                    DeviceActivity.HOLDING,
-                    metrics=(
-                        DeviceMetric(
-                            "second_stage",
+                    InstrumentActivity.HOLDING,
+                    metrics={
+                        "second_stage": InstrumentMetric(
                             "2nd Stage",
                             20.1254,
                             "K",
                             3,
                         ),
-                        DeviceMetric(
-                            "heater_output",
+                        "heater_output": InstrumentMetric(
                             "Heater",
                             12.345,
                             "%",
                             2,
                         ),
-                        DeviceMetric(
-                            "heater_range",
+                        "heater_range": InstrumentMetric(
                             "Range",
                             "LOW",
                         ),
-                    ),
+                    },
                 )
             }
             paths = logger.open_run(
                 "metrics.seq",
                 "T Measure\nT End Sequence\n",
-                device_snapshots=snapshots,
+                instrument_snapshots=snapshots,
             )
             logger.write_system_row(snapshots, "Measure")
-            logger.write_device_status(snapshots, force=True)
+            logger.write_instrument_status(snapshots, force=True)
             measurement_only = {
-                "temperature": DeviceSnapshot(
+                "temperature": InstrumentSnapshot(
                     "temperature",
                     "Temperature",
-                    DeviceKind.TEMPERATURE,
+                    InstrumentKind.TEMPERATURE,
                     now + 0.1,
                     True,
                     "K",
                     4.25,
                     4.0,
                     1.0,
-                    DeviceActivity.HOLDING,
-                    metrics=tuple(
-                        DeviceMetric(
-                            metric.key,
+                    InstrumentActivity.HOLDING,
+                    metrics={
+                        metric_key: InstrumentMetric(
                             metric.display_name,
                             None,
                             metric.unit,
                             metric.decimals,
                         )
-                        for metric in snapshots["temperature"].metrics
-                    ),
+                        for metric_key, metric
+                        in snapshots["temperature"].metrics.items()
+                    },
                 )
             }
             measurement_row = dict(
@@ -143,7 +140,7 @@ class DatafileTests(unittest.TestCase):
             logger.close()
 
             data = paths.data_file.read_text(encoding="utf-8")
-            status = paths.device_status_file.read_text(encoding="utf-8")
+            status = paths.instrument_status_file.read_text(encoding="utf-8")
             for text in (data, status):
                 self.assertIn("temperature.second_stage(K)", text)
                 self.assertIn("temperature.heater_output(%)", text)
@@ -174,18 +171,18 @@ class DatafileTests(unittest.TestCase):
             )
             now = time.monotonic()
             snapshots = {
-                "temperature": DeviceSnapshot("temperature", "温度", DeviceKind.TEMPERATURE, now, True, "K", 3.1236, 3.0, 1.0, DeviceActivity.HOLDING),
-                "field": DeviceSnapshot("field", "磁场", DeviceKind.FIELD, now, True, "Oe", 123.456, 100.0, 10.0, DeviceActivity.HOLDING),
-                "second_stage": DeviceSnapshot("second_stage", "2nd Stage", DeviceKind.MONITOR, now, True, "K", 4.2345),
+                "temperature": InstrumentSnapshot("temperature", "温度", InstrumentKind.TEMPERATURE, now, True, "K", 3.1236, 3.0, 1.0, InstrumentActivity.HOLDING),
+                "field": InstrumentSnapshot("field", "磁场", InstrumentKind.FIELD, now, True, "Oe", 123.456, 100.0, 10.0, InstrumentActivity.HOLDING),
+                "second_stage": InstrumentSnapshot("second_stage", "2nd Stage", InstrumentKind.MONITOR, now, True, "K", 4.2345),
             }
             self.assertTrue(
-                logger.write_device_status(
+                logger.write_instrument_status(
                     snapshots,
                     force=True,
                 )
             )
             self.assertFalse(
-                logger.write_device_status(snapshots)
+                logger.write_instrument_status(snapshots)
             )
             logger.write_module_row(
                 snapshots,
@@ -208,7 +205,7 @@ class DatafileTests(unittest.TestCase):
             logger.close()
             data = paths.data_file.read_text(encoding="utf-8")
             event_data = paths.event_file.read_text(encoding="utf-8")
-            device_status = paths.device_status_file.read_text(
+            instrument_status = paths.instrument_status_file.read_text(
                 encoding="utf-8"
             )
             self.assertIn("[Header]", data)
@@ -256,19 +253,19 @@ class DatafileTests(unittest.TestCase):
                 "temperature.Connected,"
                 "temperature.ReadingAge(s),"
                 "temperature.Message",
-                device_status,
+                instrument_status,
             )
             self.assertIn(
                 ",3.124,3.000,1.000,holding,"
                 "not_applicable,,connected,true,",
-                device_status,
+                instrument_status,
             )
             self.assertIn(
                 "TIMESTAMP_EPOCH,labview_1904",
-                device_status,
+                instrument_status,
             )
             status_rows = (
-                device_status.split("[Data]\n", 1)[1]
+                instrument_status.split("[Data]\n", 1)[1]
                 .strip()
                 .splitlines()
             )
@@ -435,7 +432,7 @@ class DatafileTests(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), sentinel)
             paths = logger.paths
             self.assertIsNotNone(paths)
-            protected_status = paths.device_status_file.read_text(
+            protected_status = paths.instrument_status_file.read_text(
                 encoding="utf-8"
             )
             with self.assertRaisesRegex(
@@ -443,12 +440,12 @@ class DatafileTests(unittest.TestCase):
                 "reserved run artifact",
             ):
                 logger.set_datafile(
-                    str(paths.device_status_file),
+                    str(paths.instrument_status_file),
                     "create",
                     allow_external=True,
                 )
             self.assertEqual(
-                paths.device_status_file.read_text(encoding="utf-8"),
+                paths.instrument_status_file.read_text(encoding="utf-8"),
                 protected_status,
             )
             protected_module_setting = (
@@ -501,7 +498,7 @@ class DatafileTests(unittest.TestCase):
             paths = empty.open_run("empty.seq", "T End Sequence\n")
             empty.close()
             self.assertTrue(paths.data_file.exists())
-            self.assertTrue(paths.device_status_file.exists())
+            self.assertTrue(paths.instrument_status_file.exists())
             self.assertIn("[Data]", paths.data_file.read_text(encoding="utf-8"))
 
     def test_run_directory_allocation_retries_an_atomic_creation_race(self) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .models import DeviceKind
+from .models import InstrumentKind
 
 
 def field_decimals(unit: object) -> int:
@@ -10,10 +10,10 @@ def field_decimals(unit: object) -> int:
     return 2 if str(unit).strip().lower() == "oe" else 6
 
 
-def control_decimals(kind: DeviceKind, unit: object) -> int:
-    """按设备类型和单位选择手动控制输入的小数位。"""
+def control_decimals(kind: InstrumentKind, unit: object) -> int:
+    """按仪表类型和单位选择手动控制输入的小数位。"""
 
-    if kind is DeviceKind.FIELD:
+    if kind is InstrumentKind.FIELD:
         return field_decimals(unit)
     return 3
 

@@ -17,13 +17,13 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
 from ..config import AppConfig
-from ..extensions.dependencies import (
+from ..package_support.dependencies import (
     dependency_runtime_errors,
     missing_dependencies as find_missing_dependencies,
-    partition_extension_dependencies,
+    partition_package_dependencies,
     validate_requirements_lock,
 )
-from ..extensions.trust import ExtensionTrustError, extension_tree_digest
+from ..package_support.trust import ContentTrustError, content_tree_digest
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -100,7 +100,7 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         framework_dependencies,
         dependencies,
         dependency_compatibility_errors,
-    ) = partition_extension_dependencies(declared_dependencies)
+    ) = partition_package_dependencies(declared_dependencies)
     descriptor = ModuleDescriptor(
         id=module_id,
         name=name,
@@ -140,8 +140,8 @@ def load_manifest(path: Path) -> ModuleDescriptor:
             errors.append(f"dependency URLs are not allowed: {raw_requirement}")
     errors.extend(validate_requirements_lock(path, dependencies))
     try:
-        descriptor.fingerprint = extension_tree_digest(path)
-    except ExtensionTrustError as exc:
+        descriptor.fingerprint = content_tree_digest(path)
+    except ContentTrustError as exc:
         errors.append(str(exc))
     if errors:
         descriptor.valid = False

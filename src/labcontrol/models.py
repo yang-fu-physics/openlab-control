@@ -1,7 +1,7 @@
-"""跨 UI、运行时、设备与日志边界传递的轻量状态模型。
+"""跨 UI、运行时、仪表与日志边界传递的轻量状态模型。
 
 这些对象不持有仪表、线程或文件句柄。运行时通过消息队列传递它们，UI 只消费状态快照，
-从而避免把可变设备对象暴露到 Qt 线程。
+从而避免把可变仪表对象暴露到 Qt 线程。
 """
 
 from __future__ import annotations
@@ -20,24 +20,24 @@ class Severity(str, Enum):
     ERROR = "error"
 
 
-class DeviceKind(str, Enum):
-    """框架认识的设备功能类型。"""
+class InstrumentKind(str, Enum):
+    """框架认识的仪表功能类型。"""
 
     TEMPERATURE = "temperature"
     FIELD = "field"
     MONITOR = "monitor"
 
 
-class DeviceRole(str, Enum):
-    """同类设备中的职责；目前每类最多一个 primary 参与标准控制。"""
+class InstrumentRole(str, Enum):
+    """同类仪表中的职责；目前每类最多一个 primary 参与标准控制。"""
 
     PRIMARY = "primary"
     SECONDARY = "secondary"
     MONITOR = "monitor"
 
 
-class DeviceActivity(str, Enum):
-    """设备当前动作，用于状态展示和运行快照。"""
+class InstrumentActivity(str, Enum):
+    """仪表当前动作，用于状态展示和运行快照。"""
 
     DISCONNECTED = "disconnected"
     IDLE = "idle"
@@ -46,8 +46,8 @@ class DeviceActivity(str, Enum):
     FAULT = "fault"
 
 
-class DeviceConnectionState(str, Enum):
-    """设备连接生命周期；与一次读数的 ``connected`` 标志分开保存。"""
+class InstrumentConnectionState(str, Enum):
+    """仪表连接生命周期；与一次读数的 ``connected`` 标志分开保存。"""
 
     STARTING = "starting"
     CONNECTED = "connected"
@@ -80,16 +80,15 @@ class RunState(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
-class DeviceMetric:
-    """同一物理设备随主快照返回的一项附加读数。
+class InstrumentMetric:
+    """同一物理仪表随主快照返回的一项附加读数描述。
 
-    一个 Device Plugin 仍只拥有一个连接和一个主 ``DeviceSnapshot``。温控器的辅助
-    温度、加热功率、量程等值通过本对象附在主快照上，避免为了显示第二个数值而对同一
-    USB/GPIB 仪表再打开一个并发会话。``key`` 用作稳定的 DAT 列名，``display_name``
-    只用于界面；``decimals`` 仅控制显示和写盘格式，不改变原始浮点值。
+    一个 System Instrument 仍只拥有一个连接和一个主 ``InstrumentSnapshot``。温控器的辅助
+    温度、加热功率、量程等值通过 ``snapshot.metrics`` 字典附在主快照上，避免为了显示
+    第二个数值而对同一 USB/GPIB 仪表再打开一个并发会话。字典键用作稳定的 DAT 列名，
+    ``display_name`` 只用于界面；``decimals`` 仅控制显示和写盘格式，不改变原始浮点值。
     """
 
-    key: str
     display_name: str
     value: float | int | str | bool | None
     unit: str = ""
@@ -97,28 +96,28 @@ class DeviceMetric:
 
 
 @dataclass(slots=True)
-class DeviceSnapshot:
-    """某一时刻的设备读数快照。
+class InstrumentSnapshot:
+    """某一时刻的仪表读数快照。
 
     ``timestamp`` 使用 ``time.monotonic()``，只用于新鲜度和超时计算；写入 DAT 的绝对时间由
     日志层另行生成，不能把两种时钟混用。
     """
 
-    device_id: str
+    instrument_id: str
     display_name: str
-    kind: DeviceKind
+    kind: InstrumentKind
     timestamp: float
     connected: bool
     unit: str = ""
     current: float | None = None
     target: float | None = None
     rate_per_minute: float | None = None
-    activity: DeviceActivity = DeviceActivity.IDLE
+    activity: InstrumentActivity = InstrumentActivity.IDLE
     stability: StabilityState = StabilityState.NOT_APPLICABLE
     message: str = ""
-    connection_state: DeviceConnectionState = DeviceConnectionState.CONNECTED
+    connection_state: InstrumentConnectionState = InstrumentConnectionState.CONNECTED
     instrument_stable: bool | None = None
-    metrics: tuple[DeviceMetric, ...] = ()
+    metrics: dict[str, InstrumentMetric] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
