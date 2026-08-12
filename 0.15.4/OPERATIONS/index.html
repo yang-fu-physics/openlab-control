@@ -1,0 +1,3289 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="OpenLab Control 中文使用与扩展开发教程">
+      
+      
+      
+        <link rel="canonical" href="https://yang-fu-physics.github.io/openlab-control/0.15.4/OPERATIONS/">
+      
+      
+        <link rel="prev" href="../guides/instrument-scanner/">
+      
+      
+        <link rel="next" href="../guides/data-browser/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>操作手册 - OpenLab Control</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="OpenLab Control 开发者站点">
+  <meta property="og:description" content="从第一个测量模块到真实仪表安全验证的中文开发教程。">
+  <meta property="og:image" content="https://yang-fu-physics.github.io/openlab-control/0.15.4stable/assets/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://yang-fu-physics.github.io/openlab-control/0.15.4stable/assets/og.png">
+
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#_1" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="OpenLab Control" class="md-header__button md-logo" aria-label="OpenLab Control" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1c0-.21-.07-.41-.18-.57L13 8.35V4h-2v4.35L5.18 18.43c-.11.16-.18.36-.18.57m1 3a3 3 0 0 1-3-3c0-.6.18-1.16.5-1.63L9 7.81V6a1 1 0 0 1-1-1V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1v1.81l5.5 9.56c.32.47.5 1.03.5 1.63a3 3 0 0 1-3 3zm7-6 1.34-1.34L16.27 18H7.73l2.66-4.61zm-.5-4a.5.5 0 0 1 .5.5.5.5 0 0 1-.5.5.5.5 0 0 1-.5-.5.5.5 0 0 1 .5-.5"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            OpenLab Control
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              操作手册
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="cyan"  aria-label="切换至深色模式"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="切换至深色模式" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="cyan"  aria-label="切换至浅色模式"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="切换至浅色模式" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="分享" aria-label="分享" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/yang-fu-physics/openlab-control" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    yang-fu-physics/openlab-control
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  首页
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  开始使用
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../getting-started/first-sequence/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  使用软件
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../development/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Measurement Module
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../development/system-instrument/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  System Instrument
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../development/testing/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  测试与发布
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/public-api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  参考
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="OpenLab Control" class="md-nav__button md-logo" aria-label="OpenLab Control" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1c0-.21-.07-.41-.18-.57L13 8.35V4h-2v4.35L5.18 18.43c-.11.16-.18.36-.18.57m1 3a3 3 0 0 1-3-3c0-.6.18-1.16.5-1.63L9 7.81V6a1 1 0 0 1-1-1V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1v1.81l5.5 9.56c.32.47.5 1.03.5 1.63a3 3 0 0 1-3 3zm7-6 1.34-1.34L16.27 18H7.73l2.66-4.61zm-.5-4a.5.5 0 0 1 .5.5.5.5 0 0 1-.5.5.5.5 0 0 1-.5-.5.5.5 0 0 1 .5-.5"/></svg>
+
+    </a>
+    OpenLab Control
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/yang-fu-physics/openlab-control" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    yang-fu-physics/openlab-control
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    首页
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    开始使用
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    开始使用
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows 发布包
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    源码环境
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    使用软件
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    使用软件
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/first-sequence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    第一条 SEQ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/instrument-scanner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    扫描与配置仪表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    操作手册
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    操作手册
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        日常运行的最短流程
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安装与启动
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="安装与启动">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows 发布包
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        源码运行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        报警报告
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        主窗口
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="主窗口">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        外观、字号与窗口大小
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        测量模块
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="测量模块">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#settings-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings 与 Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#seq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEQ 对应的模块设置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-apply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 前未 Apply
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refresh 与依赖
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seq_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        编辑 SEQ
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="编辑 SEQ">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        新建/打开/保存
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        插入与修改
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        模块自定义指令
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        多行操作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#measure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="运行">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pause" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pause
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        手动温场控制
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#warning-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warning 与 Error
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Warning 与 Error">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#warning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-browser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Browser
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        输出与备份
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        关闭程序
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        常见问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        模块无法勾选
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        发布包提示没有 Python Runtime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enable_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enable 后参数没有作用
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        模块窗口关不掉
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable-disabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable 报错但已显示 Disabled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#measure_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measure 没有模块数据
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#seq-measureinitialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEQ 旧 Measure/Initialize 无法运行
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        更换温控仪或磁体电源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        仪表一直 Reconnecting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        左栏被长文件名撑宽
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4K 字体不合适
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DAT 图不刷新
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/data-browser/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Browser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    常见问题
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../development/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Measurement Module
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Measurement Module
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/first-module/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    第一个测量模块
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/results-and-slots/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    多通道数据
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    设置与状态窗口
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/sequence-commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    模块自己的 SEQ 指令
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/instrument-drivers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    一台仪表一个文件
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Instrument
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    System Instrument
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/system-instrument/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    从这里开始
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/first-system-instrument/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    写第一个仪表
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/instrument-reading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    读取、前面板与日志
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/instrument-control-safety/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    控制与安全
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/instrument-testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    测试与现场接入
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    测试与发布
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    测试与发布
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    怎样检查模块
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/offline-packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    离线安装与发布
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/safety-checklist/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    仪表安全清单
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    参与核心开发
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    参考
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    参考
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/public-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    公共 Python API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../SEQUENCE_FORMAT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SEQ 格式
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DAT_FORMAT/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DAT 与事件格式
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONFIGURATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    配置参考
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    系统架构
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../DEVELOPMENT_REFERENCE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    完整开发规范
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        日常运行的最短流程
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        安装与启动
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="安装与启动">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows 发布包
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        源码运行
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        报警报告
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        主窗口
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="主窗口">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        外观、字号与窗口大小
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        测量模块
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="测量模块">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#enable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#settings-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings 与 Status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#seq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEQ 对应的模块设置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-apply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run 前未 Apply
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#refresh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refresh 与依赖
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#seq_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        编辑 SEQ
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="编辑 SEQ">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        新建/打开/保存
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        插入与修改
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        模块自定义指令
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        多行操作
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#measure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="运行">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pause" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pause
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        手动温场控制
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#warning-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warning 与 Error
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Warning 与 Error">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#warning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Warning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-browser" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Browser
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        输出与备份
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        关闭程序
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        常见问题
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        模块无法勾选
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        发布包提示没有 Python Runtime
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enable_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enable 后参数没有作用
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        模块窗口关不掉
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#disable-disabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disable 报错但已显示 Disabled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#measure_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measure 没有模块数据
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#seq-measureinitialize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SEQ 旧 Measure/Initialize 无法运行
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        更换温控仪或磁体电源
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        仪表一直 Reconnecting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        左栏被长文件名撑宽
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4k" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4K 字体不合适
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DAT 图不刷新
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="_1">操作手册<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<h2 id="_2">日常运行的最短流程<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ol>
+<li>启动后检查温度、磁场和 Monitor 的实际状态。</li>
+<li>打开 SEQ；需要测量模块时再 Enable，并核对 Status 和 Settings。</li>
+<li>有未 Apply 的设置时优先选择 <strong>Apply and Run</strong>；真机首跑不要跳过 Apply。</li>
+<li>核对数据文件位置，点击 Run；结束后检查 DAT、<code>events.dat</code> 和 <code>instrument_status.dat</code>。</li>
+<li>分享运行目录前检查 <code>configuration.toml</code>，其中可能含真实仪表地址和本机路径。</li>
+</ol>
+<p>下面各节再解释安装、模块管理、异常和维护操作。</p>
+<h2 id="_3">安装与启动<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="windows">Windows 发布包<a class="headerlink" href="#windows" title="Permanent link">&para;</a></h3>
+<p>解压整个 <code>OpenLabControl</code> 文件夹后运行：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>OpenLabControl.exe
+</span></code></pre></div>
+<p>不要只复制 EXE；<code>configs/</code>、<code>docs/</code>、<code>templates/</code>、<code>modules/</code>、
+<code>system_instruments/</code>、<code>runtime_packages/</code>、<code>trust_state/</code>、<code>module_data/</code>、<code>wheels/</code> 和
+<code>runs/</code> 等目录应和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，
+不会恢复上次 Enable 状态。</p>
+<h3 id="_4">源码运行<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>setup.bat
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>run.bat
+</span></code></pre></div>
+<p><code>setup.bat</code> 默认安装 <code>requirements-lock.txt</code> 中经过发布验证的精确版本。需要评估依赖
+升级时，同时修改 <code>requirements.txt</code>、<code>pyproject.toml</code> 和核心共享依赖表，在隔离环境
+更新锁定文件，再完成全部测试和打包验收；不要在发布环境中临时升级单个包。</p>
+<p>或：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>.venv\Scripts\python.exe run.py
+</span></code></pre></div>
+<p>指定配置/SEQ：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>.venv\Scripts\python.exe run.py --config configs\site.local.toml --sequence examples\nested_scan.seq
+</span></code></pre></div>
+<p><code>default.toml</code> 保持为可提交的仿真模板；真实地址和现场限制写入 Git 已忽略的
+<code>site.local.toml</code>。<code>run.bat</code> 也会转发相同参数。</p>
+<p>单独打开 DAT Browser：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>.venv\Scripts\python.exe run.py --data-file C:\Data\sample.dat
+</span></code></pre></div>
+<p>无界面验证模块运行时，可显式重复使用 <code>--enable-module ID</code>：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>.venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
+</span></code></pre></div>
+<p>这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules
+Manager 手动启用。无界面模式不会弹信任确认：模块必须已经手动复制、在 GUI 中确认过
+完全相同的内容指纹；存在额外依赖时，其离线 runtime 也必须已准备好，否则启动会拒绝。</p>
+<h2 id="_5">报警报告<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<ol>
+<li>把 <code>integrations/nonebot_alarm_receiver/</code> 复制到 NoneBot2 插件目录。</li>
+<li>在 NoneBot 环境文件配置随机 <code>alarm_token</code>、<code>alarm_admin_qqs</code> 和
+   <code>alarm_tester_qqs</code>；管理员与测试员列表可重叠，接收器会去重。</li>
+<li>在运行 OpenLab Control 的账户环境中设置同一 Token，例如
+   <code>OPENLAB_ALARM_TOKEN</code>；或者创建独立 Token 文件并配置 <code>token_file</code>。</li>
+<li>在 <code>configs/site.local.toml</code> 的 <code>[alarms.reporting]</code> 中核对地址后设置
+   <code>enabled = true</code>，重启程序。</li>
+<li>先用仿真 <code>Inject Warning</code>、<code>Inject Error</code> 验证：Warning 只到测试员，
+   Error 同时到管理员和测试员，同一活动事件不会反复推送。</li>
+</ol>
+<p>接收端不再接受 <code>target_qq</code>，避免持有 Token 的发射端任意选择收件人。远程接收器必须
+使用 HTTPS。报警网络故障只产生本地 Warning，不会替代仪表互锁，也不会改变 Error
+中止 SEQ、Stop 后温场 Hold Current 的行为。</p>
+<h2 id="_6">主窗口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<ul>
+<li>左侧 <code>Sequence Control</code>：数据文件、当前 SEQ、运行状态、Enabled 模块监视卡和
+  Run/Pause/Stop。</li>
+<li>中央：浮动 SEQ 和 Data Browser 窗口。</li>
+<li>右侧 <code>Sequence Command Bar</code>：双击命令后设置参数并插入。</li>
+<li>底部 <code>Instrument Status</code>：Temperature、Magnetic Field、<code>2nd Stage</code> 等控制/Monitor；不再显示测量 Transport 块。</li>
+<li>工具栏 <code>Modules</code>：测量模块管理。</li>
+<li><code>Run Log</code>：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。</li>
+<li><code>Live Trend</code>：保留最近仪表快照，最多每 250 ms 合并一次可见重绘；只影响显示。</li>
+</ul>
+<h3 id="_7">外观、字号与窗口大小<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>打开 <strong>View → Appearance</strong>：</p>
+<ul>
+<li><code>Overall size</code> 同时调整按钮、图标、间距、窗口最低尺寸和文字，范围 75%–200%；</li>
+<li><code>Text size</code> 在整体缩放上再单独调整文字，范围 70%–150%；</li>
+<li><code>At startup</code> 可选择记住上次窗口尺寸与位置、始终最大化或始终使用默认布局；</li>
+<li><code>Reset Window Positions</code> 会在保存后清除主窗口、SEQ、Data Browser、Live Trend、
+  手动控制和 Measurement Module 窗口的旧位置。</li>
+</ul>
+<p>保存后重启生效。程序不会在运行中重建模块窗口，因此不会因为改字号产生重复信号、重复
+worker 或短暂仪表连接。个人外观值保存在操作系统用户配置目录，不进入主 TOML、SEQ、
+DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同规则。</p>
+<p>若尚未保存过 Appearance，主配置的 <code>application.ui_scale</code> 仍是整体缩放默认值；在对话框
+中保存后，个人选择优先。点击 <code>Restore Defaults</code> 会恢复主配置默认缩放、100% 文字和窗口
+记忆模式，并清除旧窗口位置。</p>
+<p>温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，
+不弹控制窗口。每种 temperature/field 最多一个 primary 供 SEQ 使用；其他 secondary
+默认只读显示。即使 secondary 显式允许手动控制，SEQ 也不会自动选择它。</p>
+<h2 id="_8">测量模块<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<h3 id="enable">Enable<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h3>
+<ol>
+<li>点击工具栏或菜单 <code>Modules</code>。</li>
+<li>管理器只有 <code>Enabled / Name / Version</code> 三列。</li>
+<li>勾选所需模块。</li>
+<li>首次加载或内容变化时，核对弹窗中的类型、ID、版本、完整路径和 SHA-256 指纹后确认
+   信任；拒绝时不加载任何源码。</li>
+<li>程序显示 <code>Initializing &lt;module&gt;...</code>；初始化成功后才真正勾选并打开模块窗口。</li>
+<li>初始化失败会弹 Error，仍保持 Disabled。</li>
+</ol>
+<p>首次指纹用于建立这台电脑上的信任基线。发布包自带模板的来源由整个 ZIP 的 SHA-256
+校验保证；单独取得的第三方 Measurement Module，应与发布者提供的摘要或签名比较。内容变化后必须重新
+确认，不能只因为名称相同就继续信任。</p>
+<p>如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 <code>Sequence Command Bar</code> 会新增一个
+直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
+worker 通信失效后立即移除，不会留下一个无法执行的菜单项。</p>
+<p>模块窗口是独立浮动 Windows 窗口：可移动、最小化，保持在主窗口之前但不全局置顶；
+用户不能用关闭按钮/Alt+F4 关闭。双击管理器中的 Enabled 模块，或点击主窗口左侧的
+模块卡片，都可把窗口带到前面。</p>
+<p>每个 Enabled 模块在 <code>Sequence Status</code> 下方有一张紧凑卡片。它显示 Enabled/Measuring、
+最小化状态和活动 Warning/Error；模块若选择了结果列，还会显示最近通道值。新一轮
+<code>Measure</code> 会先清空旧值，空值显示 <code>—</code>。这些内容来自已经返回的测量结果，不会额外访问
+仪表。模块较多时只出现纵向滚动条，Run/Pause/Stop 始终留在左栏底部。</p>
+<h3 id="settings-status">Settings 与 Status<a class="headerlink" href="#settings-status" title="Permanent link">&para;</a></h3>
+<ul>
+<li>默认打开 <code>Settings</code> 页。</li>
+<li>Enable 会加载上次保存参数，但不会把这些值发送给仪表。</li>
+<li><code>Apply Settings</code> 只显示在 <code>Settings</code> 页；切换到 <code>Status</code> 后不会显示。</li>
+<li>检查参数后点击 <code>Apply Settings</code>，再次确认后才发送。</li>
+<li><code>Status</code> 页显示连接、实际状态、输出状态、读数等，布局由模块自己定义。</li>
+<li>模块可以提供 <code>Test Connection</code>、<code>Read Now</code>、<code>Measure Now</code>；仅 SEQ Idle 可用，结果不写实验 DAT。</li>
+</ul>
+<p>模块窗口设置了按 UI Scale 缩放的最小尺寸；缩小到完整显示页签、参数区和操作区的边界后不能继续缩小。</p>
+<p>Settings 在 Apply、Disable、关闭程序和 Run 前自动保存。设置保存在 <code>module_data/&lt;id&gt;/settings.toml</code>，不修改模块源码。</p>
+<h3 id="seq">SEQ 对应的模块设置<a class="headerlink" href="#seq" title="Permanent link">&para;</a></h3>
+<p>File → Save 同时保存 <code>&lt;SEQ 文件名去掉 .seq&gt;.modules.toml</code>。文件包含当前 SEQ 已导入的
+模块设置，以及保存时所有 Enabled 模块的 Settings 页当前值。File → Open 会自动导入
+同名伴随文件；旧 SEQ 没有该文件时继续使用 <code>module_data/&lt;id&gt;/settings.toml</code>。</p>
+<p>导入不是 Apply：</p>
+<ul>
+<li>启动默认 Disabled 的规则不变，Load 不会替用户勾选模块；</li>
+<li>已 Enabled 模块只更新界面并标为未 Apply；</li>
+<li>下一次 Run 会按既有流程询问 Apply and Run / Run Without Applying / Cancel；</li>
+<li>模块缺失或版本不同会显示 Warning；真实仪表参数必须重新核对；</li>
+<li>Save As 会为新 SEQ 生成新的同名伴随文件，复制实验时应同时复制这两个文件。</li>
+</ul>
+<p>打开运行目录中的 <code>sequence.seq</code> 时，程序还可直接读取该目录已经保存的
+<code>module_settings/*.settings.toml</code>，方便从历史运行快照恢复实验参数。</p>
+<h3 id="run-apply">Run 前未 Apply<a class="headerlink" href="#run-apply" title="Permanent link">&para;</a></h3>
+<p>如果 Settings 页面有修改但尚未 Apply，Run 会询问：</p>
+<ul>
+<li><code>Apply and Run</code>：先等待所有修改成功 Apply，再启动。</li>
+<li><code>Run Without Applying</code>：仪表保持现状，但把当前界面值作为 desired settings 保存到运行目录。</li>
+<li><code>Cancel</code>：不运行。</li>
+</ul>
+<p><code>Run Without Applying</code> 是高级选项：只有已经人工读回并确认仪表实际状态，而且理解快照中
+desired settings 可能与实际状态不同时才使用。真机首跑或状态不确定时选择 Cancel，核对后
+再 Apply；不要为了省去确认直接跳过。</p>
+<h3 id="disable">Disable<a class="headerlink" href="#disable" title="Permanent link">&para;</a></h3>
+<p>取消勾选时：</p>
+<ol>
+<li>先保存 Settings；</li>
+<li>调用模块 <code>close(api)</code>；</li>
+<li>close 完成后取消勾选、关闭工作进程并隐藏窗口。</li>
+</ol>
+<p>close 失败时程序报告 Error，并在关闭总上限内强制回收模块工作进程、最终显示 Disabled。
+强制回收只保证本机进程/管道不残留，不代表外部仪表已经安全；此时必须按模块硬件说明
+人工检查输出。</p>
+<h3 id="refresh">Refresh 与依赖<a class="headerlink" href="#refresh" title="Permanent link">&para;</a></h3>
+<p>只有 SEQ Idle 且全部模块 Disabled 时可以 <code>Refresh</code>。它重新扫描 <code>modules/</code>，不做运行中的热替换。</p>
+<p>框架共享依赖不需要安装。只有所选模块声明框架尚未提供的额外依赖时，Manager 才显示
+<code>Install Dependencies</code>；安装只要求该模块 Disabled，其他模块的隔离 runtime 不会被
+替换。Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。</p>
+<p>额外依赖缺失时：</p>
+<ol>
+<li>Disable 目标模块，再选中它。</li>
+<li>点击 <code>Install Dependencies</code>。</li>
+<li>核对并确认该模块的内容指纹。</li>
+<li>程序只读取模块 <code>requirements.lock</code>、根 <code>wheels/</code> 和模块 <code>wheels/</code>，使用精确版本
+   和 SHA-256 离线安装到该模块自己的 runtime。</li>
+<li>完成后 Refresh。</li>
+</ol>
+<p>没有在线回退。PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是明确
+由主框架提供的统一版本，不属于“借用”；其他额外包只能来自已验证的隔离 runtime。</p>
+<h2 id="seq_1">编辑 SEQ<a class="headerlink" href="#seq_1" title="Permanent link">&para;</a></h2>
+<h3 id="_9">新建/打开/保存<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li>File → New/Open/Save/Save As。</li>
+<li>关闭浮动 SEQ 后，点击 New/Open/Edit 会重新显示现有编辑器。</li>
+<li>文件扩展名是 <code>.seq</code>。</li>
+<li>有模块设置的实验还会保存同名 <code>.modules.toml</code>；Load 时自动导入但不 Apply。</li>
+</ul>
+<h3 id="_10">插入与修改<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li>右侧命令双击：弹参数窗口，确认后插入。</li>
+<li>SEQ 行双击：编辑该行参数。</li>
+<li><code>Set Datafile</code> 的 <code>Browse…</code> 直接打开 Windows 文件窗口；<code>open</code> 选已有文件，
+  <code>create</code> / <code>open|create</code> 可选或新建文件。</li>
+<li>插入在 Scan/End Scan 上时会进入该 Scan；否则插在所选命令之后。</li>
+<li>所有温场弹窗直接显示配置中的上下限和最大速率。</li>
+<li><code>Scan Field</code> 可选 <code>Choose nearer start or its negative</code>。它在该命令实际执行时取得已通过
+  新鲜度检查的当前场读回，选择输入路径或整条反号路径；选择结果写入 Run Log。开关默认关闭。</li>
+</ul>
+<h3 id="_11">模块自定义指令<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
+<p>模块完成 Enable 后，可在右侧直接出现例如：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Keithley 2400
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>├─ Set Current
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>└─ Scan Current
+</span></code></pre></div>
+<ul>
+<li><code>Set Current</code> 一类普通指令完成模块动作后继续下一行，不产生 DAT 行。</li>
+<li><code>Scan Current</code> 一类扫描指令与温场 Scan 一样可任意嵌套；每个点先由该模块设置成功，
+  再执行该点下面的全部子命令。</li>
+<li>子命令是 <code>Measure</code> 时，仍按当前所有 Enabled 模块和逻辑槽位规则测量；模块扫描不会
+  暗中替用户增加一次测量。</li>
+<li>同一模块的自定义指令、<code>measure</code>、<code>run_start/run_end</code> 共用一个串行 worker，不会
+  同时访问同一 VISA/GPIB session；不同模块在 <code>Measure</code> 中仍可并行。</li>
+<li>自定义指令对仪表的改变只属于本次运行状态，不修改 Settings 页或持久设置。</li>
+</ul>
+<p>SEQ 使用通用 <code>Module Command/Module Scan</code> 文本，因此即使相关模块未安装也不会丢失
+原始行。此时行显示红色；Load 只给 Warning，Run 则要求对应模块已 Enable 且仍声明同一
+稳定指令 ID。框架不会自动 Enable、Apply、安装模块或把未知指令当成其他指令执行。</p>
+<h3 id="_12">多行操作<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
+<p>可 Ctrl/Shift 选择多行，然后右键或键盘：</p>
+<ul>
+<li>Disable / Enable</li>
+<li>Delete</li>
+<li>Copy / Paste</li>
+</ul>
+<p>选中完整 Scan 的父/子混合范围时，结构操作只处理最外层节点，避免重复。Running 时禁止修改，Copy 仍可用。</p>
+<h3 id="measure">Measure<a class="headerlink" href="#measure" title="Permanent link">&para;</a></h3>
+<p>Measurement Command 只有：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>T Measure
+</span></code></pre></div>
+<p>不在命令中写模块名、重复次数或间隔。模块选择由 Run 前的 Enabled 状态决定；重复/间隔用 Scan Time 或嵌套 Scan 表达。</p>
+<h2 id="_13">运行<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
+<p>运行前建议：</p>
+<ol>
+<li>检查 Temperature/Field/2nd Stage 状态。</li>
+<li>Enable 所需模块并检查 Status。</li>
+<li>确认需 Apply 的 Settings 已发送。</li>
+<li>保存或核对 SEQ；Run 会另外保存实际执行快照。</li>
+<li>确认数据文件位置和磁盘空间。</li>
+<li>点击 Run。</li>
+</ol>
+<p>Run 开始后：</p>
+<ul>
+<li>SEQ、模块 Enable/Disable/Refresh、Settings/Apply 和手动动作锁定；</li>
+<li>所有 Enabled 模块成为本次固定 Schema；</li>
+<li>第一条指令前发送模块 <code>run_start</code> 事件并冻结 <code>slots</code>；</li>
+<li>模块自定义指令在同一冻结模块集合和同一串行 IPC 中执行；</li>
+<li>每个 Measure 按逻辑槽位并行调用参与模块的 <code>measure(slot, api)</code>；</li>
+<li>最终按 completed/stopped/error 发送每个模块的 <code>run_end</code> 事件。</li>
+</ul>
+<h3 id="pause">Pause<a class="headerlink" href="#pause" title="Permanent link">&para;</a></h3>
+<p>Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也不会断开仪表。模块自定义
+长循环须调用 <code>api.checkpoint()</code> 或 <code>api.sleep()</code> 才能在循环中响应；已经进入厂商驱动的
+阻塞调用只能等待其有限 I/O timeout。Resume 从原位置继续。</p>
+<h3 id="stop">Stop<a class="headerlink" href="#stop" title="Permanent link">&para;</a></h3>
+<p>Stop 后：</p>
+<ul>
+<li>温度和磁场执行 Hold Current；</li>
+<li>模块收到 <code>run_end</code>，reason 为 <code>stopped</code>；</li>
+<li>不执行模块 close，模块仍 Enabled，窗口保持可用。</li>
+</ul>
+<p>如果主温度或磁场仪表读链路中断，状态显示 <code>Reconnecting</code>。默认每 2 秒重连，最长
+1 分钟；SEQ 在这段时间冻结当前 Wait/Settle 计时。成功后核对仪表实际 target/rate 再
+继续；超时或核对失败进入 Error。写操作超时不会自动重发。</p>
+<h2 id="_14">手动温场控制<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h2>
+<p>双击底部 Temperature 或 Magnetic Field：</p>
+<ul>
+<li>Target；</li>
+<li>Rate；</li>
+<li>Settle/Sweep；</li>
+<li><code>Set</code>；</li>
+<li><code>Hold Current</code>。</li>
+</ul>
+<p>弹窗使用配置上下限和最大速率。<code>2nd Stage</code> 等 Monitor 没有手动控制。
+<code>control_enabled = false</code> 的 secondary 也没有手动控制。运行时仍会再次检查角色、
+连接状态、Target 和 Rate，因此不能通过脚本绕过参数窗口限制。</p>
+<h2 id="warning-error">Warning 与 Error<a class="headerlink" href="#warning-error" title="Permanent link">&para;</a></h2>
+<h3 id="warning">Warning<a class="headerlink" href="#warning" title="Permanent link">&para;</a></h3>
+<ul>
+<li>弹窗标题 <code>Warning / Operation Continues</code>；</li>
+<li>SEQ 继续；</li>
+<li>有效温场和模块数据照常写 DAT；</li>
+<li>详细 code/context 写 events.dat；</li>
+<li>同一 Source+Code+Context 活动期间只弹一次。</li>
+</ul>
+<p>典型：测量超量程、接近范围、某一点无效。</p>
+<h3 id="error">Error<a class="headerlink" href="#error" title="Permanent link">&para;</a></h3>
+<ul>
+<li>弹窗标题 <code>Error / Operation Stopped</code>；</li>
+<li>Running/Paused SEQ 进入 Faulted；</li>
+<li>温场执行 Hold；</li>
+<li>模块收到 reason 为 <code>error</code> 的 <code>run_end</code>，不调用 close；</li>
+<li>已写数据保留。</li>
+</ul>
+<p>典型：仪表掉线、互锁、二级冷头过温、源表硬件报警、模块 Schema 违规。</p>
+<p>如果同一故障被轮询/多次测量反复报告，只会更新计数，不会连续弹窗轰炸。恢复后事件 RESOLVED；再次发生才重新弹。</p>
+<h2 id="data-browser">Data Browser<a class="headerlink" href="#data-browser" title="Permanent link">&para;</a></h2>
+<p>Data Browser 与当前实验 DAT 解耦：</p>
+<ol>
+<li>Graph → Data Browser，或把 <code>.dat</code> 拖入主窗口。</li>
+<li>它只跟踪明确打开的文件。</li>
+<li>文件追加后自动刷新图。</li>
+</ol>
+<p>右键图区域可：</p>
+<ul>
+<li>选择 X；</li>
+<li>一次勾选多个 Y，再统一确认；</li>
+<li>Overlay（一个图多个 Y）或 Stacked（多图共享 X）；</li>
+<li>X Axis Log / Y Axis Log；</li>
+<li>Reset Zoom 等。</li>
+</ul>
+<p>鼠标框选放大；双击最近数据点弹出该原始行完整字段。显示布局保存在 DAT 同目录同名 <code>.plt</code>，下次打开自动恢复。</p>
+<p><code>Timestamp(s)</code>、<code>Time Stamp (sec)</code> 等绝对时间列在线性坐标下会显示实际日期时间。
+Quantum Design 文件优先按 <code>FILEOPENTIME</code> 校准；OpenLab 文件按
+<code>TIMESTAMP_EPOCH</code> 和 <code>Started</code> 换算。若文件没有足够证据确认 epoch，则保留原始
+秒值，避免显示一个看似精确但错误的日期。双击详情的摘要显示完整实际时间，下面的
+原始字段仍显示文件内秒值。</p>
+<p>普通线性坐标采用 <code>1/2/5 × 10ⁿ</code> 主刻度；时间坐标按整毫秒、秒、分钟、小时或日期
+对齐。缩放后会重新选择适合当前范围的刻度，不会改变数据本身。</p>
+<h2 id="_15">输出与备份<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h2>
+<p>一次 Run 至少保留：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sequence.seq
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>configuration.toml
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>module_settings/*.settings.toml
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>module_settings/*.status-at-start.json
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>experiment.dat
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>instrument_status.dat
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>events.dat
+</span></code></pre></div>
+<p>建议实验结束后整体复制整个运行目录，而不是只复制 DAT。模块 desired 设置和实际 Status 对复现实验同样重要。
+Load 运行目录中的 <code>sequence.seq</code> 会兼容导入这些 desired settings，但不会自动发送到
+仪表。</p>
+<p>运行目录中的 <code>configuration.toml</code> 是本次主配置的完整副本，可能含真实仪表地址和本机
+路径。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。</p>
+<p><code>instrument_status.dat</code> 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
+稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
+记录频率或增加仪表查询。</p>
+<h2 id="_16">关闭程序<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h2>
+<p>SEQ 运行中关闭主窗口会确认；确认后请求 Stop/Hold/End。随后：</p>
+<ol>
+<li>保存所有 Enabled 模块 Settings；</li>
+<li>对每个 Enabled 模块调用 <code>close(api)</code>；</li>
+<li>断开温场/Monitor；</li>
+<li>关闭日志与应用。</li>
+</ol>
+<p>下次启动所有模块仍是 Disabled，但 Settings 值会在下次 Enable 时自动载入且不自动 Apply。</p>
+<h2 id="_17">常见问题<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h2>
+<h3 id="_18">模块无法勾选<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h3>
+<p>选中行查看底部说明。常见原因：清单 Invalid、未确认信任、
+框架共享依赖范围不兼容、额外依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。
+Disable 目标模块后重新准备额外依赖；需要重新扫描源码时先 Disable 全部模块再
+Refresh。</p>
+<h3 id="python-runtime">发布包提示没有 Python Runtime<a class="headerlink" href="#python-runtime" title="Permanent link">&para;</a></h3>
+<p>只有 Measurement Module 或 System Instrument 声明额外依赖时才会显示 Install Dependencies，
+并需要配置 <code>modules.python_executable</code> / <code>system_instruments.python_executable</code>，或放置
+<code>runtime/python/python.exe</code>。框架共享依赖（包括 PyVISA）已经在 EXE 内，不需要便携
+Python；只有离线准备额外依赖需要，且便携 Python 必须自带 pip。</p>
+<h3 id="enable_1">Enable 后参数没有作用<a class="headerlink" href="#enable_1" title="Permanent link">&para;</a></h3>
+<p>这是设计行为。Enable 只初始化并加载保存值，必须点击 <code>Apply Settings</code> 并确认才发送。</p>
+<h3 id="_19">模块窗口关不掉<a class="headerlink" href="#_19" title="Permanent link">&para;</a></h3>
+<p>这是安全设计。先在 Modules Manager 取消 Enable；close 完成后窗口自动隐藏。</p>
+<h3 id="disable-disabled">Disable 报错但已显示 Disabled<a class="headerlink" href="#disable-disabled" title="Permanent link">&para;</a></h3>
+<p>close 没有确认完成，但框架已为资源释放强制关闭工作进程。不要把 Disabled 当作输出已
+关闭；查看 Error，并按该模块硬件操作说明人工退出输出、检查仪表状态后再重新 Enable。</p>
+<h3 id="measure_1">Measure 没有模块数据<a class="headerlink" href="#measure_1" title="Permanent link">&para;</a></h3>
+<p>检查 Run 前是否 Enable 模块。没有模块时程序会写一行温场/Monitor 系统状态并 Warning，不会中止。</p>
+<h3 id="seq-measureinitialize">SEQ 旧 Measure/Initialize 无法运行<a class="headerlink" href="#seq-measureinitialize" title="Permanent link">&para;</a></h3>
+<p>当前版本不兼容旧写法。删除 Initialize；把 Measure 改为无参数 <code>T Measure</code>，并在
+Modules Manager Enable 相应测量方案。</p>
+<h3 id="_20">更换温控仪或磁体电源<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h3>
+<p>取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
+<code>system_instruments/</code>，在现场配置中修改对应仪表的 <code>backend = "&lt;instrument-id&gt;"</code>、
+address、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
+会要求确认内容指纹；修改 System Instrument 后必须重新确认。核心自带内容只作为实现示例。</p>
+<h3 id="reconnecting">仪表一直 Reconnecting<a class="headerlink" href="#reconnecting" title="Permanent link">&para;</a></h3>
+<p>不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立仪表
+进程并读取实际状态。1 分钟仍失败时会 Fault，不会无限重试或猜测安全状态。</p>
+<h3 id="_21">左栏被长文件名撑宽<a class="headerlink" href="#_21" title="Permanent link">&para;</a></h3>
+<p>文件名标签会中间省略并在悬停时显示完整路径，不应再改变左栏最小宽度。若仍异常，请记录分辨率、UI Scale 和截图。</p>
+<h3 id="4k">4K 字体不合适<a class="headerlink" href="#4k" title="Permanent link">&para;</a></h3>
+<p>先使用 <strong>View → Appearance</strong>：整体大小保持 <code>Automatic</code>，再单独选择 70%–150% 的
+<code>Text size</code>。如果个人外观文件尚未建立，也可以在当前启动配置（现场通常是
+<code>configs/site.local.toml</code>）用 <code>ui_scale = "auto"</code> 或 0.75–2.0 设定现场默认值后重启。</p>
+<p>多显示器更换后若窗口落在不可见区域，选择 <code>Reset Window Positions</code> 并保存；下次启动会
+使用当前屏幕的默认布局。</p>
+<h3 id="dat">DAT 图不刷新<a class="headerlink" href="#dat" title="Permanent link">&para;</a></h3>
+<p>确认 Data Browser 打开的正是目标文件。它不会自动切换到当前 Run DAT；请使用
+<strong>Graph → Data Browser → Open DAT</strong>，或把 DAT 拖入主窗口一次。</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="页脚" >
+        
+          
+          <a href="../guides/instrument-scanner/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 扫描与配置仪表">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                上一页
+              </span>
+              <div class="md-ellipsis">
+                扫描与配置仪表
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../guides/data-browser/" class="md-footer__link md-footer__link--next" aria-label="下一页: Data Browser">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                下一页
+              </span>
+              <div class="md-ellipsis">
+                Data Browser
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 OpenLab Control contributors
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/yang-fu-physics/openlab-control" target="_blank" rel="noopener" title="OpenLab Control on GitHub" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["announce.dismiss", "content.code.annotate", "content.code.copy", "content.tabs.link", "navigation.footer", "navigation.indexes", "navigation.instant", "navigation.sections", "navigation.tabs", "navigation.top", "search.highlight", "search.share", "search.suggest", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
