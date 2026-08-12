@@ -190,6 +190,7 @@ class ReleaseContractTests(unittest.TestCase):
             "OpenLabControl.exe",
             "Get-FileHash",
             "headless_demo.log",
+            "forbiddenNames",
             "gh release create",
         ):
             with self.subTest(required=required):
