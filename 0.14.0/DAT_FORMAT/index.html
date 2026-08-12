@@ -2128,7 +2128,8 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。</p>
 <li>同一模块的行顺序保持。</li>
 <li>多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。</li>
 <li>前面板常规轮询仍按 <code>poll_interval_seconds</code> 运行；状态日志按自己的周期节流，不会为了
-  写日志增加仪表查询。Measurement Module 明确调用 <code>api.devices()</code> 时会即时增加一次采样。</li>
+  写日志增加仪表查询。Measurement Module 明确调用 <code>api.devices()</code> 时会即时增加一次
+  测量采样；插件可只查询主值，未同步读取的附加列在实验 DAT 当前行中为空。</li>
 <li>Error/Stop/完成都会在模块 <code>run_end</code> 收束后关闭文件。</li>
 <li>异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。</li>
 </ul>

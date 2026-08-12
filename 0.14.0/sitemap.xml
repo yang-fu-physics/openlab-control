@@ -2,102 +2,102 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/ARCHITECTURE/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/CONFIGURATION/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/DAT_FORMAT/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/OPERATIONS/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/PLUGIN_DEVELOPMENT/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/SEQUENCE_FORMAT/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/device-plugin/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/first-module/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/frontend/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/instrument-drivers/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/results-and-slots/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/sequence-commands/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/development/testing/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/getting-started/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/getting-started/first-sequence/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/getting-started/source/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/getting-started/windows/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/guides/contributing/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/guides/data-browser/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/guides/offline-packaging/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/guides/safety-checklist/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/guides/troubleshooting/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
     <url>
          <loc>https://yang-fu-physics.github.io/openlab-control/0.14.0/reference/public-api/</loc>
-         <lastmod>2026-08-11</lastmod>
+         <lastmod>2026-08-12</lastmod>
     </url>
 </urlset>

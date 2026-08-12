@@ -1761,9 +1761,10 @@ Monitor 永远只读，也不参与标准温度控制。例外是同一物理仪
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyController</span><span class="p">(</span><span class="n">DevicePlugin</span><span class="p">):</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">poll</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">set_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">rate_per_minute</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;Settle&quot;</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">poll_measurement</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>  <span class="c1"># 可选：只读写测量行需要的主值</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">set_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">rate_per_minute</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;Settle&quot;</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
 </span></code></pre></div>
 <table>
 <thead>
@@ -1780,6 +1781,10 @@ Monitor 永远只读，也不参与标准温度控制。例外是同一物理仪
 <tr>
 <td><code>poll</code></td>
 <td>定期读取当前值、目标、速率和是否稳定</td>
+</tr>
+<tr>
+<td><code>poll_measurement</code></td>
+<td>可选；写测量数据前只读取需要即时记录的主值</td>
 </tr>
 <tr>
 <td><code>set_target</code></td>
@@ -1822,6 +1827,15 @@ Monitor 永远只读，也不参与标准温度控制。例外是同一物理仪
 <p><code>key</code> 是固定 DAT 列名，运行中不能改变；<code>display_name</code> 只用于界面。附加值会显示在同一
 设备卡片，并写入实验 DAT 和 <code>device_status.dat</code>。<code>instrument_stable=False</code> 只会阻止
 判稳；即使它为 True，核心仍要独立通过误差、斜率和 dwell 检查。</p>
+<p>如果完整状态查询明显较慢，可以不写 <code>poll_measurement</code>，框架会安全地使用 <code>poll</code>；也可
+实现它，只读取主值。它仍返回完整结构并保持相同附加列定义，但本次没读的附加值填
+<code>None</code>，对应实验 DAT 单元格留空。完整 <code>poll</code> 继续按控制周期检查报警和安全状态，并把
+TempA、加热输出等完整值写进 <code>device_status.dat</code>。</p>
+<p>例如 Cryo-con 22C/24C 的完整 <code>poll</code> 读取 A、B、Loop 1 和加热状态；测量专用读取只发送
+<code>INPUT B:TEMPERATURE?</code>，因此一行测量不会等待其他监视查询。</p>
+<p>核心不会同时调用同一 Device Plugin 的两个方法。若后台 <code>poll()</code> 已经开始，它会先完成
+当前完整仪表事务；随后等待中的控制/安全操作优先，<code>poll_measurement()</code> 再先于尚未开始的
+后台 <code>poll()</code>。插件不要在后台另开线程绕过这个串行入口访问同一 VISA Session。</p>
 <h2 id="_4">连接时不要自动改变仪表<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <p><code>connect</code> 应按顺序完成：</p>
 <ol>

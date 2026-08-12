@@ -2048,8 +2048,9 @@ Warning；Run 预检拒绝执行，绝不会自动 Enable、Apply、安装或静
 <ul>
 <li><code>api.sleep(seconds)</code>：Pause 不计时、Stop 可打断；<code>sleep(0)</code> 只做一次检查。</li>
 <li><code>api.checkpoint()</code>：长循环或两次仪表 I/O 之间立即检查 Pause/Stop。</li>
-<li><code>api.devices()</code>：让核心立即采样一次温度、磁场和 Monitor，再返回快照副本；它不受
-  前面板的常规刷新周期限制，同一时刻多个模块请求会合并为一次设备轮询。</li>
+<li><code>api.devices()</code>：让核心立即取得一次测量专用温场快照；它不受前面板常规刷新周期限制，
+  同一时刻多个模块请求会合并。Device Plugin 可用 <code>poll_measurement()</code> 只读主值；未实现
+  时仍调用完整 <code>poll()</code>。</li>
 <li><code>api.warn(code, message, key="")</code>：报告可恢复 Warning；<code>message=None</code> 解除同一告警。</li>
 <li><code>api.status(mapping)</code>：更新模块只读状态。</li>
 <li><code>api.timeout</code>：本次核心操作总上限，用于给安全清理预留时间。</li>
@@ -2110,15 +2111,23 @@ Hold：</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyController</span><span class="p">(</span><span class="n">DevicePlugin</span><span class="p">):</span>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">poll</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">set_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">rate_per_minute</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;Settle&quot;</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="c1"># 可选；完整 poll 很慢时只读取写测量行需要的主值</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">poll_measurement</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">set_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">rate_per_minute</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;Settle&quot;</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">disconnect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
 </span></code></pre></div>
 <p>GUI 不直接操作设备。主配置限制手动控制、SEQ 参数窗口和运行时执行；插件还应再次检查
 设备自身边界。写命令超时视为结果不确定，不自动重发。</p>
 <p>同一物理仪表的辅助温度、加热功率或量程使用 <code>DeviceSnapshot.metrics</code> 返回，不能为了多
 显示一个值而对同一地址创建第二个插件会话。<code>instrument_stable</code> 可作为核心独立误差、
 斜率和 dwell 判定的附加必要条件，但不能替代这些条件。</p>
+<p><code>poll_measurement()</code> 没有实现时默认调用 <code>poll()</code>。若覆盖它，返回快照的设备 ID、种类和
+<code>metrics</code> 的 key/名称/单位/精度必须与完整快照相同；本次没有实际查询的附加值填 <code>None</code>。
+常规 <code>poll()</code> 仍负责报警、联锁和安全状态，不能因为提供快速测量读取而停止执行。</p>
+<p>同一 Device Plugin 的方法不会并发执行。已经开始的完整仪表事务不会被抢占；它返回或
+超时后，控制与安全操作优先，等待中的 <code>poll_measurement()</code> 再先于后台 <code>poll()</code>。插件
+不得另开线程绕过核心队列并访问同一 VISA Session，否则这个保证不再成立。</p>
 <h2 id="_7">依赖与离线安装<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
 <p>PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 使用框架锁定版本，扩展
 不得重复声明。只有额外库才写入 <code>dependencies</code>，并携带精确带 SHA-256 的
