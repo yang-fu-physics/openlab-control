@@ -199,6 +199,11 @@ class ReleaseContractTests(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, workflow)
+        self.assertIn(
+            '-Arguments @("--headless-demo", "--timeout", "120")',
+            workflow,
+        )
+        self.assertIn("-TimeoutMilliseconds 180000", workflow)
         self.assertNotIn("tools/InstrumentScanner.exe", workflow)
 
     def test_current_docs_describe_shared_framework_and_isolated_extras(self) -> None:

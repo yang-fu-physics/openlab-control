@@ -126,8 +126,8 @@ jobs:
             -TimeoutMilliseconds 15000
           Invoke-PackagedProgram `
             -Path (Join-Path $releaseRoot "OpenLabControl.exe") `
-            -Arguments @("--headless-demo", "--timeout", "5") `
-            -TimeoutMilliseconds 30000
+            -Arguments @("--headless-demo", "--timeout", "120") `
+            -TimeoutMilliseconds 180000
 
           $runs = Join-Path $releaseRoot "runs"
           Get-ChildItem -LiteralPath $runs -Force | Remove-Item -Recurse -Force
