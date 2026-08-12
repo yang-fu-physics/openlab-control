@@ -30,7 +30,7 @@ id = "my_thermometer"
 name = "My Thermometer"
 version = "0.1.0"
 api_version = "1.2"
-core_requires = ">=0.14,<0.16"
+core_requires = ">=0.15,<0.16"
 backend = "backend:MyThermometer"
 kinds = ["monitor"]
 dependencies = []

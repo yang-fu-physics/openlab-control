@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.15.0 - 2026-08-12
+
 - 采用不兼容的新命名：核心源码、配置、SEQ 参数、DAT 状态文件和公共 API 全部统一使用
   `instrument`。`labcontrol.devices`、`Device*` 类型、`device.toml`、`device_plugins/`、
   `[plugins]` 与 `plugin = ...` 均已删除，不提供旧名称映射。
