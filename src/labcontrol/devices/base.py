@@ -66,6 +66,17 @@ class DevicePlugin(ABC):
 
         raise NotImplementedError
 
+    async def poll_measurement(self) -> DeviceSnapshot:
+        """返回写测量数据前使用的即时快照。
+
+        默认仍执行完整 :meth:`poll`，所以普通插件无需实现第二套读取。若完整状态查询很慢，
+        插件可以覆盖本方法，只读取主测量值；返回值仍须保持与 ``poll()`` 相同的设备和
+        ``metrics`` Schema。没有在本次查询中读取的附加值应填 ``None``，不能伪装成同一
+        时刻的测量结果。安全状态仍必须由常规 ``poll()`` 持续检查。
+        """
+
+        return await self.poll()
+
     async def set_target(self, value: float, rate_per_minute: float, mode: str = "Settle") -> None:
         """设置受控量；默认实现明确拒绝只读设备。"""
 

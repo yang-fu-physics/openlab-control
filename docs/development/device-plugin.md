@@ -57,6 +57,7 @@ from labcontrol.devices.base import DevicePlugin
 class MyController(DevicePlugin):
     async def connect(self): ...
     async def poll(self): ...
+    async def poll_measurement(self): ...  # 可选：只读写测量行需要的主值
     async def set_target(self, value, rate_per_minute, mode="Settle"): ...
     async def hold(self): ...
     async def disconnect(self): ...
@@ -66,6 +67,7 @@ class MyController(DevicePlugin):
 | --- | --- |
 | `connect` | 连接仪表、确认型号、读取当前状态 |
 | `poll` | 定期读取当前值、目标、速率和是否稳定 |
+| `poll_measurement` | 可选；写测量数据前只读取需要即时记录的主值 |
 | `set_target` | 设置新的目标和速率 |
 | `hold` | 保持刚刚读到的当前状态 |
 | `disconnect` | 关闭连接 |
@@ -101,6 +103,18 @@ return DeviceSnapshot(
 `key` 是固定 DAT 列名，运行中不能改变；`display_name` 只用于界面。附加值会显示在同一
 设备卡片，并写入实验 DAT 和 `device_status.dat`。`instrument_stable=False` 只会阻止
 判稳；即使它为 True，核心仍要独立通过误差、斜率和 dwell 检查。
+
+如果完整状态查询明显较慢，可以不写 `poll_measurement`，框架会安全地使用 `poll`；也可
+实现它，只读取主值。它仍返回完整结构并保持相同附加列定义，但本次没读的附加值填
+`None`，对应实验 DAT 单元格留空。完整 `poll` 继续按控制周期检查报警和安全状态，并把
+TempA、加热输出等完整值写进 `device_status.dat`。
+
+例如 Cryo-con 22C/24C 的完整 `poll` 读取 A、B、Loop 1 和加热状态；测量专用读取只发送
+`INPUT B:TEMPERATURE?`，因此一行测量不会等待其他监视查询。
+
+核心不会同时调用同一 Device Plugin 的两个方法。若后台 `poll()` 已经开始，它会先完成
+当前完整仪表事务；随后等待中的控制/安全操作优先，`poll_measurement()` 再先于尚未开始的
+后台 `poll()`。插件不要在后台另开线程绕过这个串行入口访问同一 VISA Session。
 
 ## 连接时不要自动改变仪表
 

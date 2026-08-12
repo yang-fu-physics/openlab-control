@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Device Plugin 新增可选 `poll_measurement()`：写测量行和 Module `api.devices()` 时可只
+  查询主测量值，常规 `poll()` 继续独立执行完整安全与监视读取。未同步读取的附加列保留
+  固定 Schema 但写空，避免把旧监视值伪装成本次测量值。
+- 同一台设备的所有访问仍严格串行；已经开始的完整仪表事务先执行完，随后控制/安全操作
+  优先，测量专用 `poll_measurement()` 再优先于尚未开始的后台 `poll()`。
+- Cryo-con 22C/24C 的测量快照只发送一次 `INPUT B:TEMPERATURE?`；TempA、A/B 报警、
+  Loop 状态、加热输出和量程仍由控制轮询检查并写入 `device_status.dat`。
+
 ## 0.14.0 - 2026-08-12
 
 - Device Plugin API 升级到 1.1。一个物理设备可以在同一连接、同一快照中返回辅助温度、

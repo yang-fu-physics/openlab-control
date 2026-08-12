@@ -72,6 +72,11 @@ class DeviceWorkerTests(unittest.TestCase):
             self.assertNotIn(os.getpid(), pids.values())
             snapshots = await manager.poll_all()
             self.assertEqual(set(snapshots), {"temperature", "field", "second_stage"})
+            measurement_snapshots = await manager.poll_measurement_all()
+            self.assertEqual(
+                set(measurement_snapshots),
+                {"temperature", "field", "second_stage"},
+            )
             await manager.disconnect_all()
             self.assertTrue(
                 all(getattr(client, "pid", None) is None for client in manager.devices.values())
@@ -97,6 +102,9 @@ class DeviceWorkerTests(unittest.TestCase):
                     "    async def poll(self):\n"
                     "        return DeviceSnapshot(self.config.id, self.config.display_name, "
                     "self.config.kind, time.monotonic(), True, self.config.unit, 12.5)\n"
+                    "    async def poll_measurement(self):\n"
+                    "        return DeviceSnapshot(self.config.id, self.config.display_name, "
+                    "self.config.kind, time.monotonic(), True, self.config.unit, 99.5)\n"
                     "    async def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
                     "    async def hold(self): pass\n"
                 )
@@ -128,6 +136,8 @@ class DeviceWorkerTests(unittest.TestCase):
                 self.assertNotEqual(child_pid, os.getpid())
                 snapshots = await manager.poll_all()
                 self.assertEqual(snapshots["temperature"].current, 12.5)
+                measurement = await manager.poll_measurement_all()
+                self.assertEqual(measurement["temperature"].current, 99.5)
                 await manager.disconnect_all()
 
         asyncio.run(scenario())

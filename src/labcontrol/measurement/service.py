@@ -312,7 +312,9 @@ class MeasurementModuleService:
 
         task = self._fresh_system_task
         if task is None or task.done():
-            task = asyncio.create_task(self.devices.poll_all())
+            task = asyncio.create_task(
+                self.devices.poll_measurement_all()
+            )
             self._fresh_system_task = task
         try:
             await asyncio.shield(task)

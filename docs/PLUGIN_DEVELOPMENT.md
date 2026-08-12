@@ -256,8 +256,9 @@ return (
 
 - `api.sleep(seconds)`：Pause 不计时、Stop 可打断；`sleep(0)` 只做一次检查。
 - `api.checkpoint()`：长循环或两次仪表 I/O 之间立即检查 Pause/Stop。
-- `api.devices()`：让核心立即采样一次温度、磁场和 Monitor，再返回快照副本；它不受
-  前面板的常规刷新周期限制，同一时刻多个模块请求会合并为一次设备轮询。
+- `api.devices()`：让核心立即取得一次测量专用温场快照；它不受前面板常规刷新周期限制，
+  同一时刻多个模块请求会合并。Device Plugin 可用 `poll_measurement()` 只读主值；未实现
+  时仍调用完整 `poll()`。
 - `api.warn(code, message, key="")`：报告可恢复 Warning；`message=None` 解除同一告警。
 - `api.status(mapping)`：更新模块只读状态。
 - `api.timeout`：本次核心操作总上限，用于给安全清理预留时间。
@@ -331,6 +332,8 @@ Hold：
 class MyController(DevicePlugin):
     async def connect(self): ...
     async def poll(self): ...
+    # 可选；完整 poll 很慢时只读取写测量行需要的主值
+    async def poll_measurement(self): ...
     async def set_target(self, value, rate_per_minute, mode="Settle"): ...
     async def hold(self): ...
     async def disconnect(self): ...
@@ -342,6 +345,14 @@ GUI 不直接操作设备。主配置限制手动控制、SEQ 参数窗口和运
 同一物理仪表的辅助温度、加热功率或量程使用 `DeviceSnapshot.metrics` 返回，不能为了多
 显示一个值而对同一地址创建第二个插件会话。`instrument_stable` 可作为核心独立误差、
 斜率和 dwell 判定的附加必要条件，但不能替代这些条件。
+
+`poll_measurement()` 没有实现时默认调用 `poll()`。若覆盖它，返回快照的设备 ID、种类和
+`metrics` 的 key/名称/单位/精度必须与完整快照相同；本次没有实际查询的附加值填 `None`。
+常规 `poll()` 仍负责报警、联锁和安全状态，不能因为提供快速测量读取而停止执行。
+
+同一 Device Plugin 的方法不会并发执行。已经开始的完整仪表事务不会被抢占；它返回或
+超时后，控制与安全操作优先，等待中的 `poll_measurement()` 再先于后台 `poll()`。插件
+不得另开线程绕过核心队列并访问同一 VISA Session，否则这个保证不再成立。
 
 ## 依赖与离线安装
 

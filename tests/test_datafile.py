@@ -87,6 +87,46 @@ class DatafileTests(unittest.TestCase):
             )
             logger.write_system_row(snapshots, "Measure")
             logger.write_device_status(snapshots, force=True)
+            measurement_only = {
+                "temperature": DeviceSnapshot(
+                    "temperature",
+                    "Temperature",
+                    DeviceKind.TEMPERATURE,
+                    now + 0.1,
+                    True,
+                    "K",
+                    4.25,
+                    4.0,
+                    1.0,
+                    DeviceActivity.HOLDING,
+                    metrics=tuple(
+                        DeviceMetric(
+                            metric.key,
+                            metric.display_name,
+                            None,
+                            metric.unit,
+                            metric.decimals,
+                        )
+                        for metric in snapshots["temperature"].metrics
+                    ),
+                )
+            }
+            measurement_row = dict(
+                zip(
+                    logger._build_columns(),
+                    logger._row(measurement_only, {}, "Fast Measure"),
+                    strict=True,
+                )
+            )
+            self.assertEqual(measurement_row["Temp(K)"], "4.250")
+            self.assertEqual(
+                measurement_row["temperature.second_stage(K)"],
+                "",
+            )
+            self.assertEqual(
+                measurement_row["temperature.heater_output(%)"],
+                "",
+            )
             snapshots["temperature"].connected = False
             disconnected_row = dict(
                 zip(

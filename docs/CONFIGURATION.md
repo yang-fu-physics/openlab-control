@@ -35,6 +35,8 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 `site.example.toml
 
 Measurement Module 在测量时调用 `api.devices()` 会请求一次即时设备采样，不会复用最多
 一个常规周期以前的前面板缓存，也不会永久改变 `poll_interval_seconds`。
+插件实现可选 `poll_measurement()` 后，这次采样可以只查询主测量值；未在该次查询中读取的
+附加列写空，完整监视值仍由常规 `poll()` 写入 `device_status.dat`。
 SEQ 控制期间则使用 `control_poll_interval_seconds` 更新安全状态和稳定性；快照消息仍按
 `poll_interval_seconds` 节流，所以界面不会因为内部判稳而快速闪动。
 

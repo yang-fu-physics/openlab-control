@@ -410,6 +410,91 @@ max_rate_per_minute = 10.0
 
         asyncio.run(scenario())
 
+    def test_measurement_poll_precedes_queued_background_poll(self) -> None:
+        async def scenario() -> None:
+            config = load_config(ROOT / "configs" / "default.toml")
+            manager = DeviceManager(
+                config,
+                EventManager(),
+                isolate_processes=False,
+            )
+            await manager.connect_all()
+            await manager.poll_all()
+
+            device_id = "temperature"
+            device = manager.devices[device_id]
+            original_poll = device.poll
+            original_poll_measurement = device.poll_measurement
+            first_poll_started = asyncio.Event()
+            release_first_poll = asyncio.Event()
+            order: list[str] = []
+            regular_poll_count = 0
+            calls_in_flight = 0
+            maximum_calls_in_flight = 0
+
+            async def tracked_poll():
+                nonlocal regular_poll_count, calls_in_flight, maximum_calls_in_flight
+                regular_poll_count += 1
+                call_number = regular_poll_count
+                calls_in_flight += 1
+                maximum_calls_in_flight = max(maximum_calls_in_flight, calls_in_flight)
+                order.append(f"poll-{call_number}-start")
+                try:
+                    if call_number == 1:
+                        first_poll_started.set()
+                        await release_first_poll.wait()
+                    return await original_poll()
+                finally:
+                    order.append(f"poll-{call_number}-end")
+                    calls_in_flight -= 1
+
+            async def tracked_measurement_poll():
+                nonlocal calls_in_flight, maximum_calls_in_flight
+                calls_in_flight += 1
+                maximum_calls_in_flight = max(maximum_calls_in_flight, calls_in_flight)
+                order.append("measurement-start")
+                try:
+                    return await original_poll_measurement()
+                finally:
+                    order.append("measurement-end")
+                    calls_in_flight -= 1
+
+            device.poll = tracked_poll  # type: ignore[method-assign]
+            device.poll_measurement = tracked_measurement_poll  # type: ignore[method-assign]
+            active_poll = asyncio.create_task(manager._poll_one(device_id))
+            await first_poll_started.wait()
+
+            queued_poll = asyncio.create_task(manager._poll_one(device_id))
+            gate = manager._operation_gates[device_id]
+            while len(gate._waiters) < 1:
+                await asyncio.sleep(0)
+            measurement_poll = asyncio.create_task(
+                manager._poll_one(device_id, measurement=True)
+            )
+            while len(gate._waiters) < 2:
+                await asyncio.sleep(0)
+
+            release_first_poll.set()
+            await asyncio.gather(active_poll, queued_poll, measurement_poll)
+
+            self.assertEqual(
+                order,
+                [
+                    "poll-1-start",
+                    "poll-1-end",
+                    "measurement-start",
+                    "measurement-end",
+                    "poll-2-start",
+                    "poll-2-end",
+                ],
+            )
+            self.assertEqual(maximum_calls_in_flight, 1)
+            device.poll = original_poll  # type: ignore[method-assign]
+            device.poll_measurement = original_poll_measurement  # type: ignore[method-assign]
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
     def test_poll_timeout_quarantines_device_until_restart(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")

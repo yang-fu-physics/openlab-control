@@ -384,10 +384,15 @@ def device_worker_main(connection: Connection, spec: DeviceWorkerSpec) -> None:
                 value = loop.run_until_complete(backend.connect())
             elif action == "disconnect":
                 value = loop.run_until_complete(backend.disconnect())
-            elif action == "poll":
-                value = loop.run_until_complete(backend.poll())
+            elif action in {"poll", "poll_measurement"}:
+                poll_method = (
+                    backend.poll_measurement
+                    if action == "poll_measurement"
+                    else backend.poll
+                )
+                value = loop.run_until_complete(poll_method())
                 if not isinstance(value, DeviceSnapshot):
-                    raise TypeError("poll() must return DeviceSnapshot")
+                    raise TypeError(f"{action}() must return DeviceSnapshot")
                 value = _snapshot_payload(value)
             elif action == "set_target":
                 value = loop.run_until_complete(
@@ -843,6 +848,10 @@ class IsolatedDeviceClient:
         result = await self._request("poll")
         return snapshot_from_payload(result)
 
+    async def poll_measurement(self) -> DeviceSnapshot:
+        result = await self._request("poll_measurement")
+        return snapshot_from_payload(result)
+
     async def set_target(
         self,
         value: float,
@@ -888,6 +897,9 @@ class InProcessDeviceClient:
 
     async def poll(self) -> DeviceSnapshot:
         return await self.plugin.poll()
+
+    async def poll_measurement(self) -> DeviceSnapshot:
+        return await self.plugin.poll_measurement()
 
     async def set_target(
         self,

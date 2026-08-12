@@ -216,7 +216,8 @@ Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Ra
 - 同一模块的行顺序保持。
 - 多模块结果按中央收到顺序串行写入，没有两个进程同时写同一文件。
 - 前面板常规轮询仍按 `poll_interval_seconds` 运行；状态日志按自己的周期节流，不会为了
-  写日志增加仪表查询。Measurement Module 明确调用 `api.devices()` 时会即时增加一次采样。
+  写日志增加仪表查询。Measurement Module 明确调用 `api.devices()` 时会即时增加一次
+  测量采样；插件可只查询主值，未同步读取的附加列在实验 DAT 当前行中为空。
 - Error/Stop/完成都会在模块 `run_end` 收束后关闭文件。
 - 异常断电仍可能损失操作系统未落盘缓存；重要实验建议使用 UPS 和磁盘级备份。
 

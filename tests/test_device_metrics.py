@@ -36,6 +36,8 @@ class _FreshDevices:
             item.id: item for item in self.config.devices
         }
         self.poll_calls = 0
+        self.full_poll_calls = 0
+        self.measurement_poll_calls = 0
         self._current = 1.0
         self._snapshots = {
             "temperature": DeviceSnapshot(
@@ -53,6 +55,14 @@ class _FreshDevices:
         }
 
     async def poll_all(self) -> dict[str, DeviceSnapshot]:
+        self.full_poll_calls += 1
+        return await self._advance()
+
+    async def poll_measurement_all(self) -> dict[str, DeviceSnapshot]:
+        self.measurement_poll_calls += 1
+        return await self._advance()
+
+    async def _advance(self) -> dict[str, DeviceSnapshot]:
         self.poll_calls += 1
         await asyncio.sleep(0.01)
         self._current += 1.0
@@ -113,6 +123,8 @@ class DeviceMetricTests(unittest.TestCase):
             )
 
             self.assertEqual(devices.poll_calls, 1)
+            self.assertEqual(devices.full_poll_calls, 0)
+            self.assertEqual(devices.measurement_poll_calls, 1)
             self.assertEqual(first["temperature"]["current"], 2.0)
             self.assertEqual(second["temperature"]["current"], 2.0)
             self.assertEqual(
@@ -143,10 +155,13 @@ class DeviceMetricTests(unittest.TestCase):
 
             await service.measure_all(logger, "Measure")  # type: ignore[arg-type]
             self.assertEqual(devices.poll_calls, 1)
+            self.assertEqual(devices.full_poll_calls, 0)
+            self.assertEqual(devices.measurement_poll_calls, 1)
             self.assertEqual(logger.current, 2.0)
 
             await service._fresh_system_payload()
             self.assertEqual(devices.poll_calls, 2)
+            self.assertEqual(devices.measurement_poll_calls, 2)
             await service._fresh_system_payload(
                 reuse_within_seconds=0.1,
             )
@@ -203,6 +218,11 @@ class DeviceMetricTests(unittest.TestCase):
             )
             manager._metric_schemas.pop(device.id, None)
             manager._validate_snapshot(device.id, valid)
+            measurement = deepcopy(valid)
+            measurement.metrics = (
+                DeviceMetric("heater", "Heater", None, "%", 2),
+            )
+            manager._validate_snapshot(device.id, measurement)
             invalid = deepcopy(valid)
             invalid.metrics = (
                 DeviceMetric("heater", "Heater", 1.0, "%", 2),

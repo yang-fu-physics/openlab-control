@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import math
 import re
 import time
@@ -51,6 +52,61 @@ from .stability import StabilityEvaluator
 T = TypeVar("T")
 _METRIC_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# 同一台设备始终只允许一个操作进入插件。控制与安全操作不能被读数越过；
+# 测量专用读取可以越过尚未开始的后台状态轮询，但不会中断已经开始的仪表事务。
+_DEVICE_CONTROL_PRIORITY = 0
+_DEVICE_MEASUREMENT_PRIORITY = 10
+_DEVICE_BACKGROUND_PRIORITY = 20
+
+
+class _PriorityOperationGate:
+    """按优先级串行化单台设备的操作，并在同优先级内保持先来先执行。
+
+    ``asyncio.Lock`` 只保证互斥，不承诺测量读取能越过已经排队的后台轮询。这里把等待者
+    放入小根堆：数值越小优先级越高，递增序号保证同级 FIFO。已经取得执行权的操作绝不
+    被抢占，因此底层已经发送的一整条仪表命令一定先正常返回或超时。
+    """
+
+    def __init__(self) -> None:
+        self._locked = False
+        self._sequence = 0
+        self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
+
+    async def acquire(self, priority: int) -> None:
+        """等待执行权；任务取消时从队列移除，避免遗留死锁。"""
+
+        if not self._locked:
+            self._locked = True
+            return
+
+        loop = asyncio.get_running_loop()
+        waiter: asyncio.Future[None] = loop.create_future()
+        self._sequence += 1
+        heapq.heappush(self._waiters, (priority, self._sequence, waiter))
+        try:
+            # shield 防止任务取消顺带取消 Future；这样可以区分“尚在等待”和“已经获准”。
+            await asyncio.shield(waiter)
+        except BaseException:
+            if waiter.done():
+                # release 已把执行权交给本任务，但任务在恢复运行前被取消。
+                self.release()
+            else:
+                waiter.cancel()
+            raise
+
+    def release(self) -> None:
+        """把执行权交给当前最高优先级的有效等待者。"""
+
+        if not self._locked:
+            raise RuntimeError("Device operation gate is not acquired")
+        while self._waiters:
+            _priority, _sequence, waiter = heapq.heappop(self._waiters)
+            if waiter.cancelled():
+                continue
+            waiter.set_result(None)
+            return
+        self._locked = False
+
 
 class DeviceManager:
     """拥有全部设备客户端、最新快照和连接恢复状态的异步管理器。"""
@@ -72,7 +128,7 @@ class DeviceManager:
         self.devices: dict[str, object] = {}
         self._client_factories: dict[str, Callable[[], object]] = {}
         self.device_configs: dict[str, DeviceConfig] = {item.id: item for item in config.devices}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._operation_gates: dict[str, _PriorityOperationGate] = {}
         self._stability: dict[str, StabilityEvaluator] = {}
         self._poll_issues: dict[str, set[tuple[str, str]]] = {}
         self._stale_devices: set[str] = set()
@@ -246,7 +302,7 @@ class DeviceManager:
 
                 self._client_factories[device_config.id] = in_process_factory
                 self.devices[device_config.id] = in_process_factory()
-            self._locks[device_config.id] = asyncio.Lock()
+            self._operation_gates[device_config.id] = _PriorityOperationGate()
             self._poll_issues[device_config.id] = set()
             self._connection_states[device_config.id] = (
                 DeviceConnectionState.STARTING
@@ -452,7 +508,9 @@ class DeviceManager:
                 self._recovery_clients[device_id] = candidate
                 remaining = max(0.0, deadline - time.monotonic())
                 try:
-                    async with self._locks[device_id]:
+                    gate = self._operation_gates[device_id]
+                    await gate.acquire(_DEVICE_CONTROL_PRIORITY)
+                    try:
                         if (
                             self._generation[device_id] != generation
                             or self._shutting_down
@@ -486,6 +544,8 @@ class DeviceManager:
                         evaluator = self._stability.get(device_id)
                         if evaluator is not None and snapshot.target is not None:
                             evaluator.reset(snapshot.target, snapshot.timestamp)
+                    finally:
+                        gate.release()
                     self._recovery_clients.pop(device_id, None)
                     self.events.resolve(
                         device_id,
@@ -607,8 +667,9 @@ class DeviceManager:
         *,
         shutdown: bool = False,
         origin: str | None = None,
+        priority: int = _DEVICE_CONTROL_PRIORITY,
     ) -> T:
-        """在设备专属锁内执行一次有时限操作，并按来源和连接状态决定是否放行。
+        """在设备专属优先队列内执行一次有时限操作，并按来源和连接状态决定是否放行。
 
         写超时可能意味着指令已经到达仪表，因此不会盲目重试。对于不自带硬超时的进程内
         驱动，一次超时后禁止后续 I/O，避免仍在执行的底层调用与新指令并发接触同一仪表。
@@ -622,7 +683,9 @@ class DeviceManager:
         )
 
         async def serialized() -> T:
-            async with self._locks[device_id]:
+            gate = self._operation_gates[device_id]
+            await gate.acquire(priority)
+            try:
                 if origin == "manual" and self._control_owner == "sequence":
                     raise DeviceWarning(
                         f"{config.display_name} manual control is blocked while a SEQ owns control",
@@ -631,7 +694,7 @@ class DeviceManager:
                     )
                 if (
                     operation
-                    not in {"connect", "disconnect", "poll"}
+                    not in {"connect", "disconnect", "poll", "poll_measurement"}
                     and self._connection_states[device_id]
                     is not DeviceConnectionState.CONNECTED
                 ):
@@ -673,6 +736,8 @@ class DeviceManager:
                     ):
                         self._unavailable_after_timeout[device_id] = operation
                     raise
+            finally:
+                gate.release()
 
         return await serialized()
 
@@ -783,6 +848,20 @@ class DeviceManager:
     async def poll_all(self) -> dict[str, DeviceSnapshot]:
         """并发轮询已连接设备并返回快照副本；单台失败不会阻塞其他设备。"""
 
+        return await self._poll_all(measurement=False)
+
+    async def poll_measurement_all(self) -> dict[str, DeviceSnapshot]:
+        """取得写测量行所需的即时主读数；插件可省略慢速附加查询。"""
+
+        return await self._poll_all(measurement=True)
+
+    async def _poll_all(
+        self,
+        *,
+        measurement: bool,
+    ) -> dict[str, DeviceSnapshot]:
+        """共用完整轮询与测量轮询的错误、恢复和过期状态处理。"""
+
         device_ids = tuple(
             device_id
             for device_id in self.devices
@@ -790,7 +869,10 @@ class DeviceManager:
             is DeviceConnectionState.CONNECTED
         )
         results = await asyncio.gather(
-            *(self._poll_one(device_id) for device_id in device_ids),
+            *(
+                self._poll_one(device_id, measurement=measurement)
+                for device_id in device_ids
+            ),
             return_exceptions=True,
         )
         now = time.monotonic()
@@ -834,11 +916,20 @@ class DeviceManager:
             )
         return deepcopy(self.latest)
 
-    async def _poll_one(self, device_id: str) -> DeviceSnapshot:
+    async def _poll_one(
+        self,
+        device_id: str,
+        *,
+        measurement: bool = False,
+    ) -> DeviceSnapshot:
         """读取、校验并在设备锁内发布一台设备的最新状态。"""
 
         async def poll() -> DeviceSnapshot:
-            snapshot = await self.devices[device_id].poll()  # type: ignore[attr-defined]
+            client = self.devices[device_id]
+            if measurement:
+                snapshot = await client.poll_measurement()  # type: ignore[attr-defined]
+            else:
+                snapshot = await client.poll()  # type: ignore[attr-defined]
             self._validate_snapshot(device_id, snapshot)
             snapshot.connected = True
             snapshot.connection_state = DeviceConnectionState.CONNECTED
@@ -872,7 +963,16 @@ class DeviceManager:
             self.latest[device_id] = snapshot
             return snapshot
 
-        return await self._operate(device_id, "poll", poll)
+        return await self._operate(
+            device_id,
+            "poll_measurement" if measurement else "poll",
+            poll,
+            priority=(
+                _DEVICE_MEASUREMENT_PRIORITY
+                if measurement
+                else _DEVICE_BACKGROUND_PRIORITY
+            ),
+        )
 
     def _validate_snapshot(
         self,
