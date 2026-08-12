@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.15.2 - 2026-08-12
+
+- 正式 Windows EXE 和 ZIP 只由 GitHub Actions 在干净的 Windows runner 中构建、测试并
+  上传；本地不再生成或上传发布资产，避免本机环境与正式包不一致。
+- 修正 GitHub Windows runner 同时使用用户目录长路径与 8.3 短路径时的测试比较；两种
+  写法现在按同一真实目录处理，不再阻止云端发布。
+- 发布包根目录同时提供 `OpenLabControl.exe` 与 `InstrumentScanner.exe`，并共享唯一的
+  `_internal`；不包含 `tools/` 目录，也不重复打包 Python、PySide6 和 PyVISA 运行时。
+- 本版本包含 0.15.0/0.15.1 的 Instrument 资源架构和只读扫描器变更。真实仪表仍未完成
+  现场验证，首次接入必须保留仪表自身的硬件限值与安全状态。
+
 ## 0.15.1 - 2026-08-12
 
 - Windows 发布包把 `OpenLabControl.exe` 与 `InstrumentScanner.exe` 放在根目录；两个 onedir
