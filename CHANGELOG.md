@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.1 - 2026-08-12
+
 - Device Plugin 新增可选 `poll_measurement()`：写测量行和 Module `api.devices()` 时可只
   查询主测量值，常规 `poll()` 继续独立执行完整安全与监视读取。未同步读取的附加列保留
   固定 Schema 但写空，避免把旧监视值伪装成本次测量值。
