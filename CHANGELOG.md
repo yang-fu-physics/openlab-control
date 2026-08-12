@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.15.4 - 2026-08-12
+
+- 正式打包冒烟测试继续运行完整的 `nested_scan.seq`，SEQ 自身允许 120 秒，外层进程保护
+  限制为 180 秒；正常约 20 秒完成的多层扫描不再被错误的 5 秒上限中止。
+- GitHub runner 会等待 `OpenLabControl.exe` 与 `InstrumentScanner.exe` 真正退出并检查
+  退出码，随后再清理临时日志、检查 ZIP 内容和创建稳定 Release。
+- 正式 Windows 资产只由 GitHub Actions 构建；本地只执行源码、文档、工作流语法和测试
+  验证，不生成或上传 EXE/ZIP。
+- 包根目录包含两个 EXE 与共享 `_internal`，不包含 `tools/`。真实仪表仍未完成现场验证。
+
 ## 0.15.3 - 2026-08-12
 
 - GitHub Actions 现在以受控隐藏进程启动打包后的两个 EXE，显式等待结束、限制最长时间并
