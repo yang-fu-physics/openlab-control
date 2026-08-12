@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.15.1 - 2026-08-12
+
 - Windows 发布包把 `OpenLabControl.exe` 与 `InstrumentScanner.exe` 放在根目录；两个 onedir
   程序共享唯一的 `_internal`，不再为扫描器重复打包 PySide6、PyVISA 和 Python 运行时。
 - 发布包不再创建 `tools/`。源码仍保留 `tools/instrument_scanner.py`，继续复用主项目
