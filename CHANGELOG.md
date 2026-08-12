@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.15.3 - 2026-08-12
+
+- GitHub Actions 现在以受控隐藏进程启动打包后的两个 EXE，显式等待结束、限制最长时间并
+  检查退出码；GUI 子系统程序不再与后续 ZIP 清理和归档步骤竞态运行。
+- 冒烟测试完成后才删除 `headless_demo.log`、临时运行内容和本地仪表地址文件；归档检查
+  若仍发现本地文件，会在日志中直接列出具体路径。
+- 正式 Windows 资产继续只由 GitHub 构建。包根目录包含 `OpenLabControl.exe`、
+  `InstrumentScanner.exe` 和共享 `_internal`，不包含 `tools/`。
+- 本版本包含 0.15.0–0.15.2 的 Instrument 资源架构、只读扫描器和 Windows runner 路径
+  修复。真实仪表仍未完成现场验证。
+
 ## 0.15.2 - 2026-08-12
 
 - 正式 Windows EXE 和 ZIP 只由 GitHub Actions 在干净的 Windows runner 中构建、测试并
