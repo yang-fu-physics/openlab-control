@@ -65,6 +65,10 @@ extra-package==1.2.3 \
 
 ## 发布前清单
 
+- [ ] 核心稳定版使用与项目版本一致的 `v<版本>` 标签，由 GitHub Actions 的 Windows
+      Runner 重新测试、打包和上传；不把开发电脑生成的 ZIP 手工上传为正式资产。
+- [ ] 发布 ZIP 根目录有 `OpenLabControl.exe`、`InstrumentScanner.exe` 和唯一的
+      `_internal/`，没有发布用 `tools/` 目录。
 - [ ] 目录名、清单 ID 和文档一致。
 - [ ] 版本号已更新，变化写入 README/CHANGELOG。
 - [ ] 没有仪表地址、令牌、私钥、真实 DAT 或本机状态。

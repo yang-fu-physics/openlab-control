@@ -23,8 +23,7 @@ Get-Content .\OpenLabControl-v0.15.0-windows-x64.zip.sha256
 ## 第一次启动
 
 1. 双击 `OpenLabControl.exe`。需要确认仪表地址时，双击同目录的
-   `tools\InstrumentScanner.exe`。扫描器是独立单文件程序；主程序仍须和自己的
-   `_internal` 目录一起保留。
+   `InstrumentScanner.exe`。两个程序共享同一个 `_internal`，不要单独移动任一 EXE。
 2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
 3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。
 4. 保持列表为空，打开 `examples/nested_scan.seq`。

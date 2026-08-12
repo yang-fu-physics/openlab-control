@@ -1,4 +1,4 @@
-# Windows release environment verified for OpenLab Control 0.11.x.
+# Windows release environment verified for OpenLab Control 0.15.x.
 # Regenerate deliberately after testing dependency upgrades; do not use pip freeze
 # blindly because the development environment may contain unrelated packages.
 altgraph==0.17.5

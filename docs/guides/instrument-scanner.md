@@ -11,9 +11,10 @@
 .\.venv\Scripts\python.exe .\tools\instrument_scanner.py
 ```
 
-打包版直接双击程序目录中的 `tools\InstrumentScanner.exe`。Release 的 `tools/` 只包含
-这个独立 EXE，不包含 Python 源码；因此可以单独复制使用。源码版则直接复用主项目
-`.venv` 中锁定的 PySide6、PyVISA 及其他框架依赖。
+打包版直接双击程序根目录中的 `InstrumentScanner.exe`。它与同级的
+`OpenLabControl.exe` 共享唯一的 `_internal`，所以发布包不建立 `tools/`，也不会重复携带
+PySide6、PyVISA 和 Python 运行时。不要只复制扫描器 EXE；两个 EXE 都应与 `_internal`
+一起保留。源码版则直接复用主项目 `.venv` 中锁定的框架依赖。
 
 PyVISA 是 Python 接口，不是 Windows 的 VISA implementation。如果点击扫描时提示无法初始化
 VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通常使用 NI-VISA。安装后重新

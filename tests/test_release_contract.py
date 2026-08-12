@@ -127,13 +127,26 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(specification.count("COLLECT("), 1)
         self.assertIn('["tools/instrument_scanner.py"]', specification)
         self.assertIn('name="InstrumentScanner"', specification)
-        self.assertNotIn("scanner_exe,\n    a.binaries", specification)
+        self.assertEqual(specification.count("exclude_binaries=True"), 2)
+        self.assertIn("scanner_exe,\n    a.binaries", specification)
+        self.assertIn("scanner_analysis.binaries", specification)
+        self.assertIn("scanner_analysis.datas", specification)
         build_script = (ROOT / "build.bat").read_text(encoding="utf-8")
         self.assertIn(
-            r"dist\OpenLabControl\tools\InstrumentScanner.exe",
+            r"dist\OpenLabControl\InstrumentScanner.exe",
             build_script,
         )
+        self.assertNotIn(r"tools\InstrumentScanner.exe", build_script)
         self.assertNotIn('xcopy /E /I /Y "tools"', build_script)
+        self.assertIn("stage_windows_release.ps1", build_script)
+        self.assertIn("if defined CI exit /b 0", build_script)
+
+        staging_script = (
+            ROOT / "tools" / "stage_windows_release.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"InstrumentScanner.exe"', staging_script)
+        self.assertIn('"OpenLabControl.exe"', staging_script)
+        self.assertIn("$releaseToolsPath", staging_script)
         for name in (
             "configs",
             "examples",
@@ -142,31 +155,46 @@ class ReleaseContractTests(unittest.TestCase):
             "integrations",
             "modules",
         ):
-            self.assertIn(f'"{name}" "dist\\OpenLabControl\\{name}"', build_script)
-        self.assertNotIn("module_runtime", build_script)
+            self.assertIn(f'"{name}"', staging_script)
+        self.assertNotIn("module_runtime", staging_script)
         for name in (
             "system_instruments",
             "runtime_packages",
             "trust_state",
         ):
-            self.assertIn(
-                f'dist\\OpenLabControl\\{name}',
-                build_script,
-            )
-        self.assertIn(
-            'call :remove_python_caches "dist\\OpenLabControl\\%%R"',
-            build_script,
-        )
+            self.assertIn(f'"{name}"', staging_script)
         for generated_name in (
             "__pycache__",
             ".pytest_cache",
             ".mypy_cache",
             ".ruff_cache",
-            "*.pyc",
-            "*.pyo",
+            ".pyc",
+            ".pyo",
         ):
             with self.subTest(generated_name=generated_name):
-                self.assertIn(generated_name, build_script)
+                self.assertIn(generated_name, staging_script)
+
+    def test_github_release_workflow_builds_and_verifies_windows_assets(self) -> None:
+        workflow = (
+            ROOT / ".github" / "workflows" / "release.yml"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "windows-latest",
+            "requirements-lock.txt",
+            "is_prerelease",
+            "unittest discover -s tests",
+            "mkdocs build --strict",
+            "OpenLabControl.spec",
+            "stage_windows_release.ps1",
+            "InstrumentScanner.exe",
+            "OpenLabControl.exe",
+            "Get-FileHash",
+            "headless_demo.log",
+            "gh release create",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, workflow)
+        self.assertNotIn("tools/InstrumentScanner.exe", workflow)
 
     def test_current_docs_describe_shared_framework_and_isolated_extras(self) -> None:
         current_documents = "\n".join(

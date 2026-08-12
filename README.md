@@ -69,11 +69,15 @@ Windows 文件夹发布包：
 build.bat
 ```
 
-输出位于 `dist\OpenLabControl\`，其中包含主程序 `OpenLabControl.exe` 和独立的
-`tools\InstrumentScanner.exe`。Release 的 `tools/` 只包含该 EXE，不携带 Python 源码；
-源码版扫描器继续使用主项目 `.venv` 中的锁定依赖。源码版和打包版都从程序旁的
+输出位于 `dist\OpenLabControl\`，其中包含同级的 `OpenLabControl.exe` 和
+`InstrumentScanner.exe`。两个程序共享根目录下唯一的 `_internal`，发布包不建立
+`tools/`；源码版扫描器继续使用主项目 `.venv` 中的锁定依赖。源码版和打包版都从程序旁的
 `configs/`、`modules/`、
 `system_instruments/`、`templates/` 和可写数据目录读取，不在 `_internal/` 放第二份副本。
+
+正式稳定版由 GitHub Actions 自动构建：项目版本与 `v<版本>` 标签一致时，Windows Runner
+会重新执行完整测试、严格文档构建、双 EXE 打包与 ZIP 检查，再直接创建 Release 并上传
+ZIP 和 SHA-256。本地 `build.bat` 只用于发布前复核，不作为正式资产上传来源。
 
 ## Measurement Module
 
@@ -109,8 +113,8 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 安装时：
 
 1. 把完整 System Instrument 文件夹复制到 `system_instruments/<instrument-id>/`。
-2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击
-   `tools\InstrumentScanner.exe`。程序只读扫描并人工确认地址、
+2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
+   `InstrumentScanner.exe`。程序只读扫描并人工确认地址、
    用途、System Instrument 和主/辅助读数；结果写入 `configs/instruments.local.toml`。
 3. 把 `configs/default.toml` 复制为 `configs/site.local.toml`。
 4. 在现场副本的 `[[instruments]]` 中设置
@@ -160,7 +164,7 @@ runs/                     每次 Run 的数据、日志和快照
 docs/                     操作、格式、架构和开发教程
 src/labcontrol/           核心源码
 tests/                    核心自动测试
-tools/                    独立的只读仪表扫描与界面截图工具
+tools/                    源码开发工具（发布包不复制该目录）
 ```
 
 ## 文档

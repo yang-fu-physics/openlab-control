@@ -18,15 +18,12 @@ from typing import Any
 def application_root() -> Path:
     """返回源码项目根目录或打包发布目录。
 
-    Release 把 onefile 扫描器放在 ``tools/``。onefile 解包后的 ``__file__`` 位于临时
-    目录，不能用于定位现场配置；此时必须从真实 EXE 位置返回上一级发布目录。
+    发布包把扫描器与主程序放在同一目录并共享 ``_internal``。打包后不能使用
+    ``__file__`` 定位现场配置，因为它指向内部运行目录；应以真实 EXE 所在目录为准。
     """
 
     if getattr(sys, "frozen", False):
-        executable_directory = Path(sys.executable).resolve().parent
-        if executable_directory.name.casefold() == "tools":
-            return executable_directory.parent
-        return executable_directory
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 
 

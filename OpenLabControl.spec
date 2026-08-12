@@ -136,8 +136,8 @@ exe = EXE(
     version=version_info,
 )
 
-# Release 中的扫描器位于 ``tools/`` 且该目录只允许有一个 EXE，因此它必须是独立 onefile
-# 程序，不能依赖相邻的 ``_internal``。源码版仍直接使用主项目 .venv 中的同一组锁定依赖。
+# 发布包把扫描器与主程序放在根目录。两个 onedir EXE 由同一个 COLLECT 收集，直接共享
+# 唯一的 ``_internal``；源码版则直接使用主项目 .venv 中的同一组锁定依赖。
 scanner_analysis = Analysis(
     ["tools/instrument_scanner.py"],
     pathex=["src"],
@@ -160,9 +160,8 @@ scanner_pyz = PYZ(scanner_analysis.pure)
 scanner_exe = EXE(
     scanner_pyz,
     scanner_analysis.scripts,
-    scanner_analysis.binaries,
-    scanner_analysis.datas,
     [],
+    exclude_binaries=True,
     name="InstrumentScanner",
     debug=False,
     bootloader_ignore_signals=False,
@@ -179,8 +178,11 @@ scanner_exe = EXE(
 
 coll = COLLECT(
     exe,
+    scanner_exe,
     a.binaries,
     a.datas,
+    scanner_analysis.binaries,
+    scanner_analysis.datas,
     strip=False,
     upx=True,
     upx_exclude=[],

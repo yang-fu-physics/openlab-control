@@ -360,9 +360,9 @@ class InstrumentResourceTests(unittest.TestCase):
 
 
 class InstrumentScannerTests(unittest.TestCase):
-    def test_frozen_scanner_uses_release_root_above_tools(self) -> None:
+    def test_frozen_scanner_uses_shared_release_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            executable = Path(temp) / "tools" / "InstrumentScanner.exe"
+            executable = Path(temp) / "InstrumentScanner.exe"
             with (
                 patch.object(sys, "frozen", True, create=True),
                 patch.object(sys, "executable", str(executable)),

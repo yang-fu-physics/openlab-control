@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Windows 发布包把 `OpenLabControl.exe` 与 `InstrumentScanner.exe` 放在根目录；两个 onedir
+  程序共享唯一的 `_internal`，不再为扫描器重复打包 PySide6、PyVISA 和 Python 运行时。
+- 发布包不再创建 `tools/`。源码仍保留 `tools/instrument_scanner.py`，继续复用主项目
+  `.venv`；打包版的两个 EXE 都必须与 `_internal` 一起保留，不能只复制扫描器 EXE。
+- 新增 Windows Stable Release GitHub Actions：标签与项目版本一致时，在 GitHub Windows
+  Runner 上执行完整核心测试、严格文档构建、语法编译、双 EXE 打包、解压内容检查和
+  冒烟测试，再由 GitHub 内部网络创建稳定 Release 并上传 ZIP 与 SHA-256。
+- 本版本包含 `v0.15.0` 源码标签引入的不兼容 Instrument 资源架构、System Instrument
+  API 1.2、统一 Measurement 资源选择和只读仪表扫描器。真实仪表仍未完成现场验证。
+
 ## 0.15.0 - 2026-08-12
 
 - 采用不兼容的新命名：核心源码、配置、SEQ 参数、DAT 状态文件和公共 API 全部统一使用

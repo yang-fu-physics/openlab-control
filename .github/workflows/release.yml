@@ -1,0 +1,212 @@
+name: Windows Stable Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-lock.txt
+            requirements-docs.txt
+
+      - name: Install locked dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements-lock.txt
+          python -m pip install -r requirements-docs.txt
+
+      - name: Verify tag and source version
+        shell: pwsh
+        run: |
+          $version = (python -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])").Trim()
+          if ($env:RELEASE_TAG -ne "v$version") {
+            throw "Tag $env:RELEASE_TAG does not match project version $version"
+          }
+          $isPrerelease = (python -c "from packaging.version import Version; import sys; print(Version(sys.argv[1]).is_prerelease)" $version).Trim()
+          if ($isPrerelease -ne "False") {
+            throw "This workflow publishes stable versions only: $version"
+          }
+          $exactTag = (git describe --tags --exact-match HEAD).Trim()
+          if ($exactTag -ne $env:RELEASE_TAG) {
+            throw "Checked-out commit is not exactly tagged $env:RELEASE_TAG"
+          }
+
+      - name: Run complete tests
+        shell: pwsh
+        run: python -m unittest discover -s tests
+
+      - name: Validate source and documentation
+        shell: pwsh
+        run: |
+          python -m compileall -q src tools
+          python -m mkdocs build --strict --site-dir build/site-release
+          git diff --check
+
+      - name: Build both Windows executables
+        shell: pwsh
+        run: |
+          python -m PyInstaller --clean --noconfirm OpenLabControl.spec
+          & .\tools\stage_windows_release.ps1
+
+      - name: Verify packaged programs
+        shell: pwsh
+        run: |
+          $releaseRoot = (Resolve-Path -LiteralPath "dist\OpenLabControl").Path
+          foreach ($name in @("OpenLabControl.exe", "InstrumentScanner.exe", "_internal")) {
+            if (-not (Test-Path -LiteralPath (Join-Path $releaseRoot $name))) {
+              throw "Missing release item: $name"
+            }
+          }
+          if (Test-Path -LiteralPath (Join-Path $releaseRoot "tools")) {
+            throw "Release must not contain a tools directory"
+          }
+
+          & (Join-Path $releaseRoot "InstrumentScanner.exe") --help
+          & (Join-Path $releaseRoot "OpenLabControl.exe") --headless-demo --timeout 5
+
+          $runs = Join-Path $releaseRoot "runs"
+          Get-ChildItem -LiteralPath $runs -Force | Remove-Item -Recurse -Force
+          $demoLog = Join-Path $releaseRoot "headless_demo.log"
+          if (Test-Path -LiteralPath $demoLog) {
+            Remove-Item -LiteralPath $demoLog -Force
+          }
+
+      - name: Create and inspect release archive
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $zipName = "OpenLabControl-$($env:RELEASE_TAG)-windows-x64.zip"
+          $zipPath = Join-Path "dist" $zipName
+          & tar.exe -a -c -f $zipPath -C dist OpenLabControl
+          if ($LASTEXITCODE -ne 0) {
+            throw "tar.exe failed with exit code $LASTEXITCODE"
+          }
+
+          $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
+          $checksumPath = "$zipPath.sha256"
+          $checksumLine = "$hash  $zipName" + [Environment]::NewLine
+          [IO.File]::WriteAllText(
+            (Join-Path (Get-Location) $checksumPath),
+            $checksumLine,
+            [Text.UTF8Encoding]::new($false)
+          )
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zipPath))
+          try {
+            $entries = @($archive.Entries)
+            $rootScanner = @($entries | Where-Object {
+              $_.FullName.Replace("\", "/") -eq "OpenLabControl/InstrumentScanner.exe"
+            })
+            $toolsEntries = @($entries | Where-Object {
+              $_.FullName.Replace("\", "/").StartsWith("OpenLabControl/tools/")
+            })
+            $forbiddenEntries = @($entries | Where-Object {
+              $name = $_.FullName.Replace("\", "/")
+              $name -match "(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)(/|$)" -or
+              $name -match "\.(pyc|pyo)$" -or
+              $name -eq "OpenLabControl/configs/instruments.local.toml" -or
+              $name -eq "OpenLabControl/headless_demo.log" -or
+              ($name.StartsWith("OpenLabControl/runs/") -and -not $name.EndsWith("/"))
+            })
+            if ($rootScanner.Count -ne 1) {
+              throw "Archive must contain exactly one root InstrumentScanner.exe"
+            }
+            if ($toolsEntries.Count -ne 0) {
+              throw "Archive unexpectedly contains tools entries"
+            }
+            if ($forbiddenEntries.Count -ne 0) {
+              throw "Archive contains generated or local-only files"
+            }
+            foreach ($entry in $entries) {
+              if ($entry.FullName.EndsWith("/") -or $entry.FullName.EndsWith("\")) {
+                continue
+              }
+              $input = $entry.Open()
+              try {
+                $input.CopyTo([IO.Stream]::Null)
+              }
+              finally {
+                $input.Dispose()
+              }
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
+
+          $changelog = Get-Content -LiteralPath "CHANGELOG.md" -Raw -Encoding UTF8
+          $escapedVersion = [Regex]::Escape($version)
+          $match = [Regex]::Match(
+            $changelog,
+            "(?ms)^## $escapedVersion - [^\r\n]+\r?\n(?<body>.*?)(?=^## |\z)"
+          )
+          if (-not $match.Success) {
+            throw "CHANGELOG does not contain release notes for $version"
+          }
+          $notesPath = Join-Path "build" "release-notes-$($env:RELEASE_TAG).md"
+          $notes = "# OpenLab Control $($env:RELEASE_TAG)" + [Environment]::NewLine + [Environment]::NewLine + $match.Groups["body"].Value.Trim() + [Environment]::NewLine
+          [IO.File]::WriteAllText(
+            (Join-Path (Get-Location) $notesPath),
+            $notes,
+            [Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Publish stable GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $zipPath = "dist\OpenLabControl-$($env:RELEASE_TAG)-windows-x64.zip"
+          $checksumPath = "$zipPath.sha256"
+          $notesPath = "build\release-notes-$($env:RELEASE_TAG).md"
+          & gh release view $env:RELEASE_TAG *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          if ($releaseExists) {
+            & gh release edit $env:RELEASE_TAG --title "OpenLab Control $($env:RELEASE_TAG)" --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release edit failed with exit code $LASTEXITCODE"
+            }
+            & gh release upload $env:RELEASE_TAG $zipPath $checksumPath --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release upload failed with exit code $LASTEXITCODE"
+            }
+          }
+          else {
+            & gh release create $env:RELEASE_TAG $zipPath $checksumPath --verify-tag --latest --title "OpenLab Control $($env:RELEASE_TAG)" --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh release create failed with exit code $LASTEXITCODE"
+            }
+          }
