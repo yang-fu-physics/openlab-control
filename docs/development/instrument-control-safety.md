@@ -9,12 +9,11 @@
 
 ```toml
 kind = "temperature"       # 或 field
-role = "primary"
 control_enabled = true
 ```
 
-同一种 `kind` 最多一个主控。`secondary` 和 `monitor` 只读。核心会在界面、SEQ 预检和实际
-执行三处检查控制权，不只依赖按钮是否灰色。
+同一种 `kind` 最多一个 `control_enabled = true` 的实例；其他实例和 `monitor` 只读。核心会
+在界面、SEQ 预检和实际执行三处检查控制权，不只依赖按钮是否灰色。
 
 ## 上下限至少检查两次
 
@@ -32,7 +31,7 @@ shutdown_timeout_seconds = 3.0
 还要再次检查；仪表面板限制和硬件联锁是最后一层。任何一层都不能替代另外两层。
 
 ```python
-async def set_target(self, value, rate_per_minute, mode="Settle"):
+def set_target(self, value, rate_per_minute, mode="Settle"):
     if not self.config.min_value <= value <= self.config.max_value:
         raise SafetyViolation("Target is outside the site limit", "TARGET_LIMIT")
     if not 0 < rate_per_minute <= self.config.max_rate_per_minute:
@@ -42,7 +41,7 @@ async def set_target(self, value, rate_per_minute, mode="Settle"):
 
 不要在代码中偷偷放一个比主配置更宽的默认范围。缺少必要现场参数时，连接应失败关闭。
 
-## `connect()` 只确认，不设置
+## `open()` 只确认，不设置
 
 启动时应依次：
 
@@ -53,7 +52,7 @@ async def set_target(self, value, rate_per_minute, mode="Settle"):
 5. 不自动应用保存设置，不改变目标或输出。
 
 部分初始化失败时，也必须关闭已经打开的句柄。发现清单不等于连接仪表；只有配置实际选择
-该 `backend` 时，核心才会启动它。
+该资源时，核心才会启动它。
 
 ## 写入后读取确认
 
@@ -74,7 +73,7 @@ async def set_target(self, value, rate_per_minute, mode="Settle"):
 实现 Hold，必须先在同一次操作里读取真实当前值并验证，再写一次；不能使用几秒前的缓存、
 猜测值或零。
 
-`disconnect()` 只负责释放通讯资源，不应擅自关闭输出或改变设定。具体安全状态应由仪表本机
+`close()` 只负责释放通讯资源，不应擅自关闭输出或改变设定。具体安全状态应由仪表本机
 保护、硬件联锁和已经明确实现的 `hold()` 共同保证。
 
 ## 断线与重连

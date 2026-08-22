@@ -9,7 +9,7 @@ OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Pyt
 两者有不同目录、清单和生命周期。System Instrument 一般随实验系统固定；Measurement
 Module 每次启动默认 Disabled，由用户按需 Enable。
 
-当前稳定版本：`0.15.5`。默认配置全部使用内置仿真仪表，尚未完成真机验证。
+当前稳定版本：`0.16.0`。默认配置全部使用内置仿真仪表，尚未完成真机验证。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站包含面向初学者的中文
 使用教程、Measurement Module 教程和完整 System Instrument 教程。
@@ -22,7 +22,7 @@ Module 每次启动默认 Disabled，由用户按需 Enable。
 - Pause、Stop、Call Sequence、Set Datafile、Remark 和无参数 `Measure`。
 - 配置中的温场上下限与最大速率同时约束手动控制、SEQ 参数窗口和运行时执行。
 - 每个 System Instrument 实例和每个 Enabled Measurement Module 分别运行在独立子进程。
-- 每种温度、磁场最多一个主控仪表；其他温磁仪表默认只读，Monitor 永远只读。
+- 每种温度、磁场最多一个 `control_enabled = true` 的仪表；其他温磁仪表和 Monitor 只读。
 - 主控仪表普通失联后按配置重连；默认每 2 秒尝试一次，60 秒后转为故障。
 - 一个 `Measure` 按所有 Enabled 模块的通道槽位展开，每个通道一行；同一槽位的模块并行。
 - 模块可返回多行结果、数字状态码和独立 `rawdata`；无结果或报错的值保持空单元格。
@@ -42,8 +42,9 @@ Module 每次启动默认 Disabled，由用户按需 Enable。
 
 System Instrument 的前面板完整读取和测量即时读取相互分开：
 
-- `poll()` 默认约每秒读取完整状态，用于前面板、安全检查、判稳和状态日志；
-- `poll_measurement()` 可只读取写测量行需要的即时主值；不实现时自动使用完整 `poll()`；
+- `read_status()` 默认约每秒读取完整状态，用于前面板、安全检查、判稳和状态日志；
+- `read_measurement()` 可只读取写测量行需要的即时主值；不实现时自动使用完整
+  `read_status()`；
 - 同一 System Instrument 不会并发访问。当前完整仪表指令先完成，等待中的控制/安全操作
   优先，测量即时读取再先于尚未开始的普通后台读取。
 
@@ -115,24 +116,25 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 1. 把完整 System Instrument 文件夹复制到 `system_instruments/<instrument-id>/`。
 2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
    `InstrumentScanner.exe`。程序打开后自动进行一次只读 VISA 扫描，再由操作者确认地址、
-   用途、System Instrument 和主/辅助读数；唯一识别的实现会自动选择，主读数使用下拉框，
+   用途、System Instrument 和辅助读数；唯一识别的实现会自动选择，主读数由该实现固定，
    辅助读数使用复选框。结果写入 `configs/instruments.local.toml`。已有文件会先自动载入，
    保存前会逐项列出新增、替换、删除和保持不变的资源。
    System Instrument 名称和可选读数来自 `system_instruments/` 中的清单，扫描器不写死
    具体仪表，也不选择或绑定 Measurement Module。
 3. 把 `configs/default.toml` 复制为 `configs/site.local.toml`。
-4. 在现场副本的 `[[instruments]]` 中设置
-   `backend = "<instrument-id>"`、`resource = "<资源 ID>"`、安全上下限、最大速率和超时。
+4. 在现场副本的 `[[instruments]]` 中设置 `resource = "<资源 ID>"`、是否允许控制、安全
+   上下限、最大速率和超时。实现、主读数、单位和显示精度由资源选择及仪表清单自动得到；
+   `initial_value` 只属于内置仿真，不写入真实仪表条目。
 5. 使用 `run.bat --config configs\site.local.toml` 启动；打包版使用
    `OpenLabControl.exe --config configs\site.local.toml`。
-6. 核对首次信任窗口。发现目录不会连接仪表，只有配置选择的 backend 才会启动。
+6. 核对首次信任窗口。发现目录不会连接仪表，只有现场配置引用的资源才会启动。
 
-System Instrument 的后台以 `SystemInstrument` 为基类，提供
-`connect/poll/poll_measurement/set_target/hold/disconnect`。通讯命令建议单独放在
-`instrument.py`，让 `backend.py` 只处理生命周期、安全判断和快照组装。
+System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的
+`open/read_status/read_measurement/set_target/hold/close`。通讯命令建议单独放在
+`instrument.py`，让 `backend.py` 只处理生命周期、安全判断和读数组装。
 
 一份 System Instrument 代码对应一种物理仪表型号/协议，不对应 TempA、TempB 这样的单个
-通道。同一地址只建立一个会话；主读数放在快照主体，其余读数放入有序 `metrics` 字典，
+通道。同一地址只建立一个会话；主读数写入 `value`，其余读数放入 `auxiliary` 字典，
 界面会在主卡右侧依次建立同样大小的只读监控卡。多个不同资源各有独立进程，可以同时连接
 和并发轮询。
 

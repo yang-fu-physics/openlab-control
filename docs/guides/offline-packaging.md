@@ -24,7 +24,7 @@ OpenLabControl/system_instruments/<instrument-id>/
 重启后，框架显示类型、ID、版本、绝对路径和内容指纹。用户必须显式确认首次信任；任何
 源码或 wheel 变化都会使原确认失效。
 
-System Instrument 还必须由现场配置的 `[[instruments]].backend` 选中才会启动。单纯复制
+System Instrument 还必须先由扫描资源选择，再被现场配置的 `[[instruments]].resource` 引用才会启动。单纯复制
 目录不会连接或改变真实仪表。Measurement Module 则在 Modules Manager 中由用户 Enable。
 
 ## 不要重复声明框架依赖

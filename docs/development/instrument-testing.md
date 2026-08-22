@@ -7,18 +7,17 @@
 
 ### 连接
 
-- 正确型号可以连接并读到第一份有效快照。
+- 正确型号可以连接并读到第一份有效状态。
 - 错误型号立即拒绝，且不发送任何设置命令。
 - 打开通讯后任一步失败，句柄仍会关闭。
-- `disconnect()` 调用两次也不会报错。
+- `close()` 调用两次也不会报错。
 
 ### 读取
 
 - 正常响应能解析为正确单位和有限数值。
 - 空响应、乱码、`NaN`、无穷、仪表错误码都被拒绝。
-- `timestamp` 单调增加。
-- `poll_measurement()` 只发送预期的即时读取，不混入旧的附加值。
-- `metrics` 的 key、单位和顺序始终固定；未读取值为 `None`。
+- `read_measurement()` 只发送预期的即时读取，不混入旧的附加值。
+- `auxiliary` 的 key 和顺序始终固定；未读取值为 `None`。
 
 ### 控制
 
@@ -39,7 +38,7 @@
 ## 用假的通讯对象测试命令顺序
 
 底层仪表命令最好放在独立的 `instrument.py`，后台的 `backend.py` 只保留
-`connect/poll/poll_measurement/set_target/hold/disconnect`。假的通讯对象按顺序返回手册中的
+`open/read_status/read_measurement/set_target/hold/close`。假的通讯对象按顺序返回手册中的
 响应，并记录收到的命令：
 
 ```python

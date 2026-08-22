@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.16.0 - 2026-08-22
+
+- System Instrument API 升级为不兼容的版本 2。作者只实现同步
+  `open/read_status/read_measurement/set_target/hold/close`；读取返回普通字典，核心统一生成
+  时间戳、连接状态、显示元数据和内部快照。
+- `instrument.toml` 成为读数名称、单位、精度和主读数的唯一来源；除主读数外的 `[readings]`
+  自动成为可选辅助读数，不再重复维护辅助键列表。
+- `instruments.local.toml` 升级到 `schema_version = 2`，只保存物理地址、System Instrument 选择和勾选的辅助读数；外部
+  `[[instruments]]` 只引用 `resource`，不再重复 `backend`、`unit` 或 `role`。
+- 仪表自身状态字统一为简短的 `ready`。`instrument_status.dat` 删除与 `Connection` 重复的
+  `Connected` 列，并把旧状态列改为 `Ready`。
+- 核心模板、扫描器、Cryo-con 22C/24C 实现、测试、README 和开发网站同步到新接口；不提供
+  旧配置或旧 System Instrument 的迁移兼容层。
+- 真实 System Instrument 配置不再读取仿真的 `initial_value`；重复的读数元数据和清单中的
+  未知字段会在启动前直接报错，不会作为自定义参数被静默忽略。
 
 ## 0.15.5 - 2026-08-22
 

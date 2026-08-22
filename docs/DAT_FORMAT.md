@@ -35,7 +35,7 @@ runs/20260723_120000_nested_scan/
 ```text
 [Header]
 ; OpenLab Control Data File (default extension .dat)
-BYAPP,OpenLab Control,0.15.5
+BYAPP,OpenLab Control,0.16.0
 INFO,...
 
 [Data]
@@ -191,7 +191,7 @@ Timestamp(s),ISO8601,Severity,Source,Code,State,Count,Context,Message
 ; OpenLab Control Instrument Status Log
 ...
 [Data]
-Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.InstrumentStable,temperature.Connection,temperature.Connected,temperature.ReadingAge(s),temperature.Message,...
+Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.Ready,temperature.Connection,temperature.ReadingAge(s),temperature.Message,...
 ```
 
 每个配置仪表拥有同一组固定列：
@@ -200,9 +200,8 @@ Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Ra
 - `Activity`：`idle`、`moving`、`holding`、`fault` 等仪表动作；
 - `Stability`：`moving`、`settling`、`stable`、`timed_out`、`stale` 或
   `not_applicable`；
-- `InstrumentStable`：仪表提供该状态时为 `true/false`；空值表示该 System Instrument 没有独立状态位；
+- `Ready`：仪表提供该状态时为 `true/false`；空值表示该 System Instrument 没有独立状态位；
 - `Connection`：连接生命周期，例如 `connected`、`reconnecting`、`faulted`；
-- `Connected`：本次快照是否有效连接；
 - `ReadingAge(s)`：写入时刻与仪表单调采样时间的差，用于定位排队或旧读数；
 - System Instrument 声明的附加读数紧随该仪表固定列，例如辅助温度、加热输出和量程；
 - `Message`：驱动、恢复或状态说明。

@@ -464,8 +464,8 @@ Modules Manager Enable 相应测量方案。
 ### 更换温控仪或磁体电源
 
 取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
-`system_instruments/`，在现场配置中修改对应仪表的 `backend = "<instrument-id>"`、
-address、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
+`system_instruments/`，用 Instrument Scanner 选择新地址和实现，再在现场配置中让对应
+`[[instruments]]` 引用新 `resource`，检查控制许可、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
 会要求确认内容指纹；修改 System Instrument 后必须重新确认。核心自带内容只作为实现示例。
 
 ### 仪表一直 Reconnecting

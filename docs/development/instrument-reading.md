@@ -1,116 +1,112 @@
 # 读取、前面板与日志
 
-System Instrument 有两种读取入口。多数仪表只需写 `poll()`；只有完整状态查询明显较慢时，
-才需要额外写 `poll_measurement()`。
+多数 System Instrument 只需写 `read_status()`。只有完整状态读取明显较慢时，才额外写
+`read_measurement()`。
 
-## `poll()`：完整状态
+## `read_status()`：完整状态
 
-核心周期性调用 `poll()`。它应返回当前值、目标、速率、动作状态、仪表自己的稳定标志以及
-需要长期监视的附加值。返回结果用于：
-
-- 主窗口仪表卡片；
-- 温度、磁场的稳定性判断；
-- Live Trend；
-- 每次 Run 的 `instrument_status.dat`；
-- 报警与断线检测。
-
-前面板默认约 1 秒更新一次。SEQ 判稳可以使用更短的内部周期，但不会让前面板跟着快速重绘。
+核心周期性调用它，用于前面板、温度/磁场判稳、Live Trend、报警和
+`instrument_status.dat`。返回一个普通字典：
 
 ```python
-return InstrumentSnapshot(
-    instrument_id=self.config.id,
-    display_name=self.config.display_name,
-    kind=self.config.kind,
-    timestamp=time.monotonic(),
-    connected=True,
-    unit="K",
-    current=temp_b,
-    target=setpoint,
-    rate_per_minute=ramp_rate,
-    activity=InstrumentActivity.MOVING if ramping else InstrumentActivity.HOLDING,
-    instrument_stable=not ramping,
-)
-```
-
-核心会检查 ID、类型、有限数值、时间戳和附加列结构。不要用上次缓存值冒充刚读到的值。
-
-## `poll_measurement()`：写 DAT 前的即时主值
-
-Measurement Module 在真正需要温度或磁场的测量时刻调用 `api.instruments()`。核心会请求
-一次即时快照，而不是复用最多一秒以前的前面板缓存。同一时刻多个模块的请求会合并。
-
-默认实现直接调用 `poll()`，所以普通仪表不用写第二套代码。若完整查询需要很多条命令，才
-覆盖 `poll_measurement()`，只读正式测量行需要的主值：
-
-```python
-async def poll_measurement(self):
-    temp_b = read_sample_temperature(self._transport)
-    return InstrumentSnapshot(
-        instrument_id=self.config.id,
-        display_name=self.config.display_name,
-        kind=self.config.kind,
-        timestamp=time.monotonic(),
-        connected=True,
-        unit="K",
-        current=temp_b,
-        # 本次没有同步读取的值留空，不能填上次缓存。
-        target=None,
-        rate_per_minute=None,
-        metrics={
-            "temp_a": InstrumentMetric("2nd Stage", None, "K", 3),
-        },
-    )
-```
-
-`poll()` 仍继续负责完整安全检查。`poll_measurement()` 不是跳过报警的办法；测量主值自身无效
-或越过硬安全边界时仍应立即报错。
-
-## 同一条通讯连接不会被并发访问
-
-核心对每个 System Instrument 使用一个串行入口：
-
-1. 已经开始的一条完整仪表指令先完成；
-2. 等待中的控制和安全操作优先；
-3. `poll_measurement()` 优先于尚未开始的普通 `poll()`；
-4. 后台 `poll()` 最后执行。
-
-“优先”不是强行打断一条已经发送到仪表的命令。底层 I/O 仍必须设置有限超时。后台代码也
-不要另开线程直接使用同一个 VISA Session，否则会绕开这个顺序。
-
-## 一台仪表返回多个值
-
-同一温控仪可能同时返回样品温度、冷头温度、加热功率和加热量程。应保持一个连接，并把
-辅助值放在有序 `metrics` 字典。不要先拼成一段字符串：
-
-```python
-metrics={
-    "temp_a": InstrumentMetric("2nd Stage", temp_a, "K", 3),
-    "heater_output": InstrumentMetric("Heater Output", heater_percent, "%FS", 2),
-    "heater_range": InstrumentMetric("Heater Range", range_name),
+return {
+    "value": temp_b,
+    "target": setpoint,
+    "rate": ramp_rate,
+    "moving": ramping,
+    "ready": not ramping,
+    "auxiliary": {
+        "temp_a": temp_a,
+        "heater_output": heater_percent,
+        "heater_range": range_name,
+    },
 }
 ```
 
-- 字典键是固定列名，只能使用小写字母、数字和下划线；运行中不能增删、改名或改变顺序。
-- `display_name` 只用于界面。
-- `value` 可以是数值、文字、布尔值或 `None`。
-- `None` 会写成空单元格，表示“本次没有读取”，不会沿用旧值。
-- `decimals` 只控制显示和文件格式，不改变原始数值。
+字段很少：
 
-结构化字典比整段字符串多保留了数值类型、单位、顺序和精度。前面板会自动创建两列读数
-格并随内容增加行；多台物理仪表的卡片会按窗口宽度自动换行。`message` 仍可用于显示一条
-临时的人类说明，但不能替代需要写入 DAT、日志或参与报警的结构化读数。
+| 键 | 必需 | 含义 |
+| --- | --- | --- |
+| `value` | 是 | 主读数；数值或 `None` |
+| `target` | 否 | 当前目标 |
+| `rate` | 否 | 每分钟速率 |
+| `moving` | 否 | 仪表是否正在改变值 |
+| `ready` | 否 | 仪表自己的就绪/稳定状态字 |
+| `auxiliary` | 否 | 选中的附加读数 |
+
+核心从 `instrument.toml` 取得名称、单位和小数位，并负责时间戳、连接状态和内部快照。后端
+不要重复返回这些元数据。数值必须有限；附加值可以是有限数值、短文字、布尔值或 `None`。
+
+完整状态读取仍要检查所有安全状态，即使操作者没有勾选某个辅助读数。例如 TempA 未显示时，
+TempA 过温仍必须报错。
+
+## `read_measurement()`：写 DAT 前的即时主值
+
+Measurement Module 调用 `api.instruments()` 时，核心请求一次即时仪表读数，不复用最多一秒前
+的前面板缓存。同一时刻多个模块的请求会合并。
+
+基类默认调用 `read_status()`。若完整查询需要很多命令，可只实现：
+
+```python
+def read_measurement(self):
+    return {"value": read_sample_temperature(self._transport)}
+```
+
+本次没有同步读取的辅助列会写空，不会沿用旧值。后台 `read_status()` 仍持续负责完整安全
+检查；`read_measurement()` 自己读到无效主值时也必须报错。
+
+## 同一连接不会被并发访问
+
+核心对每个 System Instrument 串行执行：
+
+1. 已经开始的一条仪表指令先完成；
+2. 等待中的控制和安全操作优先；
+3. `read_measurement()` 先于尚未开始的普通 `read_status()`；
+4. 后台 `read_status()` 最后执行。
+
+“优先”不会中断已经发出的命令，所以底层 I/O 仍必须有有限超时。后端不要另开线程访问同一
+VISA Session。
+
+## 一台仪表返回多个值
+
+在清单中声明一次：
+
+```toml
+main_reading = "temp_b"
+
+[readings.temp_b]
+label = "Sample Temperature (Temp B)"
+unit = "K"
+decimals = 3
+
+[readings.temp_a]
+label = "Cold Head Temperature (Temp A)"
+unit = "K"
+decimals = 3
+
+[readings.heater_output]
+label = "Heater Output"
+unit = "%FS"
+decimals = 2
+```
+
+除 `main_reading` 外的条目自动显示为扫描器复选项。操作者勾选的键在
+`config.auxiliary_readings` 中；`read_status()` 的 `auxiliary` 必须完整返回这些键。键和顺序
+在运行中不能变化。
+
+前面板会在主读数右侧依次显示辅助卡片。结构化字典保留数值类型、单位和精度；不要把多个
+值拼成一段字符串。
 
 ## 两类数据文件
 
-| 文件 | 何时写 | 用途 |
+| 文件 | 何时写 | 内容 |
 | --- | --- | --- |
-| 实验 DAT | 每个 `Measure` 结果行 | 与模块测量结果同步的温度、磁场和即时附加值 |
-| `instrument_status.dat` | Run 期间按独立周期 | 当前值、目标、速率、稳定、连接状态及完整附加读数 |
+| 实验 DAT | 每个 `Measure` 结果行 | 与模块测量同步的主值和本次即时辅助值 |
+| `instrument_status.dat` | Run 期间按独立周期 | 完整值、目标、速率、稳定性、连接和辅助读数 |
 
-Data Browser 不会自动绑定当前实验 DAT；用户可以打开任意 DAT。Live Trend 使用已取得的
-快照缓存，不会为了画图额外轮询仪表。
+Data Browser 可打开任意 DAT，不绑定当前 Run。Live Trend 使用已有快照，不会额外读取仪表。
 
-## 仪表稳定与框架稳定不是一回事
+## `ready` 不能绕过核心判稳
 
-`instrument_stable` 保存仪表状态字。它为 `False` 时，框架不会宣告稳定；它为 `True` 时，
-框架仍会独立检查目标误差、斜率和 dwell。这样可以避免一个错误或过早的状态位直接放行 SEQ。
+`ready = false` 会阻止稳定；`ready = true` 以后，核心仍要检查目标误差、斜率和 dwell。没有
+独立状态字时省略该键或返回 `None`。

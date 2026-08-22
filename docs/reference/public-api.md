@@ -40,10 +40,10 @@ Frontend 是普通 QWidget，只通过这个桥请求后端 Action 或状态刷�
     options:
       members:
         - __init__
-        - connect
-        - disconnect
-        - poll
-        - poll_measurement
+        - open
+        - close
+        - read_status
+        - read_measurement
         - set_target
         - hold
 
@@ -53,26 +53,11 @@ Frontend 是普通 QWidget，只通过这个桥请求后端 Action 或状态刷�
 
 ::: labcontrol.instruments.base.SafetyViolation
 
-## 仪表状态模型
-
-::: labcontrol.models.InstrumentSnapshot
-
-::: labcontrol.models.InstrumentMetric
-
-::: labcontrol.models.InstrumentKind
-
-::: labcontrol.models.InstrumentRole
-
-::: labcontrol.models.InstrumentActivity
-
-::: labcontrol.models.InstrumentConnectionState
-
-::: labcontrol.models.StabilityState
-
 ## 公共接口使用原则
 
 - Module 只导入 `labcontrol.module_api` 和可选 `labcontrol.measurement.frontend_api`。
-- System Instrument 只依赖 `labcontrol.instruments.base`、配置对象和状态模型。
+- System Instrument 只依赖 `labcontrol.instruments.base` 和传入的配置对象；读取方法返回文档
+  规定的普通字典，不创建核心状态对象。
 - 不保存 API 对象供另一个调用或线程使用。
 - 不访问带下划线字段。
 - 不通过内部 service/worker 绕过生命周期、IPC 或安全限制。

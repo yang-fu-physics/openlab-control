@@ -39,8 +39,9 @@ Git 忽略；若团队需要共享模板，另存为脱敏的 `site.example.toml
 
 Measurement Module 在测量时调用 `api.instruments()` 会请求一次即时仪表采样，不会复用最多
 一个常规周期以前的前面板缓存，也不会永久改变 `poll_interval_seconds`。
-System Instrument 实现可选 `poll_measurement()` 后，这次采样可以只查询主测量值；未在该次查询中读取的
-附加列写空，完整监视值仍由常规 `poll()` 写入 `instrument_status.dat`。
+System Instrument 实现可选 `read_measurement()` 后，这次采样可以只查询主测量值；未在该次
+查询中读取的附加列写空，完整监视值仍由常规 `read_status()` 写入
+`instrument_status.dat`。
 SEQ 控制期间则使用 `control_poll_interval_seconds` 更新安全状态和稳定性；快照消息仍按
 `poll_interval_seconds` 节流，所以界面不会因为内部判稳而快速闪动。
 
@@ -203,7 +204,7 @@ runtime 完整性规则与模块相同；框架共享依赖仍直接使用核心
 `resource_file` 指向独立 TOML。每个条目是一台物理仪表，不是一个通道：
 
 ```toml
-schema_version = 1
+schema_version = 2
 
 [[resources]]
 id = "cryocon_main"
@@ -211,8 +212,7 @@ address = "USB0::0x1234::0x5678::SERIAL::INSTR"
 identity = "Cryo-con,24C,SERIAL,1.0"
 purpose = "system"
 system_instrument = "cryocon_22c_24c"
-primary_reading = "temp_b"
-monitor_readings = ["temp_a", "heater_output", "heater_range"]
+auxiliary_readings = ["temp_a", "heater_output", "heater_range"]
 
 [[resources]]
 id = "keithley_2400_1"
@@ -220,44 +220,44 @@ address = "GPIB0::24::INSTR"
 identity = "KEITHLEY INSTRUMENTS INC.,MODEL 2400,SERIAL,1.0"
 purpose = "measurement"
 system_instrument = ""
-primary_reading = ""
-monitor_readings = []
+auxiliary_readings = []
 ```
 
 - `id` 是以后引用的稳定名称，地址变化时不需要改模块设置。
 - `purpose` 只能是 `system` 或 `measurement`。
-- System 资源必须选择已安装的 `system_instrument`。扫描清单提供主/辅助读数的内部键和英文名称；扫描器使用下拉框与复选框呈现，保存前仍须由人确认。
+- System 资源必须选择已安装的 `system_instrument`。主读数由其清单固定；扫描器用复选框显示
+  清单中的其他读数，并保存操作者选择的 `auxiliary_readings`。
 - 同一地址不能登记两次；同一 System 资源也不能由两个 `[[instruments]]` 实例同时打开。
 - Measurement Module 前端与后台都可用 `api.resources()` 取得深拷贝；System 地址不会暴露。
 - 扫描只做资源枚举和一次 `*IDN?`，不会替用户设置上下限、PID、输出或模块参数。
 
 ## `[[instruments]]`
 
-仪表只用于温度、磁场与只读 Monitor。每个条目必需：
+仪表只用于温度、磁场与只读 Monitor。外部 System Instrument 的条目通过 `resource` 自动
+取得实现、地址、主读数、单位和精度：
 
 | 键 | 必需 | 说明 |
 |---|---|---|
 | `id` | 是 | 全局唯一 ID，SEQ 通过它选择仪表；必须是非空可打印文本且不得有首尾空白，内部空格允许 |
 | `display_name` | 是 | 英文 UI 名称 |
 | `kind` | 是 | `temperature`、`field` 或 `monitor` |
-| `backend` | 是 | 内置仿真使用 `package.module:ClassName`；外部 System Instrument 使用其 `instrument.toml` 的 ID |
-| `resource` | 外部 System Instrument 必需 | 资源表中的物理仪表 ID；核心解析出地址并通过 `config.address` 交给后台。内置仿真不得填写 |
-| `role` | 是（推荐显式） | temperature/field 使用 `primary` 或 `secondary`；monitor 必须是 `monitor` |
-| `control_enabled` | 否 | primary 必须 `true`；secondary 默认 `false`，仅 primary 会被标准 SEQ 自动选择 |
-| `unit` | 否 | 原生单位 |
-| `initial_value` | 仿真 | 初始值 |
+| `resource` | 外部实现必需 | 资源表中的物理仪表 ID；内置仿真不得填写 |
+| `backend` | 仅内置仿真 | `package.module:ClassName`；外部实现不得重复填写 |
+| `control_enabled` | 否 | 默认 `false`；标准 SEQ 自动选择同 kind 中唯一的 `true` 实例 |
+| `unit` | 仅内置仿真 | 外部实现的单位来自 `instrument.toml` |
+| `initial_value` | 仅内置仿真 | 仿真初始值；真实 `resource` 条目填写该键会被拒绝 |
 | `stale_after_seconds` | 否 | 读数超过该时间未更新视为 Stale，默认 3 秒 |
-| `operation_timeout_seconds` | 否 | Connect/Poll/Set/Hold 的框架最终上限，默认 10 秒 |
-| `shutdown_timeout_seconds` | 否 | Disconnect 的框架最终上限，默认 3 秒 |
+| `operation_timeout_seconds` | 否 | Open/Read/Set/Hold 的框架最终上限，默认 10 秒 |
+| `shutdown_timeout_seconds` | 否 | Close 的框架最终上限，默认 3 秒 |
 
-每个 temperature/field kind 最多一个 primary。SEQ 自动选择该 primary，Run 前要求其
-已 Connected 且有新鲜读回。多个 secondary 可以同时显示；默认只监视。测量仪表应写成
+每个 temperature/field kind 最多一个 `control_enabled = true` 的实例。SEQ 自动选择它，
+Run 前要求其已 Connected 且有新鲜读回。其他实例可以同时显示并保持只读。测量仪表应写成
 完整 Measurement Module，而不是加入 `[[instruments]]`。
 
-一台多通道温控仪只写一个条目。主样品温度进入 `current`，TempA、加热功率、量程等通过
-同一快照的 `metrics` 字典返回。多个不同物理仪表可以写多个条目；连接和轮询会并发进行。
+一台多通道温控仪只写一个条目。主样品温度由后端的 `value` 返回，TempA、加热功率、量程等通过
+后端的 `auxiliary` 字典返回。多个不同物理仪表可以写多个条目；连接和轮询会并发进行。
 
-仪表超时必须是大于零的有限秒数。Poll/连接读链路失败后，核心终止旧仪表进程并在
+仪表超时必须是大于零的有限秒数。读取/连接链路失败后，核心终止旧仪表进程并在
 `system_instruments.reconnect_timeout_seconds` 内重建连接；运行中的主仪表恢复期间冻结 SEQ
 活动计时。成功恢复后核对实际 target/rate，不重放写命令。Set/Hold 写超时是歧义
 故障，立即 Faulted，不自动重试。真实驱动仍须设置更短的 VISA/串口/TCP/SDK 协议
@@ -276,7 +276,7 @@ monitor_readings = []
 | `stability_timeout_seconds` | 本次目标的判稳超时 |
 | `stability_window_seconds` | 计算斜率的窗口 |
 
-`stability_timeout_seconds` 同时是 Settle 判稳和 Sweep 到达目标的最终等待上限；即使 Poll 持续只返回 Warning、没有新快照，SEQ 也会按 `alarms.stability_timeout` 结束等待，不会无限挂起。
+`stability_timeout_seconds` 同时是 Settle 判稳和 Sweep 到达目标的最终等待上限；即使读取持续只返回 Warning、没有新快照，SEQ 也会按 `alarms.stability_timeout` 结束等待，不会无限挂起。
 
 所有值使用仪表原生单位。默认磁场原生单位为 Oe：
 
@@ -286,7 +286,7 @@ id = "field"
 display_name = "Magnetic Field"
 kind = "field"
 backend = "labcontrol.instruments.simulated:SimulatedFieldController"
-role = "primary"
+control_enabled = true
 unit = "Oe"
 min_value = -90000.0
 max_value = 90000.0
@@ -298,7 +298,7 @@ SEQ 仍可使用 T，中央会换算为仪表 Oe 后再检查上下限和速率�
 
 ### Monitor
 
-Monitor 是只读单值仪表，只需 Poll 返回 `current`。它：
+Monitor 是只读仪表，只需 `read_status()` 返回 `value`。它：
 
 - 不接受 Set/Hold；
 - 不参与标准温度/磁场自动选择或中央判稳；
@@ -314,7 +314,6 @@ id = "second_stage"
 display_name = "2nd Stage"
 kind = "monitor"
 backend = "labcontrol.instruments.simulated:SimulatedReadOnlyMonitor"
-role = "monitor"
 unit = "K"
 initial_value = 4.2
 noise = 0.002
@@ -339,7 +338,7 @@ Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 
 - 无仪表条目、重复仪表 ID，或空白/控制字符导致无法寻址的仪表 ID；
 - 未知仪表 kind；
 - 外部 System Instrument 未选择资源、主配置内联物理地址，或内置仿真占用真实资源；
-- 同一种类多个 primary、primary 禁用控制、monitor 启用控制或角色/kind 不匹配；
+- 同一种类多个可控仪表、monitor 启用控制，或仍使用已经删除的 `role`；
 - `min_value >= max_value`；
 - 非正默认/最大速率；
 - `ui_scale` 越界；

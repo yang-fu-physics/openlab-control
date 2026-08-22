@@ -1,17 +1,17 @@
 # 写第一个 System Instrument
 
-这一页做一个最小只读温度仪表。先让“连接、读取、断开”跑通，再增加控制；这样更容易定位
-协议问题，也不会在第一次测试时意外改变输出。
+这一页做一个最小只读温度仪表。先完成连接、读取和断开，再考虑控制。这样第一次接真机时
+不会意外改变输出。
 
 ## 1. 复制骨架
 
-把下面目录复制到安装目录：
+复制：
 
 ```text
 templates/system-instruments-repository/instruments/example_monitor/
 ```
 
-复制后的结构例如：
+得到：
 
 ```text
 system_instruments/my_thermometer/
@@ -19,153 +19,156 @@ system_instruments/my_thermometer/
 └─ backend.py
 ```
 
-目录名和清单 ID 都使用小写字母、数字与下划线，并以字母开头。
+目录名和清单 `id` 使用小写字母、数字与下划线，并以字母开头。
 
-## 2. 写清单
-
-`instrument.toml` 告诉核心这份代码叫什么、从哪里加载、能提供什么类型的读数：
+## 2. 写 `instrument.toml`
 
 ```toml
 id = "my_thermometer"
 name = "My Thermometer"
 version = "0.1.0"
-api_version = "1.2"
-core_requires = ">=0.15,<0.16"
+api_version = "2"
+core_requires = ">=0.16,<0.17"
 backend = "backend:MyThermometer"
 kinds = ["monitor"]
 dependencies = []
+main_reading = "temperature"
 
 [discovery]
 identity_pattern = "(?i)expected maker.*expected model"
-primary_reading = "reading"
-monitor_readings = []
 
-[discovery.reading_labels]
-reading = "Main Reading"
+[readings.temperature]
+label = "Temperature"
+unit = "K"
+decimals = 3
 ```
 
-字段含义：
+只需理解这些字段：
 
-| 字段 | 说明 |
+| 字段 | 作用 |
 | --- | --- |
-| `id` | 稳定名称；配置中的 `backend` 使用它 |
-| `version` | 代码有变化时递增 |
-| `backend` | `Python 文件名:类名`，这里就是 `backend.py` 中的 `MyThermometer` |
-| `kinds` | 允许用于 `temperature`、`field` 或 `monitor` 中的哪些类型 |
-| `dependencies` | 额外第三方包；PyVISA 等框架已有依赖不用重复写 |
-| `[discovery]` | 可选只读扫描建议；正则只匹配 `*IDN?`，不会导入后台或连接输出 |
-| `[discovery.reading_labels]` | 把保存用内部键映射为扫描器下拉框和复选框中的英文名称；必须覆盖每个声明的主/辅助读数 |
+| `id` | 这份实现的固定名称 |
+| `backend` | `Python 文件名:类名` |
+| `kinds` | 可用作 `temperature`、`field` 或 `monitor` |
+| `main_reading` | 前面板和标准 DAT 使用的主读数 |
+| `[readings.<键>]` | 每个读数的英文名称、单位和显示小数位 |
+| `identity_pattern` | 扫描器用 `*IDN?` 返回值自动建议这份实现 |
+| `dependencies` | 仅填写框架没有提供的额外包；PyVISA 不用重复写 |
 
-## 3. 写后台类
+`main_reading` 必须对应一个 `[readings.<键>]`。除主读数外，其余 `[readings]` 会自动成为扫描器
+里的可选辅助读数，不需要再列第二遍。
 
-下面示例展示接口位置。`open_transport` 和 `query_temperature` 代表你根据仪表手册写的有限
-超时通讯代码；不要直接照抄成真实驱动。
+清单只接受教程列出的字段。字段拼错或继续填写旧的辅助读数列表会直接显示为 Invalid，
+不会被静默忽略。
+
+## 3. 写 `backend.py`
+
+后端是普通同步 Python。下面的 `open_transport()` 和 `query_temperature()` 代表按仪表手册写的
+通讯代码，不是可以直接控制任意仪表的通用实现。
 
 ```python
-from __future__ import annotations
-
-import time
+from pyvisa.errors import VisaIOError
 
 from labcontrol.instruments.base import InstrumentError, SystemInstrument
-from labcontrol.models import InstrumentActivity, InstrumentSnapshot
 
 
 class MyThermometer(SystemInstrument):
-    api_version = "1.2"
-
-    def __init__(self, config, simulation_speed=1.0):
-        super().__init__(config, simulation_speed)
+    def __init__(self, config):
+        super().__init__(config)
         self._transport = None
-        self._address = config.address
 
-    async def connect(self):
-        transport = None
+    def open(self):
+        transport = open_transport(
+            self.config.address,
+            timeout_seconds=1.0,
+        )
         try:
-            transport = open_transport(self._address, timeout_seconds=1.0)
             identity = transport.query("*IDN?")
             if "EXPECTED MODEL" not in identity.upper():
                 raise InstrumentError(
                     f"Unexpected instrument: {identity}",
                     "IDENTITY_MISMATCH",
-                    self._address,
+                    self.config.address,
                 )
-            # 先成功读一次，确认通讯和数值都正常；这里不改变仪表设置。
-            query_temperature(transport)
-            self._transport = transport
-        except Exception:
-            if transport is not None:
-                transport.close()
+            value = float(query_temperature(transport))
+            if not 2.0 <= value <= 400.0:
+                raise InstrumentError(
+                    f"Temperature is outside the validated range: {value}",
+                    "TEMPERATURE_OUT_OF_RANGE",
+                    self.config.address,
+                )
+        except (VisaIOError, OSError, ValueError, InstrumentError):
+            transport.close()
             raise
+        self._transport = transport
 
-    async def poll(self):
+    def read_status(self):
         if self._transport is None:
-            raise InstrumentError("Instrument is not connected", "NOT_CONNECTED")
-        value = float(query_temperature(self._transport))
-        return InstrumentSnapshot(
-            instrument_id=self.config.id,
-            display_name=self.config.display_name,
-            kind=self.config.kind,
-            timestamp=time.monotonic(),
-            connected=True,
-            unit=self.config.unit,
-            current=value,
-            activity=InstrumentActivity.IDLE,
-        )
+            raise InstrumentError("Instrument is not open", "NOT_OPEN")
+        return {
+            "value": float(query_temperature(self._transport)),
+            "auxiliary": {},
+        }
 
-    async def disconnect(self):
+    def close(self):
         transport, self._transport = self._transport, None
         if transport is not None:
             transport.close()
 ```
 
-几个重要细节：
+核心负责时间戳、显示名称、单位、连接状态和内部快照。后端不要创建这些对象，只返回读数。
+所有底层 I/O 都必须设置有限超时。
 
-- `__init__` 只保存配置，不能连接或写仪表。
-- `connect` 先用局部变量建立连接；中途失败也要关闭已经打开的句柄。
-- `timestamp` 必须用 `time.monotonic()`，不能使用日期时间。
-- `disconnect` 要允许调用多次，也要能清理只完成一半的初始化。
-- 所有底层读取和写入都必须有有限超时。
+## 4. 扫描并选择地址
 
-## 4. 扫描并在现场配置中选择它
-
-先运行：
+运行：
 
 ```powershell
 .\.venv\Scripts\python.exe .\tools\instrument_scanner.py
 ```
 
-确认该地址用途为 `System`，选择 `my_thermometer`，保存资源 ID，例如
-`sample_thermometer`。然后在现场主配置中引用它：
+把地址用途设为 `System`，选择 `my_thermometer`，保存资源名，例如
+`sample_thermometer`。扫描器生成的本机文件类似：
+
+```toml
+[[resources]]
+id = "sample_thermometer"
+address = "USB0::...::INSTR"
+identity = "Expected Maker,Expected Model,..."
+purpose = "system"
+system_instrument = "my_thermometer"
+auxiliary_readings = []
+```
+
+主读数不在这里重复保存；它来自 `instrument.toml`。
+
+现场主配置只引用资源：
 
 ```toml
 [[instruments]]
 id = "sample_monitor"
 display_name = "Sample Monitor"
 kind = "monitor"
-role = "monitor"
-control_enabled = false
-backend = "my_thermometer"
 resource = "sample_thermometer"
-unit = "K"
+control_enabled = false
 operation_timeout_seconds = 10.0
 shutdown_timeout_seconds = 3.0
 ```
 
-核心会把资源地址解析到 `config.address`。PID 表、协议超时或厂商专用选项仍可作为
-`[[instruments]]` 的额外键，通过 `config.extras` 读取。
+这里不再重复 `backend`、`unit`、`role` 或仿真用的 `initial_value`。协议超时、PID 表和厂商专用选项仍可写在该
+`[[instruments]]` 中，并从 `config.extras` 读取。
 
 ## 5. 第一次加载
 
 1. 重启 OpenLab Control。
 2. 核对首次信任窗口中的类型、ID、版本、路径和内容指纹。
-3. 确认后，观察前面板是否出现读数。
+3. 确认后观察前面板读数。
 4. 修改任何源文件后，内容指纹会变化，需要再次确认。
 
-如果需要额外依赖，程序会提示从本地 wheel 安装；不会联网下载。PyVISA、PySide6、
-QtAwesome、packaging 和 typing_extensions 使用框架锁定的统一版本。
+额外依赖只从本地 wheel 安装，不会联网下载。PyVISA、PySide6、QtAwesome、packaging 和
+typing_extensions 使用框架锁定版本。
 
 ## 6. 再增加控制
 
-只有温度或磁场主控仪表才实现 `set_target()` 和 `hold()`。先在配置中声明真实上下限和最大
-速率，再阅读[控制与安全](instrument-control-safety.md)。只读仪表不要写这两个方法；基类会
-明确拒绝控制请求。
+温度或磁场控制器再实现 `set_target()` 和 `hold()`，并在现场配置中写
+`control_enabled = true`、真实上下限和最大速率。继续阅读[控制与安全](instrument-control-safety.md)。

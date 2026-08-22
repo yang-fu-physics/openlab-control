@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.15.5 的当前边界。
+本文描述 OpenLab Control 0.16.0 的当前边界。
 
 ## 运行模型
 
@@ -13,7 +13,7 @@ GUI 主线程
             │
             ▼
 后台 asyncio 线程
-├─ InstrumentManager：仪表角色、限制、恢复和快照
+├─ InstrumentManager：控制许可、限制、恢复和快照
 ├─ SequenceEngine：SEQ、Pause、Stop 和 Error
 ├─ MeasurementModuleService：模块调度与结果校验
 ├─ DatRunLogger：所有运行文件的唯一写入者
@@ -33,7 +33,7 @@ GUI 不直接操作仪表。每个模块内部请求串行，不同模块可并�
 
 System Instrument 与 Measurement Module 分开：
 
-- System Instrument 提供温度、磁场或 Monitor；核心负责角色、上下限、速率、失联恢复和
+- System Instrument 提供温度、磁场或 Monitor；核心负责控制许可、上下限、速率、失联恢复和
   Hold 策略。
 - Measurement Module 拥有完成一次测量所需的仪表、切换器、时序、状态码和安全动作；
   它只能读取温场快照，不能控制温度或磁场。
@@ -45,6 +45,11 @@ PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享�
 依赖进入 `runtime_packages/<type>/<id>/<fingerprint>/site-packages`；离线安装固定使用
 `--no-index --only-binary=:all: --require-hashes`，并验证 `requirements.lock`、wheel、
 runtime marker 和依赖树摘要。
+
+System Instrument 的作者接口是同步的 `open/read_status/read_measurement/set_target/hold/close`。
+驱动只返回包含 `value` 和可选 `target/rate/moving/ready/auxiliary` 的普通字典；核心统一生成
+时间戳、连接状态和内部快照。`instrument.toml` 是主读数及显示元数据的唯一来源；资源表只
+保存物理地址、实现选择和操作者勾选的辅助读数；现场主配置只保存控制许可与安全参数。
 
 ## Measurement Module 协议
 
@@ -98,8 +103,8 @@ sidecar。
 
 `ModuleAPI` 仅提供可中断等待/`checkpoint()`、只读仪表快照、Warning、状态更新和本次
 总 timeout。`api.instruments()` 会触发一次测量专用即时仪表采样，与前面板常规轮询分开；
-并发模块请求合并为一次采样。System Instrument 未实现 `poll_measurement()` 时自动使用完整
-`poll()`。Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O 仍
+并发模块请求合并为一次采样。System Instrument 未实现 `read_measurement()` 时自动使用完整
+`read_status()`。Pause 冻结 `api.sleep()` 计时；Stop 在检查点取消调用。任意厂商阻塞 I/O 仍
 必须由模块设置有限 timeout。
 
 ## SEQ 与安全收尾
@@ -141,9 +146,9 @@ Run 开始时冻结为固定列。Data Browser 只跟踪用户打开的 DAT，�
 `control_poll_interval_seconds` 做判稳，但发给前面板和 Live Trend 的快照仍按前者节流。
 Measurement Module 的即时读取独立于这两个周期。
 
-同一台物理仪表的 `connect`、写控制、Hold、测量读取、后台轮询和断开均经过同一个优先
+同一台物理仪表的 `open`、写控制、Hold、测量读取、后台轮询和 `close` 均经过同一个优先
 串行入口，不会同时访问仪表。入口不抢占已经开始的后台调用：当前完整仪表事务返回或超时
-后，控制与安全操作先执行，等待中的 `poll_measurement()` 再先于后台 `poll()`。因此后台
+后，控制与安全操作先执行，等待中的 `read_measurement()` 再先于后台 `read_status()`。因此后台
 状态刷新不会把测量用即时读数长期压在队尾。
 
 事件键为 `source + code + context`。重复活动 Warning/Error 只增加 Count；resolve 后才可
@@ -152,6 +157,6 @@ Measurement Module 的即时读取独立于这两个周期。
 
 ## 真实仪表边界
 
-OpenLab Control 0.15.5 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
+OpenLab Control 0.16.0 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
 限温、磁体保护、硬件互锁或人工急停。接入真机前必须保留并通过模块自己的命令顺序、
 读回、量程、timeout、异常清理与协议解析测试，再进行低风险现场验证。

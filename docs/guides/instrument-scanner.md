@@ -23,6 +23,9 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 
 默认输出是 `configs/instruments.local.toml`。该文件已被 Git 忽略。
 
+0.16 使用 `schema_version = 2`。旧资源文件不会自动迁移；先保留旧文件作参考，再重新扫描并
+人工确认。扫描器不会覆盖一个无法按当前 Schema 读取的文件。
+
 工具打开时会自动读取这份文件，随后自动执行一次 VISA 扫描。旧资源会先显示为仪表卡片，
 扫描结果再与旧表合并；没有在本次扫描中出现的旧地址也会保留，除非你明确把它的 `Use` 改为
 `Ignore`。需要重新检查连接时仍可点击 **Scan VISA instruments**。
@@ -31,7 +34,7 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 
 - System Instrument 的名称、型号匹配规则和可选读数全部来自各自的 `instrument.toml`；
 - 扫描器不会为了发现这些信息而导入 `backend.py`；
-- 唯一匹配的 System Instrument 会自动预选，主读数和监控读数仍由操作者确认。
+- 唯一匹配的 System Instrument 会自动预选；主读数由该实现固定，辅助读数由操作者勾选。
 
 扫描器不读取 Measurement Module 目录，也不把地址绑定到某个模块。Measurement 资源保存后
 会出现在模块的 Settings 中，具体地址在 Enable 模块后选择。
@@ -63,26 +66,38 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 | `Use` | 不使用选 Ignore；温度、磁场和长期监控选 System；测量仪表选 Measurement |
 | `Resource name (ID)` | 自己容易记住且长期不变的名称，例如 `cryocon_main`、`keithley_2400_1` |
 | `System Instrument` | 只有 System 资源需要；唯一匹配型号时自动选择，否则由操作者确认 |
-| `Primary reading` | 从清单提供的英文名称中选择主控制/主记录值，不需要输入内部键 |
-| `Monitor readings` | 勾选需要显示和记录的同一物理仪表辅助读数 |
+| `Main reading` | 只读显示；由所选 System Instrument 清单固定 |
+| `Auxiliary readings` | 勾选需要显示和记录的同一物理仪表附加读数 |
 
-安装的 System Instrument 可以在 `instrument.toml` 的 `[discovery]` 中给出身份匹配和通道
-建议。唯一匹配时工具会自动选择实现和默认读数，但不会跳过人工确认。例如：
+安装的 System Instrument 在 `instrument.toml` 中给出身份匹配和全部读数。例如：
 
 ```toml
+main_reading = "temp_b"
+
 [discovery]
 identity_pattern = "(?i)cryo-?con.*(?:22c|24c)"
-primary_reading = "temp_b"
-monitor_readings = ["temp_a", "heater_output", "heater_range"]
 
-[discovery.reading_labels]
-temp_b = "Sample Temperature (Temp B)"
-temp_a = "Cold Head Temperature (Temp A)"
-heater_output = "Heater Output"
-heater_range = "Heater Range"
+[readings.temp_b]
+label = "Sample Temperature (Temp B)"
+unit = "K"
+decimals = 3
+
+[readings.temp_a]
+label = "Cold Head Temperature (Temp A)"
+unit = "K"
+decimals = 3
+
+[readings.heater_output]
+label = "Heater Output"
+unit = "%FS"
+decimals = 2
+
+[readings.heater_range]
+label = "Heater Range"
 ```
 
-TOML 保存内部键；下拉框和复选框只显示右侧英文名称。这样更换显示文字不会破坏配置。
+`main_reading` 必须对应一个 `[readings]`。其他读数自动成为辅助复选项。资源文件只保存勾选
+结果，不再重复主读数、单位或显示精度。
 
 ## 为什么 TempA 和 TempB 不拆成两台
 
@@ -94,12 +109,11 @@ id = "cryocon_main"
 address = "USB0::...::INSTR"
 purpose = "system"
 system_instrument = "cryocon_22c_24c"
-primary_reading = "temp_b"
-monitor_readings = ["temp_a", "heater_output", "heater_range"]
+auxiliary_readings = ["temp_a", "heater_output", "heater_range"]
 ```
 
-System Instrument 在一次 `poll()` 中读取完整状态：TempB 作为快照主值，TempA、加热功率和
-量程放在 `metrics` 字典中。这样不会为了显示第二个温度并发打开同一个 USB 地址；界面只把
+System Instrument 在一次 `read_status()` 中读取完整状态：TempB 写入 `value`，TempA、加热
+功率和量程放在 `auxiliary` 字典中。这样不会为了显示第二个温度并发打开同一个 USB 地址；界面只把
 这些值拆成主卡右侧的独立监控卡，不会改变底层连接数量。
 
 如果实验室还有另一台独立温控仪或磁场电源，则为它登记另一个资源。核心会给每个不同资源
@@ -112,7 +126,7 @@ System Instrument 在一次 `poll()` 中读取完整状态：TempB 作为快照�
 - 每个选中地址和前面板型号一致；
 - 没有把同一地址登记两次；
 - System/Measurement 用途没有选反；
-- 主读数和辅助读数没有重复；
+- 主读数正确，辅助读数选择符合实验需要；
 - System Instrument 与型号一致。
 
 保存窗口还会单独列出：
@@ -121,8 +135,8 @@ System Instrument 在一次 `poll()` 中读取完整状态：TempB 作为快照�
 - 哪些资源是新增或删除；
 - 哪些旧资源保持不变。
 
-选为 System 的卡片必须填写 `Resource name (ID)` 并选择 `System Instrument` 和
-`Primary reading`；选为 Measurement 的卡片必须填写 `Resource name (ID)`。只要有缺项，
+选为 System 的卡片必须填写 `Resource name (ID)` 并选择 `System Instrument`；选为
+Measurement 的卡片必须填写 `Resource name (ID)`。只要有缺项，
 工具就不会写文件，而会定位并标红第一张未完成卡片。不需要的地址可以明确选 `Ignore`。
 
 保存采用同目录临时文件再原子替换，不会留下半个 TOML。程序启动时会再次严格验证；有
@@ -141,11 +155,8 @@ resource_file = "configs/instruments.local.toml"
 id = "temperature"
 display_name = "Temperature"
 kind = "temperature"
-backend = "cryocon_22c_24c"
 resource = "cryocon_main"
-role = "primary"
 control_enabled = true
-unit = "K"
 min_value = 2.0
 max_value = 400.0
 max_rate_per_minute = 10.0
