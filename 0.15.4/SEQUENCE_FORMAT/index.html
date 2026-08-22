@@ -2254,8 +2254,8 @@
 等待时间必须在 0 到 31536000 秒之间；手写 SEQ 与运行时使用同一限制。</p>
 <h3 id="_4">仪表选择<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
 <p>温度/磁场 Set 和 Scan 都可在末尾显式选择配置中的仪表：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>T Set Temperature 20.000 K at 5.000 K/min in Settle mode using instrument &quot;cryostat_primary&quot;
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using instrument &quot;magnet A&quot;
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>T Set Temperature 20.000 K at 5.000 K/min in Settle mode using instrument "cryostat_primary"
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using instrument "magnet A"
 </span></code></pre></div>
 <p>参数窗口按仪表类型列出允许控制的配置 ID，并随选择项切换上下限和最大速率。省略
 <code>using instrument</code> 时选择该类型唯一的 primary；旧文件中的 <code>temperature</code>/<code>field</code> 角色名也
@@ -2325,8 +2325,8 @@ duration 范围为 0 到 31536000 秒，<code>steps</code> 范围为 1 到 10000
 <h3 id="measurement-module">Measurement Module 自定义指令<a class="headerlink" href="#measurement-module" title="Permanent link">&para;</a></h3>
 <p>模块完成 Enable 后，可以在右侧以自己的名称注册普通指令和扫描指令。SEQ 使用固定的
 通用信封，而不是把每家仪表语法写入核心解析器：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>T Module Command &quot;keithley_2400&quot; &quot;set_current&quot; {&quot;current&quot;:0.001,&quot;output&quot;:true}
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>T Module Scan &quot;keithley_2400&quot; &quot;scan_current&quot; {&quot;points&quot;:[&quot;1 mA&quot;,&quot;2 mA&quot;],&quot;settle_seconds&quot;:0}
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>T Module Command "keithley_2400" "set_current" {"current":0.001,"output":true}
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>T Module Scan "keithley_2400" "scan_current" {"points":["1 mA","2 mA"],"settle_seconds":0}
 </span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>T     Measure
 </span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>T End Scan
 </span></code></pre></div>

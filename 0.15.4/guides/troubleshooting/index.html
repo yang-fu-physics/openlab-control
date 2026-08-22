@@ -2011,8 +2011,11 @@
 <p>首次 Enable 失败、重启后正常通常说明初始化时序、残留资源或 timeout 有问题，不应当把
 “重启可恢复”视为修复。</p>
 <h2 id="visa-implementation">找不到 VISA implementation<a class="headerlink" href="#visa-implementation" title="Permanent link">&para;</a></h2>
-<p>PyVISA 已由框架提供，但仍需要与 GPIB/USB 接口匹配的厂商 VISA Runtime。安装 NI-VISA、
-Keysight VISA 或对应厂商 runtime 后重启程序。模块不应自行安装另一套 PyVISA。</p>
+<p>PyVISA 已由框架提供，但仍需要与 GPIB/USB 接口匹配的厂商 VISA Runtime。打开
+<code>InstrumentScanner.exe</code> 后会自动尝试扫描；若初始化失败，弹窗中的链接会打开
+<a href="https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html">NI-VISA 官方下载页</a>。也可以安装
+Keysight VISA 或接口厂商指定的 Runtime。安装完成后重新打开扫描器，不需要重新打包程序，
+也不要在模块中安装另一套 PyVISA。扫描成功后的选择步骤见<a href="../instrument-scanner/">扫描与配置仪表</a>。</p>
 <h2 id="enable">Enable 立即提示设置不合法<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h2>
 <p>Enable 只应打开模块安全初态，不应把保存设置自动写入仪表。若模块必须验证界面设置，应在
 用户点击 Apply Settings 时进行。对于旧保存值超出新量程的情况，Frontend 应显示并允许

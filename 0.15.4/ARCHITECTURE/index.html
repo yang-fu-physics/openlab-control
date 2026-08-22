@@ -1942,9 +1942,9 @@ runtime marker 和依赖树摘要。</p>
 <p>核心调用顺序：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Enable:  spawn worker → 验证可选指令声明 → open → 向 UI 注册指令
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Apply:   configure
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Run:     on_event(&quot;status&quot;) → on_event(&quot;run_start&quot;) → read slots
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Run:     on_event("status") → on_event("run_start") → read slots
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>Measure: 对每个逻辑槽位并行调用参与模块的 measure
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Finish:  on_event(&quot;run_end&quot;, reason)
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Finish:  on_event("run_end", reason)
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>Disable: close → shutdown worker
 </span></code></pre></div>
 <p>模块指令元数据只由隔离 worker 读取并转换为受限 JSON；主进程不会为发现菜单而提前导入

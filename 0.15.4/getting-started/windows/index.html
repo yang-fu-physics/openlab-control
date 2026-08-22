@@ -1883,7 +1883,9 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 <h2 id="_2">第一次启动<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <ol>
 <li>双击 <code>OpenLabControl.exe</code>。需要确认仪表地址时，双击同目录的
-   <code>InstrumentScanner.exe</code>。两个程序共享同一个 <code>_internal</code>，不要单独移动任一 EXE。</li>
+   <code>InstrumentScanner.exe</code>。扫描器会自动读取已有配置并开始一次只读扫描；识别到唯一的
+   System Instrument 时会自动选择它，主读数和监控读数仍由操作者确认。两个程序共享同一个
+   <code>_internal</code>，不要单独移动任一 EXE。</li>
 <li>确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。</li>
 <li>打开 <strong>Modules</strong>。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。</li>
 <li>保持列表为空，打开 <code>examples/nested_scan.seq</code>。</li>
@@ -1900,7 +1902,9 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 <div class="admonition note">
 <p class="admonition-title">VISA 资源发现</p>
 <p>PyVISA 是框架共享依赖，但它不是 GPIB 硬件驱动。若提示找不到 VISA implementation，
-请安装仪表接口厂商的 VISA Runtime；不要在模块中重复安装另一套 PyVISA。</p>
+可直接点击扫描失败弹窗中的 <a href="https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html">NI-VISA 官方下载链接</a>，
+或安装仪表接口厂商提供的其他 VISA Runtime。安装后重新打开扫描器；不要在模块中重复
+安装另一套 PyVISA。完整选择步骤见<a href="../../guides/instrument-scanner/">扫描与配置仪表</a>。</p>
 </div>
 <h2 id="_4">手动安装示例模块<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <p>把一个完整目录复制到程序旁边的 <code>modules/</code>：</p>

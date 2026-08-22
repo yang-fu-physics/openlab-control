@@ -1975,24 +1975,24 @@ VISA Session 发送两条命令。若一次完整读取已经开始，它会先�
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">schema_version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">[[resources]]</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;cryocon_main&quot;</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;USB0::...::INSTR&quot;</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">identity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Cryo-con,24C,...&quot;</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">purpose</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;system&quot;</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">system_instrument</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;cryocon_22c_24c&quot;</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">primary_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;temp_b&quot;</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">monitor_readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;temp_a&quot;</span><span class="p">]</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_main"</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"USB0::...::INSTR"</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">identity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Cryo-con,24C,..."</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">purpose</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"system"</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">system_instrument</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_22c_24c"</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">primary_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temp_b"</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">monitor_readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"temp_a"</span><span class="p">,</span><span class="w"> </span><span class="s2">"heater_output"</span><span class="p">,</span><span class="w"> </span><span class="s2">"heater_range"</span><span class="p">]</span>
 </span></code></pre></div>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># configs/site.local.toml</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">[[instruments]]</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;temperature&quot;</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">display_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Temperature&quot;</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;temperature&quot;</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">role</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;primary&quot;</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temperature"</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">display_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Temperature"</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temperature"</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">role</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"primary"</span>
 </span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">control_enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;my_temperature_controller&quot;</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">resource</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;cryocon_main&quot;</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;K&quot;</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my_temperature_controller"</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">resource</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_main"</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
 </span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="n">min_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2.0</span>
 </span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">max_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">400.0</span>
 </span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="n">max_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span>
@@ -2011,8 +2011,8 @@ VISA Session 发送两条命令。若一次完整读取已经开始，它会先�
 <code>control_enabled = true</code> 的仪表，手动窗口和 SEQ 才能设置目标。其他温度、磁场实例默认
 只监视；<code>monitor</code> 永远只读。</p>
 <p>如果同一台物理仪表、同一个通讯口还能返回第二级冷头温度，不要再创建第二个连接。应在
-同一个快照的有序 <code>metrics</code> 字典中加入 <code>InstrumentMetric</code>；监控卡会按字典内容自动扩展，
-具体写法见<a href="../instrument-reading/">读取、前面板与日志</a>。</p>
+同一个快照的有序 <code>metrics</code> 字典中加入 <code>InstrumentMetric</code>；界面会按字典顺序在主卡右侧
+建立独立的固定高度监控卡，具体写法见<a href="../instrument-reading/">读取、前面板与日志</a>。</p>
 <div class="admonition warning">
 <p class="admonition-title">示例不是通用真实驱动</p>
 <p>核心模板故意在连接真实仪表前报错。只有完成型号确认、有限 I/O 超时、现场上下限、
