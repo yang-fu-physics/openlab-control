@@ -178,6 +178,10 @@ class MainWindowLayoutTests(unittest.TestCase):
                 ["Enabled", "Name", "Version"],
             )
             self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
+            self.assertEqual(
+                window.status_scroll.horizontalScrollBarPolicy(),
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+            )
             self.assertEqual(window.module_descriptors, ())
             self.assertEqual(window.windowTitle(), self.config.title)
             self.assertEqual(

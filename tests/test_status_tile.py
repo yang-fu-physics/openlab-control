@@ -36,7 +36,10 @@ from labcontrol.ui.dialogs import (  # noqa: E402
     ManualControlDialog,
 )
 from labcontrol.ui.trend import TrendCanvas  # noqa: E402
-from labcontrol.ui.widgets import StatusTile  # noqa: E402
+from labcontrol.ui.widgets import (  # noqa: E402
+    InstrumentStatusPanel,
+    StatusTile,
+)
 
 
 class StatusTileTests(unittest.TestCase):
@@ -77,44 +80,97 @@ class StatusTileTests(unittest.TestCase):
         trend.close()
         tile.close()
 
-    def test_temperature_tile_shows_same_connection_auxiliary_metrics(self) -> None:
+    def test_auxiliary_metrics_use_separate_cards_to_the_right(self) -> None:
+        panel = InstrumentStatusPanel()
         tile = StatusTile(
             "temperature",
             "Temperature",
             InstrumentKind.TEMPERATURE,
         )
-        tile.update_snapshot(
-            InstrumentSnapshot(
-                instrument_id="temperature",
-                display_name="Temperature",
-                kind=InstrumentKind.TEMPERATURE,
-                timestamp=time.monotonic(),
-                connected=True,
-                unit="K",
-                current=4.2,
-                target=4.0,
-                rate_per_minute=1.0,
-                metrics={
-                    "second_stage": InstrumentMetric(
-                        "2nd Stage", 20.1254, "K", 3
-                    ),
-                    "heater_output": InstrumentMetric(
-                        "Heater", 12.345, "%", 2
-                    ),
-                    "heater_range": InstrumentMetric("Range", "LOW"),
-                },
-            )
+        panel.add_tile(tile)
+        snapshot = InstrumentSnapshot(
+            instrument_id="temperature",
+            display_name="Temperature",
+            kind=InstrumentKind.TEMPERATURE,
+            timestamp=time.monotonic(),
+            connected=True,
+            unit="K",
+            current=4.2,
+            target=4.0,
+            rate_per_minute=1.0,
+            metrics={
+                "second_stage": InstrumentMetric(
+                    "2nd Stage", 20.1254, "K", 3
+                ),
+                "heater_output": InstrumentMetric(
+                    "Heater", 12.345, "%", 2
+                ),
+                "heater_range": InstrumentMetric("Range", "LOW"),
+            },
         )
-        self.assertFalse(tile.metrics_widget.isHidden())
+        tile.update_snapshot(snapshot)
+        panel.update_metrics(
+            snapshot.instrument_id,
+            snapshot.display_name,
+            snapshot.metrics,
+            connected=snapshot.connected,
+        )
+
         self.assertEqual(
-            tile.metric_text("second_stage"),
-            "2nd Stage\n20.125 K",
+            list(panel.metric_tiles),
+            [
+                ("temperature", "second_stage"),
+                ("temperature", "heater_output"),
+                ("temperature", "heater_range"),
+            ],
         )
         self.assertEqual(
-            tile.metric_text("heater_output"),
-            "Heater\n12.35 %",
+            panel.metric_tiles[
+                ("temperature", "second_stage")
+            ].value_label.text(),
+            "20.125 K",
         )
-        self.assertEqual(tile.metric_text("heater_range"), "Range\nLOW")
+        self.assertEqual(
+            panel.metric_tiles[
+                ("temperature", "heater_output")
+            ].value_label.text(),
+            "12.35 %",
+        )
+        self.assertEqual(
+            panel.metric_tiles[
+                ("temperature", "heater_range")
+            ].value_label.text(),
+            "LOW",
+        )
+        self.assertEqual(tile.maximumHeight(), panel.metric_tiles[
+            ("temperature", "second_stage")
+        ].maximumHeight())
+
+        panel.update_metrics(
+            snapshot.instrument_id,
+            snapshot.display_name,
+            {},
+            connected=False,
+        )
+        self.assertEqual(
+            panel.metric_tiles[
+                ("temperature", "second_stage")
+            ].value_label.text(),
+            "—",
+        )
+        self.assertEqual(len(panel.metric_tiles), 3)
+        panel.close()
+
+    def test_status_cards_keep_fixed_light_colors(self) -> None:
+        tile = StatusTile(
+            "temperature",
+            "Temperature",
+            InstrumentKind.TEMPERATURE,
+        )
+        style = tile.styleSheet()
+        self.assertIn("background: #ffffff", style)
+        self.assertIn("color: #202124", style)
+        self.assertIn("color: #6f6f6f", style)
         tile.close()
 
     def test_live_trend_coalesces_visible_redraws_and_stops_them_when_hidden(

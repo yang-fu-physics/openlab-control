@@ -520,6 +520,9 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         scroll.setWidget(panel)
@@ -1636,6 +1639,12 @@ class MainWindow(QMainWindow):
             tile = self.status_tiles.get(instrument_id)
             if tile is not None:
                 tile.update_snapshot(snapshot)
+            self.status_panel.update_metrics(
+                instrument_id,
+                snapshot.display_name,
+                snapshot.metrics,
+                connected=snapshot.connected,
+            )
             dialog = self.manual_dialogs.get(instrument_id)
             if dialog is not None:
                 dialog.update_snapshot(snapshot)

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -64,10 +61,11 @@ class ElidedLabel(QLabel):
 
 
 class StatusTile(QFrame):
-    """显示一台物理仪表的主读数及自动展开的附加读数。
+    """用固定高度卡片显示一台物理仪表的主读数。
 
     controllable 单独保存，Monitor 或只读温磁仪表不会仅因双击而打开控制路径。
-    snapshot.metrics 是有序字典；每个键只创建一个显示格，字典顺序就是界面顺序。
+    同一连接返回的附加读数由 :class:`InstrumentStatusPanel` 在右侧创建独立卡片，不能再
+    把主卡向下撑高。
     """
 
     doubleClicked = Signal(str)
@@ -91,8 +89,9 @@ class StatusTile(QFrame):
         self.setObjectName("statusTile")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
+        self.setMaximumHeight(scaled(105))
         self.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
         )
         self.setCursor(
@@ -132,23 +131,12 @@ class StatusTile(QFrame):
         self.detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.detail_label.setWordWrap(True)
         layout.addWidget(self.detail_label)
-
-        self.metrics_widget = QWidget(self)
-        self.metrics_layout = QGridLayout(self.metrics_widget)
-        self.metrics_layout.setContentsMargins(0, scaled(2), 0, 0)
-        self.metrics_layout.setHorizontalSpacing(scaled(8))
-        self.metrics_layout.setVerticalSpacing(scaled(2))
-        self.metric_labels: dict[str, QLabel] = {}
-        self._metric_order: tuple[str, ...] = ()
-        self.metrics_widget.hide()
-        layout.addWidget(self.metrics_widget)
         self._set_state_style("disconnected")
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
         """用一次完整快照更新文本、自动读数格和状态颜色。"""
 
         if not snapshot.connected:
-            self._update_metrics({})
             self.value_label.setText("—")
             state_text = {
                 InstrumentConnectionState.STARTING: "Starting",
@@ -168,7 +156,6 @@ class StatusTile(QFrame):
             self._set_state_style(snapshot.connection_state.value)
             return
 
-        self._update_metrics(snapshot.metrics)
         if snapshot.kind in (
             InstrumentKind.TEMPERATURE,
             InstrumentKind.FIELD,
@@ -218,10 +205,20 @@ class StatusTile(QFrame):
             self.state_label.setText("Monitoring")
             self._set_state_style("stable")
 
-    @staticmethod
-    def _metric_text(metric: InstrumentMetric) -> str:
-        """把结构化附加读数格式化为紧凑的两行文本。"""
+    def update_metric(
+        self,
+        metric: InstrumentMetric,
+        source_title: str,
+        *,
+        connected: bool,
+    ) -> None:
+        """把同一连接的附加读数显示成普通只读状态卡。"""
 
+        self.title_label.setText(metric.display_name)
+        self.detail_label.setText(f"From {source_title}")
+        if not connected:
+            self.mark_metric_unavailable()
+            return
         if metric.value is None:
             value = "—"
         elif isinstance(metric.value, bool):
@@ -234,52 +231,20 @@ class StatusTile(QFrame):
             )
         else:
             value = str(metric.value)
-        return (
-            f"{metric.display_name}\n{value}"
-            + (f" {metric.unit}" if metric.unit else "")
+        self.value_label.setText(
+            value + (f" {metric.unit}" if metric.unit else "")
+        )
+        self.state_label.setText(
+            "No Reading" if metric.value is None else "Monitoring"
+        )
+        self._set_state_style(
+            "stale" if metric.value is None else "stable"
         )
 
-    def _update_metrics(
-        self,
-        metrics: Mapping[str, InstrumentMetric],
-    ) -> None:
-        """按字典键自动创建、移除并更新两列读数格。"""
-
-        keys = tuple(metrics)
-        if keys != self._metric_order:
-            for label in self.metric_labels.values():
-                self.metrics_layout.removeWidget(label)
-                label.deleteLater()
-            self.metric_labels.clear()
-            for index, key in enumerate(keys):
-                label = QLabel("", self.metrics_widget)
-                label.setObjectName("tileDetail")
-                label.setTextFormat(Qt.TextFormat.PlainText)
-                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                label.setWordWrap(True)
-                label.setMinimumWidth(0)
-                label.setSizePolicy(
-                    QSizePolicy.Policy.Ignored,
-                    QSizePolicy.Policy.Preferred,
-                )
-                self.metrics_layout.addWidget(
-                    label,
-                    index // 2,
-                    index % 2,
-                )
-                self.metric_labels[key] = label
-            self._metric_order = keys
-        for key, metric in metrics.items():
-            self.metric_labels[key].setText(
-                self._metric_text(metric)
-            )
-        self.metrics_widget.setVisible(bool(keys))
-
-    def metric_text(self, key: str) -> str:
-        """返回某项完整显示文本，主要供测试与辅助功能使用。"""
-
-        label = self.metric_labels.get(key)
-        return "" if label is None else label.text()
+    def mark_metric_unavailable(self) -> None:
+        self.value_label.setText("—")
+        self.state_label.setText("Unavailable")
+        self._set_state_style("disconnected")
 
     def mouseDoubleClickEvent(
         self,
@@ -297,71 +262,93 @@ class StatusTile(QFrame):
     def _set_state_style(self, state: str) -> None:
         """把运行状态映射为统一边框和背景色。"""
 
-        color = {
-            "stable": "#2e9d55",
-            "settling": "#d08a00",
-            "moving": "#2e73c5",
-            "timed_out": "#c53b3b",
-            "stale": "#a55a00",
-            "starting": "#777777",
-            "reconnecting": "#d08a00",
-            "faulted": "#c53b3b",
-            "disconnected": "#777777",
-        }.get(state, "#777777")
-        self.setStyleSheet(
-            "QFrame#statusTile { background: #ffffff; "
-            "border: 1px solid #c0c0c0; "
-            f"border-bottom: 4px solid {color}; "
-            "border-radius: 4px; }"
-        )
+        self.setStyleSheet(_status_tile_style(state))
+
+
+def _status_tile_style(state: str) -> str:
+    """返回不受 Windows 深浅主题影响的固定浅色卡片样式。"""
+
+    color = {
+        "stable": "#2e9d55",
+        "settling": "#d08a00",
+        "moving": "#2e73c5",
+        "timed_out": "#c53b3b",
+        "stale": "#a55a00",
+        "starting": "#777777",
+        "reconnecting": "#d08a00",
+        "faulted": "#c53b3b",
+        "disconnected": "#777777",
+    }.get(state, "#777777")
+    return (
+        "QFrame#statusTile { background: #ffffff; "
+        "border: 1px solid #c0c0c0; "
+        f"border-bottom: 4px solid {color}; "
+        "border-radius: 4px; }"
+        "QFrame#statusTile QLabel { background: transparent; color: #202124; }"
+        "QFrame#statusTile QLabel#tileDetail { color: #6f6f6f; }"
+    )
 
 
 class InstrumentStatusPanel(QWidget):
-    """按可用宽度自动换行的多仪表监控面板。"""
+    """把主仪表和附加监控值保持为一行，新增卡片依次排在右侧。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tiles: list[StatusTile] = []
-        self._columns = 0
-        self._grid = QGridLayout(self)
-        self._grid.setContentsMargins(
+        self.metric_tiles: dict[tuple[str, str], StatusTile] = {}
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(
             scaled(5),
             scaled(5),
             scaled(5),
             scaled(5),
         )
-        self._grid.setSpacing(scaled(5))
+        self._row.setSpacing(scaled(5))
+        self._row.addStretch(1)
+        self.setSizePolicy(
+            QSizePolicy.Policy.MinimumExpanding,
+            QSizePolicy.Policy.Preferred,
+        )
 
     def add_tile(self, tile: StatusTile) -> None:
         self._tiles.append(tile)
-        self._reflow(force=True)
+        self._row.insertWidget(self._row.count() - 1, tile)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._reflow()
+    def update_metrics(
+        self,
+        instrument_id: str,
+        instrument_title: str,
+        metrics: dict[str, InstrumentMetric],
+        *,
+        connected: bool,
+    ) -> None:
+        """为有序 metrics 字典逐项创建右侧卡片，并更新已有卡片。"""
 
-    def _reflow(self, *, force: bool = False) -> None:
-        tile_width = max(scaled(220), 1)
-        spacing = max(self._grid.horizontalSpacing(), 0)
-        available = max(self.width(), tile_width)
-        columns = max(
-            1,
-            (available + spacing) // (tile_width + spacing),
-        )
-        columns = min(columns, max(1, len(self._tiles)))
-        if not force and columns == self._columns:
-            return
-        for column in range(max(self._columns, columns)):
-            self._grid.setColumnStretch(column, 0)
-        for index, tile in enumerate(self._tiles):
-            self._grid.addWidget(
-                tile,
-                index // columns,
-                index % columns,
+        current_keys = set(metrics)
+        for metric_key, metric in metrics.items():
+            identity = (instrument_id, metric_key)
+            tile = self.metric_tiles.get(identity)
+            if tile is None:
+                tile = StatusTile(
+                    f"{instrument_id}.{metric_key}",
+                    metric.display_name,
+                    InstrumentKind.MONITOR,
+                    False,
+                    self,
+                )
+                self.metric_tiles[identity] = tile
+                self._row.insertWidget(
+                    self._row.count() - 1,
+                    tile,
+                )
+            tile.update_metric(
+                metric,
+                instrument_title,
+                connected=connected,
             )
-        for column in range(columns):
-            self._grid.setColumnStretch(column, 1)
-        self._columns = columns
+        for (owner_id, metric_key), tile in self.metric_tiles.items():
+            if owner_id == instrument_id and metric_key not in current_keys:
+                tile.mark_metric_unavailable()
 
 
 __all__ = [
