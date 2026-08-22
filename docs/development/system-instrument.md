@@ -87,7 +87,7 @@ identity = "Cryo-con,24C,..."
 purpose = "system"
 system_instrument = "cryocon_22c_24c"
 primary_reading = "temp_b"
-monitor_readings = ["temp_a"]
+monitor_readings = ["temp_a", "heater_output", "heater_range"]
 ```
 
 ```toml
@@ -122,8 +122,8 @@ max_rate_per_minute = 10.0
 只监视；`monitor` 永远只读。
 
 如果同一台物理仪表、同一个通讯口还能返回第二级冷头温度，不要再创建第二个连接。应在
-同一个快照的有序 `metrics` 字典中加入 `InstrumentMetric`；监控卡会按字典内容自动扩展，
-具体写法见[读取、前面板与日志](instrument-reading.md)。
+同一个快照的有序 `metrics` 字典中加入 `InstrumentMetric`；界面会按字典顺序在主卡右侧
+建立独立的固定高度监控卡，具体写法见[读取、前面板与日志](instrument-reading.md)。
 
 !!! warning "示例不是通用真实驱动"
 

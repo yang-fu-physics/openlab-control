@@ -212,7 +212,7 @@ identity = "Cryo-con,24C,SERIAL,1.0"
 purpose = "system"
 system_instrument = "cryocon_22c_24c"
 primary_reading = "temp_b"
-monitor_readings = ["temp_a"]
+monitor_readings = ["temp_a", "heater_output", "heater_range"]
 
 [[resources]]
 id = "keithley_2400_1"
@@ -226,7 +226,7 @@ monitor_readings = []
 
 - `id` 是以后引用的稳定名称，地址变化时不需要改模块设置。
 - `purpose` 只能是 `system` 或 `measurement`。
-- System 资源必须选择已安装的 `system_instrument`。扫描清单可以提供主/辅助读数建议，但必须由人确认。
+- System 资源必须选择已安装的 `system_instrument`。扫描清单提供主/辅助读数的内部键和英文名称；扫描器使用下拉框与复选框呈现，保存前仍须由人确认。
 - 同一地址不能登记两次；同一 System 资源也不能由两个 `[[instruments]]` 实例同时打开。
 - Measurement Module 前端与后台都可用 `api.resources()` 取得深拷贝；System 地址不会暴露。
 - 扫描只做资源枚举和一次 `*IDN?`，不会替用户设置上下限、PID、输出或模块参数。

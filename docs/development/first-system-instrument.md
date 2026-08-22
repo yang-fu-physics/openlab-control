@@ -37,8 +37,11 @@ dependencies = []
 
 [discovery]
 identity_pattern = "(?i)expected maker.*expected model"
-primary_reading = ""
+primary_reading = "reading"
 monitor_readings = []
+
+[discovery.reading_labels]
+reading = "Main Reading"
 ```
 
 字段含义：
@@ -51,6 +54,7 @@ monitor_readings = []
 | `kinds` | 允许用于 `temperature`、`field` 或 `monitor` 中的哪些类型 |
 | `dependencies` | 额外第三方包；PyVISA 等框架已有依赖不用重复写 |
 | `[discovery]` | 可选只读扫描建议；正则只匹配 `*IDN?`，不会导入后台或连接输出 |
+| `[discovery.reading_labels]` | 把保存用内部键映射为扫描器下拉框和复选框中的英文名称；必须覆盖每个声明的主/辅助读数 |
 
 ## 3. 写后台类
 

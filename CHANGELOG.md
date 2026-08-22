@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Instrument Scanner 使用英文仪表卡片和默认折叠的完整 `*IDN?`，自动载入已有
+  `instruments.local.toml` 并在窗口打开后自动执行一次只读 VISA 扫描；唯一识别的 System
+  Instrument 自动选择，主读数使用显示名称下拉框，辅助读数使用复选框。名称和读数来自
+  `instrument.toml`，不执行第三方后台，也不选择 Measurement Module。保存确认明确列出新增、
+  替换、删除及保持不变的资源，缺项时定位卡片；扫描失败弹窗提供 NI-VISA 官方下载链接。
+- Instrument Status 恢复固定高度横向卡片。System Instrument 的每项附加监控值使用右侧
+  独立卡片，卡片在失联时保留位置并显示不可用；背景、文字和边框颜色不跟随系统深色主题。
+
 ## 0.15.4 - 2026-08-12
 
 - 正式打包冒烟测试继续运行完整的 `nested_scan.seq`，SEQ 自身允许 120 秒，外层进程保护

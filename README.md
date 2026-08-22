@@ -114,8 +114,12 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 
 1. 把完整 System Instrument 文件夹复制到 `system_instruments/<instrument-id>/`。
 2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
-   `InstrumentScanner.exe`。程序只读扫描并人工确认地址、
-   用途、System Instrument 和主/辅助读数；结果写入 `configs/instruments.local.toml`。
+   `InstrumentScanner.exe`。程序打开后自动进行一次只读 VISA 扫描，再由操作者确认地址、
+   用途、System Instrument 和主/辅助读数；唯一识别的实现会自动选择，主读数使用下拉框，
+   辅助读数使用复选框。结果写入 `configs/instruments.local.toml`。已有文件会先自动载入，
+   保存前会逐项列出新增、替换、删除和保持不变的资源。
+   System Instrument 名称和可选读数来自 `system_instruments/` 中的清单，扫描器不写死
+   具体仪表，也不选择或绑定 Measurement Module。
 3. 把 `configs/default.toml` 复制为 `configs/site.local.toml`。
 4. 在现场副本的 `[[instruments]]` 中设置
    `backend = "<instrument-id>"`、`resource = "<资源 ID>"`、安全上下限、最大速率和超时。
@@ -129,7 +133,8 @@ System Instrument 的后台以 `SystemInstrument` 为基类，提供
 
 一份 System Instrument 代码对应一种物理仪表型号/协议，不对应 TempA、TempB 这样的单个
 通道。同一地址只建立一个会话；主读数放在快照主体，其余读数放入有序 `metrics` 字典，
-监控卡会自动扩展。多个不同资源各有独立进程，可以同时连接和并发轮询。
+界面会在主卡右侧依次建立同样大小的只读监控卡。多个不同资源各有独立进程，可以同时连接
+和并发轮询。
 
 从[仪表扫描与地址配置](docs/guides/instrument-scanner.md)和
 [System Instrument 教程](docs/development/system-instrument.md)开始学习。
