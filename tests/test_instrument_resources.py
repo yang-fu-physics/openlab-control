@@ -27,7 +27,12 @@ from labcontrol.instrument_resources import (  # noqa: E402
 )
 from labcontrol.measurement.frontend_api import ModuleUIAPI  # noqa: E402
 from labcontrol.module_api import ModuleAPI, ModuleError  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 from instrument_scanner import (  # noqa: E402
+    InstrumentScannerWindow,
+    NI_VISA_DOWNLOAD_URL,
+    VisaScanResult,
     application_root,
     discover_scan_descriptors,
     match_descriptor,
@@ -360,6 +365,185 @@ class InstrumentResourceTests(unittest.TestCase):
 
 
 class InstrumentScannerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.application = QApplication.instance() or QApplication([])
+
+    def test_scanner_loads_existing_file_and_marks_incomplete_system_rows(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "instruments.local.toml"
+            instrument = root / "system_instruments" / "controller"
+            instrument.mkdir(parents=True)
+            (instrument / "backend.py").write_text(
+                "class Driver: pass\n",
+                encoding="utf-8",
+            )
+            (instrument / "instrument.toml").write_text(
+                (
+                    'id = "controller"\n'
+                    'name = "Example Controller"\n'
+                    'version = "1.0.0"\n'
+                    'api_version = "1.2"\n'
+                    'backend = "backend:Driver"\n'
+                    'kinds = ["temperature"]\n'
+                    '[discovery]\n'
+                    'identity_pattern = "Maker,Controller"\n'
+                    'primary_reading = "temp_b"\n'
+                    'monitor_readings = ["temp_a", "heater_output", "heater_range"]\n'
+                    '[discovery.reading_labels]\n'
+                    'temp_b = "Sample Temperature (Temp B)"\n'
+                    'temp_a = "Cold Head Temperature (Temp A)"\n'
+                    'heater_output = "Heater Output"\n'
+                    'heater_range = "Heater Range"\n'
+                ),
+                encoding="utf-8",
+            )
+            write_instrument_resources(
+                output,
+                (
+                    InstrumentResource(
+                        "meter",
+                        "GPIB0::1::INSTR",
+                        "Maker,Model,Serial,Version with a very long tail",
+                    ),
+                ),
+            )
+            with patch(
+                "instrument_scanner.QTimer.singleShot"
+            ) as schedule_scan:
+                window = InstrumentScannerWindow(
+                    output,
+                    root / "system_instruments",
+                )
+            try:
+                schedule_scan.assert_called_once()
+                self.assertEqual(
+                    schedule_scan.call_args.args[0],
+                    0,
+                )
+                self.assertEqual(
+                    schedule_scan.call_args.args[1],
+                    window.start_scan,
+                )
+                self.assertIn(
+                    "System Instruments (1): Example Controller",
+                    window.discovery_label.text(),
+                )
+                self.assertIn(
+                    "Loaded 1 existing resource",
+                    window.existing_label.text(),
+                )
+                self.assertEqual(len(window._rows), 1)
+                self.assertIn(
+                    "Maker,Model,Serial,Version with a very long tail",
+                    window._rows[0]["details_text"].text(),
+                )
+                self.assertEqual(
+                    window.scroll_area.horizontalScrollBarPolicy(),
+                    Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+                )
+
+                window._show_results(
+                    (
+                        VisaScanResult(
+                            "GPIB0::1::INSTR",
+                            "Maker,Model,Serial,NewVersion",
+                        ),
+                        VisaScanResult(
+                            "USB0::2::INSTR",
+                            "Maker,Controller,2",
+                        ),
+                    )
+                )
+                window.resize(960, 600)
+                window.show()
+                self.application.processEvents()
+                self.assertLessEqual(
+                    window.minimumSizeHint().width(),
+                    window.minimumWidth(),
+                )
+                self.assertFalse(
+                    window.scroll_area.horizontalScrollBar().isVisible()
+                )
+                controls = window._rows[1]
+                self.assertEqual(
+                    controls["purpose"].currentText(),
+                    "System",
+                )
+                self.assertEqual(
+                    controls["system_instrument"].currentData(),
+                    "controller",
+                )
+                self.assertEqual(
+                    controls["primary"].currentData(),
+                    "temp_b",
+                )
+                self.assertEqual(
+                    controls["primary"].currentText(),
+                    "Sample Temperature (Temp B)",
+                )
+                self.assertEqual(
+                    {
+                        key: checkbox.text()
+                        for key, checkbox in controls[
+                            "monitor_checks"
+                        ].items()
+                    },
+                    {
+                        "temp_a": "Cold Head Temperature (Temp A)",
+                        "heater_output": "Heater Output",
+                        "heater_range": "Heater Range",
+                    },
+                )
+                self.assertTrue(
+                    all(
+                        checkbox.isChecked()
+                        for checkbox in controls[
+                            "monitor_checks"
+                        ].values()
+                    )
+                )
+                controls["monitor_checks"][
+                    "heater_range"
+                ].setChecked(False)
+                configured = next(
+                    resource
+                    for resource in window._resources()
+                    if resource.purpose == "system"
+                )
+                self.assertEqual(
+                    configured.primary_reading,
+                    "temp_b",
+                )
+                self.assertEqual(
+                    configured.monitor_readings,
+                    ("temp_a", "heater_output"),
+                )
+                controls["monitor_checks"][
+                    "heater_range"
+                ].setChecked(True)
+                controls["id"].clear()
+                with patch("instrument_scanner.QMessageBox.warning") as warning:
+                    window.preview_and_save()
+                warning.assert_called_once()
+                self.assertIn("Complete these selected rows", warning.call_args.args[2])
+
+                controls["purpose"].setCurrentText("Ignore")
+                with patch(
+                    "instrument_scanner.QMessageBox.question",
+                    return_value=QMessageBox.StandardButton.Cancel,
+                ) as question:
+                    window.preview_and_save()
+                self.assertIn(
+                    "Existing entries replaced: meter",
+                    question.call_args.args[2],
+                )
+            finally:
+                window.close()
+
     def test_frozen_scanner_uses_shared_release_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             executable = Path(temp) / "InstrumentScanner.exe"
@@ -391,6 +575,54 @@ class InstrumentScannerTests(unittest.TestCase):
                 "includes PyVISA.*NI-VISA",
             ):
                 scan_visa_resources(0.25)
+
+    def test_scan_failure_dialog_links_official_ni_visa_download(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            dialogs: list[QMessageBox] = []
+
+            def capture_dialog(dialog: QMessageBox) -> int:
+                dialogs.append(dialog)
+                return 0
+
+            with (
+                patch("instrument_scanner.QTimer.singleShot"),
+                patch.object(
+                    QMessageBox,
+                    "exec",
+                    new=capture_dialog,
+                ),
+            ):
+                window = InstrumentScannerWindow(
+                    root / "instruments.local.toml",
+                    root / "system_instruments",
+                )
+                try:
+                    window._scan_failed("<driver>\nmissing")
+                    self.assertEqual(len(dialogs), 1)
+                    dialog = dialogs[0]
+                    self.assertEqual(
+                        dialog.textFormat(),
+                        Qt.TextFormat.RichText,
+                    )
+                    self.assertEqual(
+                        dialog.textInteractionFlags(),
+                        Qt.TextInteractionFlag.TextBrowserInteraction,
+                    )
+                    self.assertIn(
+                        NI_VISA_DOWNLOAD_URL,
+                        dialog.text(),
+                    )
+                    self.assertIn(
+                        "&lt;driver&gt;<br>missing",
+                        dialog.text(),
+                    )
+                    self.assertEqual(
+                        window.summary_label.text(),
+                        "VISA scan failed",
+                    )
+                finally:
+                    window.close()
 
     def test_scan_uses_only_idn_query_and_closes_every_session(
         self,
@@ -514,7 +746,12 @@ class InstrumentScannerTests(unittest.TestCase):
                     '[discovery]\n'
                     'identity_pattern = "(?i)cryo-?con.*24c"\n'
                     'primary_reading = "temp_b"\n'
-                    'monitor_readings = ["temp_a"]\n'
+                    'monitor_readings = ["temp_a", "heater_output", "heater_range"]\n'
+                    '[discovery.reading_labels]\n'
+                    'temp_b = "Sample Temperature (Temp B)"\n'
+                    'temp_a = "Cold Head Temperature (Temp A)"\n'
+                    'heater_output = "Heater Output"\n'
+                    'heater_range = "Heater Range"\n'
                 ),
                 encoding="utf-8",
             )
@@ -529,7 +766,16 @@ class InstrumentScannerTests(unittest.TestCase):
             self.assertEqual(matched.primary_reading, "temp_b")
             self.assertEqual(
                 matched.monitor_readings,
-                ("temp_a",),
+                ("temp_a", "heater_output", "heater_range"),
+            )
+            self.assertEqual(
+                dict(matched.reading_labels),
+                {
+                    "temp_b": "Sample Temperature (Temp B)",
+                    "temp_a": "Cold Head Temperature (Temp A)",
+                    "heater_output": "Heater Output",
+                    "heater_range": "Heater Range",
+                },
             )
             self.assertEqual(
                 suggest_resource_id(
@@ -538,7 +784,6 @@ class InstrumentScannerTests(unittest.TestCase):
                 ),
                 "cryo_con_24c_123",
             )
-
 
 if __name__ == "__main__":
     unittest.main()

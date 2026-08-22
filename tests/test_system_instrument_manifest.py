@@ -16,6 +16,7 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.instruments.manifest import (  # noqa: E402
     configured_system_instruments,
     discover_system_instruments,
+    load_instrument_manifest,
 )
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.package_support.trust import (  # noqa: E402
@@ -94,6 +95,28 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             )
             changed = discover_system_instruments(config)[0]
             self.assertNotEqual(changed.fingerprint, original)
+
+    def test_discovery_reading_labels_must_cover_declared_readings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            instrument = _write_instrument(Path(temporary))
+            manifest = instrument / "instrument.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8")
+                + (
+                    "\n[discovery]\n"
+                    'primary_reading = "temp_b"\n'
+                    'monitor_readings = ["temp_a"]\n'
+                    "[discovery.reading_labels]\n"
+                    'temp_b = "Sample Temperature (Temp B)"\n'
+                ),
+                encoding="utf-8",
+            )
+            descriptor = load_instrument_manifest(instrument)
+            self.assertFalse(descriptor.valid)
+            self.assertIn(
+                "reading_labels must define exactly every declared",
+                descriptor.error,
+            )
 
     def test_manifest_rejects_url_dependencies_and_duplicate_ids(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

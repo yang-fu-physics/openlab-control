@@ -48,6 +48,7 @@ class SystemInstrumentDescriptor:
     identity_pattern: str = ""
     primary_reading: str = ""
     monitor_readings: tuple[str, ...] = ()
+    reading_labels: tuple[tuple[str, str], ...] = ()
     fingerprint: str = ""
     valid: bool = True
     error: str = ""
@@ -100,6 +101,20 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
             str(item).strip()
             for item in raw_monitor_readings
         )
+        raw_reading_labels = discovery.get("reading_labels", {})
+        if not isinstance(raw_reading_labels, dict):
+            raise TypeError("discovery.reading_labels must be a table")
+        if any(
+            not isinstance(value, str)
+            for value in raw_reading_labels.values()
+        ):
+            raise TypeError(
+                "discovery.reading_labels values must be text"
+            )
+        reading_labels = tuple(
+            (str(key).strip(), str(value).strip())
+            for key, value in raw_reading_labels.items()
+        )
     except (
         OSError,
         KeyError,
@@ -130,6 +145,7 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         identity_pattern=identity_pattern,
         primary_reading=primary_reading,
         monitor_readings=monitor_readings,
+        reading_labels=reading_labels,
     )
     errors: list[str] = []
     if not _IDENTIFIER.fullmatch(instrument_id):
@@ -190,6 +206,35 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         errors.append(
             "discovery primary_reading cannot also be a monitor_reading"
         )
+    declared_readings = {
+        reading
+        for reading in (primary_reading, *monitor_readings)
+        if reading
+    }
+    labels_by_reading = dict(reading_labels)
+    if set(labels_by_reading) != declared_readings:
+        errors.append(
+            "discovery.reading_labels must define exactly every declared "
+            "primary and monitor reading"
+        )
+    for reading, label in reading_labels:
+        if not _IDENTIFIER.fullmatch(reading):
+            errors.append(
+                "discovery.reading_labels keys must match [a-z][a-z0-9_]*"
+            )
+        if (
+            not label
+            or len(label) > 80
+            or any(not character.isprintable() for character in label)
+        ):
+            errors.append(
+                "discovery.reading_labels values must be printable text "
+                "with 1-80 characters"
+            )
+    if len({label.casefold() for label in labels_by_reading.values()}) != len(
+        labels_by_reading
+    ):
+        errors.append("discovery.reading_labels values must be unique")
     errors.extend(dependency_compatibility_errors)
     for raw_requirement in declared_dependencies:
         try:
