@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.15.5 - 2026-08-22
+
 - Instrument Scanner 使用英文仪表卡片和默认折叠的完整 `*IDN?`，自动载入已有
   `instruments.local.toml` 并在窗口打开后自动执行一次只读 VISA 扫描；唯一识别的 System
   Instrument 自动选择，主读数使用显示名称下拉框，辅助读数使用复选框。名称和读数来自
