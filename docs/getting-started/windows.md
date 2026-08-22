@@ -23,7 +23,9 @@ Get-Content .\OpenLabControl-v0.15.4-windows-x64.zip.sha256
 ## 第一次启动
 
 1. 双击 `OpenLabControl.exe`。需要确认仪表地址时，双击同目录的
-   `InstrumentScanner.exe`。两个程序共享同一个 `_internal`，不要单独移动任一 EXE。
+   `InstrumentScanner.exe`。扫描器会自动读取已有配置并开始一次只读扫描；识别到唯一的
+   System Instrument 时会自动选择它，主读数和监控读数仍由操作者确认。两个程序共享同一个
+   `_internal`，不要单独移动任一 EXE。
 2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
 3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。
 4. 保持列表为空，打开 `examples/nested_scan.seq`。
@@ -43,7 +45,9 @@ Get-Content .\OpenLabControl-v0.15.4-windows-x64.zip.sha256
 !!! note "VISA 资源发现"
 
     PyVISA 是框架共享依赖，但它不是 GPIB 硬件驱动。若提示找不到 VISA implementation，
-    请安装仪表接口厂商的 VISA Runtime；不要在模块中重复安装另一套 PyVISA。
+    可直接点击扫描失败弹窗中的 [NI-VISA 官方下载链接](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)，
+    或安装仪表接口厂商提供的其他 VISA Runtime。安装后重新打开扫描器；不要在模块中重复
+    安装另一套 PyVISA。完整选择步骤见[扫描与配置仪表](../guides/instrument-scanner.md)。
 
 ## 手动安装示例模块
 

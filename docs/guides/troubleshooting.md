@@ -17,8 +17,11 @@
 
 ## 找不到 VISA implementation
 
-PyVISA 已由框架提供，但仍需要与 GPIB/USB 接口匹配的厂商 VISA Runtime。安装 NI-VISA、
-Keysight VISA 或对应厂商 runtime 后重启程序。模块不应自行安装另一套 PyVISA。
+PyVISA 已由框架提供，但仍需要与 GPIB/USB 接口匹配的厂商 VISA Runtime。打开
+`InstrumentScanner.exe` 后会自动尝试扫描；若初始化失败，弹窗中的链接会打开
+[NI-VISA 官方下载页](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)。也可以安装
+Keysight VISA 或接口厂商指定的 Runtime。安装完成后重新打开扫描器，不需要重新打包程序，
+也不要在模块中安装另一套 PyVISA。扫描成功后的选择步骤见[扫描与配置仪表](instrument-scanner.md)。
 
 ## Enable 立即提示设置不合法
 
