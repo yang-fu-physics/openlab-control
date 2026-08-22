@@ -40,7 +40,7 @@ def _external_instrument(
             'id = "isolated_test"\n'
             'name = "Isolated Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "1.2"\n'
+            'api_version = "2"\n'
             'backend = "backend:IsolatedTestInstrument"\n'
             f"kinds = [{kinds}]\n"
             + (
@@ -48,6 +48,8 @@ def _external_instrument(
                 if dependencies
                 else ""
             )
+            + 'main_reading = "value"\n'
+            + '[readings.value]\nlabel = "Value"\nunit = "K"\n'
         ),
         encoding="utf-8",
     )
@@ -91,22 +93,16 @@ class InstrumentWorkerTests(unittest.TestCase):
                 marker = root / "backend-pid.txt"
                 source = (
                     "import os\n"
-                    "import time\n"
                     "from pathlib import Path\n"
                     f"Path({str(marker)!r}).write_text(str(os.getpid()), encoding='utf-8')\n"
                     "from labcontrol.instruments.base import SystemInstrument\n"
-                    "from labcontrol.models import InstrumentSnapshot\n"
                     "class IsolatedTestInstrument(SystemInstrument):\n"
-                    "    async def connect(self): pass\n"
-                    "    async def disconnect(self): pass\n"
-                    "    async def poll(self):\n"
-                    "        return InstrumentSnapshot(self.config.id, self.config.display_name, "
-                    "self.config.kind, time.monotonic(), True, self.config.unit, 12.5)\n"
-                    "    async def poll_measurement(self):\n"
-                    "        return InstrumentSnapshot(self.config.id, self.config.display_name, "
-                    "self.config.kind, time.monotonic(), True, self.config.unit, 99.5)\n"
-                    "    async def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
-                    "    async def hold(self): pass\n"
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self): return {'value': 12.5}\n"
+                    "    def read_measurement(self): return {'value': 99.5}\n"
+                    "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
+                    "    def hold(self): pass\n"
                 )
                 _external_instrument(root, source)
                 state = root / "state"
@@ -151,12 +147,12 @@ class InstrumentWorkerTests(unittest.TestCase):
                 source = (
                     "from labcontrol.instruments.base import SystemInstrument, SafetyViolation\n"
                     "class IsolatedTestInstrument(SystemInstrument):\n"
-                    "    async def connect(self): pass\n"
-                    "    async def disconnect(self): pass\n"
-                    "    async def poll(self):\n"
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self):\n"
                     "        raise SafetyViolation('sensor fault', 'SENSOR_FAULT', 'A')\n"
-                    "    async def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
-                    "    async def hold(self): pass\n"
+                    "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
+                    "    def hold(self): pass\n"
                 )
                 _external_instrument(root / "instruments", source)
                 state = root / "state"
@@ -199,22 +195,16 @@ class InstrumentWorkerTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 source = (
-                    "import time\n"
                     "from instrument_only_demo import VALUE\n"
                     "from labcontrol.instruments.base import SystemInstrument\n"
-                    "from labcontrol.models import InstrumentSnapshot\n"
                     "class IsolatedTestInstrument(SystemInstrument):\n"
-                    "    async def connect(self): pass\n"
-                    "    async def disconnect(self): pass\n"
-                    "    async def poll(self):\n"
-                    "        return InstrumentSnapshot("
-                    "self.config.id, self.config.display_name, "
-                    "self.config.kind, time.monotonic(), True, "
-                    "self.config.unit, VALUE)\n"
-                    "    async def set_target("
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self): return {'value': VALUE}\n"
+                    "    def set_target("
                     "self, value, rate_per_minute, mode='Settle'"
                     "): pass\n"
-                    "    async def hold(self): pass\n"
+                    "    def hold(self): pass\n"
                 )
                 instrument = _external_instrument(
                     root / "instruments",
@@ -317,15 +307,13 @@ class InstrumentWorkerTests(unittest.TestCase):
                 source = (
                     "import time\n"
                     "from labcontrol.instruments.base import SystemInstrument\n"
-                    "from labcontrol.models import InstrumentSnapshot\n"
                     "class IsolatedTestInstrument(SystemInstrument):\n"
-                    "    async def connect(self): pass\n"
-                    "    async def disconnect(self): pass\n"
-                    "    async def poll(self):\n"
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self):\n"
                     "        if self.config.extras.get('hang'):\n"
                     "            time.sleep(5.0)\n"
-                    "        return InstrumentSnapshot(self.config.id, self.config.display_name, "
-                    "self.config.kind, time.monotonic(), True, self.config.unit, 4.2)\n"
+                    "        return {'value': 4.2}\n"
                 )
                 _external_instrument(root, source, kinds='"monitor"')
                 state = root / "state"

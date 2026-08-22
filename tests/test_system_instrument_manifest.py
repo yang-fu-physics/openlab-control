@@ -42,29 +42,31 @@ def _write_instrument(
             f'id = "{instrument_id}"\n'
             'name = "Example Temperature"\n'
             'version = "0.1.0"\n'
-            'api_version = "1.2"\n'
+            'api_version = "2"\n'
             'backend = "backend:ExampleTemperature"\n'
             'kinds = ["temperature"]\n'
             f"{dependency_block}"
+            'main_reading = "temperature"\n'
+            '[readings.temperature]\n'
+            'label = "Temperature"\n'
+            'unit = "K"\n'
+            'decimals = 3\n'
         ),
         encoding="utf-8",
     )
     (instrument / "backend.py").write_text(
         backend_source
         or (
-            "import time\n"
             "from labcontrol.instruments.base import SystemInstrument\n"
-            "from labcontrol.models import InstrumentActivity, InstrumentSnapshot\n"
             "class ExampleTemperature(SystemInstrument):\n"
-            "    async def connect(self): pass\n"
-            "    async def disconnect(self): pass\n"
-            "    async def poll(self):\n"
-            "        return InstrumentSnapshot(self.config.id, self.config.display_name, "
-            "self.config.kind, time.monotonic(), True, self.config.unit, "
-            "self.config.initial_value, self.config.initial_value, "
-            "self.config.default_rate_per_minute, InstrumentActivity.IDLE)\n"
-            "    async def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
-            "    async def hold(self): pass\n"
+            "    def open(self): pass\n"
+            "    def close(self): pass\n"
+            "    def read_status(self):\n"
+            "        return {'value': self.config.initial_value, "
+            "'target': self.config.initial_value, "
+            "'rate': self.config.default_rate_per_minute}\n"
+            "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
+            "    def hold(self): pass\n"
         ),
         encoding="utf-8",
     )
@@ -96,25 +98,39 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             changed = discover_system_instruments(config)[0]
             self.assertNotEqual(changed.fingerprint, original)
 
-    def test_discovery_reading_labels_must_cover_declared_readings(self) -> None:
+    def test_main_reading_must_have_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             instrument = _write_instrument(Path(temporary))
             manifest = instrument / "instrument.toml"
             manifest.write_text(
-                manifest.read_text(encoding="utf-8")
-                + (
-                    "\n[discovery]\n"
-                    'primary_reading = "temp_b"\n'
-                    'monitor_readings = ["temp_a"]\n'
-                    "[discovery.reading_labels]\n"
-                    'temp_b = "Sample Temperature (Temp B)"\n'
+                manifest.read_text(encoding="utf-8").replace(
+                    'main_reading = "temperature"',
+                    'main_reading = "missing"',
                 ),
                 encoding="utf-8",
             )
             descriptor = load_instrument_manifest(instrument)
             self.assertFalse(descriptor.valid)
             self.assertIn(
-                "reading_labels must define exactly every declared",
+                "readings must define the declared main_reading",
+                descriptor.error,
+            )
+
+    def test_manifest_rejects_obsolete_or_misspelled_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            instrument = _write_instrument(Path(temporary))
+            manifest = instrument / "instrument.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    'main_reading = "temperature"\n',
+                    'main_reading = "temperature"\nauxiliary_readings = []\n',
+                ),
+                encoding="utf-8",
+            )
+            descriptor = load_instrument_manifest(instrument)
+            self.assertFalse(descriptor.valid)
+            self.assertIn(
+                "unknown instrument.toml fields: auxiliary_readings",
                 descriptor.error,
             )
 
@@ -233,19 +249,15 @@ class SystemInstrumentManifestTests(unittest.TestCase):
                 root = Path(temporary)
                 marker = root / "imported.txt"
                 source = (
-                    "import time\n"
                     "from pathlib import Path\n"
                     f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
                     "from labcontrol.instruments.base import SystemInstrument\n"
-                    "from labcontrol.models import InstrumentSnapshot\n"
                     "class ExampleTemperature(SystemInstrument):\n"
-                    "    async def connect(self): pass\n"
-                    "    async def disconnect(self): pass\n"
-                    "    async def poll(self):\n"
-                    "        return InstrumentSnapshot(self.config.id, self.config.display_name, "
-                    "self.config.kind, time.monotonic(), True, self.config.unit, 3.0)\n"
-                    "    async def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
-                    "    async def hold(self): pass\n"
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self): return {'value': 3.0}\n"
+                    "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
+                    "    def hold(self): pass\n"
                 )
                 _write_instrument(root, backend_source=source)
                 state = root / "state"

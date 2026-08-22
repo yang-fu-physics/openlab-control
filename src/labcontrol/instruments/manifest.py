@@ -11,13 +11,13 @@ import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from .. import __version__
-from ..config import AppConfig
 from ..package_support.dependencies import (
     partition_package_dependencies,
     validate_requirements_lock,
@@ -25,12 +25,25 @@ from ..package_support.dependencies import (
 from ..package_support.trust import ContentTrustError, content_tree_digest
 from ..models import InstrumentKind
 
+if TYPE_CHECKING:
+    from ..config import AppConfig
 
-SYSTEM_INSTRUMENT_API_VERSION = "1.2"
+
+SYSTEM_INSTRUMENT_API_VERSION = "2"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENTRYPOINT = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class InstrumentReadingDescriptor:
+    """清单中一个可显示读数的唯一元数据来源。"""
+
+    key: str
+    label: str
+    unit: str = ""
+    decimals: int | None = None
 
 
 @dataclass(slots=True)
@@ -46,9 +59,8 @@ class SystemInstrumentDescriptor:
     framework_dependencies: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     identity_pattern: str = ""
-    primary_reading: str = ""
-    monitor_readings: tuple[str, ...] = ()
-    reading_labels: tuple[tuple[str, str], ...] = ()
+    main_reading: str = ""
+    readings: tuple[InstrumentReadingDescriptor, ...] = ()
     fingerprint: str = ""
     valid: bool = True
     error: str = ""
@@ -56,6 +68,20 @@ class SystemInstrumentDescriptor:
     @property
     def can_load(self) -> bool:
         return self.valid and bool(self.fingerprint)
+
+    @property
+    def auxiliary_readings(self) -> tuple[str, ...]:
+        return tuple(
+            reading.key
+            for reading in self.readings
+            if reading.key != self.main_reading
+        )
+
+    def reading(self, key: str) -> InstrumentReadingDescriptor:
+        for reading in self.readings:
+            if reading.key == key:
+                return reading
+        raise KeyError(key)
 
 
 def _invalid(path: Path, message: str) -> SystemInstrumentDescriptor:
@@ -74,6 +100,27 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
     try:
         with manifest_path.open("rb") as handle:
             raw = tomllib.load(handle)
+        unknown_fields = sorted(
+            set(raw)
+            - {
+                "api_version",
+                "backend",
+                "core_requires",
+                "dependencies",
+                "discovery",
+                "id",
+                "kinds",
+                "main_reading",
+                "name",
+                "readings",
+                "version",
+            }
+        )
+        if unknown_fields:
+            raise ValueError(
+                "unknown instrument.toml fields: "
+                + ", ".join(unknown_fields)
+            )
         instrument_id = str(raw["id"]).strip()
         name = str(raw["name"]).strip()
         version = str(raw["version"]).strip()
@@ -88,33 +135,42 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         discovery = raw.get("discovery", {})
         if not isinstance(discovery, dict):
             raise TypeError("discovery must be a table")
+        unknown_discovery_fields = sorted(
+            set(discovery) - {"identity_pattern"}
+        )
+        if unknown_discovery_fields:
+            raise ValueError(
+                "unknown discovery fields: "
+                + ", ".join(unknown_discovery_fields)
+            )
         identity_pattern = str(
             discovery.get("identity_pattern", "")
         ).strip()
-        primary_reading = str(
-            discovery.get("primary_reading", "")
-        ).strip()
-        raw_monitor_readings = discovery.get("monitor_readings", [])
-        if not isinstance(raw_monitor_readings, list):
-            raise TypeError("discovery.monitor_readings must be an array")
-        monitor_readings = tuple(
-            str(item).strip()
-            for item in raw_monitor_readings
-        )
-        raw_reading_labels = discovery.get("reading_labels", {})
-        if not isinstance(raw_reading_labels, dict):
-            raise TypeError("discovery.reading_labels must be a table")
-        if any(
-            not isinstance(value, str)
-            for value in raw_reading_labels.values()
-        ):
-            raise TypeError(
-                "discovery.reading_labels values must be text"
+        main_reading = str(raw.get("main_reading", "")).strip()
+        raw_readings = raw.get("readings", {})
+        if not isinstance(raw_readings, dict):
+            raise TypeError("readings must be a table")
+        readings: list[InstrumentReadingDescriptor] = []
+        for raw_key, raw_metadata in raw_readings.items():
+            if not isinstance(raw_metadata, dict):
+                raise TypeError(f"readings.{raw_key} must be a table")
+            unknown_reading_fields = sorted(
+                set(raw_metadata) - {"decimals", "label", "unit"}
             )
-        reading_labels = tuple(
-            (str(key).strip(), str(value).strip())
-            for key, value in raw_reading_labels.items()
-        )
+            if unknown_reading_fields:
+                raise ValueError(
+                    f"unknown readings.{raw_key} fields: "
+                    + ", ".join(unknown_reading_fields)
+                )
+            decimals = raw_metadata.get("decimals")
+            readings.append(
+                InstrumentReadingDescriptor(
+                    key=str(raw_key).strip(),
+                    label=str(raw_metadata["label"]).strip(),
+                    unit=str(raw_metadata.get("unit", "")).strip(),
+                    decimals=decimals,
+                )
+            )
     except (
         OSError,
         KeyError,
@@ -143,9 +199,8 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         framework_dependencies=framework_dependencies,
         dependencies=dependencies,
         identity_pattern=identity_pattern,
-        primary_reading=primary_reading,
-        monitor_readings=monitor_readings,
-        reading_labels=reading_labels,
+        main_reading=main_reading,
+        readings=tuple(readings),
     )
     errors: list[str] = []
     if not _IDENTIFIER.fullmatch(instrument_id):
@@ -192,49 +247,44 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
                 errors.append(
                     f"discovery.identity_pattern is invalid: {exc}"
                 )
-    for label, reading in (
-        ("primary_reading", primary_reading),
-        *(("monitor_readings", value) for value in monitor_readings),
-    ):
-        if reading and not _IDENTIFIER.fullmatch(reading):
-            errors.append(
-                f"discovery.{label} must match [a-z][a-z0-9_]*"
-            )
-    if len(monitor_readings) != len(set(monitor_readings)):
-        errors.append("discovery.monitor_readings must be unique")
-    if primary_reading and primary_reading in monitor_readings:
+    if main_reading and not _IDENTIFIER.fullmatch(main_reading):
+        errors.append("main_reading must match [a-z][a-z0-9_]*")
+    if not main_reading:
+        errors.append("main_reading is required")
+    metadata_by_reading = {reading.key: reading for reading in readings}
+    if main_reading and main_reading not in metadata_by_reading:
         errors.append(
-            "discovery primary_reading cannot also be a monitor_reading"
+            "readings must define the declared main_reading"
         )
-    declared_readings = {
-        reading
-        for reading in (primary_reading, *monitor_readings)
-        if reading
-    }
-    labels_by_reading = dict(reading_labels)
-    if set(labels_by_reading) != declared_readings:
-        errors.append(
-            "discovery.reading_labels must define exactly every declared "
-            "primary and monitor reading"
-        )
-    for reading, label in reading_labels:
-        if not _IDENTIFIER.fullmatch(reading):
+    for reading in readings:
+        if not _IDENTIFIER.fullmatch(reading.key):
             errors.append(
-                "discovery.reading_labels keys must match [a-z][a-z0-9_]*"
+                "readings keys must match [a-z][a-z0-9_]*"
             )
         if (
-            not label
-            or len(label) > 80
-            or any(not character.isprintable() for character in label)
+            not reading.label
+            or len(reading.label) > 80
+            or any(not character.isprintable() for character in reading.label)
         ):
             errors.append(
-                "discovery.reading_labels values must be printable text "
+                "reading labels must be printable text "
                 "with 1-80 characters"
             )
-    if len({label.casefold() for label in labels_by_reading.values()}) != len(
-        labels_by_reading
+        if (
+            len(reading.unit) > 24
+            or any(not character.isprintable() for character in reading.unit)
+        ):
+            errors.append("reading units must be printable text with at most 24 characters")
+        if reading.decimals is not None and (
+            isinstance(reading.decimals, bool)
+            or not isinstance(reading.decimals, int)
+            or not 0 <= reading.decimals <= 12
+        ):
+            errors.append("reading decimals must be an integer from 0 to 12")
+    if len({item.label.casefold() for item in readings}) != len(
+        readings
     ):
-        errors.append("discovery.reading_labels values must be unique")
+        errors.append("reading labels must be unique")
     errors.extend(dependency_compatibility_errors)
     for raw_requirement in declared_dependencies:
         try:
@@ -259,7 +309,7 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
 
 
 def discover_system_instruments(
-    config: AppConfig,
+    config: "AppConfig",
 ) -> tuple[SystemInstrumentDescriptor, ...]:
     root = config.resolve_project_path(config.system_instruments.directory)
     root.mkdir(parents=True, exist_ok=True)
@@ -287,7 +337,7 @@ def discover_system_instruments(
 
 
 def configured_system_instruments(
-    config: AppConfig,
+    config: "AppConfig",
     descriptors: tuple[SystemInstrumentDescriptor, ...],
 ) -> tuple[SystemInstrumentDescriptor, ...]:
     by_id = {descriptor.id: descriptor for descriptor in descriptors}
@@ -316,7 +366,7 @@ def configured_system_instruments(
 
 
 def instrument_dependency_directory(
-    config: AppConfig,
+    config: "AppConfig",
     descriptor: SystemInstrumentDescriptor,
 ) -> Path:
     return (

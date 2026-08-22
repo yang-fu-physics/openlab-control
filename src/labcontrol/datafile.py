@@ -333,7 +333,7 @@ class DatRunLogger:
                 self._data_writer.writerow([
                     "INFO",
                     f"Instrument {instrument.id}: {instrument.display_name}; "
-                    f"kind={instrument.kind.value}; role={instrument.role.value}; "
+                    f"kind={instrument.kind.value}; "
                     f"control={str(instrument.control_enabled).lower()}; "
                     f"backend={instrument.backend}",
                 ])
@@ -486,7 +486,7 @@ class DatRunLogger:
                     (
                         f"Instrument {instrument.id}: {instrument.display_name}; "
                         f"kind={instrument.kind.value}; "
-                        f"role={instrument.role.value}; "
+                        f"control={str(instrument.control_enabled).lower()}; "
                         f"unit={instrument.unit}"
                     ),
                 ]
@@ -520,9 +520,8 @@ class DatRunLogger:
                     f"{prefix}.Rate{rate_suffix}",
                     f"{prefix}.Activity",
                     f"{prefix}.Stability",
-                    f"{prefix}.InstrumentStable",
+                    f"{prefix}.Ready",
                     f"{prefix}.Connection",
-                    f"{prefix}.Connected",
                     f"{prefix}.ReadingAge(s)",
                     f"{prefix}.Message",
                 ]
@@ -670,11 +669,10 @@ class DatRunLogger:
                     snapshot.stability.value,
                     (
                         ""
-                        if snapshot.instrument_stable is None
-                        else str(snapshot.instrument_stable).lower()
+                        if snapshot.ready is None
+                        else str(snapshot.ready).lower()
                     ),
                     snapshot.connection_state.value,
-                    str(snapshot.connected).lower(),
                     f"{max(0.0, now - snapshot.timestamp):.3f}",
                     snapshot.message,
                 ]

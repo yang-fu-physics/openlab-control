@@ -746,12 +746,8 @@ class InstrumentScannerWindow(QMainWindow):
                 index = system_instrument.count() - 1
             system_instrument.setCurrentIndex(max(0, index))
 
-            primary = QComboBox(system_options)
-            primary.setSizeAdjustPolicy(
-                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-            )
-            primary.setMinimumContentsLength(16)
-            primary.setSizePolicy(
+            main_reading = QLabel(system_options)
+            main_reading.setSizePolicy(
                 QSizePolicy.Policy.Ignored,
                 QSizePolicy.Policy.Fixed,
             )
@@ -768,13 +764,13 @@ class InstrumentScannerWindow(QMainWindow):
             )
             system_layout.addWidget(system_instrument, 0, 1)
             system_layout.addWidget(
-                QLabel("Primary reading"),
+                QLabel("Main reading"),
                 0,
                 2,
             )
-            system_layout.addWidget(primary, 0, 3)
+            system_layout.addWidget(main_reading, 0, 3)
             system_layout.addWidget(
-                QLabel("Monitor readings"),
+                QLabel("Auxiliary readings"),
                 1,
                 0,
             )
@@ -797,20 +793,11 @@ class InstrumentScannerWindow(QMainWindow):
             ignored_message.setObjectName("mutedText")
             card_layout.addWidget(ignored_message)
 
-            selected_primary = (
-                previous.primary_reading
+            selected_auxiliary = (
+                previous.auxiliary_readings
                 if previous is not None
                 else (
-                    descriptor.primary_reading
-                    if descriptor is not None
-                    else ""
-                )
-            )
-            selected_monitors = (
-                previous.monitor_readings
-                if previous is not None
-                else (
-                    descriptor.monitor_readings
+                    descriptor.auxiliary_readings
                     if descriptor is not None
                     else ()
                 )
@@ -820,10 +807,10 @@ class InstrumentScannerWindow(QMainWindow):
                 "purpose": purpose,
                 "id": resource_id,
                 "system_instrument": system_instrument,
-                "primary": primary,
-                "monitor_layout": monitor_layout,
-                "monitor_checks": {},
-                "unavailable_monitors": (),
+                "main_label": main_reading,
+                "auxiliary_layout": monitor_layout,
+                "auxiliary_checks": {},
+                "unavailable_auxiliary": (),
                 "configuration": configuration,
                 "system_options": system_options,
                 "ignored_message": ignored_message,
@@ -833,8 +820,7 @@ class InstrumentScannerWindow(QMainWindow):
             self._rows.append(row_controls)
             self._set_reading_options(
                 row_controls,
-                selected_primary,
-                selected_monitors,
+                selected_auxiliary,
             )
             purpose.currentTextChanged.connect(
                 lambda _text, values=row_controls:
@@ -878,26 +864,23 @@ class InstrumentScannerWindow(QMainWindow):
         )
         self._set_reading_options(
             controls,
-            descriptor.primary_reading if descriptor is not None else "",
-            descriptor.monitor_readings if descriptor is not None else (),
+            descriptor.auxiliary_readings if descriptor is not None else (),
         )
 
     def _set_reading_options(
         self,
         controls: dict[str, Any],
-        selected_primary: str,
-        selected_monitors: tuple[str, ...],
+        selected_auxiliary: tuple[str, ...],
     ) -> None:
-        primary: QComboBox = controls["primary"]
-        primary.clear()
-        monitor_layout: QVBoxLayout = controls["monitor_layout"]
-        while monitor_layout.count():
-            item = monitor_layout.takeAt(0)
+        main_label: QLabel = controls["main_label"]
+        auxiliary_layout: QVBoxLayout = controls["auxiliary_layout"]
+        while auxiliary_layout.count():
+            item = auxiliary_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
-        controls["monitor_checks"] = {}
-        controls["unavailable_monitors"] = ()
+        controls["auxiliary_checks"] = {}
+        controls["unavailable_auxiliary"] = ()
 
         descriptor = self._descriptor(
             str(
@@ -906,57 +889,41 @@ class InstrumentScannerWindow(QMainWindow):
             )
         )
         if descriptor is None:
-            primary.addItem(
-                "Select a System Instrument first",
-                "",
-            )
+            main_label.setText("Select a System Instrument first")
             note = QLabel(
                 "Select a System Instrument to see available readings."
             )
             note.setObjectName("mutedText")
-            monitor_layout.addWidget(note)
-            monitor_layout.addStretch(1)
+            auxiliary_layout.addWidget(note)
+            auxiliary_layout.addStretch(1)
             return
 
-        labels = dict(descriptor.reading_labels)
-        if descriptor.primary_reading:
-            primary.addItem(
-                labels[descriptor.primary_reading],
-                descriptor.primary_reading,
-            )
-        else:
-            primary.addItem("No primary reading declared", "")
-        primary_index = primary.findData(selected_primary)
-        if selected_primary and primary_index < 0:
-            primary.insertItem(
-                0,
-                f"Unavailable reading: {selected_primary}",
-                "",
-            )
-            primary_index = 0
-        primary.setCurrentIndex(max(0, primary_index))
+        main_label.setText(descriptor.reading(descriptor.main_reading).label)
 
-        selected_monitor_set = set(selected_monitors)
-        for reading in descriptor.monitor_readings:
-            checkbox = QCheckBox(labels[reading], controls["card"])
-            checkbox.setChecked(reading in selected_monitor_set)
-            controls["monitor_checks"][reading] = checkbox
-            monitor_layout.addWidget(checkbox)
-        unavailable = selected_monitor_set - set(
-            descriptor.monitor_readings
+        selected_auxiliary_set = set(selected_auxiliary)
+        for reading in descriptor.auxiliary_readings:
+            checkbox = QCheckBox(
+                descriptor.reading(reading).label,
+                controls["card"],
+            )
+            checkbox.setChecked(reading in selected_auxiliary_set)
+            controls["auxiliary_checks"][reading] = checkbox
+            auxiliary_layout.addWidget(checkbox)
+        unavailable = selected_auxiliary_set - set(
+            descriptor.auxiliary_readings
         )
-        controls["unavailable_monitors"] = tuple(sorted(unavailable))
+        controls["unavailable_auxiliary"] = tuple(sorted(unavailable))
         if unavailable:
             warning = QLabel(
                 "Unavailable: " + ", ".join(sorted(unavailable))
             )
             warning.setStyleSheet("color:#b91c1c;")
-            monitor_layout.addWidget(warning)
-        elif not descriptor.monitor_readings:
-            note = QLabel("No optional monitor readings declared.")
+            auxiliary_layout.addWidget(warning)
+        elif not descriptor.auxiliary_readings:
+            note = QLabel("No optional auxiliary readings declared.")
             note.setObjectName("mutedText")
-            monitor_layout.addWidget(note)
-        monitor_layout.addStretch(1)
+            auxiliary_layout.addWidget(note)
+        auxiliary_layout.addStretch(1)
 
     def _update_row_enabled(
         self,
@@ -996,10 +963,10 @@ class InstrumentScannerWindow(QMainWindow):
             if use == "Ignore":
                 continue
             result: VisaScanResult = controls["result"]
-            monitors = tuple(
+            auxiliary = tuple(
                 reading
                 for reading, checkbox in controls[
-                    "monitor_checks"
+                    "auxiliary_checks"
                 ].items()
                 if checkbox.isChecked()
             )
@@ -1019,16 +986,8 @@ class InstrumentScannerWindow(QMainWindow):
                         if use == "System"
                         else ""
                     ),
-                    primary_reading=(
-                        str(
-                            controls["primary"].currentData()
-                            or ""
-                        )
-                        if use == "System"
-                        else ""
-                    ),
-                    monitor_readings=(
-                        monitors
+                    auxiliary_readings=(
+                        auxiliary
                         if use == "System"
                         else ()
                     ),
@@ -1099,13 +1058,8 @@ class InstrumentScannerWindow(QMainWindow):
                     or ""
                 ).strip():
                     fields.append("System Instrument")
-                if not str(
-                    controls["primary"].currentData()
-                    or ""
-                ).strip():
-                    fields.append("Primary reading")
-                if controls["unavailable_monitors"]:
-                    fields.append("Unavailable monitor readings")
+                if controls["unavailable_auxiliary"]:
+                    fields.append("Unavailable auxiliary readings")
             if fields:
                 result: VisaScanResult = controls["result"]
                 missing.append(

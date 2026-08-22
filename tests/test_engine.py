@@ -549,7 +549,6 @@ class SequenceEngineTests(unittest.TestCase):
                 display_name=temperature.display_name,
                 kind=InstrumentKind.TEMPERATURE,
                 timestamp=now,
-                connected=True,
                 unit=temperature.unit,
                 current=300.0,
                 target=299.0,

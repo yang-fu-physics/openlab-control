@@ -24,7 +24,6 @@ from labcontrol.models import (  # noqa: E402
     InstrumentConnectionState,
     InstrumentKind,
     InstrumentMetric,
-    InstrumentRole,
     InstrumentSnapshot,
     LabEvent,
     Severity,
@@ -56,7 +55,6 @@ class StatusTileTests(unittest.TestCase):
             display_name="2nd Stage",
             kind=InstrumentKind.MONITOR,
             timestamp=time.monotonic(),
-            connected=True,
             unit="K",
             current=4.2345,
             activity=InstrumentActivity.IDLE,
@@ -93,7 +91,6 @@ class StatusTileTests(unittest.TestCase):
             display_name="Temperature",
             kind=InstrumentKind.TEMPERATURE,
             timestamp=time.monotonic(),
-            connected=True,
             unit="K",
             current=4.2,
             target=4.0,
@@ -182,7 +179,6 @@ class StatusTileTests(unittest.TestCase):
             display_name="Temperature",
             kind=InstrumentKind.TEMPERATURE,
             timestamp=123.0,
-            connected=True,
             unit="K",
             current=4.2,
         )
@@ -220,7 +216,6 @@ class StatusTileTests(unittest.TestCase):
             "Temperature",
             InstrumentKind.TEMPERATURE,
             time.monotonic(),
-            False,
             "K",
             message="Retrying for up to 60 seconds",
             connection_state=InstrumentConnectionState.RECONNECTING,
@@ -240,7 +235,6 @@ class StatusTileTests(unittest.TestCase):
         secondary = replace(
             config.instrument("temperature"),
             id="temperature_backup",
-            role=InstrumentRole.SECONDARY,
             control_enabled=False,
         )
         tile = StatusTile(
@@ -257,7 +251,6 @@ class StatusTileTests(unittest.TestCase):
                 secondary.display_name,
                 secondary.kind,
                 time.monotonic(),
-                True,
                 secondary.unit,
                 10.0,
                 10.0,
@@ -291,11 +284,11 @@ class StatusTileTests(unittest.TestCase):
     def test_temperature_and_oe_field_use_requested_precision(self) -> None:
         now = time.monotonic()
         temperature = InstrumentSnapshot(
-            "temperature", "Temperature", InstrumentKind.TEMPERATURE, now, True, "K",
+            "temperature", "Temperature", InstrumentKind.TEMPERATURE, now, "K",
             300.1236, 299.9, 10.0, InstrumentActivity.MOVING,
         )
         field = InstrumentSnapshot(
-            "field", "Magnetic Field", InstrumentKind.FIELD, now, True, "Oe",
+            "field", "Magnetic Field", InstrumentKind.FIELD, now, "Oe",
             123.456, 200.0, 5000.0, InstrumentActivity.MOVING,
         )
         temperature_tile = StatusTile("temperature", "Temperature", InstrumentKind.TEMPERATURE)
@@ -431,7 +424,6 @@ class StatusTileTests(unittest.TestCase):
             replace(
                 temperature,
                 id="cryostat_backup",
-                role=InstrumentRole.SECONDARY,
                 control_enabled=False,
                 min_value=2.0,
                 max_value=350.0,

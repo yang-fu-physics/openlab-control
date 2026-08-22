@@ -1,9 +1,8 @@
 """读取和写入现场物理仪表资源表。
 
-资源表只回答“哪台物理仪表位于哪个通讯地址”。System Instrument 与 Measurement
-Module 都用稳定的资源 ID 引用它，避免同一个 VISA 地址散落在多个设置文件中。资源表不
-保存输出状态、目标值或安全上下限；这些仍由具体 System Instrument 或 Measurement Module
-负责验证。
+资源表记录物理地址和用途；System 资源还记录扫描时确认的 System Instrument 与需要显示的
+辅助读数。主读数和读数元数据来自 ``instrument.toml``，控制权限与安全上下限来自现场主配置。
+资源表不保存输出状态、目标值或安全限制。
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 
-RESOURCE_FILE_VERSION = 1
+RESOURCE_FILE_VERSION = 2
 _RESOURCE_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _READING_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 _PURPOSES = frozenset({"system", "measurement"})
@@ -33,8 +32,8 @@ class InstrumentResource:
     """一台物理仪表的稳定名称、通讯地址及人工确认结果。
 
     ``system_instrument`` 只在 ``purpose="system"`` 时使用，值为 System Instrument 的目录/清单
-    ID。``primary_reading`` 和 ``monitor_readings`` 记录扫描工具中由用户确认的通道角色；
-    System Instrument 仍须在连接时验证这些通道真实存在，不能只相信扫描结果。
+    ID。主读数由 System Instrument 清单定义；``auxiliary_readings`` 只记录操作者选择显示的
+    附加读数。System Instrument 仍须在连接时验证这些通道真实存在，不能只相信扫描结果。
     """
 
     id: str
@@ -42,8 +41,7 @@ class InstrumentResource:
     identity: str = ""
     purpose: str = "measurement"
     system_instrument: str = ""
-    primary_reading: str = ""
-    monitor_readings: tuple[str, ...] = ()
+    auxiliary_readings: tuple[str, ...] = ()
 
     def public_payload(self) -> dict[str, Any]:
         """返回可安全传给 Measurement Module 前后端的只读 JSON 视图。"""
@@ -54,8 +52,7 @@ class InstrumentResource:
             "identity": self.identity,
             "purpose": self.purpose,
             "system_instrument": self.system_instrument,
-            "primary_reading": self.primary_reading,
-            "monitor_readings": list(self.monitor_readings),
+            "auxiliary_readings": list(self.auxiliary_readings),
         }
 
 
@@ -139,31 +136,22 @@ def validate_resources(
             f"resources[{index}].system_instrument",
             allow_empty=True,
         )
-        primary = _reading_id(
-            item.primary_reading,
-            f"resources[{index}].primary_reading",
-            allow_empty=True,
-        )
-        monitors = tuple(
+        auxiliary = tuple(
             _reading_id(
                 value,
-                f"resources[{index}].monitor_readings",
+                f"resources[{index}].auxiliary_readings",
             )
-            for value in item.monitor_readings
+            for value in item.auxiliary_readings
         )
-        if len(monitors) != len(set(monitors)):
+        if len(auxiliary) != len(set(auxiliary)):
             raise InstrumentResourceError(
-                f"resources[{index}].monitor_readings contains duplicates"
-            )
-        if primary and primary in monitors:
-            raise InstrumentResourceError(
-                f"resources[{index}] cannot use {primary!r} as both primary and monitor"
+                f"resources[{index}].auxiliary_readings contains duplicates"
             )
         if purpose == "system" and not system_instrument:
             raise InstrumentResourceError(
                 f"resources[{index}].system_instrument is required for a system resource"
             )
-        if purpose == "measurement" and (primary or monitors):
+        if purpose == "measurement" and auxiliary:
             raise InstrumentResourceError(
                 f"resources[{index}] measurement resources cannot declare system readings"
             )
@@ -178,8 +166,7 @@ def validate_resources(
                 identity=identity,
                 purpose=purpose,
                 system_instrument=system_instrument,
-                primary_reading=primary,
-                monitor_readings=monitors,
+                auxiliary_readings=auxiliary,
             )
         )
     return tuple(result)
@@ -218,8 +205,7 @@ def load_instrument_resources(path: str | Path) -> tuple[InstrumentResource, ...
         "identity",
         "purpose",
         "system_instrument",
-        "primary_reading",
-        "monitor_readings",
+        "auxiliary_readings",
     }
     for index, entry in enumerate(entries, start=1):
         if not isinstance(entry, dict):
@@ -235,12 +221,12 @@ def load_instrument_resources(path: str | Path) -> tuple[InstrumentResource, ...
             raise InstrumentResourceError(
                 f"resources[{index}] requires id and address"
             )
-        raw_monitors = entry.get("monitor_readings", [])
-        if not isinstance(raw_monitors, list) or any(
-            not isinstance(value, str) for value in raw_monitors
+        raw_auxiliary = entry.get("auxiliary_readings", [])
+        if not isinstance(raw_auxiliary, list) or any(
+            not isinstance(value, str) for value in raw_auxiliary
         ):
             raise InstrumentResourceError(
-                f"resources[{index}].monitor_readings must be an array of strings"
+                f"resources[{index}].auxiliary_readings must be an array of strings"
             )
         resources.append(
             InstrumentResource(
@@ -249,8 +235,7 @@ def load_instrument_resources(path: str | Path) -> tuple[InstrumentResource, ...
                 identity=entry.get("identity", ""),
                 purpose=entry.get("purpose", "measurement"),
                 system_instrument=entry.get("system_instrument", ""),
-                primary_reading=entry.get("primary_reading", ""),
-                monitor_readings=tuple(raw_monitors),
+                auxiliary_readings=tuple(raw_auxiliary),
             )
         )
     return validate_resources(resources)
@@ -283,9 +268,8 @@ def render_instrument_resources(
                 f"identity = {_toml_string(item.identity)}",
                 f"purpose = {_toml_string(item.purpose)}",
                 f"system_instrument = {_toml_string(item.system_instrument)}",
-                f"primary_reading = {_toml_string(item.primary_reading)}",
-                "monitor_readings = ["
-                + ", ".join(_toml_string(value) for value in item.monitor_readings)
+                "auxiliary_readings = ["
+                + ", ".join(_toml_string(value) for value in item.auxiliary_readings)
                 + "]",
             ]
         )

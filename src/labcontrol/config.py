@@ -14,7 +14,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from .instrument_resources import (
@@ -22,7 +22,10 @@ from .instrument_resources import (
     InstrumentResourceError,
     load_instrument_resources,
 )
-from .models import InstrumentKind, InstrumentRole, Severity
+from .models import InstrumentKind, Severity
+
+if TYPE_CHECKING:
+    from .instruments.manifest import SystemInstrumentDescriptor
 
 
 class ConfigurationError(ValueError):
@@ -56,11 +59,21 @@ class StabilityConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class InstrumentConfig:
-    """一个逻辑系统仪表实例的后端选择、角色、限制和超时。
+class InstrumentReadingConfig:
+    """一个读数的稳定键和显示元数据。"""
 
-    ``backend`` 可以指向内置 ``module:class``，也可以是外部 System Instrument 的清单 ID。
-    ``control_enabled`` 是运行时的最终授权边界：Monitor 和只读仪表不能因 UI 操作而绕过它。
+    key: str
+    display_name: str
+    unit: str = ""
+    decimals: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InstrumentConfig:
+    """一个逻辑系统仪表实例的后端选择、读数、限制和超时。
+
+    外部 ``backend`` 从物理资源选择自动得到；只有内置模拟仪表在站点配置中直接声明入口。
+    ``control_enabled`` 是运行时的最终授权边界：只读仪表不能因 UI 操作而绕过它。
     ``extras`` 原样传递给具体驱动，便于更换仪表时只改 TOML。
     """
 
@@ -70,9 +83,11 @@ class InstrumentConfig:
     backend: str
     resource_id: str = ""
     address: str = ""
-    role: InstrumentRole = InstrumentRole.SECONDARY
     control_enabled: bool = False
     unit: str = ""
+    main_reading: str = "value"
+    auxiliary_readings: tuple[str, ...] = ()
+    readings: tuple[InstrumentReadingConfig, ...] = ()
     initial_value: float = 0.0
     default_rate_per_minute: float = 1.0
     min_value: float = float("-inf")
@@ -83,6 +98,12 @@ class InstrumentConfig:
     shutdown_timeout_seconds: float = 3.0
     stability: StabilityConfig | None = None
     extras: dict[str, Any] = field(default_factory=dict)
+
+    def reading(self, key: str) -> InstrumentReadingConfig:
+        for reading in self.readings:
+            if reading.key == key:
+                return reading
+        raise KeyError(key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,10 +364,11 @@ def _instrument_identifier(value: object) -> str:
 def _instrument_config(
     raw: dict[str, Any],
     resources: dict[str, InstrumentResource],
+    descriptors: dict[str, "SystemInstrumentDescriptor"],
 ) -> InstrumentConfig:
-    """把一个 ``[[instruments]]`` 表转换为经过角色与安全限制校验的配置。"""
+    """把一个 ``[[instruments]]`` 表转换为经过安全限制校验的配置。"""
 
-    required = ("id", "display_name", "kind", "backend")
+    required = ("id", "display_name", "kind")
     missing = [key for key in required if key not in raw]
     if missing:
         raise ConfigurationError(f"Instrument configuration is missing fields: {', '.join(missing)}")
@@ -357,43 +379,35 @@ def _instrument_config(
 
     instrument_id = _instrument_identifier(raw["id"])
     prefix = f"Instrument {instrument_id}"
-    default_role = (
-        InstrumentRole.MONITOR
-        if kind is InstrumentKind.MONITOR
-        else InstrumentRole.SECONDARY
-    )
-    try:
-        role = InstrumentRole(str(raw.get("role", default_role.value)).strip().casefold())
-    except ValueError as exc:
+    if "role" in raw:
         raise ConfigurationError(
-            f"{prefix} role must be primary, secondary, or monitor"
-        ) from exc
+            f"{prefix} role is no longer used; control_enabled alone selects the controller"
+        )
+    derived_reading_fields = sorted(
+        set(raw)
+        & {
+            "auxiliary_readings",
+            "main_reading",
+            "monitor_readings",
+            "primary_reading",
+            "reading_labels",
+            "readings",
+        }
+    )
+    if derived_reading_fields:
+        raise ConfigurationError(
+            f"{prefix} reading metadata comes from its System Instrument manifest; "
+            f"remove: {', '.join(derived_reading_fields)}"
+        )
     control_enabled = _boolean(
-        raw.get("control_enabled", role is InstrumentRole.PRIMARY),
+        raw.get("control_enabled", False),
         f"{prefix} control_enabled",
     )
     if kind is InstrumentKind.MONITOR:
-        if role is not InstrumentRole.MONITOR:
-            raise ConfigurationError(
-                f"{prefix} kind=monitor requires role=monitor"
-            )
         if control_enabled:
             raise ConfigurationError(
                 f"{prefix} monitor instruments cannot enable control"
             )
-    else:
-        if role is InstrumentRole.MONITOR:
-            raise ConfigurationError(
-                f"{prefix} temperature/field instruments use primary or secondary role"
-            )
-        if role is InstrumentRole.PRIMARY and not control_enabled:
-            raise ConfigurationError(
-                f"{prefix} primary instruments must enable control"
-            )
-    initial_value = _finite_float(
-        raw.get("initial_value", 0.0),
-        f"{prefix} initial_value",
-    )
     default_rate = _finite_float(
         raw.get("default_rate_per_minute", 1.0),
         f"{prefix} default_rate_per_minute",
@@ -461,19 +475,24 @@ def _instrument_config(
             stale_after_seconds=stale_after,
         )
 
-    backend = str(raw["backend"]).strip()
     if "address" in raw:
         raise ConfigurationError(
             f"{prefix} must store its physical address in the instrument "
             "resource file and select it with resource"
         )
     resource_id = str(raw.get("resource", "")).strip()
-    resource = None
     if resource_id:
-        if ":" in backend:
+        if "backend" in raw:
             raise ConfigurationError(
-                f"{prefix} uses a built-in backend and cannot select a "
-                "physical instrument resource"
+                f"{prefix} backend is selected by its resource and must not be repeated"
+            )
+        if "unit" in raw:
+            raise ConfigurationError(
+                f"{prefix} unit is declared by its System Instrument manifest"
+            )
+        if "initial_value" in raw:
+            raise ConfigurationError(
+                f"{prefix} initial_value is only used by built-in simulators"
             )
         resource = resources.get(resource_id)
         if resource is None:
@@ -484,22 +503,71 @@ def _instrument_config(
             raise ConfigurationError(
                 f"{prefix} resource {resource_id!r} is reserved for a Measurement Module"
             )
-        if resource.system_instrument != backend:
+        backend = resource.system_instrument
+        descriptor = descriptors.get(backend)
+        if descriptor is None:
             raise ConfigurationError(
-                f"{prefix} backend {backend!r} does not match resource System "
-                f"Instrument {resource.system_instrument!r}"
+                f"{prefix} selects missing System Instrument {backend!r}"
             )
+        if not descriptor.can_load:
+            raise ConfigurationError(
+                f"{prefix} selects invalid System Instrument {backend!r}: {descriptor.error}"
+            )
+        if kind not in descriptor.kinds:
+            raise ConfigurationError(
+                f"{prefix} System Instrument {backend!r} does not support {kind.value}"
+            )
+        unsupported_auxiliary = set(resource.auxiliary_readings) - set(
+            descriptor.auxiliary_readings
+        )
+        if unsupported_auxiliary:
+            raise ConfigurationError(
+                f"{prefix} resource selects unsupported auxiliary readings: "
+                + ", ".join(sorted(unsupported_auxiliary))
+            )
+        selected_keys = (descriptor.main_reading, *resource.auxiliary_readings)
+        readings = tuple(
+            InstrumentReadingConfig(
+                key=metadata.key,
+                display_name=metadata.label,
+                unit=metadata.unit,
+                decimals=metadata.decimals,
+            )
+            for metadata in (descriptor.reading(key) for key in selected_keys)
+        )
+        main_reading = descriptor.main_reading
+        auxiliary_readings = resource.auxiliary_readings
+        unit = readings[0].unit
         address = resource.address
+        initial_value = 0.0
     else:
+        if "backend" not in raw:
+            raise ConfigurationError(
+                f"{prefix} requires resource for a real instrument or backend for a built-in simulator"
+            )
+        backend = str(raw["backend"]).strip()
         if ":" not in backend:
             raise ConfigurationError(
-                f"{prefix} selects external System Instrument {backend!r} "
-                "but has no resource"
+                f"{prefix} external System Instruments must be selected through resource"
             )
+        unit = str(raw.get("unit", ""))
+        main_reading = "value"
+        auxiliary_readings = ()
+        readings = (
+            InstrumentReadingConfig(
+                key=main_reading,
+                display_name=str(raw["display_name"]),
+                unit=unit,
+            ),
+        )
         address = ""
+        initial_value = _finite_float(
+            raw.get("initial_value", 0.0),
+            f"{prefix} initial_value",
+        )
 
     known = {
-        "id", "display_name", "kind", "backend", "role", "control_enabled",
+        "id", "display_name", "kind", "backend", "control_enabled",
         "resource",
         "unit", "initial_value",
         "default_rate_per_minute", "min_value", "max_value",
@@ -516,9 +584,11 @@ def _instrument_config(
         backend=backend,
         resource_id=resource_id,
         address=address,
-        role=role,
         control_enabled=control_enabled,
-        unit=str(raw.get("unit", "")),
+        unit=unit,
+        main_reading=main_reading,
+        auxiliary_readings=auxiliary_readings,
+        readings=readings,
         initial_value=initial_value,
         default_rate_per_minute=default_rate,
         min_value=min_value,
@@ -528,13 +598,7 @@ def _instrument_config(
         operation_timeout_seconds=operation_timeout,
         shutdown_timeout_seconds=shutdown_timeout,
         stability=stability,
-        extras={
-            **({
-                "primary_reading": resource.primary_reading,
-                "monitor_readings": list(resource.monitor_readings),
-            } if resource is not None else {}),
-            **{key: value for key, value in raw.items() if key not in known},
-        },
+        extras={key: value for key, value in raw.items() if key not in known},
     )
     if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
         if instrument.min_value >= instrument.max_value:
@@ -545,7 +609,14 @@ def _instrument_config(
             raise ConfigurationError(
                 f"Instrument {instrument.id}: default rate must not exceed max_rate_per_minute"
             )
-        if not instrument.min_value <= instrument.initial_value <= instrument.max_value:
+        if (
+            not resource_id
+            and not (
+                instrument.min_value
+                <= instrument.initial_value
+                <= instrument.max_value
+            )
+        ):
             raise ConfigurationError(
                 f"Instrument {instrument.id}: initial_value must be within min_value and max_value"
             )
@@ -555,8 +626,8 @@ def _instrument_config(
 def load_config(path: str | Path) -> AppConfig:
     """加载 TOML 并返回完整 :class:`AppConfig`。
 
-    该函数是配置的唯一入口。它会拒绝重复仪表 ID、多个同类主控仪表、不可控的 primary、
-    可控的 monitor、无效文件名、越界初始值和不安全的报警地址。调用方可以假定返回对象的
+    该函数是配置的唯一入口。它会拒绝重复仪表 ID、多个同类可控仪表、可控的 monitor、
+    无效文件名、越界初始值和不安全的报警地址。调用方可以假定返回对象的
     结构约束已经成立，但实际目标值仍必须由 ``InstrumentManager.validate_target`` 再检查。
     """
 
@@ -588,9 +659,33 @@ def load_config(path: str | Path) -> AppConfig:
         item.id: item
         for item in instrument_resources
     }
+    from .instruments.manifest import load_instrument_manifest
+
+    instrument_directory_value = str(
+        system_instrument_raw.get("directory", "system_instruments")
+    )
+    instrument_directory = Path(instrument_directory_value)
+    if not instrument_directory.is_absolute():
+        instrument_directory = source.parent.parent / instrument_directory
+    descriptors: dict[str, SystemInstrumentDescriptor] = {}
+    if instrument_directory.is_dir():
+        for instrument_path in sorted(
+            instrument_directory.iterdir(),
+            key=lambda item: item.name.casefold(),
+        ):
+            if not instrument_path.is_dir() or not (
+                instrument_path / "instrument.toml"
+            ).is_file():
+                continue
+            descriptor = load_instrument_manifest(instrument_path)
+            if descriptor.id in descriptors:
+                raise ConfigurationError(
+                    f"Duplicate System Instrument id: {descriptor.id}"
+                )
+            descriptors[descriptor.id] = descriptor
     raw_instruments = list(raw.get("instruments", []))
     parsed_instruments = [
-        _instrument_config(item, resources_by_id)
+        _instrument_config(item, resources_by_id, descriptors)
         for item in raw_instruments
     ]
     instruments = tuple(parsed_instruments)
@@ -607,18 +702,18 @@ def load_config(path: str | Path) -> AppConfig:
     if len(selected_resources) != len(set(selected_resources)):
         raise ConfigurationError(
             "A physical instrument resource can be selected by only one "
-            "[[instruments]] entry; return its additional readings as metrics"
+            "[[instruments]] entry; return its additional readings as auxiliary values"
         )
     for kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
-        primary = [
+        controllers = [
             instrument.id
             for instrument in instruments
-            if instrument.kind is kind and instrument.role is InstrumentRole.PRIMARY
+            if instrument.kind is kind and instrument.control_enabled
         ]
-        if len(primary) > 1:
+        if len(controllers) > 1:
             raise ConfigurationError(
-                f"Only one primary {kind.value} instrument is allowed: "
-                + ", ".join(primary)
+                f"Only one controllable {kind.value} instrument is allowed: "
+                + ", ".join(controllers)
             )
 
     ui_refresh_ms = _positive_int(

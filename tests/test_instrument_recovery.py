@@ -18,7 +18,6 @@ from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     InstrumentConnectionState,
-    InstrumentRole,
     Severity,
 )
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
@@ -36,9 +35,11 @@ def _write_instrument(
             'id = "recovery_test"\n'
             'name = "Recovery Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "1.2"\n'
+            'api_version = "2"\n'
             'backend = "backend:RecoveryInstrument"\n'
             f"kinds = [{kinds}]\n"
+            'main_reading = "value"\n'
+            '[readings.value]\nlabel = "Value"\nunit = "K"\n'
         ),
         encoding="utf-8",
     )
@@ -75,31 +76,26 @@ def _source(
         "import time\n"
         "from pathlib import Path\n"
         "from labcontrol.instruments.base import InstrumentError, SystemInstrument\n"
-        "from labcontrol.models import InstrumentActivity, InstrumentSnapshot\n"
         f"FAILURE = Path({str(failure_file)!r})\n"
         f"{marker_setup}"
         "class RecoveryInstrument(SystemInstrument):\n"
-        "    def __init__(self, config, simulation_speed=1.0):\n"
-        "        super().__init__(config, simulation_speed)\n"
+        "    def __init__(self, config):\n"
+        "        super().__init__(config)\n"
         "        self.connected = False\n"
         "        self.target = config.initial_value\n"
         "        self.rate = config.default_rate_per_minute\n"
-        "    async def connect(self):\n"
+        "    def open(self):\n"
         f"{connect_body}"
-        "    async def disconnect(self):\n"
+        "    def close(self):\n"
         "        self.connected = False\n"
-        "    async def poll(self):\n"
+        "    def read_status(self):\n"
         "        if FAILURE.exists():\n"
         "            raise InstrumentError('temporary link failure', 'LINK_LOST')\n"
-        "        return InstrumentSnapshot(\n"
-        "            self.config.id, self.config.display_name, self.config.kind,\n"
-        "            time.monotonic(), True, self.config.unit,\n"
-        "            self.target, self.target, self.rate, InstrumentActivity.HOLDING,\n"
-        "        )\n"
-        "    async def set_target(self, value, rate_per_minute, mode='Settle'):\n"
+        "        return {'value': self.target, 'target': self.target, 'rate': self.rate}\n"
+        "    def set_target(self, value, rate_per_minute, mode='Settle'):\n"
         f"{set_body}"
         "        self.rate = rate_per_minute\n"
-        "    async def hold(self):\n"
+        "    def hold(self):\n"
         "        if not self.connected:\n"
         "            raise InstrumentError('not connected', 'NOT_CONNECTED')\n"
     )
@@ -128,7 +124,6 @@ class InstrumentRecoveryTests(unittest.TestCase):
             selected = replace(
                 base.instrument("second_stage"),
                 backend="recovery_test",
-                role=InstrumentRole.MONITOR,
                 control_enabled=False,
                 operation_timeout_seconds=operation_timeout,
                 shutdown_timeout_seconds=0.1,
@@ -137,7 +132,6 @@ class InstrumentRecoveryTests(unittest.TestCase):
             selected = replace(
                 base.instrument("temperature"),
                 backend="recovery_test",
-                role=InstrumentRole.PRIMARY,
                 control_enabled=True,
                 operation_timeout_seconds=operation_timeout,
                 shutdown_timeout_seconds=0.1,

@@ -28,14 +28,6 @@ class InstrumentKind(str, Enum):
     MONITOR = "monitor"
 
 
-class InstrumentRole(str, Enum):
-    """同类仪表中的职责；目前每类最多一个 primary 参与标准控制。"""
-
-    PRIMARY = "primary"
-    SECONDARY = "secondary"
-    MONITOR = "monitor"
-
-
 class InstrumentActivity(str, Enum):
     """仪表当前动作，用于状态展示和运行快照。"""
 
@@ -47,7 +39,7 @@ class InstrumentActivity(str, Enum):
 
 
 class InstrumentConnectionState(str, Enum):
-    """仪表连接生命周期；与一次读数的 ``connected`` 标志分开保存。"""
+    """仪表连接生命周期，也是 ``InstrumentSnapshot.connected`` 的唯一来源。"""
 
     STARTING = "starting"
     CONNECTED = "connected"
@@ -107,7 +99,6 @@ class InstrumentSnapshot:
     display_name: str
     kind: InstrumentKind
     timestamp: float
-    connected: bool
     unit: str = ""
     current: float | None = None
     target: float | None = None
@@ -116,8 +107,14 @@ class InstrumentSnapshot:
     stability: StabilityState = StabilityState.NOT_APPLICABLE
     message: str = ""
     connection_state: InstrumentConnectionState = InstrumentConnectionState.CONNECTED
-    instrument_stable: bool | None = None
+    ready: bool | None = None
     metrics: dict[str, InstrumentMetric] = field(default_factory=dict)
+
+    @property
+    def connected(self) -> bool:
+        """连接状态只由 ``connection_state`` 决定，避免两份状态互相矛盾。"""
+
+        return self.connection_state is InstrumentConnectionState.CONNECTED
 
 
 @dataclass(slots=True)

@@ -257,11 +257,6 @@ class MeasurementModuleService:
             payload[instrument_id] = {
                 "display_name": snapshot.display_name,
                 "kind": snapshot.kind.value,
-                "role": (
-                    ""
-                    if instrument_config is None
-                    else instrument_config.role.value
-                ),
                 "control_enabled": (
                     False
                     if instrument_config is None
@@ -277,7 +272,7 @@ class MeasurementModuleService:
                 "stability": snapshot.stability.value,
                 "message": snapshot.message,
                 "connection_state": snapshot.connection_state.value,
-                "instrument_stable": snapshot.instrument_stable,
+                "ready": snapshot.ready,
                 "metrics": {
                     metric_key: {
                         "display_name": metric.display_name,

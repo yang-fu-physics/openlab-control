@@ -112,20 +112,20 @@ class StabilityTests(unittest.TestCase):
                 10.0,
                 10.0,
                 moment,
-                instrument_stable=False,
+                ready=False,
             )
         self.assertEqual(blocked.state, StabilityState.SETTLING)
         first_allowed = evaluator.update(
             10.0,
             10.0,
             2.0,
-            instrument_stable=True,
+            ready=True,
         )
         stable = evaluator.update(
             10.0,
             10.0,
             2.5,
-            instrument_stable=True,
+            ready=True,
         )
         self.assertEqual(first_allowed.state, StabilityState.SETTLING)
         self.assertEqual(stable.state, StabilityState.STABLE)

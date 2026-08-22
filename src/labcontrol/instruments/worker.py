@@ -24,14 +24,6 @@ from ..config import InstrumentConfig
 from ..package_support.dependencies import dependency_runtime_errors
 from ..package_support.loading import load_import_object, load_source_object
 from ..package_support.trust import content_tree_digest
-from ..models import (
-    InstrumentActivity,
-    InstrumentConnectionState,
-    InstrumentKind,
-    InstrumentMetric,
-    InstrumentSnapshot,
-    StabilityState,
-)
 from .base import InstrumentError, SystemInstrument, InstrumentWarning, SafetyViolation
 
 
@@ -122,157 +114,80 @@ def _receive_message(connection: Connection) -> dict[str, Any]:
     return dict(value)
 
 
-def _snapshot_payload(snapshot: InstrumentSnapshot) -> dict[str, Any]:
-    """把仪表快照转换为仅含 JSON 标量的 IPC 载荷。"""
+def _reading_payload(reading: object) -> dict[str, Any]:
+    """验证驱动边界，只允许文档声明的 JSON 标量读数。"""
 
-    if snapshot.instrument_stable is not None and not isinstance(
-        snapshot.instrument_stable,
-        bool,
-    ):
+    if not isinstance(reading, dict):
         raise InstrumentError(
-            "instrument_stable must be boolean or null",
-            "INVALID_INSTRUMENT_SNAPSHOT",
+            "Instrument read methods must return a dictionary",
+            "INVALID_INSTRUMENT_READING",
         )
-    if not isinstance(snapshot.metrics, dict):
+    allowed = {"value", "target", "rate", "moving", "ready", "auxiliary"}
+    unknown = set(reading) - allowed
+    if unknown:
         raise InstrumentError(
-            "metrics must be a dictionary of InstrumentMetric values",
-            "INVALID_INSTRUMENT_SNAPSHOT",
+            "Instrument reading contains unknown fields: " + ", ".join(sorted(unknown)),
+            "INVALID_INSTRUMENT_READING",
         )
-    metric_payloads: list[dict[str, Any]] = []
-    for key, metric in snapshot.metrics.items():
+    if "value" not in reading:
+        raise InstrumentError(
+            "Instrument reading is missing value",
+            "INVALID_INSTRUMENT_READING",
+        )
+    result = dict(reading)
+    for key in ("value", "target", "rate"):
+        value = result.get(key)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise InstrumentError(
+                f"Instrument reading {key} must be a finite number or null",
+                "NONFINITE_INSTRUMENT_READING",
+            )
+    for key in ("moving", "ready"):
+        value = result.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise InstrumentError(
+                f"Instrument reading {key} must be boolean or null",
+                "INVALID_INSTRUMENT_READING",
+            )
+    auxiliary = result.get("auxiliary", {})
+    if not isinstance(auxiliary, dict):
+        raise InstrumentError(
+            "Instrument reading auxiliary must be a dictionary",
+            "INVALID_INSTRUMENT_READING",
+        )
+    for key, value in auxiliary.items():
         if not isinstance(key, str):
             raise InstrumentError(
-                "metric keys must be text",
-                "INVALID_INSTRUMENT_SNAPSHOT",
+                "Auxiliary reading keys must be text",
+                "INVALID_INSTRUMENT_READING",
             )
-        if not isinstance(metric, InstrumentMetric):
+        if not isinstance(value, (int, float, str, bool, type(None))):
             raise InstrumentError(
-                "metrics must contain only InstrumentMetric values",
-                "INVALID_INSTRUMENT_SNAPSHOT",
-            )
-        if not isinstance(metric.value, (int, float, str, bool, type(None))):
-            raise InstrumentError(
-                "metric values must be JSON scalars",
-                "INVALID_INSTRUMENT_SNAPSHOT",
+                f"Auxiliary reading {key!r} must be a JSON scalar",
+                "INVALID_INSTRUMENT_READING",
             )
         if (
-            isinstance(metric.value, (int, float))
-            and not isinstance(metric.value, bool)
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and not math.isfinite(value)
         ):
-            try:
-                finite = math.isfinite(metric.value)
-            except OverflowError:
-                finite = False
-            if not finite:
-                raise InstrumentError(
-                    "metric numeric values must be finite",
-                    "NONFINITE_INSTRUMENT_READING",
-                )
-        metric_payloads.append(
-            {
-                "key": key,
-                "display_name": metric.display_name,
-                "value": metric.value,
-                "unit": metric.unit,
-                "decimals": metric.decimals,
-            }
-        )
-    return {
-        "instrument_id": snapshot.instrument_id,
-        "display_name": snapshot.display_name,
-        "kind": snapshot.kind.value,
-        "timestamp": snapshot.timestamp,
-        "connected": snapshot.connected,
-        "unit": snapshot.unit,
-        "current": snapshot.current,
-        "target": snapshot.target,
-        "rate_per_minute": snapshot.rate_per_minute,
-        "activity": snapshot.activity.value,
-        "stability": snapshot.stability.value,
-        "message": snapshot.message,
-        "connection_state": snapshot.connection_state.value,
-        "instrument_stable": snapshot.instrument_stable,
-        "metrics": metric_payloads,
-    }
-
-
-def snapshot_from_payload(payload: dict[str, Any]) -> InstrumentSnapshot:
-    """严格重建父进程使用的仪表快照；枚举或必需字段错误即拒绝。"""
-
-    try:
-        raw_instrument_stable = payload.get("instrument_stable")
-        if raw_instrument_stable is not None and not isinstance(
-            raw_instrument_stable,
-            bool,
-        ):
-            raise TypeError("instrument_stable must be boolean or null")
-        raw_metrics = payload.get("metrics", [])
-        if not isinstance(raw_metrics, list):
-            raise TypeError("metrics must be a list")
-        metrics: dict[str, InstrumentMetric] = {}
-        for raw_metric in raw_metrics:
-            if not isinstance(raw_metric, dict):
-                raise TypeError("each metric must be an object")
-            value = raw_metric.get("value")
-            if not isinstance(value, (int, float, str, bool, type(None))):
-                raise TypeError("metric value must be a JSON scalar")
-            decimals = raw_metric.get("decimals")
-            if decimals is not None and (
-                isinstance(decimals, bool) or not isinstance(decimals, int)
-            ):
-                raise TypeError("metric decimals must be an integer or null")
-            key = str(raw_metric["key"])
-            if key in metrics:
-                raise TypeError("metric keys must be unique")
-            metrics[key] = InstrumentMetric(
-                    display_name=str(raw_metric["display_name"]),
-                    value=value,
-                    unit=str(raw_metric.get("unit", "")),
-                    decimals=decimals,
+            raise InstrumentError(
+                f"Auxiliary reading {key!r} must be finite",
+                "NONFINITE_INSTRUMENT_READING",
             )
-        return InstrumentSnapshot(
-            instrument_id=str(payload["instrument_id"]),
-            display_name=str(payload["display_name"]),
-            kind=InstrumentKind(str(payload["kind"])),
-            timestamp=float(payload["timestamp"]),
-            connected=bool(payload["connected"]),
-            unit=str(payload.get("unit", "")),
-            current=(
-                None
-                if payload.get("current") is None
-                else float(payload["current"])
-            ),
-            target=(
-                None
-                if payload.get("target") is None
-                else float(payload["target"])
-            ),
-            rate_per_minute=(
-                None
-                if payload.get("rate_per_minute") is None
-                else float(payload["rate_per_minute"])
-            ),
-            activity=InstrumentActivity(str(payload.get("activity", "idle"))),
-            stability=StabilityState(
-                str(payload.get("stability", "not_applicable"))
-            ),
-            message=str(payload.get("message", "")),
-            connection_state=InstrumentConnectionState(
-                str(
-                    payload.get(
-                        "connection_state",
-                        "connected" if payload.get("connected") else "disconnected",
-                    )
-                )
-            ),
-            instrument_stable=raw_instrument_stable,
-            metrics=metrics,
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise InstrumentWorkerError(
-            f"Instrument worker returned an invalid snapshot: {exc}",
-            "INVALID_INSTRUMENT_SNAPSHOT",
-        ) from exc
+        if isinstance(value, str) and (
+            len(value) > 256 or any(character in value for character in "\r\n")
+        ):
+            raise InstrumentError(
+                f"Auxiliary reading {key!r} contains invalid text",
+                "INVALID_INSTRUMENT_READING",
+            )
+    result["auxiliary"] = dict(auxiliary)
+    return result
 
 
 def _activate_dependency_directory(path: str) -> None:
@@ -325,28 +240,25 @@ def _load_backend(spec: InstrumentWorkerSpec) -> type[SystemInstrument]:
         backend = load_import_object(spec.backend)
     if not isinstance(backend, type) or not issubclass(backend, SystemInstrument):
         raise TypeError(f"{spec.backend} is not a SystemInstrument")
-    if str(getattr(backend, "api_version", "")) != SystemInstrument.api_version:
-        raise TypeError(
-            f"{spec.backend} uses incompatible instrument API "
-            f"{getattr(backend, 'api_version', '')!r}"
-        )
     return backend
 
 
 def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -> None:
-    """仪表子进程入口：串行分发协议动作，并在退出前清理 event loop。
+    """仪表子进程入口：在一个线程中串行执行普通同步驱动方法。
 
     子进程不信任父进程载荷的形状；每个动作只提取预定义字段。后端抛出的
     ``InstrumentWarning``/``InstrumentError`` 会结构化返回，其他异常统一转换为稳定错误代码。
     """
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
     try:
         backend_class = _load_backend(spec)
-        backend = backend_class(
-            spec.instrument_config,
-            simulation_speed=spec.simulation_speed,
+        backend = (
+            backend_class(
+                spec.instrument_config,
+                simulation_speed=spec.simulation_speed,
+            )
+            if not spec.external
+            else backend_class(spec.instrument_config)
         )
         _send_message(connection, {"type": "ready"})
     except Exception as exc:
@@ -360,7 +272,6 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
             )
         finally:
             connection.close()
-            loop.close()
         return
 
     while True:
@@ -373,7 +284,7 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
         payload = request.get("payload", {})
         if not isinstance(payload, dict):
             payload = {}
-        if action == "close":
+        if action == "stop_worker":
             _send_message(
                 connection,
                 {
@@ -385,30 +296,25 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
             )
             break
         try:
-            if action == "connect":
-                value = loop.run_until_complete(backend.connect())
-            elif action == "disconnect":
-                value = loop.run_until_complete(backend.disconnect())
-            elif action in {"poll", "poll_measurement"}:
-                poll_method = (
-                    backend.poll_measurement
-                    if action == "poll_measurement"
-                    else backend.poll
+            if action == "open":
+                value = backend.open()
+            elif action == "close_instrument":
+                value = backend.close()
+            elif action in {"read_status", "read_measurement"}:
+                read_method = (
+                    backend.read_measurement
+                    if action == "read_measurement"
+                    else backend.read_status
                 )
-                value = loop.run_until_complete(poll_method())
-                if not isinstance(value, InstrumentSnapshot):
-                    raise TypeError(f"{action}() must return InstrumentSnapshot")
-                value = _snapshot_payload(value)
+                value = _reading_payload(read_method())
             elif action == "set_target":
-                value = loop.run_until_complete(
-                    backend.set_target(
-                        float(payload["value"]),
-                        float(payload["rate_per_minute"]),
-                        str(payload.get("mode", "Settle")),
-                    )
+                value = backend.set_target(
+                    float(payload["value"]),
+                    float(payload["rate_per_minute"]),
+                    str(payload.get("mode", "Settle")),
                 )
             elif action == "hold":
-                value = loop.run_until_complete(backend.hold())
+                value = backend.hold()
             else:
                 raise InstrumentError(
                     f"Unknown instrument worker action: {action}",
@@ -481,12 +387,6 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
             except Exception:
                 break
     connection.close()
-    pending = asyncio.all_tasks(loop)
-    for task in pending:
-        task.cancel()
-    if pending:
-        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-    loop.close()
 
 
 class InstrumentWorkerClient:
@@ -766,7 +666,7 @@ class InstrumentWorkerClient:
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
                     try:
-                        self.request("close", {}, remaining)
+                        self.request("stop_worker", {}, remaining)
                     except Exception:
                         pass
             self._invalidate(
@@ -836,7 +736,7 @@ class IsolatedInstrumentClient:
         except InstrumentWorkerError as exc:
             raise self._translate(exc) from exc
 
-    async def connect(self) -> None:
+    async def open(self) -> None:
         try:
             await asyncio.to_thread(
                 self.worker.start,
@@ -844,18 +744,16 @@ class IsolatedInstrumentClient:
             )
         except InstrumentWorkerError as exc:
             raise self._translate(exc) from exc
-        await self._request("connect")
+        await self._request("open")
 
-    async def disconnect(self) -> None:
-        await self._request("disconnect", shutdown=True)
+    async def close(self) -> None:
+        await self._request("close_instrument", shutdown=True)
 
-    async def poll(self) -> InstrumentSnapshot:
-        result = await self._request("poll")
-        return snapshot_from_payload(result)
+    async def read_status(self) -> dict[str, Any]:
+        return await self._request("read_status")
 
-    async def poll_measurement(self) -> InstrumentSnapshot:
-        result = await self._request("poll_measurement")
-        return snapshot_from_payload(result)
+    async def read_measurement(self) -> dict[str, Any]:
+        return await self._request("read_measurement")
 
     async def set_target(
         self,
@@ -875,7 +773,7 @@ class IsolatedInstrumentClient:
     async def hold(self) -> None:
         await self._request("hold")
 
-    async def close(self) -> None:
+    async def shutdown(self) -> None:
         await asyncio.to_thread(
             self.worker.close,
             self.shutdown_timeout_seconds,
@@ -894,17 +792,17 @@ class InProcessInstrumentClient:
     def __init__(self, instrument: SystemInstrument) -> None:
         self.backend = instrument
 
-    async def connect(self) -> None:
-        await self.backend.connect()
+    async def open(self) -> None:
+        await asyncio.to_thread(self.backend.open)
 
-    async def disconnect(self) -> None:
-        await self.backend.disconnect()
+    async def close(self) -> None:
+        await asyncio.to_thread(self.backend.close)
 
-    async def poll(self) -> InstrumentSnapshot:
-        return await self.backend.poll()
+    async def read_status(self) -> dict[str, Any]:
+        return _reading_payload(await asyncio.to_thread(self.backend.read_status))
 
-    async def poll_measurement(self) -> InstrumentSnapshot:
-        return await self.backend.poll_measurement()
+    async def read_measurement(self) -> dict[str, Any]:
+        return _reading_payload(await asyncio.to_thread(self.backend.read_measurement))
 
     async def set_target(
         self,
@@ -912,12 +810,12 @@ class InProcessInstrumentClient:
         rate_per_minute: float,
         mode: str = "Settle",
     ) -> None:
-        await self.backend.set_target(value, rate_per_minute, mode)
+        await asyncio.to_thread(self.backend.set_target, value, rate_per_minute, mode)
 
     async def hold(self) -> None:
-        await self.backend.hold()
+        await asyncio.to_thread(self.backend.hold)
 
-    async def close(self) -> None:
+    async def shutdown(self) -> None:
         return None
 
     async def force_stop(self, timeout_seconds: float = 0.25) -> None:

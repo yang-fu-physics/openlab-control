@@ -1,25 +1,20 @@
 from __future__ import annotations
 
-import time
-
 from labcontrol.instruments.base import InstrumentError, SystemInstrument
-from labcontrol.models import InstrumentActivity, InstrumentSnapshot
 
 
 class ExampleController(SystemInstrument):
     """Fail-closed skeleton; replace every placeholder before hardware use."""
 
-    api_version = "1.2"
-
-    def __init__(self, config, simulation_speed: float = 1.0) -> None:
-        super().__init__(config, simulation_speed)
+    def __init__(self, config) -> None:
+        super().__init__(config)
         self._transport = None
         self._current: float | None = None
         self._target: float | None = None
         self._rate: float | None = None
         self._address = config.address
 
-    async def connect(self) -> None:
+    def open(self) -> None:
         # Open with a bounded driver timeout, query *IDN? (or equivalent), and
         # verify model/firmware without changing output before setting transport.
         raise InstrumentError(
@@ -28,13 +23,13 @@ class ExampleController(SystemInstrument):
             self._address,
         )
 
-    async def disconnect(self) -> None:
+    def close(self) -> None:
         transport, self._transport = self._transport, None
         if transport is not None:
             # Close the vendor handle here. This method must be idempotent.
             pass
 
-    async def poll(self) -> InstrumentSnapshot:
+    def read_status(self) -> dict[str, object]:
         if self._transport is None:
             raise InstrumentError(
                 "Instrument is not connected",
@@ -48,20 +43,14 @@ class ExampleController(SystemInstrument):
                 "INVALID_READBACK",
                 self._address,
             )
-        return InstrumentSnapshot(
-            instrument_id=self.config.id,
-            display_name=self.config.display_name,
-            kind=self.config.kind,
-            timestamp=time.monotonic(),
-            connected=True,
-            unit=self.config.unit,
-            current=self._current,
-            target=self._target,
-            rate_per_minute=self._rate,
-            activity=InstrumentActivity.HOLDING,
-        )
+        return {
+            "value": self._current,
+            "target": self._target,
+            "rate": self._rate,
+            "moving": False,
+        }
 
-    async def set_target(
+    def set_target(
         self,
         value: float,
         rate_per_minute: float,
@@ -94,7 +83,7 @@ class ExampleController(SystemInstrument):
             self._address,
         )
 
-    async def hold(self) -> None:
+    def hold(self) -> None:
         if self._transport is None:
             raise InstrumentError(
                 "Instrument is not connected",

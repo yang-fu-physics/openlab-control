@@ -53,11 +53,11 @@ class StabilityEvaluator:
         target: float,
         now: float,
         *,
-        instrument_stable: bool | None = None,
+        ready: bool | None = None,
     ) -> StabilityResult:
         """加入新样本并计算 MOVING、SETTLING、STABLE 或 TIMED_OUT。
 
-        ``instrument_stable`` 为 ``False`` 时禁止开始或继续 dwell；``True`` 也不能
+        ``ready`` 为 ``False`` 时禁止开始或继续 dwell；``True`` 也不能
         单独判稳，仍必须通过核心的误差、斜率和驻留时间检查。``None`` 保留没有该
         状态位的仪表原有行为。
         """
@@ -79,7 +79,7 @@ class StabilityEvaluator:
         elapsed = now - self._target_started_at if self._target_started_at is not None else 0.0
 
         # 仪表状态只作附加门槛，不能绕过软件独立计算的误差、历史和斜率条件。
-        qualified_by_instrument = instrument_stable is not False
+        qualified_by_instrument = ready is not False
         if within and enough_history and slope_ok and qualified_by_instrument:
             if self._qualified_at is None:
                 self._qualified_at = now

@@ -16,8 +16,7 @@ from labcontrol.instruments.base import InstrumentError, SafetyViolation  # noqa
 from labcontrol.instruments.worker import (  # noqa: E402
     InstrumentWorkerError,
     IsolatedInstrumentClient,
-    _snapshot_payload,
-    snapshot_from_payload,
+    _reading_payload,
 )
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
@@ -41,13 +40,12 @@ class _FreshInstruments:
         self._current = 1.0
         self._snapshots = {
             "temperature": InstrumentSnapshot(
-                "temperature",
-                "Temperature",
-                InstrumentKind.TEMPERATURE,
-                time.monotonic(),
-                True,
-                "K",
-                self._current,
+                instrument_id="temperature",
+                display_name="Temperature",
+                kind=InstrumentKind.TEMPERATURE,
+                timestamp=time.monotonic(),
+                unit="K",
+                current=self._current,
                 metrics={
                     "second_stage": InstrumentMetric(
                         "2nd Stage", 20.0, "K", 3
@@ -77,36 +75,21 @@ class _FreshInstruments:
 
 
 class InstrumentMetricTests(unittest.TestCase):
-    def test_worker_snapshot_round_trip_preserves_metrics_and_instrument_flag(
+    def test_worker_reading_boundary_accepts_scalars_and_rejects_nonfinite_values(
         self,
     ) -> None:
-        original = InstrumentSnapshot(
-            "temperature",
-            "Temperature",
-            InstrumentKind.TEMPERATURE,
-            123.0,
-            True,
-            "K",
-            4.2,
-            instrument_stable=False,
-            metrics={
-                "heater_output": InstrumentMetric(
-                    "Heater", 12.5, "%", 2
-                ),
-                "heater_range": InstrumentMetric("Range", "LOW"),
+        original = {
+            "value": 4.2,
+            "ready": False,
+            "auxiliary": {
+                "heater_output": 12.5,
+                "heater_range": "LOW",
             },
-        )
-
-        restored = snapshot_from_payload(_snapshot_payload(original))
-
-        self.assertFalse(restored.instrument_stable)
-        self.assertEqual(restored.metrics, original.metrics)
-
-        original.metrics = {
-            "bad": InstrumentMetric("Bad", float("nan")),
         }
+        self.assertEqual(_reading_payload(original), original)
+
         with self.assertRaises(InstrumentError) as captured:
-            _snapshot_payload(original)
+            _reading_payload({"value": 4.2, "auxiliary": {"bad": float("nan")}})
         self.assertEqual(
             captured.exception.code,
             "NONFINITE_INSTRUMENT_READING",
@@ -209,13 +192,12 @@ class InstrumentMetricTests(unittest.TestCase):
 
             instrument = config.instruments[0]
             valid = InstrumentSnapshot(
-                instrument.id,
-                instrument.display_name,
-                instrument.kind,
-                time.monotonic(),
-                True,
-                instrument.unit,
-                4.2,
+                instrument_id=instrument.id,
+                display_name=instrument.display_name,
+                kind=instrument.kind,
+                timestamp=time.monotonic(),
+                unit=instrument.unit,
+                current=4.2,
                 metrics={
                     "heater": InstrumentMetric("Heater", 1.0, "%", 2),
                 },

@@ -25,6 +25,7 @@ from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     InstrumentActivity,
+    InstrumentConnectionState,
     InstrumentKind,
     InstrumentMetric,
     InstrumentSnapshot,
@@ -47,16 +48,15 @@ class DatafileTests(unittest.TestCase):
             now = time.monotonic()
             snapshots = {
                 "temperature": InstrumentSnapshot(
-                    "temperature",
-                    "Temperature",
-                    InstrumentKind.TEMPERATURE,
-                    now,
-                    True,
-                    "K",
-                    4.2,
-                    4.0,
-                    1.0,
-                    InstrumentActivity.HOLDING,
+                    instrument_id="temperature",
+                    display_name="Temperature",
+                    kind=InstrumentKind.TEMPERATURE,
+                    timestamp=now,
+                    unit="K",
+                    current=4.2,
+                    target=4.0,
+                    rate_per_minute=1.0,
+                    activity=InstrumentActivity.HOLDING,
                     metrics={
                         "second_stage": InstrumentMetric(
                             "2nd Stage",
@@ -86,16 +86,15 @@ class DatafileTests(unittest.TestCase):
             logger.write_instrument_status(snapshots, force=True)
             measurement_only = {
                 "temperature": InstrumentSnapshot(
-                    "temperature",
-                    "Temperature",
-                    InstrumentKind.TEMPERATURE,
-                    now + 0.1,
-                    True,
-                    "K",
-                    4.25,
-                    4.0,
-                    1.0,
-                    InstrumentActivity.HOLDING,
+                    instrument_id="temperature",
+                    display_name="Temperature",
+                    kind=InstrumentKind.TEMPERATURE,
+                    timestamp=now + 0.1,
+                    unit="K",
+                    current=4.25,
+                    target=4.0,
+                    rate_per_minute=1.0,
+                    activity=InstrumentActivity.HOLDING,
                     metrics={
                         metric_key: InstrumentMetric(
                             metric.display_name,
@@ -124,7 +123,9 @@ class DatafileTests(unittest.TestCase):
                 measurement_row["temperature.heater_output(%)"],
                 "",
             )
-            snapshots["temperature"].connected = False
+            snapshots["temperature"].connection_state = (
+                InstrumentConnectionState.DISCONNECTED
+            )
             disconnected_row = dict(
                 zip(
                     logger._build_columns(),
@@ -171,9 +172,9 @@ class DatafileTests(unittest.TestCase):
             )
             now = time.monotonic()
             snapshots = {
-                "temperature": InstrumentSnapshot("temperature", "温度", InstrumentKind.TEMPERATURE, now, True, "K", 3.1236, 3.0, 1.0, InstrumentActivity.HOLDING),
-                "field": InstrumentSnapshot("field", "磁场", InstrumentKind.FIELD, now, True, "Oe", 123.456, 100.0, 10.0, InstrumentActivity.HOLDING),
-                "second_stage": InstrumentSnapshot("second_stage", "2nd Stage", InstrumentKind.MONITOR, now, True, "K", 4.2345),
+                "temperature": InstrumentSnapshot("temperature", "温度", InstrumentKind.TEMPERATURE, now, "K", 3.1236, 3.0, 1.0, InstrumentActivity.HOLDING),
+                "field": InstrumentSnapshot("field", "磁场", InstrumentKind.FIELD, now, "Oe", 123.456, 100.0, 10.0, InstrumentActivity.HOLDING),
+                "second_stage": InstrumentSnapshot("second_stage", "2nd Stage", InstrumentKind.MONITOR, now, "K", 4.2345),
             }
             self.assertTrue(
                 logger.write_instrument_status(
@@ -248,16 +249,15 @@ class DatafileTests(unittest.TestCase):
                 "temperature.Rate(K/min),"
                 "temperature.Activity,"
                 "temperature.Stability,"
-                "temperature.InstrumentStable,"
+                "temperature.Ready,"
                 "temperature.Connection,"
-                "temperature.Connected,"
                 "temperature.ReadingAge(s),"
                 "temperature.Message",
                 instrument_status,
             )
             self.assertIn(
                 ",3.124,3.000,1.000,holding,"
-                "not_applicable,,connected,true,",
+                "not_applicable,,connected,",
                 instrument_status,
             )
             self.assertIn(

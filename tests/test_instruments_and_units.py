@@ -16,7 +16,7 @@ from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.instruments.base import InstrumentError, InstrumentWarning, SafetyViolation  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.formatting import fixed_number  # noqa: E402
-from labcontrol.models import InstrumentKind, InstrumentRole, StabilityState  # noqa: E402
+from labcontrol.models import InstrumentKind, StabilityState  # noqa: E402
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
 from labcontrol.units import UnitConversionError, convert_value  # noqa: E402
 
@@ -60,7 +60,7 @@ class InstrumentManagerTests(unittest.TestCase):
         with self.assertRaises(SafetyViolation):
             manager.validate_target("temperature", math.inf, 10.0)
 
-    def test_instrument_role_aliases_resolve_custom_ids_and_reject_wrong_kinds(self) -> None:
+    def test_kind_aliases_resolve_custom_ids_and_reject_wrong_kinds(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
         custom = replace(
             config,
@@ -91,7 +91,7 @@ class InstrumentManagerTests(unittest.TestCase):
             manager.resolve_instrument_id(InstrumentKind.FIELD, "missing")
         self.assertEqual(missing.exception.code, "UNKNOWN_INSTRUMENT")
 
-    def test_secondary_control_is_read_only_by_default(self) -> None:
+    def test_second_instrument_is_read_only_when_control_is_disabled(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
             primary = config.instrument("temperature")
@@ -99,7 +99,6 @@ class InstrumentManagerTests(unittest.TestCase):
                 primary,
                 id="temperature_backup",
                 display_name="Backup Temperature",
-                role=InstrumentRole.SECONDARY,
                 control_enabled=False,
             )
             custom = replace(
@@ -131,7 +130,7 @@ class InstrumentManagerTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_configuration_roles_are_unique_and_missing_role_is_read_only(self) -> None:
+    def test_only_one_controller_per_kind_and_missing_control_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
@@ -142,7 +141,6 @@ id = "temperature_backup"
 display_name = "Backup Temperature"
 kind = "temperature"
 backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"
-role = "secondary"
 unit = "K"
 initial_value = 300.0
 default_rate_per_minute = 5.0
@@ -154,18 +152,17 @@ max_rate_per_minute = 10.0
             valid_path.write_text(source + secondary_block, encoding="utf-8")
             valid = load_config(valid_path)
             backup = valid.instrument("temperature_backup")
-            self.assertEqual(backup.role, InstrumentRole.SECONDARY)
             self.assertFalse(backup.control_enabled)
 
             duplicate_path = root / "duplicate.toml"
             duplicate_path.write_text(
                 source + secondary_block.replace(
-                    'role = "secondary"',
-                    'role = "primary"',
+                    'unit = "K"',
+                    'control_enabled = true\nunit = "K"',
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ConfigurationError, "Only one primary"):
+            with self.assertRaisesRegex(ConfigurationError, "Only one controllable"):
                 load_config(duplicate_path)
 
             implicit_path = root / "implicit.toml"
@@ -173,20 +170,13 @@ max_rate_per_minute = 10.0
                 "\n".join(
                     line
                     for line in source.splitlines()
-                    if not line.startswith(("role = ", "control_enabled = "))
+                    if not line.startswith("control_enabled = ")
                 ),
                 encoding="utf-8",
             )
             implicit = load_config(implicit_path)
-            self.assertEqual(
-                implicit.instrument("temperature").role,
-                InstrumentRole.SECONDARY,
-            )
             self.assertFalse(implicit.instrument("temperature").control_enabled)
-            self.assertEqual(
-                implicit.instrument("second_stage").role,
-                InstrumentRole.MONITOR,
-            )
+            self.assertFalse(implicit.instrument("second_stage").control_enabled)
 
     def test_sequence_control_lease_blocks_manual_writes_without_fatal_error(self) -> None:
         async def scenario() -> None:
@@ -390,7 +380,7 @@ max_rate_per_minute = 10.0
             await manager.poll_all()
 
             monitor = manager.instruments["second_stage"]
-            original_poll = monitor.poll
+            original_poll = monitor.read_status
             monitor_started = asyncio.Event()
             release_monitor = asyncio.Event()
 
@@ -399,7 +389,7 @@ max_rate_per_minute = 10.0
                 await release_monitor.wait()
                 return await original_poll()
 
-            monitor.poll = delayed_monitor_poll  # type: ignore[method-assign]
+            monitor.read_status = delayed_monitor_poll  # type: ignore[method-assign]
             poll_task = asyncio.create_task(manager.poll_all())
             await monitor_started.wait()
             await manager.set_target("field", 100.0, 5000.0)
@@ -423,8 +413,8 @@ max_rate_per_minute = 10.0
 
             instrument_id = "temperature"
             instrument = manager.instruments[instrument_id]
-            original_poll = instrument.poll
-            original_poll_measurement = instrument.poll_measurement
+            original_poll = instrument.read_status
+            original_poll_measurement = instrument.read_measurement
             first_poll_started = asyncio.Event()
             release_first_poll = asyncio.Event()
             order: list[str] = []
@@ -459,8 +449,8 @@ max_rate_per_minute = 10.0
                     order.append("measurement-end")
                     calls_in_flight -= 1
 
-            instrument.poll = tracked_poll  # type: ignore[method-assign]
-            instrument.poll_measurement = tracked_measurement_poll  # type: ignore[method-assign]
+            instrument.read_status = tracked_poll  # type: ignore[method-assign]
+            instrument.read_measurement = tracked_measurement_poll  # type: ignore[method-assign]
             active_poll = asyncio.create_task(manager._poll_one(instrument_id))
             await first_poll_started.wait()
 
@@ -489,8 +479,8 @@ max_rate_per_minute = 10.0
                 ],
             )
             self.assertEqual(maximum_calls_in_flight, 1)
-            instrument.poll = original_poll  # type: ignore[method-assign]
-            instrument.poll_measurement = original_poll_measurement  # type: ignore[method-assign]
+            instrument.read_status = original_poll  # type: ignore[method-assign]
+            instrument.read_measurement = original_poll_measurement  # type: ignore[method-assign]
             await manager.disconnect_all()
 
         asyncio.run(scenario())
@@ -505,7 +495,7 @@ max_rate_per_minute = 10.0
             await manager.connect_all()
             await manager.poll_all()
             monitor = manager.instruments["second_stage"]
-            original_poll = monitor.poll
+            original_poll = monitor.read_status
             manager.instrument_configs["second_stage"] = replace(
                 manager.instrument_configs["second_stage"],
                 operation_timeout_seconds=0.02,
@@ -515,7 +505,7 @@ max_rate_per_minute = 10.0
                 await asyncio.sleep(5.0)
                 return await original_poll()
 
-            monitor.poll = hung_poll  # type: ignore[method-assign]
+            monitor.read_status = hung_poll  # type: ignore[method-assign]
             started = asyncio.get_running_loop().time()
             await manager.poll_all()
             self.assertLess(asyncio.get_running_loop().time() - started, 0.5)
@@ -528,7 +518,7 @@ max_rate_per_minute = 10.0
             self.assertIn("INSTRUMENT_OPERATION_TIMEOUT", codes)
             self.assertIn("INSTRUMENT_UNAVAILABLE_AFTER_TIMEOUT", codes)
 
-            monitor.poll = original_poll  # type: ignore[method-assign]
+            monitor.read_status = original_poll  # type: ignore[method-assign]
             manager._unavailable_after_timeout.clear()
             await manager.disconnect_all()
 
@@ -650,12 +640,12 @@ max_rate_per_minute = 10.0
             await manager.poll_all()
 
             temperature = manager.instruments["temperature"]
-            original_poll = temperature.poll
+            original_poll = temperature.read_status
 
             async def failed_poll():
                 raise InstrumentWarning("temporary read failure", "TEMP_READ")
 
-            temperature.poll = failed_poll  # type: ignore[method-assign]
+            temperature.read_status = failed_poll  # type: ignore[method-assign]
             await asyncio.sleep(0.02)
             stale = await manager.poll_all()
             self.assertEqual(
@@ -664,7 +654,7 @@ max_rate_per_minute = 10.0
             )
             self.assertIn("stale", stale["temperature"].message.lower())
 
-            temperature.poll = original_poll  # type: ignore[method-assign]
+            temperature.read_status = original_poll  # type: ignore[method-assign]
             recovered = await manager.poll_all()
             self.assertNotEqual(
                 recovered["temperature"].stability,
@@ -692,19 +682,21 @@ max_rate_per_minute = 10.0
             await manager.connect_all()
             await manager.poll_all()
             monitor = manager.instruments["second_stage"]
-            original_poll = monitor.poll
+            original_poll = monitor.read_status
 
             async def invalid_poll():
-                return replace(await original_poll(), current=math.nan)
+                reading = await original_poll()
+                reading["value"] = math.nan
+                return reading
 
-            monitor.poll = invalid_poll  # type: ignore[method-assign]
+            monitor.read_status = invalid_poll  # type: ignore[method-assign]
             snapshots = await manager.poll_all()
             self.assertTrue(math.isfinite(snapshots["second_stage"].current or math.nan))
             self.assertIn(
                 "NONFINITE_INSTRUMENT_READING",
                 [notice.event.code for notice in notices],
             )
-            monitor.poll = original_poll  # type: ignore[method-assign]
+            monitor.read_status = original_poll  # type: ignore[method-assign]
             await manager.disconnect_all()
 
         asyncio.run(scenario())

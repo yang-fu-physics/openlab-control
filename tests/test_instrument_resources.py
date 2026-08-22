@@ -41,6 +41,36 @@ from instrument_scanner import (  # noqa: E402
 )
 
 
+def _write_system_instrument(
+    root: Path,
+    instrument_id: str,
+    kind: str,
+    main_reading: str,
+    auxiliary_readings: tuple[str, ...] = (),
+) -> None:
+    directory = root / "system_instruments" / instrument_id
+    directory.mkdir(parents=True)
+    (directory / "backend.py").write_text("class Driver: pass\n", encoding="utf-8")
+    readings = (main_reading, *auxiliary_readings)
+    metadata = "".join(
+        f"\n[readings.{key}]\nlabel = \"{key}\"\nunit = \"K\"\n"
+        for key in readings
+    )
+    (directory / "instrument.toml").write_text(
+        (
+            f'id = "{instrument_id}"\n'
+            f'name = "{instrument_id}"\n'
+            'version = "1.0.0"\n'
+            'api_version = "2"\n'
+            'backend = "backend:Driver"\n'
+            f'kinds = ["{kind}"]\n'
+            f'main_reading = "{main_reading}"\n'
+            + metadata
+        ),
+        encoding="utf-8",
+    )
+
+
 class InstrumentResourceTests(unittest.TestCase):
     def test_round_trip_preserves_system_and_measurement_resources(
         self,
@@ -52,8 +82,7 @@ class InstrumentResourceTests(unittest.TestCase):
                 identity="Cryo-con,24C,SERIAL,1.0",
                 purpose="system",
                 system_instrument="cryocon_22c_24c",
-                primary_reading="temp_b",
-                monitor_readings=("temp_a",),
+                auxiliary_readings=("temp_a",),
             ),
             InstrumentResource(
                 "keithley_2400",
@@ -70,10 +99,10 @@ class InstrumentResourceTests(unittest.TestCase):
                 resources,
             )
             text = path.read_text(encoding="utf-8")
-            self.assertIn("schema_version = 1", text)
+            self.assertIn("schema_version = 2", text)
             self.assertIn('purpose = "system"', text)
 
-    def test_registry_rejects_duplicate_addresses_and_ambiguous_roles(
+    def test_registry_rejects_duplicate_addresses_and_measurement_readings(
         self,
     ) -> None:
         duplicate = (
@@ -101,7 +130,7 @@ class InstrumentResourceTests(unittest.TestCase):
                         "meter",
                         "GPIB0::2::INSTR",
                         purpose="measurement",
-                        primary_reading="voltage",
+                        auxiliary_readings=("voltage",),
                     ),
                 )
             )
@@ -120,7 +149,7 @@ class InstrumentResourceTests(unittest.TestCase):
                 )
             )
 
-    def test_main_config_resolves_resource_once_and_injects_roles(
+    def test_main_config_resolves_resource_and_reading_metadata(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -131,6 +160,13 @@ class InstrumentResourceTests(unittest.TestCase):
                 ROOT / "configs" / "default.toml",
                 config_path,
             )
+            _write_system_instrument(
+                root,
+                "cryocon_22c_24c",
+                "temperature",
+                "temp_b",
+                ("temp_a",),
+            )
             write_instrument_resources(
                 root / "configs" / "instruments.local.toml",
                 (
@@ -139,8 +175,7 @@ class InstrumentResourceTests(unittest.TestCase):
                         "USB0::1::INSTR",
                         purpose="system",
                         system_instrument="cryocon_22c_24c",
-                        primary_reading="temp_b",
-                        monitor_readings=("temp_a",),
+                        auxiliary_readings=("temp_a",),
                     ),
                 ),
             )
@@ -148,11 +183,31 @@ class InstrumentResourceTests(unittest.TestCase):
             source = source.replace(
                 'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
                 (
-                    'backend = "cryocon_22c_24c"\n'
                     'resource = "cryocon_main"'
                 ),
                 1,
             )
+            source = source.replace('unit = "K"\n', "", 1)
+            config_path.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "initial_value is only used by built-in simulators",
+            ):
+                load_config(config_path)
+            source = source.replace('initial_value = 300.0\n', "", 1)
+            config_path.write_text(
+                source.replace(
+                    'resource = "cryocon_main"',
+                    'resource = "cryocon_main"\nmain_reading = "temp_b"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "reading metadata comes from",
+            ):
+                load_config(config_path)
             config_path.write_text(source, encoding="utf-8")
             config = load_config(config_path)
             temperature = config.instrument("temperature")
@@ -161,12 +216,12 @@ class InstrumentResourceTests(unittest.TestCase):
                 "USB0::1::INSTR",
             )
             self.assertEqual(
-                temperature.extras["primary_reading"],
+                temperature.main_reading,
                 "temp_b",
             )
             self.assertEqual(
-                temperature.extras["monitor_readings"],
-                ["temp_a"],
+                temperature.auxiliary_readings,
+                ("temp_a",),
             )
             logger = DatRunLogger(config, EventManager())
             paths = logger.open_run(
@@ -187,6 +242,19 @@ class InstrumentResourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "configs").mkdir()
+            _write_system_instrument(
+                root,
+                "cryocon_22c_24c",
+                "temperature",
+                "temp_b",
+                ("temp_a",),
+            )
+            _write_system_instrument(
+                root,
+                "magnet_supply_x",
+                "field",
+                "field",
+            )
             config_path = root / "configs" / "site.local.toml"
             write_instrument_resources(
                 root / "configs" / "instruments.local.toml",
@@ -196,15 +264,13 @@ class InstrumentResourceTests(unittest.TestCase):
                         "USB0::1::INSTR",
                         purpose="system",
                         system_instrument="cryocon_22c_24c",
-                        primary_reading="temp_b",
-                        monitor_readings=("temp_a",),
+                        auxiliary_readings=("temp_a",),
                     ),
                     InstrumentResource(
                         "magnet_controller",
                         "GPIB0::7::INSTR",
                         purpose="system",
                         system_instrument="magnet_supply_x",
-                        primary_reading="field",
                     ),
                 ),
             )
@@ -213,13 +279,17 @@ class InstrumentResourceTests(unittest.TestCase):
             )
             source = source.replace(
                 'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
-                'backend = "cryocon_22c_24c"\nresource = "temperature_controller"',
+                'resource = "temperature_controller"',
                 1,
             ).replace(
                 'backend = "labcontrol.instruments.simulated:SimulatedFieldController"',
-                'backend = "magnet_supply_x"\nresource = "magnet_controller"',
+                'resource = "magnet_controller"',
                 1,
             )
+            source = source.replace('unit = "K"\n', "", 1)
+            source = source.replace('unit = "Oe"\n', "", 1)
+            source = source.replace('initial_value = 300.0\n', "", 1)
+            source = source.replace('initial_value = 0.0\n', "", 1)
             config_path.write_text(source, encoding="utf-8")
 
             config = load_config(config_path)
@@ -252,7 +322,7 @@ class InstrumentResourceTests(unittest.TestCase):
                 1,
             )
             config_path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(ConfigurationError, "has no resource"):
+            with self.assertRaisesRegex(ConfigurationError, "selected through resource"):
                 load_config(config_path)
 
             config_path.write_text(
@@ -277,11 +347,12 @@ class InstrumentResourceTests(unittest.TestCase):
             source = source.replace(
                 'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
                 (
-                    'backend = "cryocon_22c_24c"\n'
                     'resource = "missing"'
                 ),
                 1,
             )
+            source = source.replace('unit = "K"\n', "", 1)
+            source = source.replace('initial_value = 300.0\n', "", 1)
             config_path.write_text(source, encoding="utf-8")
             with self.assertRaisesRegex(
                 ConfigurationError,
@@ -386,18 +457,16 @@ class InstrumentScannerTests(unittest.TestCase):
                     'id = "controller"\n'
                     'name = "Example Controller"\n'
                     'version = "1.0.0"\n'
-                    'api_version = "1.2"\n'
+                    'api_version = "2"\n'
                     'backend = "backend:Driver"\n'
                     'kinds = ["temperature"]\n'
+                    'main_reading = "temp_b"\n'
                     '[discovery]\n'
                     'identity_pattern = "Maker,Controller"\n'
-                    'primary_reading = "temp_b"\n'
-                    'monitor_readings = ["temp_a", "heater_output", "heater_range"]\n'
-                    '[discovery.reading_labels]\n'
-                    'temp_b = "Sample Temperature (Temp B)"\n'
-                    'temp_a = "Cold Head Temperature (Temp A)"\n'
-                    'heater_output = "Heater Output"\n'
-                    'heater_range = "Heater Range"\n'
+                    '[readings.temp_b]\nlabel = "Sample Temperature (Temp B)"\nunit = "K"\n'
+                    '[readings.temp_a]\nlabel = "Cold Head Temperature (Temp A)"\nunit = "K"\n'
+                    '[readings.heater_output]\nlabel = "Heater Output"\nunit = "%FS"\n'
+                    '[readings.heater_range]\nlabel = "Heater Range"\n'
                 ),
                 encoding="utf-8",
             )
@@ -478,18 +547,14 @@ class InstrumentScannerTests(unittest.TestCase):
                     "controller",
                 )
                 self.assertEqual(
-                    controls["primary"].currentData(),
-                    "temp_b",
-                )
-                self.assertEqual(
-                    controls["primary"].currentText(),
+                    controls["main_label"].text(),
                     "Sample Temperature (Temp B)",
                 )
                 self.assertEqual(
                     {
                         key: checkbox.text()
                         for key, checkbox in controls[
-                            "monitor_checks"
+                            "auxiliary_checks"
                         ].items()
                     },
                     {
@@ -502,11 +567,11 @@ class InstrumentScannerTests(unittest.TestCase):
                     all(
                         checkbox.isChecked()
                         for checkbox in controls[
-                            "monitor_checks"
+                            "auxiliary_checks"
                         ].values()
                     )
                 )
-                controls["monitor_checks"][
+                controls["auxiliary_checks"][
                     "heater_range"
                 ].setChecked(False)
                 configured = next(
@@ -515,14 +580,10 @@ class InstrumentScannerTests(unittest.TestCase):
                     if resource.purpose == "system"
                 )
                 self.assertEqual(
-                    configured.primary_reading,
-                    "temp_b",
-                )
-                self.assertEqual(
-                    configured.monitor_readings,
+                    configured.auxiliary_readings,
                     ("temp_a", "heater_output"),
                 )
-                controls["monitor_checks"][
+                controls["auxiliary_checks"][
                     "heater_range"
                 ].setChecked(True)
                 controls["id"].clear()
@@ -740,18 +801,16 @@ class InstrumentScannerTests(unittest.TestCase):
                     'id = "cryocon_22c_24c"\n'
                     'name = "Cryo-con"\n'
                     'version = "1.0.0"\n'
-                    'api_version = "1.2"\n'
+                    'api_version = "2"\n'
                     'backend = "backend:Driver"\n'
                     'kinds = ["temperature"]\n'
+                    'main_reading = "temp_b"\n'
                     '[discovery]\n'
                     'identity_pattern = "(?i)cryo-?con.*24c"\n'
-                    'primary_reading = "temp_b"\n'
-                    'monitor_readings = ["temp_a", "heater_output", "heater_range"]\n'
-                    '[discovery.reading_labels]\n'
-                    'temp_b = "Sample Temperature (Temp B)"\n'
-                    'temp_a = "Cold Head Temperature (Temp A)"\n'
-                    'heater_output = "Heater Output"\n'
-                    'heater_range = "Heater Range"\n'
+                    '[readings.temp_b]\nlabel = "Sample Temperature (Temp B)"\nunit = "K"\n'
+                    '[readings.temp_a]\nlabel = "Cold Head Temperature (Temp A)"\nunit = "K"\n'
+                    '[readings.heater_output]\nlabel = "Heater Output"\nunit = "%FS"\n'
+                    '[readings.heater_range]\nlabel = "Heater Range"\n'
                 ),
                 encoding="utf-8",
             )
@@ -763,13 +822,13 @@ class InstrumentScannerTests(unittest.TestCase):
             )
             self.assertIsNotNone(matched)
             assert matched is not None
-            self.assertEqual(matched.primary_reading, "temp_b")
+            self.assertEqual(matched.main_reading, "temp_b")
             self.assertEqual(
-                matched.monitor_readings,
+                matched.auxiliary_readings,
                 ("temp_a", "heater_output", "heater_range"),
             )
             self.assertEqual(
-                dict(matched.reading_labels),
+                {reading.key: reading.label for reading in matched.readings},
                 {
                     "temp_b": "Sample Temperature (Temp B)",
                     "temp_a": "Cold Head Temperature (Temp A)",

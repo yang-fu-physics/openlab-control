@@ -1,8 +1,13 @@
 id = "example_monitor"
 name = "Example Read-only Monitor"
-version = "0.2.0"
-api_version = "1.2"
-core_requires = ">=0.15,<0.16"
+version = "0.3.0"
+api_version = "2"
+core_requires = ">=0.16,<0.17"
 backend = "backend:ExampleMonitor"
 kinds = ["monitor"]
 dependencies = []
+main_reading = "value"
+
+[readings.value]
+label = "Reading"
+decimals = 3

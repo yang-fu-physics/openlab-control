@@ -42,7 +42,6 @@ from .models import (
     InstrumentConnectionState,
     InstrumentKind,
     InstrumentMetric,
-    InstrumentRole,
     InstrumentSnapshot,
     Severity,
     StabilityState,
@@ -283,22 +282,19 @@ class InstrumentManager:
                     or not issubclass(instrument_class, SystemInstrument)
                 ):
                     raise TypeError(f"{instrument_config.backend} is not a SystemInstrument")
-                if (
-                    str(getattr(instrument_class, "api_version", ""))
-                    != SystemInstrument.api_version
-                ):
-                    raise TypeError(
-                        f"{instrument_config.backend} uses incompatible instrument API "
-                        f"{getattr(instrument_class, 'api_version', '')!r}"
-                    )
                 def in_process_factory(
                     backend_class: type[SystemInstrument] = instrument_class,
                     configured: InstrumentConfig = instrument_config,
+                    external: bool = descriptor is not None,
                 ) -> InProcessInstrumentClient:
                     return InProcessInstrumentClient(
-                        backend_class(
-                            configured,
-                            simulation_speed=self.config.simulation_speed,
+                        (
+                            backend_class(configured)
+                            if external
+                            else backend_class(
+                                configured,
+                                simulation_speed=self.config.simulation_speed,
+                            )
                         )
                     )
 
@@ -368,13 +364,12 @@ class InstrumentManager:
                 display_name=config.display_name,
                 kind=config.kind,
                 timestamp=time.monotonic(),
-                connected=False,
                 unit=config.unit,
                 current=None,
                 target=self._expected_targets.get(instrument_id),
                 rate_per_minute=self._expected_rates.get(instrument_id),
+                connection_state=state,
             )
-        snapshot.connected = False
         snapshot.activity = (
             InstrumentActivity.FAULT
             if state is InstrumentConnectionState.FAULTED
@@ -523,21 +518,22 @@ class InstrumentManager:
                             min(0.25, remaining)
                         )
                         await asyncio.wait_for(
-                            candidate.connect(),  # type: ignore[attr-defined]
+                            candidate.open(),  # type: ignore[attr-defined]
                             timeout=remaining,
                         )
                         remaining = max(0.0, deadline - time.monotonic())
-                        snapshot = await asyncio.wait_for(
-                            candidate.poll(),  # type: ignore[attr-defined]
+                        reading = await asyncio.wait_for(
+                            candidate.read_status(),  # type: ignore[attr-defined]
                             timeout=remaining,
+                        )
+                        snapshot = self._snapshot_from_reading(
+                            instrument_id,
+                            reading,
+                            measurement=False,
                         )
                         self._validate_snapshot(instrument_id, snapshot)
                         self._validate_recovered_state(instrument_id, snapshot)
                         self.instruments[instrument_id] = candidate
-                        snapshot.connected = True
-                        snapshot.connection_state = (
-                            InstrumentConnectionState.CONNECTED
-                        )
                         self.latest[instrument_id] = snapshot
                         self._connection_states[instrument_id] = (
                             InstrumentConnectionState.CONNECTED
@@ -696,7 +692,7 @@ class InstrumentManager:
                     )
                 if (
                     operation
-                    not in {"connect", "disconnect", "poll", "poll_measurement"}
+                    not in {"open", "close", "poll", "poll_measurement"}
                     and self._connection_states[instrument_id]
                     is not InstrumentConnectionState.CONNECTED
                 ):
@@ -748,7 +744,7 @@ class InstrumentManager:
 
         async def connect(instrument_id: str, instrument: object) -> None:
             try:
-                await self._operate(instrument_id, "connect", instrument.connect)
+                await self._operate(instrument_id, "open", instrument.open)
                 self._connection_states[instrument_id] = (
                     InstrumentConnectionState.CONNECTED
                 )
@@ -812,8 +808,8 @@ class InstrumentManager:
             try:
                 await self._operate(
                     instrument_id,
-                    "disconnect",
-                    instrument.disconnect,
+                    "close",
+                    instrument.close,
                     shutdown=True,
                 )
             except Exception as exc:
@@ -826,7 +822,7 @@ class InstrumentManager:
                 )
             finally:
                 try:
-                    await instrument.close()  # type: ignore[attr-defined]
+                    await instrument.shutdown()  # type: ignore[attr-defined]
                 except Exception as exc:
                     self.events.report(
                         Severity.WARNING,
@@ -929,12 +925,15 @@ class InstrumentManager:
         async def poll() -> InstrumentSnapshot:
             client = self.instruments[instrument_id]
             if measurement:
-                snapshot = await client.poll_measurement()  # type: ignore[attr-defined]
+                reading = await client.read_measurement()  # type: ignore[attr-defined]
             else:
-                snapshot = await client.poll()  # type: ignore[attr-defined]
+                reading = await client.read_status()  # type: ignore[attr-defined]
+            snapshot = self._snapshot_from_reading(
+                instrument_id,
+                reading,
+                measurement=measurement,
+            )
             self._validate_snapshot(instrument_id, snapshot)
-            snapshot.connected = True
-            snapshot.connection_state = InstrumentConnectionState.CONNECTED
             self._connection_states[instrument_id] = (
                 InstrumentConnectionState.CONNECTED
             )
@@ -947,7 +946,7 @@ class InstrumentManager:
                     snapshot.current,
                     snapshot.target,
                     snapshot.timestamp,
-                    instrument_stable=snapshot.instrument_stable,
+                    ready=snapshot.ready,
                 )
                 snapshot.stability = result.state
                 timeout_code = "STABILITY_TIMEOUT"
@@ -976,6 +975,88 @@ class InstrumentManager:
             ),
         )
 
+    def _snapshot_from_reading(
+        self,
+        instrument_id: str,
+        reading: dict[str, object],
+        *,
+        measurement: bool,
+    ) -> InstrumentSnapshot:
+        """用框架配置把驱动的纯数值结果组装成内部快照。"""
+
+        config = self.instrument_configs[instrument_id]
+        auxiliary = reading["auxiliary"]
+        if not isinstance(auxiliary, dict):
+            raise InstrumentError(
+                f"{config.display_name} returned invalid auxiliary readings",
+                "INVALID_INSTRUMENT_READING",
+                instrument_id,
+            )
+        selected = set(config.auxiliary_readings)
+        returned = set(auxiliary)
+        unexpected = returned - selected
+        if unexpected:
+            raise InstrumentError(
+                f"{config.display_name} returned undeclared auxiliary readings: "
+                + ", ".join(sorted(unexpected)),
+                "INVALID_INSTRUMENT_READING",
+                instrument_id,
+            )
+        missing = selected - returned
+        if missing and not measurement:
+            raise InstrumentError(
+                f"{config.display_name} omitted selected auxiliary readings: "
+                + ", ".join(sorted(missing)),
+                "INVALID_INSTRUMENT_READING",
+                instrument_id,
+            )
+        moving = bool(reading.get("moving", False))
+        activity = (
+            InstrumentActivity.MOVING
+            if moving
+            else (
+                InstrumentActivity.IDLE
+                if config.kind is InstrumentKind.MONITOR
+                else InstrumentActivity.HOLDING
+            )
+        )
+        metrics = {
+            key: InstrumentMetric(
+                display_name=metadata.display_name,
+                value=auxiliary.get(key),
+                unit=metadata.unit,
+                decimals=metadata.decimals,
+            )
+            for key in config.auxiliary_readings
+            for metadata in (config.reading(key),)
+        }
+        return InstrumentSnapshot(
+            instrument_id=instrument_id,
+            display_name=config.display_name,
+            kind=config.kind,
+            timestamp=time.monotonic(),
+            unit=config.unit,
+            current=(
+                None
+                if reading.get("value") is None
+                else float(reading["value"])
+            ),
+            target=(
+                None
+                if reading.get("target") is None
+                else float(reading["target"])
+            ),
+            rate_per_minute=(
+                None
+                if reading.get("rate") is None
+                else float(reading["rate"])
+            ),
+            activity=activity,
+            connection_state=InstrumentConnectionState.CONNECTED,
+            ready=reading.get("ready"),
+            metrics=metrics,
+        )
+
     def _validate_snapshot(
         self,
         instrument_id: str,
@@ -996,8 +1077,8 @@ class InstrumentManager:
                 "INSTRUMENT_REPORTED_DISCONNECTED",
                 instrument_id,
             )
-        if snapshot.instrument_stable is not None and not isinstance(
-            snapshot.instrument_stable,
+        if snapshot.ready is not None and not isinstance(
+            snapshot.ready,
             bool,
         ):
             raise InstrumentError(
@@ -1155,7 +1236,6 @@ class InstrumentManager:
         for config in self.config.instruments:
             if (
                 config.kind is kind
-                and config.role is InstrumentRole.PRIMARY
                 and config.control_enabled
             ):
                 return config.id
