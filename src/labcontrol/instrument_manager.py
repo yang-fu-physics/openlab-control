@@ -47,6 +47,9 @@ from .models import (
     StabilityState,
 )
 from .stability import StabilityEvaluator
+from .system_instrument_commands import (
+    configured_system_instrument_commands,
+)
 
 
 T = TypeVar("T")
@@ -124,6 +127,14 @@ class InstrumentManager:
         self.config = config
         self.events = events
         self.descriptors = {descriptor.id: descriptor for descriptor in descriptors}
+        self.sequence_commands = configured_system_instrument_commands(
+            config,
+            descriptors,
+        )
+        self._sequence_command_specs = {
+            (command.instrument_id, command.command_id): command
+            for command in self.sequence_commands
+        }
         self.isolate_processes = isolate_processes
         self.instruments: dict[str, object] = {}
         self._client_factories: dict[str, Callable[[], object]] = {}
@@ -1393,6 +1404,75 @@ class InstrumentManager:
             mode,
             origin=origin,
         )
+
+    def has_sequence_command(
+        self,
+        instrument_id: str,
+        command_id: str,
+    ) -> bool:
+        """返回逻辑仪表是否声明了该稳定指令 ID。"""
+
+        return (
+            instrument_id,
+            command_id,
+        ) in self._sequence_command_specs
+
+    async def execute_sequence_command(
+        self,
+        instrument_id: str,
+        command_id: str,
+    ) -> bool:
+        """串行执行一条仪表 SEQ 指令；Warning 继续，Error 中止。"""
+
+        if not self.has_sequence_command(instrument_id, command_id):
+            raise InstrumentError(
+                f"System Instrument sequence command is unavailable: "
+                f"{instrument_id}.{command_id}",
+                "INSTRUMENT_SEQUENCE_COMMAND_UNAVAILABLE",
+                f"{instrument_id}.{command_id}",
+            )
+        operation = f"sequence_command:{command_id}"
+        try:
+            await self._operate(
+                instrument_id,
+                operation,
+                lambda: self.instruments[
+                    instrument_id
+                ].execute_sequence_command(command_id),
+                origin="sequence",
+            )
+        except InstrumentWarning as exc:
+            self.events.report(
+                Severity.WARNING,
+                instrument_id,
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            return False
+        except InstrumentError as exc:
+            if self._uncertain_write_error(exc):
+                await self._fault_uncertain_write(
+                    instrument_id,
+                    operation,
+                    exc,
+                )
+                raise InstrumentError(
+                    f"{self.instrument_configs[instrument_id].display_name} "
+                    f"sequence command {command_id!r} could not be confirmed "
+                    "and was not replayed",
+                    "INSTRUMENT_WRITE_RESULT_UNKNOWN",
+                    instrument_id,
+                ) from exc
+            self.events.report(
+                Severity.ERROR,
+                instrument_id,
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            raise
+        return True
 
     async def hold_all(self) -> bool:
         """尽力 Hold 所有可控温度和磁场仪表，并返回是否全部成功。"""

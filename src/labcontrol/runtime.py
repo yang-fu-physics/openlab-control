@@ -26,6 +26,9 @@ from .instruments.manifest import SystemInstrumentDescriptor, discover_system_in
 from .instrument_manager import InstrumentManager
 from .sequence.engine import SequenceEngine
 from .sequence.model import SequenceDocument
+from .system_instrument_commands import (
+    configured_system_instrument_commands,
+)
 
 
 class RuntimeService:
@@ -57,6 +60,12 @@ class RuntimeService:
             discover_system_instruments(config)
             if instrument_descriptors is None
             else instrument_descriptors
+        )
+        self.instrument_sequence_commands = (
+            configured_system_instrument_commands(
+                config,
+                self.instrument_descriptors,
+            )
         )
 
     def start(self, timeout: float = 10.0) -> None:
@@ -110,6 +119,9 @@ class RuntimeService:
                 self.logger,
                 self.modules,
                 progress_callback=self._on_progress,
+                instrument_sequence_commands=(
+                    self.instrument_sequence_commands
+                ),
             )
             loop.run_until_complete(self.instruments.connect_all())
             initial_snapshots = loop.run_until_complete(

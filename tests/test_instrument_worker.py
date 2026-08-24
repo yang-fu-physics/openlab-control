@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.config import load_config  # noqa: E402
+from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.instruments.manifest import (  # noqa: E402
     instrument_dependency_directory,
     discover_system_instruments,
@@ -32,6 +33,7 @@ def _external_instrument(
     source: str,
     kinds: str = '"temperature"',
     dependencies: str = "",
+    sequence_commands: str = "",
 ) -> Path:
     instrument = root / "isolated_test"
     instrument.mkdir(parents=True)
@@ -53,6 +55,7 @@ def _external_instrument(
             + '[panel]\n'
             + f'template = "{panel_template}"\n'
             + '[readings.value]\nlabel = "Value"\nunit = "K"\n'
+            + sequence_commands
         ),
         encoding="utf-8",
     )
@@ -137,6 +140,75 @@ class InstrumentWorkerTests(unittest.TestCase):
                 self.assertEqual(snapshots["temperature"].current, 12.5)
                 measurement = await manager.poll_measurement_all()
                 self.assertEqual(measurement["temperature"].current, 99.5)
+                await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
+    def test_declared_sequence_command_reaches_external_worker_once(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = root / "sequence-command.txt"
+                source = (
+                    "from pathlib import Path\n"
+                    "from labcontrol.instruments.base import SystemInstrument\n"
+                    "class IsolatedTestInstrument(SystemInstrument):\n"
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self): return {'value': 12.5}\n"
+                    "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
+                    "    def hold(self): pass\n"
+                    "    def execute_sequence_command(self, command_id):\n"
+                    f"        Path({str(marker)!r}).write_text(command_id, encoding='utf-8')\n"
+                )
+                _external_instrument(
+                    root / "instruments",
+                    source,
+                    sequence_commands=(
+                        '[[sequence_commands]]\n'
+                        'id = "compressor_on"\n'
+                        'label = "Compressor On"\n'
+                    ),
+                )
+                state = root / "state"
+                instrument = replace(
+                    self.config.instruments[0],
+                    backend="isolated_test",
+                )
+                config = replace(
+                    self.config,
+                    system_instruments=replace(
+                        self.config.system_instruments,
+                        directory=str(root / "instruments"),
+                        state_directory=str(state),
+                    ),
+                    instruments=(instrument,),
+                )
+                descriptors = discover_system_instruments(config)
+                ContentTrustStore(state / "trusted_content.json").trust(
+                    "instrument",
+                    descriptors[0],
+                )
+                manager = InstrumentManager(config, EventManager(), descriptors)
+                await manager.connect_all()
+                self.assertTrue(
+                    await manager.execute_sequence_command(
+                        instrument.id,
+                        "compressor_on",
+                    )
+                )
+                self.assertEqual(
+                    marker.read_text(encoding="utf-8"),
+                    "compressor_on",
+                )
+                with self.assertRaisesRegex(
+                    InstrumentError,
+                    "sequence command is unavailable",
+                ):
+                    await manager.execute_sequence_command(
+                        instrument.id,
+                        "missing",
+                    )
                 await manager.disconnect_all()
 
         asyncio.run(scenario())

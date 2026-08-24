@@ -30,6 +30,7 @@ from .model import (
     Command,
     CommandType,
     SequenceDocument,
+    SystemInstrumentCommandSpec,
     validate_command_parameters,
 )
 from .parser import format_command, load_sequence, parse_temperature_points, serialize_sequence
@@ -53,6 +54,10 @@ class SequenceEngine:
         logger: DatRunLogger,
         modules: MeasurementModuleService | None = None,
         progress_callback: ProgressCallback | None = None,
+        instrument_sequence_commands: tuple[
+            SystemInstrumentCommandSpec,
+            ...,
+        ] = (),
     ) -> None:
         self.config = config
         self.instruments = instruments
@@ -60,6 +65,7 @@ class SequenceEngine:
         self.logger = logger
         self.modules = modules or MeasurementModuleService((), events, instruments)
         self.progress_callback = progress_callback or (lambda _: None)
+        self.instrument_sequence_commands = instrument_sequence_commands
         self.state = RunState.IDLE
         # gate 被 clear 时，所有经过 _checkpoint 的 SEQ 调度都停住。它不会主动关闭
         # 模块输出或仪表连接；这些物理策略由具体模块/仪表定义。
@@ -138,23 +144,34 @@ class SequenceEngine:
             if self._call_stack
             else self.config.project_root
         )
-        invalid_module_command = self._find_invalid_module_command(
+        invalid_dynamic_command = self._find_invalid_dynamic_command(
             document.commands,
             base_directory,
             frozenset(self._call_stack),
         )
-        if invalid_module_command is not None:
-            command, issues = invalid_module_command
+        if invalid_dynamic_command is not None:
+            command, issues = invalid_dynamic_command
+            instrument_command = (
+                command.type is CommandType.INSTRUMENT_COMMAND
+            )
             self.state = RunState.FAULTED
             self._fatal_abort = True
             self._abort_message = (
-                "Invalid module sequence command: "
+                (
+                    "Invalid System Instrument sequence command: "
+                    if instrument_command
+                    else "Invalid module sequence command: "
+                )
                 + "; ".join(issues)
             )
             self.events.report(
                 Severity.ERROR,
                 "sequence",
-                "MODULE_SEQUENCE_COMMAND_INVALID",
+                (
+                    "INSTRUMENT_SEQUENCE_COMMAND_INVALID"
+                    if instrument_command
+                    else "MODULE_SEQUENCE_COMMAND_INVALID"
+                ),
                 self._abort_message,
                 format_command(command, preserve_raw=False),
             )
@@ -491,6 +508,14 @@ class SequenceEngine:
         if command.type is CommandType.SCAN_TIME:
             await self._scan_time(command, path)
             return
+        if command.type is CommandType.INSTRUMENT_COMMAND:
+            await self._checkpoint()
+            await self.instruments.execute_sequence_command(
+                command.instrument_id,
+                command.instrument_command_id,
+            )
+            await self._checkpoint()
+            return
         if command.type is CommandType.MODULE_COMMAND:
             await self._execute_module_command(command)
             return
@@ -707,7 +732,10 @@ class SequenceEngine:
             raise InstrumentError(f"Circular sequence call detected: {source}", "SEQUENCE_CALL_CYCLE", str(source))
         if not source.exists():
             raise InstrumentError(f"Subsequence does not exist: {source}", "SEQUENCE_NOT_FOUND", str(source))
-        result = load_sequence(source)
+        result = load_sequence(
+            source,
+            instrument_commands=self.instrument_sequence_commands,
+        )
         if result.has_errors:
             details = "; ".join(issue.message for issue in result.issues if issue.level == "error")
             raise InstrumentError(f"Subsequence parsing failed: {details}", "SEQUENCE_PARSE_ERROR", str(source))
@@ -772,7 +800,12 @@ class SequenceEngine:
                 if source in call_stack or not source.exists():
                     continue
                 try:
-                    result = load_sequence(source)
+                    result = load_sequence(
+                        source,
+                        instrument_commands=(
+                            self.instrument_sequence_commands
+                        ),
+                    )
                 except OSError:
                     continue
                 if result.has_errors:
@@ -784,7 +817,7 @@ class SequenceEngine:
                 )
         return total
 
-    def _find_invalid_module_command(
+    def _find_invalid_dynamic_command(
         self,
         commands: list[Command],
         base_directory: Path,
@@ -792,20 +825,30 @@ class SequenceEngine:
         *,
         parent_enabled: bool = True,
     ) -> tuple[Command, tuple[str, ...]] | None:
-        """在产生运行目录或移动仪表前递归验证所有会执行的模块指令。"""
+        """在产生运行目录或移动仪表前递归验证所有会执行的动态指令。"""
 
         for command in commands:
             effective_enabled = parent_enabled and command.enabled
             if not effective_enabled:
                 continue
-            if command.type in {
+            if command.type is CommandType.INSTRUMENT_COMMAND:
+                if not self.instruments.has_sequence_command(
+                    command.instrument_id,
+                    command.instrument_command_id,
+                ):
+                    return command, (
+                        "command is not declared by the configured instrument: "
+                        f"{command.instrument_id}."
+                        f"{command.instrument_command_id}",
+                    )
+            elif command.type in {
                 CommandType.MODULE_COMMAND,
                 CommandType.MODULE_SCAN,
             }:
                 issues = self.modules.sequence_command_issues(command)
                 if issues:
                     return command, issues
-            invalid_child = self._find_invalid_module_command(
+            invalid_child = self._find_invalid_dynamic_command(
                 command.children,
                 base_directory,
                 call_stack,
@@ -821,12 +864,17 @@ class SequenceEngine:
             if source in call_stack or not source.exists():
                 continue
             try:
-                result = load_sequence(source)
+                result = load_sequence(
+                    source,
+                    instrument_commands=(
+                        self.instrument_sequence_commands
+                    ),
+                )
             except OSError:
                 continue
             if result.has_errors:
                 continue
-            invalid_called = self._find_invalid_module_command(
+            invalid_called = self._find_invalid_dynamic_command(
                 result.document.commands,
                 source.parent,
                 call_stack | {source},

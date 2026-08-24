@@ -82,3 +82,13 @@ class SystemInstrument(ABC):
     def hold(self) -> None:
         """停止改变受控量并保持当前状态；默认实现明确拒绝不支持的仪表。"""
         raise InstrumentError(f"Instrument {self.config.id} does not support hold", "UNSUPPORTED_HOLD")
+
+    def execute_sequence_command(self, command_id: str) -> None:
+        """执行清单声明的无参数 SEQ 指令；默认实现明确拒绝。"""
+
+        raise InstrumentError(
+            f"Instrument {self.config.id} does not support sequence command "
+            f"{command_id!r}",
+            "UNSUPPORTED_SEQUENCE_COMMAND",
+            command_id,
+        )

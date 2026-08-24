@@ -31,6 +31,7 @@ class CommandType(str, Enum):
     CALL_SEQUENCE = "call_sequence"
     INJECT_WARNING = "inject_warning"
     INJECT_ERROR = "inject_error"
+    INSTRUMENT_COMMAND = "instrument_command"
     MODULE_COMMAND = "module_command"
     MODULE_SCAN = "module_scan"
     UNKNOWN = "unknown"
@@ -62,6 +63,9 @@ class Command:
     # 因而模块可以自由使用 ``module_id`` 等普通字段而不会与核心保留键冲突。
     module_id: str = ""
     module_command_id: str = ""
+    # System Instrument 指令同样把核心信封与作者的指令 ID 分开；当前接口没有参数。
+    instrument_id: str = ""
+    instrument_command_id: str = ""
 
     def update_params(self, values: dict[str, Any]) -> None:
         """替换编辑后的参数，并丢弃不再可信的原始文本缓存。"""
@@ -81,6 +85,23 @@ class Command:
 
         refresh(duplicate)
         return duplicate
+
+
+@dataclass(frozen=True, slots=True)
+class SystemInstrumentCommandSpec:
+    """一条可直接插入当前站点 SEQ 的无参数仪表指令。"""
+
+    instrument_id: str
+    command_id: str
+    label: str
+
+    def create(self) -> Command:
+        return Command(
+            CommandType.INSTRUMENT_COMMAND,
+            {"label": self.label},
+            instrument_id=self.instrument_id,
+            instrument_command_id=self.command_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)

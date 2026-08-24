@@ -46,6 +46,14 @@ class InstrumentReadingDescriptor:
     decimals: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class InstrumentSequenceCommandDescriptor:
+    """清单声明的一条无参数 SEQ 指令。"""
+
+    id: str
+    label: str
+
+
 @dataclass(slots=True)
 class SystemInstrumentDescriptor:
     id: str
@@ -62,6 +70,7 @@ class SystemInstrumentDescriptor:
     identity_pattern: str = ""
     main_reading: str = ""
     readings: tuple[InstrumentReadingDescriptor, ...] = ()
+    sequence_commands: tuple[InstrumentSequenceCommandDescriptor, ...] = ()
     fingerprint: str = ""
     valid: bool = True
     error: str = ""
@@ -116,6 +125,7 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
                 "name",
                 "panel",
                 "readings",
+                "sequence_commands",
                 "version",
             }
         )
@@ -184,6 +194,29 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
                     decimals=decimals,
                 )
             )
+        raw_sequence_commands = raw.get("sequence_commands", [])
+        if not isinstance(raw_sequence_commands, list):
+            raise TypeError("sequence_commands must be an array of tables")
+        sequence_commands: list[InstrumentSequenceCommandDescriptor] = []
+        for index, raw_command in enumerate(raw_sequence_commands, start=1):
+            if not isinstance(raw_command, dict):
+                raise TypeError(
+                    f"sequence_commands entry {index} must be a table"
+                )
+            unknown_command_fields = sorted(
+                set(raw_command) - {"id", "label"}
+            )
+            if unknown_command_fields:
+                raise ValueError(
+                    f"unknown sequence_commands entry {index} fields: "
+                    + ", ".join(unknown_command_fields)
+                )
+            sequence_commands.append(
+                InstrumentSequenceCommandDescriptor(
+                    id=str(raw_command["id"]).strip(),
+                    label=str(raw_command["label"]).strip(),
+                )
+            )
     except (
         OSError,
         KeyError,
@@ -215,6 +248,7 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         identity_pattern=identity_pattern,
         main_reading=main_reading,
         readings=tuple(readings),
+        sequence_commands=tuple(sequence_commands),
     )
     errors: list[str] = []
     if not _IDENTIFIER.fullmatch(instrument_id):
@@ -306,6 +340,26 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         readings
     ):
         errors.append("reading labels must be unique")
+    for command in sequence_commands:
+        if not _IDENTIFIER.fullmatch(command.id):
+            errors.append(
+                "sequence command ids must match [a-z][a-z0-9_]*"
+            )
+        if (
+            not command.label
+            or len(command.label) > 100
+            or any(not character.isprintable() for character in command.label)
+        ):
+            errors.append(
+                "sequence command labels must be printable text "
+                "with 1-100 characters"
+            )
+    if len({item.id for item in sequence_commands}) != len(sequence_commands):
+        errors.append("sequence command ids must be unique")
+    if len(
+        {item.label.casefold() for item in sequence_commands}
+    ) != len(sequence_commands):
+        errors.append("sequence command labels must be unique")
     errors.extend(dependency_compatibility_errors)
     for raw_requirement in declared_dependencies:
         try:

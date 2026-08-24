@@ -84,6 +84,7 @@ from ..sequence.model import (
     CommandSpec,
     CommandType,
     SequenceDocument,
+    SystemInstrumentCommandSpec,
 )
 from ..sequence.module_settings import (
     SequenceModuleSettings,
@@ -153,6 +154,16 @@ class MainWindow(QMainWindow):
             self.module_descriptors,
             instrument_descriptors,
         )
+        self._instrument_sequence_commands: tuple[
+            SystemInstrumentCommandSpec,
+            ...,
+        ] = (
+            self.runtime.instrument_sequence_commands
+        )
+        self._instrument_sequence_command_specs = {
+            (command.instrument_id, command.command_id): command
+            for command in self._instrument_sequence_commands
+        }
         self.document = SequenceDocument()
         self.sequence_path: Path | None = None
         # 这些值属于当前打开的 SEQ，而不是“已发送到仪表”的状态。模块保持 Disabled；
@@ -414,6 +425,19 @@ class MainWindow(QMainWindow):
                 ("core", spec.command_type.value),
             )
             group.addChild(child)
+        system_group = groups["System Commands"]
+        for spec in self._instrument_sequence_commands:
+            child = QTreeWidgetItem([spec.label])
+            child.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                (
+                    "instrument",
+                    spec.instrument_id,
+                    spec.command_id,
+                ),
+            )
+            system_group.addChild(child)
         self.command_tree.expandAll()
         self.command_tree.itemDoubleClicked.connect(self._insert_palette_command)
         layout.addWidget(self.command_tree, 1)
@@ -801,7 +825,12 @@ class MainWindow(QMainWindow):
             return
         path = self.config.resolve_project_path(self.config.default_sequence)
         if path.exists():
-            result = load_sequence(path)
+            result = load_sequence(
+                path,
+                instrument_commands=(
+                    self._instrument_sequence_commands
+                ),
+            )
             module_settings = (
                 load_sequence_module_settings(path)
             )
@@ -1040,7 +1069,12 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self._last_sequence_directory = Path(path).resolve().parent
-        result = load_sequence(path)
+        result = load_sequence(
+            path,
+            instrument_commands=(
+                self._instrument_sequence_commands
+            ),
+        )
         imported = load_sequence_module_settings(
             path
         )
@@ -1182,6 +1216,13 @@ class MainWindow(QMainWindow):
         if not value or self.current_run_state not in self.TERMINAL_STATES:
             return
         if not isinstance(value, tuple) or not value:
+            return
+        if value[0] == "instrument" and len(value) == 3:
+            spec = self._instrument_sequence_command_specs.get(
+                (str(value[1]), str(value[2]))
+            )
+            if spec is not None:
+                self.editor.insert_command(spec.create())
             return
         if value[0] == "core" and len(value) == 2:
             command_type = CommandType(value[1])
@@ -1404,7 +1445,13 @@ class MainWindow(QMainWindow):
                 "\n".join(module_command_issues[:12]),
             )
             return
-        validation = parse_sequence(serialize_sequence(self.document), self.document.name)
+        validation = parse_sequence(
+            serialize_sequence(self.document),
+            self.document.name,
+            instrument_commands=(
+                self._instrument_sequence_commands
+            ),
+        )
         errors = [item for item in validation.issues if item.level == "error"]
         if errors:
             QMessageBox.critical(

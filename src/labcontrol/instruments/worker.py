@@ -315,6 +315,10 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
                 )
             elif action == "hold":
                 value = backend.hold()
+            elif action == "execute_sequence_command":
+                value = backend.execute_sequence_command(
+                    str(payload["command_id"])
+                )
             else:
                 raise InstrumentError(
                     f"Unknown instrument worker action: {action}",
@@ -773,6 +777,12 @@ class IsolatedInstrumentClient:
     async def hold(self) -> None:
         await self._request("hold")
 
+    async def execute_sequence_command(self, command_id: str) -> None:
+        await self._request(
+            "execute_sequence_command",
+            {"command_id": command_id},
+        )
+
     async def shutdown(self) -> None:
         await asyncio.to_thread(
             self.worker.close,
@@ -814,6 +824,12 @@ class InProcessInstrumentClient:
 
     async def hold(self) -> None:
         await asyncio.to_thread(self.backend.hold)
+
+    async def execute_sequence_command(self, command_id: str) -> None:
+        await asyncio.to_thread(
+            self.backend.execute_sequence_command,
+            command_id,
+        )
 
     async def shutdown(self) -> None:
         return None

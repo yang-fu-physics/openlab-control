@@ -33,6 +33,7 @@ def _write_instrument(
     instrument_id: str = "example_temperature",
     dependencies: str = "",
     backend_source: str | None = None,
+    sequence_commands: str = "",
 ) -> Path:
     instrument = root / instrument_id
     instrument.mkdir(parents=True)
@@ -53,6 +54,7 @@ def _write_instrument(
             'label = "Temperature"\n'
             'unit = "K"\n'
             'decimals = 3\n'
+            f"{sequence_commands}"
         ),
         encoding="utf-8",
     )
@@ -100,6 +102,47 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             )
             changed = discover_system_instruments(config)[0]
             self.assertNotEqual(changed.fingerprint, original)
+
+    def test_manifest_declares_only_stable_no_parameter_sequence_commands(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            instrument = _write_instrument(
+                Path(temporary),
+                sequence_commands=(
+                    '[[sequence_commands]]\n'
+                    'id = "compressor_on"\n'
+                    'label = "Compressor On"\n'
+                    '[[sequence_commands]]\n'
+                    'id = "compressor_off"\n'
+                    'label = "Compressor Off"\n'
+                ),
+            )
+            descriptor = load_instrument_manifest(instrument)
+            self.assertTrue(descriptor.valid, descriptor.error)
+            self.assertEqual(
+                [command.id for command in descriptor.sequence_commands],
+                ["compressor_on", "compressor_off"],
+            )
+            self.assertEqual(
+                [command.label for command in descriptor.sequence_commands],
+                ["Compressor On", "Compressor Off"],
+            )
+
+            manifest = instrument / "instrument.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8")
+                + '[[sequence_commands]]\n'
+                + 'id = "compressor_other"\n'
+                + 'label = "compressor on"\n',
+                encoding="utf-8",
+            )
+            duplicate = load_instrument_manifest(instrument)
+            self.assertFalse(duplicate.valid)
+            self.assertIn(
+                "sequence command labels must be unique",
+                duplicate.error,
+            )
 
     def test_main_reading_must_have_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

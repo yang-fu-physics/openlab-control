@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .model import (
     Command,
     CommandType,
     SequenceDocument,
+    SystemInstrumentCommandSpec,
     validate_command_parameters,
 )
 
@@ -259,8 +261,19 @@ def format_temperature_points(value: object) -> str:
     return f"[{', '.join(tokens)}]"
 
 
-def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
+def _parse_base_command(
+    text: str,
+    line_number: int,
+    instrument_commands: Mapping[str, SystemInstrumentCommandSpec],
+) -> tuple[Command, SequenceIssue | None]:
     """解析不含 ``using instrument`` 后缀的一条规范命令。"""
+
+    instrument_command = instrument_commands.get(text.casefold())
+    if instrument_command is not None:
+        command = instrument_command.create()
+        command.raw_text = text
+        command.source_line = line_number
+        return command, None
 
     module_result = _parse_module_command(text, line_number)
     if module_result is not None:
@@ -507,7 +520,11 @@ def _parse_base_command(text: str, line_number: int) -> tuple[Command, SequenceI
     ), SequenceIssue(line_number, "warning", "Unknown command will be preserved and skipped at runtime", text)
 
 
-def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue | None]:
+def _parse_command(
+    text: str,
+    line_number: int,
+    instrument_commands: Mapping[str, SystemInstrumentCommandSpec],
+) -> tuple[Command, SequenceIssue | None]:
     """先安全解析可选仪表后缀，再委托基础命令解析器。"""
 
     original = text
@@ -551,7 +568,11 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
                     original,
                 )
 
-    command, issue = _parse_base_command(text, line_number)
+    command, issue = _parse_base_command(
+        text,
+        line_number,
+        instrument_commands,
+    )
     command.raw_text = original
     if (
         command.type is CommandType.UNKNOWN
@@ -581,7 +602,13 @@ def _parse_command(text: str, line_number: int) -> tuple[Command, SequenceIssue 
     return command, issue
 
 
-def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = None) -> ParseResult:
+def parse_sequence(
+    text: str,
+    name: str = "Untitled.seq",
+    path: Path | None = None,
+    *,
+    instrument_commands: tuple[SystemInstrumentCommandSpec, ...] = (),
+) -> ParseResult:
     """解析完整 SEQ，并使用栈构造任意深度扫描树。
 
     每行可带 ``T`` 或 ``F``；这里只记录节点自身状态，父扫描禁用后的有效状态由文档模型和
@@ -590,6 +617,10 @@ def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = No
     """
 
     document = SequenceDocument(name=name, path=path)
+    instrument_commands_by_label = {
+        command.label.casefold(): command
+        for command in instrument_commands
+    }
     stack: list[list[Command]] = [document.commands]
     containers: list[Command] = []
     issues: list[SequenceIssue] = []
@@ -624,7 +655,11 @@ def parse_sequence(text: str, name: str = "Untitled.seq", path: Path | None = No
                 containers.pop()
             continue
 
-        command, issue = _parse_command(command_text, line_number)
+        command, issue = _parse_command(
+            command_text,
+            line_number,
+            instrument_commands_by_label,
+        )
         if issue is None:
             parameter_issues = validate_command_parameters(command)
             if parameter_issues:
@@ -745,6 +780,8 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
         return f"Inject Warning {p.get('code', 'SIM_WARNING')} {p.get('message', 'Simulated Warning')}"
     if command.type is CommandType.INJECT_ERROR:
         return f"Inject Error {p.get('code', 'SIM_ERROR')} {p.get('message', 'Simulated Error')}"
+    if command.type is CommandType.INSTRUMENT_COMMAND:
+        return str(p["label"])
     if command.type in {
         CommandType.MODULE_COMMAND,
         CommandType.MODULE_SCAN,
@@ -798,11 +835,20 @@ def _read_text(path: Path) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def load_sequence(path: str | Path) -> ParseResult:
+def load_sequence(
+    path: str | Path,
+    *,
+    instrument_commands: tuple[SystemInstrumentCommandSpec, ...] = (),
+) -> ParseResult:
     """从磁盘读取并解析 SEQ，保存绝对来源路径供 Call Sequence 解析。"""
 
     source = Path(path).resolve()
-    return parse_sequence(_read_text(source), name=source.name, path=source)
+    return parse_sequence(
+        _read_text(source),
+        name=source.name,
+        path=source,
+        instrument_commands=instrument_commands,
+    )
 
 
 def save_sequence(document: SequenceDocument, path: str | Path) -> Path:

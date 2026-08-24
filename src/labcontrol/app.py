@@ -33,6 +33,9 @@ from .models import RunProgress, RunState
 from .measurement.settings import load_settings
 from .paths import default_config_path
 from .runtime import RuntimeService
+from .system_instrument_commands import (
+    configured_system_instrument_commands,
+)
 from .sequence.module_settings import (
     load_sequence_module_settings,
 )
@@ -159,13 +162,19 @@ def _headless_demo(
         diagnostic.write(message + "\n")
         diagnostic.flush()
 
-    result = load_sequence(sequence_path)
+    runtime = RuntimeService(
+        config,
+        instrument_descriptors=instrument_descriptors,
+    )
+    result = load_sequence(
+        sequence_path,
+        instrument_commands=runtime.instrument_sequence_commands,
+    )
     if result.has_errors:
         for issue in result.issues:
             emit(f"{issue.level}: line {issue.line_number}: {issue.message}")
         diagnostic.close()
         return 2
-    runtime = RuntimeService(config, instrument_descriptors=instrument_descriptors)
     imported = load_sequence_module_settings(
         sequence_path
     )
@@ -298,6 +307,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         instrument_descriptors = discover_system_instruments(config)
         selected_system_instruments = configured_system_instruments(
+            config,
+            instrument_descriptors,
+        )
+        configured_system_instrument_commands(
             config,
             instrument_descriptors,
         )
