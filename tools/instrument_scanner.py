@@ -1,8 +1,8 @@
-"""只读扫描 VISA 仪表，并在人工确认后写入现场资源配置。
+"""只读扫描 VISA 仪表、录入 TCP 端点，并在人工确认后写入现场资源配置。
 
 扫描阶段只列出 VISA 资源并发送一次 *IDN?。程序不会执行 reset、clear、输出开关、
-设定点或 Measurement Module 的 Apply Settings。识别失败的地址仍会列出，用户可以根据
-前面板和线缆手动确认。
+设定点或 Measurement Module 的 Apply Settings。TCP 端点只保存人工输入的地址和端口，
+不会建立连接或发送识别指令。
 """
 
 from __future__ import annotations
@@ -145,11 +145,46 @@ QCheckBox { background: transparent; spacing: 6px; }
 
 @dataclass(frozen=True, slots=True)
 class VisaScanResult:
-    """一个 VISA 地址的一次只读识别结果。"""
+    """一个 VISA 扫描结果或人工录入的 TCP 资源候选项。"""
 
     address: str
     identity: str = ""
     error: str = ""
+    transport: str = "VISA"
+
+
+def tcp_resource_address(host: str, port: str) -> str:
+    """验证两个用户输入，并生成资源文件使用的规范 TCP 地址。"""
+
+    normalized_host = host.strip()
+    if (
+        not normalized_host
+        or any(
+            not character.isprintable() or character.isspace()
+            for character in normalized_host
+        )
+        or "://" in normalized_host
+    ):
+        raise ValueError(
+            "TCP address must be a host name or IP address without a scheme"
+        )
+    normalized_port = port.strip()
+    try:
+        port_number = int(normalized_port)
+    except ValueError as exc:
+        raise ValueError("TCP port must be an integer from 1 to 65535") from exc
+    if not 1 <= port_number <= 65535:
+        raise ValueError("TCP port must be an integer from 1 to 65535")
+    uri_host = (
+        f"[{normalized_host}]"
+        if ":" in normalized_host
+        and not (
+            normalized_host.startswith("[")
+            and normalized_host.endswith("]")
+        )
+        else normalized_host
+    )
+    return f"tcp://{uri_host}:{port_number}"
 
 
 def scan_visa_resources(
@@ -363,19 +398,36 @@ class InstrumentScannerWindow(QMainWindow):
         header_layout.addLayout(file_controls)
 
         scan_controls = QHBoxLayout()
-        scan_controls.setSpacing(10)
-        scan_controls.addStretch(1)
+        scan_controls.setSpacing(8)
+        scan_controls.addWidget(QLabel("TCP address"))
+        self.tcp_address_input = QLineEdit()
+        self.tcp_address_input.setPlaceholderText("192.168.1.100")
+        self.tcp_address_input.setMinimumWidth(100)
+        scan_controls.addWidget(self.tcp_address_input, 1)
+        scan_controls.addWidget(QLabel("Port"))
+        self.tcp_port_input = QLineEdit()
+        self.tcp_port_input.setPlaceholderText("4001")
+        self.tcp_port_input.setMaxLength(5)
+        self.tcp_port_input.setMaximumWidth(80)
+        scan_controls.addWidget(self.tcp_port_input)
+        self.add_tcp_button = QPushButton("Add TCP")
+        scan_controls.addWidget(self.add_tcp_button)
+        header_layout.addLayout(scan_controls)
+
+        visa_controls = QHBoxLayout()
+        visa_controls.setSpacing(8)
         safety_label = QLabel(
-            "Read-only scan · one *IDN? per VISA address"
+            "VISA: one read-only *IDN? · TCP: no probe"
         )
         safety_label.setStyleSheet(
             "color:#15803d; font-weight:600;"
         )
-        scan_controls.addWidget(safety_label)
+        visa_controls.addWidget(safety_label)
+        visa_controls.addStretch(1)
         self.scan_button = QPushButton("Scan VISA instruments")
         self.scan_button.setObjectName("primaryButton")
-        scan_controls.addWidget(self.scan_button)
-        header_layout.addLayout(scan_controls)
+        visa_controls.addWidget(self.scan_button)
+        header_layout.addLayout(visa_controls)
         self.existing_label = QLabel()
         self.existing_label.setWordWrap(True)
         self.existing_label.setObjectName("mutedText")
@@ -408,7 +460,7 @@ class InstrumentScannerWindow(QMainWindow):
         footer.setObjectName("scannerFooter")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(20, 11, 20, 11)
-        self.summary_label = QLabel("No VISA resources listed")
+        self.summary_label = QLabel("No instrument resources listed")
         self.summary_label.setMinimumWidth(0)
         self.summary_label.setSizePolicy(
             QSizePolicy.Policy.Ignored,
@@ -422,6 +474,13 @@ class InstrumentScannerWindow(QMainWindow):
         layout.addWidget(footer)
 
         self.scan_button.clicked.connect(self.start_scan)
+        self.add_tcp_button.clicked.connect(self._add_tcp_endpoint)
+        self.tcp_address_input.returnPressed.connect(
+            self._add_tcp_endpoint
+        )
+        self.tcp_port_input.returnPressed.connect(
+            self._add_tcp_endpoint
+        )
         self.output_button.clicked.connect(self.choose_output)
         self.save_button.clicked.connect(
             self.preview_and_save
@@ -491,8 +550,49 @@ class InstrumentScannerWindow(QMainWindow):
             if isinstance(results, (tuple, list))
             else ()
         )
-        self._scan_results = values
-        self._show_results(values)
+        manual_tcp = tuple(
+            result
+            for result in self._scan_results
+            if result.transport == "TCP"
+        )
+        self._show_results(values + manual_tcp)
+
+    def _add_tcp_endpoint(self) -> None:
+        """把人工输入加入候选列表；这里不打开 socket。"""
+
+        try:
+            address = tcp_resource_address(
+                self.tcp_address_input.text(),
+                self.tcp_port_input.text(),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(
+                self,
+                "Invalid TCP Endpoint",
+                str(exc),
+            )
+            return
+        if address.casefold() in {
+            controls["result"].address.casefold()
+            for controls in self._rows
+        }:
+            QMessageBox.warning(
+                self,
+                "TCP Endpoint Already Listed",
+                f"{address} is already listed.",
+            )
+            return
+        self.tcp_address_input.clear()
+        self.tcp_port_input.clear()
+        self._show_results(
+            self._scan_results
+            + (
+                VisaScanResult(
+                    address=address,
+                    transport="TCP",
+                ),
+            )
+        )
 
     def _scan_failed(self, message: str) -> None:
         dialog = QMessageBox(self)
@@ -540,7 +640,16 @@ class InstrumentScannerWindow(QMainWindow):
                     VisaScanResult(
                         item.address,
                         item.identity,
-                        "Not seen in this scan",
+                        (
+                            "Saved TCP endpoint"
+                            if item.address.casefold().startswith("tcp://")
+                            else "Not seen in this scan"
+                        ),
+                        (
+                            "TCP"
+                            if item.address.casefold().startswith("tcp://")
+                            else "VISA"
+                        ),
                     )
                 )
 
@@ -552,7 +661,7 @@ class InstrumentScannerWindow(QMainWindow):
         self._rows.clear()
         if not merged:
             placeholder = QLabel(
-                "Select Scan VISA instruments to discover connected devices."
+                "Scan VISA instruments or add a TCP endpoint."
             )
             placeholder.setObjectName("mutedText")
             placeholder.setAlignment(
@@ -583,7 +692,10 @@ class InstrumentScannerWindow(QMainWindow):
             identity_row = QHBoxLayout()
             identity_row.setSpacing(10)
             status = QLabel()
-            if result.error == "Not seen in this scan":
+            if result.transport == "TCP":
+                status.setText("TCP endpoint")
+                status.setObjectName("mutedText")
+            elif result.error == "Not seen in this scan":
                 status.setText("Existing entry")
                 status.setObjectName("mutedText")
             elif result.error:
@@ -611,7 +723,11 @@ class InstrumentScannerWindow(QMainWindow):
             identity_summary = (
                 " · ".join(identity_parts[:2])
                 if identity_parts
-                else "Identity unavailable"
+                else (
+                    "Not probed"
+                    if result.transport == "TCP"
+                    else "Identity unavailable"
+                )
             )
             identity_label = QLabel(identity_summary)
             identity_label.setObjectName("mutedText")
@@ -632,12 +748,21 @@ class InstrumentScannerWindow(QMainWindow):
                 "\n".join(
                     text
                     for text in (
-                        f"*IDN?: {result.identity}"
-                        if result.identity
-                        else "*IDN?: no response",
-                        f"Status: {result.error}"
-                        if result.error
-                        else "",
+                        (
+                            "TCP endpoint: no connection or command was sent"
+                            if result.transport == "TCP"
+                            else (
+                                f"*IDN?: {result.identity}"
+                                if result.identity
+                                else "*IDN?: no response"
+                            )
+                        ),
+                        (
+                            f"Status: {result.error}"
+                            if result.error
+                            and result.error != "Saved TCP endpoint"
+                            else ""
+                        ),
                     )
                     if text
                 )
@@ -788,7 +913,7 @@ class InstrumentScannerWindow(QMainWindow):
             card_layout.addWidget(configuration)
 
             ignored_message = QLabel(
-                "This VISA resource will not be written to the configuration."
+                "This resource will not be written to the configuration."
             )
             ignored_message.setObjectName("mutedText")
             card_layout.addWidget(ignored_message)

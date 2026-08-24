@@ -38,6 +38,7 @@ from instrument_scanner import (  # noqa: E402
     match_descriptor,
     scan_visa_resources,
     suggest_resource_id,
+    tcp_resource_address,
 )
 
 
@@ -640,6 +641,90 @@ class InstrumentScannerTests(unittest.TestCase):
                 "includes PyVISA.*NI-VISA",
             ):
                 scan_visa_resources(0.25)
+
+    def test_tcp_endpoint_is_added_without_probing_and_survives_visa_scan(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with patch("instrument_scanner.QTimer.singleShot"):
+                window = InstrumentScannerWindow(
+                    root / "instruments.local.toml",
+                    root / "system_instruments",
+                )
+            try:
+                window.tcp_address_input.setText("192.168.1.20")
+                window.tcp_port_input.setText("4001")
+                window._add_tcp_endpoint()
+                self.assertEqual(len(window._rows), 1)
+                tcp_result = window._rows[0]["result"]
+                self.assertEqual(
+                    tcp_result.address,
+                    "tcp://192.168.1.20:4001",
+                )
+                self.assertEqual(tcp_result.transport, "TCP")
+                self.assertEqual(tcp_result.identity, "")
+                self.assertIn(
+                    "no connection or command was sent",
+                    window._rows[0]["details_text"].text(),
+                )
+
+                window._scan_completed(
+                    (
+                        VisaScanResult(
+                            "GPIB0::1::INSTR",
+                            "Maker,Model,Serial,1",
+                        ),
+                    )
+                )
+                self.assertEqual(
+                    {
+                        controls["result"].address
+                        for controls in window._rows
+                    },
+                    {
+                        "GPIB0::1::INSTR",
+                        "tcp://192.168.1.20:4001",
+                    },
+                )
+                tcp_controls = next(
+                    controls
+                    for controls in window._rows
+                    if controls["result"].transport == "TCP"
+                )
+                tcp_controls["purpose"].setCurrentText("Measurement")
+                resources = window._resources()
+                tcp_resource = next(
+                    resource
+                    for resource in resources
+                    if resource.address.startswith("tcp://")
+                )
+                self.assertEqual(
+                    tcp_resource.address,
+                    "tcp://192.168.1.20:4001",
+                )
+            finally:
+                window.close()
+
+    def test_tcp_endpoint_input_is_validated_before_it_is_listed(self) -> None:
+        self.assertEqual(
+            tcp_resource_address("example.local", "0502"),
+            "tcp://example.local:502",
+        )
+        self.assertEqual(
+            tcp_resource_address("2001:db8::1", "4001"),
+            "tcp://[2001:db8::1]:4001",
+        )
+        for host, port in (
+            ("", "4001"),
+            ("tcp://example.local", "4001"),
+            ("example.local", "0"),
+            ("example.local", "65536"),
+            ("example.local", "not-a-port"),
+        ):
+            with self.subTest(host=host, port=port):
+                with self.assertRaises(ValueError):
+                    tcp_resource_address(host, port)
 
     def test_scan_failure_dialog_links_official_ni_visa_download(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
