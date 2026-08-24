@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.0 - 2026-08-25
+
+- System Instrument API 升级为不兼容的版本 3。`instrument.toml` 直接选择
+  `controller`、`readout` 或 `switch` 面板模板；温控、磁场、只读监视和开关状态不再由核心
+  为具体仪表硬编码界面。
+- System Instrument 可声明无参数 SEQ 指令。只有现场配置中实际存在对应仪表时，指令才加入
+  **System Commands**；SEQ 与前面板按钮共用同一隔离进程、timeout、错误上报和控制互斥。
+- 新增通用 `switch` 面板。状态读数在 DAT/状态日志中保持数字，面板仅将 0/1 显示为 Off/On；
+  SEQ 运行时禁用人工按钮，避免两条控制路径同时写仪表。
+- Instrument Scanner 可人工录入 TCP 地址与端口，并保存为 `tcp://host:port`。TCP 录入不建立
+  连接、不发送识别指令；VISA 扫描仍只发送一次只读 `*IDN?`。
+- System Instrument 仓库新增 ZLAN 6408 压缩机实现：DI1 读取状态、DO1 控制开关，并提供
+  `Compressor On` / `Compressor Off`。该实现仍需按现场接线和 Modbus TCP 配置独立验证。
+
 ## 0.16.0 - 2026-08-22
 
 - System Instrument API 升级为不兼容的版本 2。作者只实现同步
