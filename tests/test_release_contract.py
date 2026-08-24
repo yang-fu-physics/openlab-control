@@ -174,7 +174,7 @@ class ReleaseContractTests(unittest.TestCase):
             with self.subTest(generated_name=generated_name):
                 self.assertIn(generated_name, staging_script)
 
-    def test_github_release_workflow_builds_and_checks_windows_assets(self) -> None:
+    def test_github_release_workflow_builds_and_verifies_windows_assets(self) -> None:
         workflow = (
             ROOT / ".github" / "workflows" / "release.yml"
         ).read_text(encoding="utf-8")
@@ -188,6 +188,10 @@ class ReleaseContractTests(unittest.TestCase):
             "stage_windows_release.ps1",
             "InstrumentScanner.exe",
             "OpenLabControl.exe",
+            "Start-Process",
+            "WaitForExit",
+            "$process.ExitCode",
+            "$process.Kill($true)",
             "Get-FileHash",
             "headless_demo.log",
             "forbiddenNames",
@@ -195,8 +199,11 @@ class ReleaseContractTests(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, workflow)
-        self.assertNotIn("Start-Process", workflow)
-        self.assertNotIn("--headless-demo", workflow)
+        self.assertIn(
+            '-Arguments @("--headless-demo", "--timeout", "120")',
+            workflow,
+        )
+        self.assertIn("-TimeoutMilliseconds 180000", workflow)
         self.assertNotIn("tools/InstrumentScanner.exe", workflow)
 
     def test_current_docs_describe_shared_framework_and_isolated_extras(self) -> None:

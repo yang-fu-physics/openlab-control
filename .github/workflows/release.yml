@@ -79,7 +79,7 @@ jobs:
           python -m PyInstaller --clean --noconfirm OpenLabControl.spec
           & .\tools\stage_windows_release.ps1
 
-      - name: Verify packaged files
+      - name: Verify packaged programs
         shell: pwsh
         run: |
           $releaseRoot = (Resolve-Path -LiteralPath "dist\OpenLabControl").Path
@@ -90,6 +90,55 @@ jobs:
           }
           if (Test-Path -LiteralPath (Join-Path $releaseRoot "tools")) {
             throw "Release must not contain a tools directory"
+          }
+
+          function Invoke-PackagedProgram {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$Path,
+              [string[]]$Arguments = @(),
+              [int]$TimeoutMilliseconds = 30000
+            )
+
+            $process = Start-Process `
+              -FilePath $Path `
+              -ArgumentList $Arguments `
+              -WorkingDirectory $releaseRoot `
+              -WindowStyle Hidden `
+              -PassThru
+            if (-not $process.WaitForExit($TimeoutMilliseconds)) {
+              try {
+                $process.Kill($true)
+              }
+              catch {
+                $process.Kill()
+              }
+              throw "Packaged program timed out: $([IO.Path]::GetFileName($Path))"
+            }
+            if ($process.ExitCode -ne 0) {
+              throw "Packaged program exited with code $($process.ExitCode): $([IO.Path]::GetFileName($Path))"
+            }
+          }
+
+          Invoke-PackagedProgram `
+            -Path (Join-Path $releaseRoot "InstrumentScanner.exe") `
+            -Arguments @("--help") `
+            -TimeoutMilliseconds 15000
+          Invoke-PackagedProgram `
+            -Path (Join-Path $releaseRoot "OpenLabControl.exe") `
+            -Arguments @("--headless-demo", "--timeout", "120") `
+            -TimeoutMilliseconds 180000
+
+          $runs = Join-Path $releaseRoot "runs"
+          Get-ChildItem -LiteralPath $runs -Force | Remove-Item -Recurse -Force
+          $generatedPaths = @(
+            (Join-Path $releaseRoot "headless_demo.log"),
+            (Join-Path $releaseRoot "configs\instruments.local.toml")
+          )
+          foreach ($generatedPath in $generatedPaths) {
+            if (Test-Path -LiteralPath $generatedPath) {
+              Remove-Item -LiteralPath $generatedPath -Force
+            }
           }
 
       - name: Create and inspect release archive
