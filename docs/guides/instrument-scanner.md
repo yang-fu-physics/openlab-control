@@ -124,7 +124,7 @@ auxiliary_readings = ["temp_a", "heater_output", "heater_range"]
 
 System Instrument 在一次 `read_status()` 中读取完整状态：TempB 写入 `value`，TempA、加热
 功率和量程放在 `auxiliary` 字典中。这样不会为了显示第二个温度并发打开同一个 USB 地址；
-界面把这些辅助值放入最多四格的 `readout`，不会改变底层连接数量。
+界面把这些辅助值放入最多四格的 `readout_grid`，不会改变底层连接数量。
 
 如果实验室还有另一台独立温控仪或磁场电源，则为它登记另一个资源。核心会给每个不同资源
 建立独立进程，可以同时连接和并发轮询。

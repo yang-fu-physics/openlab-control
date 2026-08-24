@@ -136,9 +136,10 @@ System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的
 
 一份 System Instrument 代码对应一种物理仪表型号/协议，不对应 TempA、TempB 这样的单个
 通道。同一地址只建立一个会话；主读数写入 `value`，其余读数放入 `auxiliary` 字典，
-System Instrument API 3 清单必须选择 `controller`、`readout` 或 `switch` 面板。`controller`
-保持当前值、目标、速率和稳定状态样式；`readout` 以 2×2 最多显示四个读数，第五个开始放到
-右侧的下一个面板；`switch` 显示 0/1 状态，并把清单声明的无参数指令显示为按钮。同一指令
+System Instrument API 3 清单必须选择 `controller`、`readout`、`readout_grid` 或 `switch`
+面板。`controller` 保持当前值、目标、速率和稳定状态样式；`readout` 只显示一个主读数；
+`readout_grid` 以 2×2 最多显示四个读数，第五个开始放到右侧的下一个面板；`switch`
+显示 0/1 状态，并把清单声明的无参数指令显示为按钮。同一指令
 也直接出现在右侧 `System Commands` 中，不写 DAT。多个不同资源各有独立进程，可以同时
 连接和并发轮询。
 

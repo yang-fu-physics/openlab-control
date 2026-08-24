@@ -188,9 +188,19 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             unknown = load_instrument_manifest(instrument)
             self.assertFalse(unknown.valid)
             self.assertIn(
-                "panel.template must be controller, readout, or switch",
+                "panel.template must be controller, readout, readout_grid, or switch",
                 unknown.error,
             )
+
+            manifest.write_text(
+                source.replace(
+                    'template = "controller"',
+                    'template = "readout_grid"',
+                ),
+                encoding="utf-8",
+            )
+            grid = load_instrument_manifest(instrument)
+            self.assertTrue(grid.valid, grid.error)
 
     def test_switch_panel_uses_declared_sequence_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -54,7 +54,7 @@ decimals = 3
 | `backend` | `Python 文件名:类名` |
 | `kinds` | 可用作 `temperature`、`field` 或 `monitor` |
 | `main_reading` | 前面板和标准 DAT 使用的主读数 |
-| `[panel].template` | 底部面板；普通只读值用 `readout`，温度/磁场控制用 `controller`，0/1 状态和简单按钮用 `switch` |
+| `[panel].template` | 底部面板；单个只读值用 `readout`，多个只读值用 `readout_grid`，温度/磁场控制用 `controller`，0/1 状态和简单按钮用 `switch` |
 | `[readings.<键>]` | 每个读数的英文名称、单位和显示小数位 |
 | `identity_pattern` | 扫描器用 `*IDN?` 返回值自动建议这份实现 |
 | `dependencies` | 仅填写框架没有提供的额外包；PyVISA 不用重复写 |

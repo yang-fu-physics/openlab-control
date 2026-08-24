@@ -285,13 +285,22 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         errors.append("at least one supported instrument kind is required")
     if len(kinds) != len(set(kinds)):
         errors.append("supported instrument kinds must be unique")
-    if panel_template not in {"controller", "readout", "switch"}:
-        errors.append("panel.template must be controller, readout, or switch")
+    if panel_template not in {
+        "controller",
+        "readout",
+        "readout_grid",
+        "switch",
+    }:
+        errors.append(
+            "panel.template must be controller, readout, readout_grid, or switch"
+        )
     if (
         panel_template == "controller"
         and InstrumentKind.MONITOR in kinds
     ):
-        errors.append("monitor instruments must use the readout or switch panel template")
+        errors.append(
+            "monitor instruments must use the readout, readout_grid, or switch panel template"
+        )
     if identity_pattern:
         if len(identity_pattern) > 256:
             errors.append("discovery.identity_pattern is too long")

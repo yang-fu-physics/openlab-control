@@ -131,25 +131,19 @@ class ControllerPanel(QFrame):
 
 
 class ReadoutPanel(QFrame):
-    """在一个固定面板内以 2×2 排列最多四个读数。"""
+    """直接显示一个只读值，不添加标题栏或状态说明。"""
 
     def __init__(
         self,
-        title: str,
-        readings: tuple[InstrumentReadingConfig, ...],
-        main_reading: str,
+        reading: InstrumentReadingConfig,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        if not 1 <= len(readings) <= 4:
-            raise ValueError("A readout panel requires one to four readings")
-        self.readings = readings
-        self.main_reading = main_reading
-        self.value_labels: dict[str, QLabel] = {}
+        self.reading = reading
         self.setObjectName("instrumentPanel")
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setMinimumWidth(scaled(300))
-        self.setMaximumHeight(scaled(120))
+        self.setMinimumWidth(scaled(205))
+        self.setMaximumHeight(scaled(105))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -157,14 +151,80 @@ class ReadoutPanel(QFrame):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
         layout = _panel_layout(self)
-        self.title_label, self.state_label = _panel_header(layout, title)
+        layout.addStretch(1)
+        self.name_label = QLabel(reading.display_name)
+        self.name_label.setObjectName("panelTitle")
+        self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.value_label = QLabel("—")
+        self.value_label.setObjectName("panelValue")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.name_label)
+        layout.addWidget(self.value_label)
+        layout.addStretch(1)
+        self._set_state_style("disconnected")
+
+    def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
+        if not snapshot.connected:
+            self.value_label.setText("—")
+            self.setToolTip(snapshot.message)
+            self._set_state_style(snapshot.connection_state.value)
+            return
+        self.setToolTip("")
+        decimals = (
+            self.reading.decimals
+            if self.reading.decimals is not None
+            else 3
+        )
+        self.value_label.setText(
+            _formatted_reading(
+                snapshot.current,
+                self.reading.unit,
+                decimals,
+            )
+        )
+        self._set_state_style(
+            "stable" if snapshot.current is not None else "stale"
+        )
+
+    def _set_state_style(self, state: str) -> None:
+        self.setStyleSheet(_instrument_panel_style(state))
+
+
+class ReadoutGridPanel(QFrame):
+    """在一个 2×2 面板内直接显示一至四个读数。"""
+
+    def __init__(
+        self,
+        readings: tuple[InstrumentReadingConfig, ...],
+        main_reading: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        if not 1 <= len(readings) <= 4:
+            raise ValueError(
+                "A readout grid panel requires one to four readings"
+            )
+        self.readings = readings
+        self.main_reading = main_reading
+        self.name_labels: dict[str, QLabel] = {}
+        self.value_labels: dict[str, QLabel] = {}
+        self.setObjectName("instrumentPanel")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setMinimumWidth(scaled(300))
+        self.setMaximumHeight(scaled(105))
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        layout = _panel_layout(self)
         readings_layout = QGridLayout()
         readings_layout.setContentsMargins(0, 0, 0, 0)
-        readings_layout.setHorizontalSpacing(scaled(4))
+        readings_layout.setHorizontalSpacing(scaled(8))
         readings_layout.setVerticalSpacing(scaled(3))
         for index, reading in enumerate(readings):
-            cell = QFrame(self)
-            cell.setObjectName("readoutCell")
+            cell = QWidget(self)
             cell_layout = QVBoxLayout(cell)
             cell_layout.setContentsMargins(
                 scaled(4),
@@ -182,6 +242,7 @@ class ReadoutPanel(QFrame):
             cell_layout.addWidget(name_label)
             cell_layout.addWidget(value_label)
             readings_layout.addWidget(cell, index // 2, index % 2)
+            self.name_labels[reading.key] = name_label
             self.value_labels[reading.key] = value_label
         layout.addLayout(readings_layout)
         self._set_state_style("disconnected")
@@ -190,7 +251,6 @@ class ReadoutPanel(QFrame):
         if not snapshot.connected:
             for value_label in self.value_labels.values():
                 value_label.setText("—")
-            self.state_label.setText(_connection_state_text(snapshot))
             self.setToolTip(snapshot.message)
             self._set_state_style(snapshot.connection_state.value)
             return
@@ -212,9 +272,6 @@ class ReadoutPanel(QFrame):
                 _formatted_reading(value, reading.unit, decimals)
             )
             has_reading = has_reading or value is not None
-        self.state_label.setText(
-            "Monitoring" if has_reading else "No Reading"
-        )
         self._set_state_style("stable" if has_reading else "stale")
 
     def _set_state_style(self, state: str) -> None:
@@ -324,12 +381,18 @@ class InstrumentPanelHost(QWidget):
         super().__init__(parent)
         self.main_panels: dict[
             str,
-            ControllerPanel | ReadoutPanel | SwitchPanel,
+            ControllerPanel
+            | ReadoutPanel
+            | ReadoutGridPanel
+            | SwitchPanel,
         ] = {}
-        self.readout_panels: dict[tuple[str, int], ReadoutPanel] = {}
+        self.readout_panels: dict[
+            tuple[str, int],
+            ReadoutGridPanel,
+        ] = {}
         self._readout_panels_by_instrument: dict[
             str,
-            list[ReadoutPanel],
+            list[ReadoutGridPanel],
         ] = {}
         self._row = QHBoxLayout(self)
         self._row.setContentsMargins(
@@ -345,7 +408,7 @@ class InstrumentPanelHost(QWidget):
             QSizePolicy.Policy.Preferred,
         )
 
-        right_panels: list[ReadoutPanel] = []
+        right_panels: list[ReadoutGridPanel] = []
         for instrument in instruments:
             if instrument.panel_template == "controller":
                 controller_panel = ControllerPanel(
@@ -355,9 +418,20 @@ class InstrumentPanelHost(QWidget):
                 controller_panel.controlRequested.connect(
                     self.controlRequested
                 )
-                panel: ControllerPanel | None = controller_panel
+                panel: (
+                    ControllerPanel
+                    | ReadoutPanel
+                    | SwitchPanel
+                    | None
+                ) = controller_panel
                 readout_keys = instrument.auxiliary_readings
             elif instrument.panel_template == "readout":
+                panel = ReadoutPanel(
+                    instrument.reading(instrument.main_reading),
+                    self,
+                )
+                readout_keys = ()
+            elif instrument.panel_template == "readout_grid":
                 panel = None
                 readout_keys = (
                     instrument.main_reading,
@@ -390,15 +464,9 @@ class InstrumentPanelHost(QWidget):
                 readout_keys[index : index + 4]
                 for index in range(0, len(readout_keys), 4)
             )
-            instrument_readouts: list[ReadoutPanel] = []
+            instrument_readouts: list[ReadoutGridPanel] = []
             for group_index, reading_keys in enumerate(groups):
-                title = instrument.display_name
-                if instrument.panel_template in {"controller", "switch"}:
-                    title += " Readouts"
-                if len(groups) > 1:
-                    title += f" ({group_index + 1})"
-                readout_panel = ReadoutPanel(
-                    title,
+                readout_panel = ReadoutGridPanel(
                     tuple(
                         instrument.reading(reading_key)
                         for reading_key in reading_keys
@@ -409,7 +477,7 @@ class InstrumentPanelHost(QWidget):
                 self.readout_panels[(instrument.id, group_index)] = readout_panel
                 instrument_readouts.append(readout_panel)
                 if (
-                    instrument.panel_template == "readout"
+                    instrument.panel_template == "readout_grid"
                     and group_index == 0
                 ):
                     self.main_panels[instrument.id] = readout_panel
@@ -428,7 +496,10 @@ class InstrumentPanelHost(QWidget):
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
         main_panel = self.main_panels[snapshot.instrument_id]
-        if isinstance(main_panel, (ControllerPanel, SwitchPanel)):
+        if isinstance(
+            main_panel,
+            (ControllerPanel, ReadoutPanel, SwitchPanel),
+        ):
             main_panel.update_snapshot(snapshot)
         for readout_panel in self._readout_panels_by_instrument[
             snapshot.instrument_id
@@ -536,8 +607,6 @@ def _instrument_panel_style(state: str) -> str:
         "border-radius: 4px; }"
         "QFrame#instrumentPanel QLabel { background: transparent; color: #202124; }"
         "QFrame#instrumentPanel QLabel#panelDetail { color: #6f6f6f; }"
-        "QFrame#instrumentPanel QFrame#readoutCell { background: #f7f8fa; "
-        "border: 1px solid #dedede; border-radius: 2px; }"
         "QFrame#instrumentPanel QLabel#readoutName { color: #6f6f6f; }"
         "QFrame#instrumentPanel QLabel#readoutValue { color: #202124; }"
         "QFrame#instrumentPanel QPushButton { background: #f7f8fa; "
@@ -554,5 +623,6 @@ __all__ = [
     "ControllerPanel",
     "InstrumentPanelHost",
     "ReadoutPanel",
+    "ReadoutGridPanel",
     "SwitchPanel",
 ]

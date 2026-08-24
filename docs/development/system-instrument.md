@@ -122,10 +122,11 @@ max_rate_per_minute = 10.0
 控制的 temperature/field 仍可显示和记录；monitor 永远不能启用控制。
 
 `instrument.toml` 必须在 `[panel]` 中选择一个模板：`controller` 显示当前值、目标、速率和
-稳定状态，并在获准控制时允许双击；`readout` 以 2×2 最多显示四个读数；`switch` 把主读数
-0/1 显示为 Off/On，并把该清单的全部 `sequence_commands` 显示为按钮。按钮和 SEQ 使用同一
-指令 ID，不需要再写第二份面板 action 列表。选中的辅助读数统一进入 `readout`；第五个读数
-开始使用右侧的下一个 `readout`。可控温度/磁场实例必须使用 `controller`。
+稳定状态，并在获准控制时允许双击；`readout` 只显示一个主读数；`readout_grid` 以 2×2
+最多显示四个读数；`switch` 把主读数 0/1 显示为 Off/On，并把该清单的全部
+`sequence_commands` 显示为按钮。按钮和 SEQ 使用同一指令 ID，不需要再写第二份面板 action
+列表。`controller` 和 `switch` 的辅助读数也进入网格，第五个读数开始使用右侧的下一个
+网格。可控温度/磁场实例必须使用 `controller`。
 
 简单系统指令在清单中这样声明：
 

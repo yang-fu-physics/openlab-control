@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QCheckBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QCheckBox, QFrame  # noqa: E402
 
 from labcontrol.config import InstrumentReadingConfig, load_config  # noqa: E402
 from labcontrol.models import (  # noqa: E402
@@ -42,6 +42,7 @@ from labcontrol.ui.trend import TrendCanvas  # noqa: E402
 from labcontrol.ui.instrument_panels import (  # noqa: E402
     ControllerPanel,
     InstrumentPanelHost,
+    ReadoutGridPanel,
     ReadoutPanel,
     SwitchPanel,
 )
@@ -72,8 +73,21 @@ class InstrumentPanelTests(unittest.TestCase):
         panel.show()
         QTest.mouseDClick(panel, Qt.MouseButton.LeftButton)
         self.assertEqual(emitted, [])
-        self.assertEqual(panel.value_labels["value"].text(), "4.234 K")
-        self.assertEqual(panel.state_label.text(), "Monitoring")
+        self.assertEqual(panel.value_label.text(), "4.234 K")
+        self.assertEqual(panel.name_label.text(), "2nd Stage")
+        self.assertEqual(panel.minimumWidth(), 205)
+        self.assertEqual(panel.maximumHeight(), 105)
+        self.assertEqual(
+            panel.value_label.objectName(),
+            "panelValue",
+        )
+        self.assertFalse(hasattr(panel, "title_label"))
+        self.assertFalse(hasattr(panel, "state_label"))
+        self.assertFalse(hasattr(panel, "detail_label"))
+        self.assertEqual(
+            panel.findChildren(QFrame, "readoutCell"),
+            [],
+        )
         self.assertEqual(panel.cursor().shape(), Qt.CursorShape.ArrowCursor)
         trend = TrendCanvas()
         trend.add_snapshots({"second_stage": snapshot})
@@ -131,6 +145,7 @@ class InstrumentPanelTests(unittest.TestCase):
             [("temperature", 0)],
         )
         readout = host.readout_panels[("temperature", 0)]
+        self.assertIsInstance(readout, ReadoutGridPanel)
         self.assertEqual(
             readout.value_labels["second_stage"].text(),
             "20.125 K",
@@ -167,6 +182,7 @@ class InstrumentPanelTests(unittest.TestCase):
         base = config.instrument("second_stage")
         instrument = replace(
             base,
+            panel_template="readout_grid",
             auxiliary_readings=("a", "b", "c", "d"),
             readings=(
                 base.reading(base.main_reading),
@@ -187,6 +203,25 @@ class InstrumentPanelTests(unittest.TestCase):
         )
         self.assertEqual(list(second.value_labels), ["d"])
         self.assertLess(host._row.indexOf(first), host._row.indexOf(second))
+        host.close()
+
+    def test_single_readout_does_not_display_auxiliary_readings(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        base = config.instrument("second_stage")
+        instrument = replace(
+            base,
+            auxiliary_readings=("extra",),
+            readings=(
+                base.reading(base.main_reading),
+                InstrumentReadingConfig("extra", "Extra", "K", 2),
+            ),
+        )
+        host = InstrumentPanelHost((instrument,))
+
+        panel = host.main_panels["second_stage"]
+        self.assertIsInstance(panel, ReadoutPanel)
+        self.assertEqual(panel.name_label.text(), "2nd Stage")
+        self.assertEqual(host.readout_panels, {})
         host.close()
 
     def test_switch_panel_displays_state_and_emits_declared_action(self) -> None:
@@ -247,6 +282,9 @@ class InstrumentPanelTests(unittest.TestCase):
     def test_status_cards_keep_fixed_light_colors(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
         panel = ControllerPanel(config.instrument("temperature"))
+        self.assertEqual(panel.title_label.objectName(), "panelTitle")
+        self.assertEqual(panel.value_label.objectName(), "panelValue")
+        self.assertEqual(panel.detail_label.objectName(), "panelDetail")
         style = panel.styleSheet()
         self.assertIn("background: #ffffff", style)
         self.assertIn("color: #202124", style)
