@@ -81,6 +81,7 @@ class InstrumentConfig:
     display_name: str
     kind: InstrumentKind
     backend: str
+    panel_template: str
     resource_id: str = ""
     address: str = ""
     control_enabled: bool = False
@@ -537,6 +538,7 @@ def _instrument_config(
         )
         main_reading = descriptor.main_reading
         auxiliary_readings = resource.auxiliary_readings
+        panel_template = descriptor.panel_template
         unit = readings[0].unit
         address = resource.address
         initial_value = 0.0
@@ -553,6 +555,11 @@ def _instrument_config(
         unit = str(raw.get("unit", ""))
         main_reading = "value"
         auxiliary_readings = ()
+        panel_template = (
+            "controller"
+            if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
+            else "readout"
+        )
         readings = (
             InstrumentReadingConfig(
                 key=main_reading,
@@ -582,6 +589,7 @@ def _instrument_config(
         display_name=str(raw["display_name"]),
         kind=kind,
         backend=backend,
+        panel_template=panel_template,
         resource_id=resource_id,
         address=address,
         control_enabled=control_enabled,
@@ -601,6 +609,10 @@ def _instrument_config(
         extras={key: value for key, value in raw.items() if key not in known},
     )
     if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
+        if instrument.control_enabled and instrument.panel_template != "controller":
+            raise ConfigurationError(
+                f"Instrument {instrument.id}: control_enabled requires the controller panel template"
+            )
         if instrument.min_value >= instrument.max_value:
             raise ConfigurationError(f"Instrument {instrument.id}: min_value must be less than max_value")
         if instrument.default_rate_per_minute <= 0 or instrument.max_rate_per_minute <= 0:

@@ -27,7 +27,7 @@ configs/site.local.toml 的 [[instruments]]
         │ resource + 控制许可 + 安全范围
         ▼
 system_instruments/<id>/instrument.toml
-        │ backend + 主读数 + 所有读数的名称/单位/精度
+        │ backend + 面板模板 + 主读数 + 所有读数的名称/单位/精度
         ▼
 独立子进程 ── 串行访问 ── VISA / 串口 / 厂商库 ── 真实仪表
 ```
@@ -67,6 +67,9 @@ backend = "backend:Cryocon22C24CController"
 kinds = ["temperature"]
 main_reading = "temp_b"
 
+[panel]
+template = "controller"
+
 [readings.temp_b]
 label = "Sample Temperature (Temp B)"
 unit = "K"
@@ -103,7 +106,7 @@ max_value = 400.0
 max_rate_per_minute = 10.0
 ```
 
-同一个信息只写一次：地址和实现选择在资源表；主读数、单位和精度在清单；控制许可和安全
+同一个信息只写一次：地址和实现选择在资源表；面板模板、主读数、单位和精度在清单；控制许可和安全
 范围在现场主配置。外部 System Instrument 的 `[[instruments]]` 不再接受重复的 `backend`、
 `unit`、旧 `role` 或仿真的 `initial_value`。清单中的未知字段也会直接标记为 Invalid。
 
@@ -115,6 +118,11 @@ max_rate_per_minute = 10.0
 
 每种 temperature/field 最多一个 `control_enabled = true` 的实例。SEQ 自动选择它。没有启用
 控制的 temperature/field 仍可显示和记录；monitor 永远不能启用控制。
+
+`instrument.toml` 必须在 `[panel]` 中选择一个模板：`controller` 显示当前值、目标、速率和
+稳定状态，并在获准控制时允许双击；`readout` 以 2×2 最多显示四个读数。选中的辅助读数
+统一进入 `readout`；第五个读数开始使用右侧的下一个 `readout`。可控实例必须使用
+`controller`，其主控制面板样式不因辅助读数改变。
 
 ## 阅读顺序
 

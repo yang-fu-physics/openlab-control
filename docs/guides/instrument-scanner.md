@@ -74,6 +74,9 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 ```toml
 main_reading = "temp_b"
 
+[panel]
+template = "controller"
+
 [discovery]
 identity_pattern = "(?i)cryo-?con.*(?:22c|24c)"
 
@@ -96,8 +99,8 @@ decimals = 2
 label = "Heater Range"
 ```
 
-`main_reading` 必须对应一个 `[readings]`。其他读数自动成为辅助复选项。资源文件只保存勾选
-结果，不再重复主读数、单位或显示精度。
+`panel.template` 选择底部主面板，`main_reading` 必须对应一个 `[readings]`。其他读数自动成为
+辅助复选项。资源文件只保存勾选结果，不再重复面板、主读数、单位或显示精度。
 
 ## 为什么 TempA 和 TempB 不拆成两台
 
@@ -113,8 +116,8 @@ auxiliary_readings = ["temp_a", "heater_output", "heater_range"]
 ```
 
 System Instrument 在一次 `read_status()` 中读取完整状态：TempB 写入 `value`，TempA、加热
-功率和量程放在 `auxiliary` 字典中。这样不会为了显示第二个温度并发打开同一个 USB 地址；界面只把
-这些值拆成主卡右侧的独立监控卡，不会改变底层连接数量。
+功率和量程放在 `auxiliary` 字典中。这样不会为了显示第二个温度并发打开同一个 USB 地址；
+界面把这些辅助值放入最多四格的 `readout`，不会改变底层连接数量。
 
 如果实验室还有另一台独立温控仪或磁场电源，则为它登记另一个资源。核心会给每个不同资源
 建立独立进程，可以同时连接和并发轮询。

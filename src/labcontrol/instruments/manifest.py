@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from ..config import AppConfig
 
 
-SYSTEM_INSTRUMENT_API_VERSION = "2"
+SYSTEM_INSTRUMENT_API_VERSION = "3"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 _ENTRYPOINT = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$"
@@ -52,6 +52,7 @@ class SystemInstrumentDescriptor:
     name: str
     version: str
     path: Path
+    panel_template: str
     api_version: str = ""
     core_requires: str = ""
     backend: str = ""
@@ -90,6 +91,7 @@ def _invalid(path: Path, message: str) -> SystemInstrumentDescriptor:
         name=f"{path.name} (Invalid)",
         version="—",
         path=path.resolve(),
+        panel_template="",
         valid=False,
         error=message,
     )
@@ -112,6 +114,7 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
                 "kinds",
                 "main_reading",
                 "name",
+                "panel",
                 "readings",
                 "version",
             }
@@ -146,6 +149,16 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         identity_pattern = str(
             discovery.get("identity_pattern", "")
         ).strip()
+        panel = raw.get("panel")
+        if not isinstance(panel, dict):
+            raise TypeError("panel must be a table")
+        unknown_panel_fields = sorted(set(panel) - {"template"})
+        if unknown_panel_fields:
+            raise ValueError(
+                "unknown panel fields: "
+                + ", ".join(unknown_panel_fields)
+            )
+        panel_template = str(panel["template"]).strip()
         main_reading = str(raw.get("main_reading", "")).strip()
         raw_readings = raw.get("readings", {})
         if not isinstance(raw_readings, dict):
@@ -192,6 +205,7 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         name=name,
         version=version,
         path=path.resolve(),
+        panel_template=panel_template,
         api_version=api_version,
         core_requires=core_requires,
         backend=backend,
@@ -237,6 +251,13 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         errors.append("at least one supported instrument kind is required")
     if len(kinds) != len(set(kinds)):
         errors.append("supported instrument kinds must be unique")
+    if panel_template not in {"controller", "readout"}:
+        errors.append("panel.template must be controller or readout")
+    if (
+        panel_template == "controller"
+        and InstrumentKind.MONITOR in kinds
+    ):
+        errors.append("monitor instruments must use the readout panel template")
     if identity_pattern:
         if len(identity_pattern) > 256:
             errors.append("discovery.identity_pattern is too long")

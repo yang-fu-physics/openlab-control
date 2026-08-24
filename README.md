@@ -135,8 +135,9 @@ System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的
 
 一份 System Instrument 代码对应一种物理仪表型号/协议，不对应 TempA、TempB 这样的单个
 通道。同一地址只建立一个会话；主读数写入 `value`，其余读数放入 `auxiliary` 字典，
-界面会在主卡右侧依次建立同样大小的只读监控卡。多个不同资源各有独立进程，可以同时连接
-和并发轮询。
+System Instrument API 3 清单必须选择 `controller` 或 `readout` 面板。`controller` 保持当前
+值、目标、速率和稳定状态样式；`readout` 以 2×2 最多显示四个读数，第五个开始放到右侧的
+下一个面板。多个不同资源各有独立进程，可以同时连接和并发轮询。
 
 从[仪表扫描与地址配置](docs/guides/instrument-scanner.md)和
 [System Instrument 教程](docs/development/system-instrument.md)开始学习。

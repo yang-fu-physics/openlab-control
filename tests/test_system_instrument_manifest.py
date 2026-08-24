@@ -42,11 +42,13 @@ def _write_instrument(
             f'id = "{instrument_id}"\n'
             'name = "Example Temperature"\n'
             'version = "0.1.0"\n'
-            'api_version = "2"\n'
+            'api_version = "3"\n'
             'backend = "backend:ExampleTemperature"\n'
             'kinds = ["temperature"]\n'
             f"{dependency_block}"
             'main_reading = "temperature"\n'
+            '[panel]\n'
+            'template = "controller"\n'
             '[readings.temperature]\n'
             'label = "Temperature"\n'
             'unit = "K"\n'
@@ -88,6 +90,7 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             descriptor = discover_system_instruments(config)[0]
             self.assertTrue(descriptor.can_load, descriptor.error)
             self.assertEqual(descriptor.id, "example_temperature")
+            self.assertEqual(descriptor.panel_template, "controller")
             self.assertEqual(descriptor.fingerprint, content_tree_digest(instrument))
 
             original = descriptor.fingerprint
@@ -114,6 +117,36 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             self.assertIn(
                 "readings must define the declared main_reading",
                 descriptor.error,
+            )
+
+    def test_panel_template_is_required_and_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            instrument = _write_instrument(Path(temporary))
+            manifest = instrument / "instrument.toml"
+            source = manifest.read_text(encoding="utf-8")
+            manifest.write_text(
+                source.replace(
+                    '[panel]\ntemplate = "controller"\n',
+                    "",
+                ),
+                encoding="utf-8",
+            )
+            missing = load_instrument_manifest(instrument)
+            self.assertFalse(missing.valid)
+            self.assertIn("panel must be a table", missing.error)
+
+            manifest.write_text(
+                source.replace(
+                    'template = "controller"',
+                    'template = "unknown"',
+                ),
+                encoding="utf-8",
+            )
+            unknown = load_instrument_manifest(instrument)
+            self.assertFalse(unknown.valid)
+            self.assertIn(
+                "panel.template must be controller or readout",
+                unknown.error,
             )
 
     def test_manifest_rejects_obsolete_or_misspelled_fields(self) -> None:

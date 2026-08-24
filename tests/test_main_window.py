@@ -177,7 +177,10 @@ class MainWindowLayoutTests(unittest.TestCase):
                 [manager.table.horizontalHeaderItem(index).text() for index in range(3)],
                 ["Enabled", "Name", "Version"],
             )
-            self.assertEqual(set(window.status_tiles), {"temperature", "field", "second_stage"})
+            self.assertEqual(
+                set(window.status_panel.main_panels),
+                {"temperature", "field", "second_stage"},
+            )
             self.assertEqual(
                 window.status_scroll.horizontalScrollBarPolicy(),
                 Qt.ScrollBarPolicy.ScrollBarAsNeeded,

@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QCheckBox  # noqa: E402
 
-from labcontrol.config import load_config  # noqa: E402
+from labcontrol.config import InstrumentReadingConfig, load_config  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     InstrumentActivity,
     InstrumentConnectionState,
@@ -35,21 +35,25 @@ from labcontrol.ui.dialogs import (  # noqa: E402
     ManualControlDialog,
 )
 from labcontrol.ui.trend import TrendCanvas  # noqa: E402
-from labcontrol.ui.widgets import (  # noqa: E402
-    InstrumentStatusPanel,
-    StatusTile,
+from labcontrol.ui.instrument_panels import (  # noqa: E402
+    ControllerPanel,
+    InstrumentPanelHost,
+    ReadoutPanel,
 )
 
 
-class StatusTileTests(unittest.TestCase):
+class InstrumentPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_monitor_tile_is_display_only(self) -> None:
-        tile = StatusTile("second_stage", "2nd Stage", InstrumentKind.MONITOR)
+    def test_monitor_readout_panel_is_display_only(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        host = InstrumentPanelHost((config.instrument("second_stage"),))
+        panel = host.main_panels["second_stage"]
+        self.assertIsInstance(panel, ReadoutPanel)
         emitted: list[str] = []
-        tile.doubleClicked.connect(emitted.append)
+        host.controlRequested.connect(emitted.append)
         snapshot = InstrumentSnapshot(
             instrument_id="second_stage",
             display_name="2nd Stage",
@@ -59,14 +63,13 @@ class StatusTileTests(unittest.TestCase):
             current=4.2345,
             activity=InstrumentActivity.IDLE,
         )
-        tile.update_snapshot(snapshot)
-        tile.show()
-        QTest.mouseDClick(tile, Qt.MouseButton.LeftButton)
+        host.update_snapshot(snapshot)
+        panel.show()
+        QTest.mouseDClick(panel, Qt.MouseButton.LeftButton)
         self.assertEqual(emitted, [])
-        self.assertEqual(tile.value_label.text(), "4.234 K")
-        self.assertEqual(tile.state_label.text(), "Monitoring")
-        self.assertIn("Display only", tile.detail_label.text())
-        self.assertEqual(tile.cursor().shape(), Qt.CursorShape.ArrowCursor)
+        self.assertEqual(panel.value_labels["value"].text(), "4.234 K")
+        self.assertEqual(panel.state_label.text(), "Monitoring")
+        self.assertEqual(panel.cursor().shape(), Qt.CursorShape.ArrowCursor)
         trend = TrendCanvas()
         trend.add_snapshots({"second_stage": snapshot})
         self.assertEqual(len(trend.history["2nd Stage"]), 1)
@@ -76,16 +79,27 @@ class StatusTileTests(unittest.TestCase):
         )
         self.assertFalse(trend._redraw_timer.isActive())
         trend.close()
-        tile.close()
+        host.close()
 
-    def test_auxiliary_metrics_use_separate_cards_to_the_right(self) -> None:
-        panel = InstrumentStatusPanel()
-        tile = StatusTile(
-            "temperature",
-            "Temperature",
-            InstrumentKind.TEMPERATURE,
+    def test_controller_auxiliary_readings_share_four_value_panel(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        base = config.instrument("temperature")
+        instrument = replace(
+            base,
+            auxiliary_readings=(
+                "second_stage",
+                "heater_output",
+                "heater_range",
+            ),
+            readings=(
+                base.reading(base.main_reading),
+                InstrumentReadingConfig("second_stage", "2nd Stage", "K", 3),
+                InstrumentReadingConfig("heater_output", "Heater", "%", 2),
+                InstrumentReadingConfig("heater_range", "Range"),
+            ),
         )
-        panel.add_tile(tile)
+        host = InstrumentPanelHost((instrument,))
+        panel = host.main_panels["temperature"]
         snapshot = InstrumentSnapshot(
             instrument_id="temperature",
             display_name="Temperature",
@@ -105,70 +119,79 @@ class StatusTileTests(unittest.TestCase):
                 "heater_range": InstrumentMetric("Range", "LOW"),
             },
         )
-        tile.update_snapshot(snapshot)
-        panel.update_metrics(
-            snapshot.instrument_id,
-            snapshot.display_name,
-            snapshot.metrics,
-            connected=snapshot.connected,
-        )
+        host.update_snapshot(snapshot)
 
         self.assertEqual(
-            list(panel.metric_tiles),
-            [
-                ("temperature", "second_stage"),
-                ("temperature", "heater_output"),
-                ("temperature", "heater_range"),
-            ],
+            list(host.readout_panels),
+            [("temperature", 0)],
         )
+        readout = host.readout_panels[("temperature", 0)]
         self.assertEqual(
-            panel.metric_tiles[
-                ("temperature", "second_stage")
-            ].value_label.text(),
+            readout.value_labels["second_stage"].text(),
             "20.125 K",
         )
         self.assertEqual(
-            panel.metric_tiles[
-                ("temperature", "heater_output")
-            ].value_label.text(),
+            readout.value_labels["heater_output"].text(),
             "12.35 %",
         )
         self.assertEqual(
-            panel.metric_tiles[
-                ("temperature", "heater_range")
-            ].value_label.text(),
+            readout.value_labels["heater_range"].text(),
             "LOW",
         )
-        self.assertEqual(tile.maximumHeight(), panel.metric_tiles[
-            ("temperature", "second_stage")
-        ].maximumHeight())
+        self.assertEqual(panel.maximumHeight(), 105)
 
-        panel.update_metrics(
-            snapshot.instrument_id,
-            snapshot.display_name,
-            {},
-            connected=False,
+        host.update_snapshot(
+            InstrumentSnapshot(
+                instrument_id="temperature",
+                display_name="Temperature",
+                kind=InstrumentKind.TEMPERATURE,
+                timestamp=time.monotonic(),
+                unit="K",
+                connection_state=InstrumentConnectionState.DISCONNECTED,
+            )
         )
         self.assertEqual(
-            panel.metric_tiles[
-                ("temperature", "second_stage")
-            ].value_label.text(),
+            readout.value_labels["second_stage"].text(),
             "—",
         )
-        self.assertEqual(len(panel.metric_tiles), 3)
-        panel.close()
+        self.assertEqual(len(host.readout_panels), 1)
+        host.close()
+
+    def test_readout_fifth_value_starts_a_panel_to_the_right(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        base = config.instrument("second_stage")
+        instrument = replace(
+            base,
+            auxiliary_readings=("a", "b", "c", "d"),
+            readings=(
+                base.reading(base.main_reading),
+                InstrumentReadingConfig("a", "A", "K", 1),
+                InstrumentReadingConfig("b", "B", "K", 1),
+                InstrumentReadingConfig("c", "C", "K", 1),
+                InstrumentReadingConfig("d", "D", "K", 1),
+            ),
+        )
+        host = InstrumentPanelHost((instrument,))
+        first = host.readout_panels[("second_stage", 0)]
+        second = host.readout_panels[("second_stage", 1)]
+
+        self.assertIs(host.main_panels["second_stage"], first)
+        self.assertEqual(
+            list(first.value_labels),
+            ["value", "a", "b", "c"],
+        )
+        self.assertEqual(list(second.value_labels), ["d"])
+        self.assertLess(host._row.indexOf(first), host._row.indexOf(second))
+        host.close()
 
     def test_status_cards_keep_fixed_light_colors(self) -> None:
-        tile = StatusTile(
-            "temperature",
-            "Temperature",
-            InstrumentKind.TEMPERATURE,
-        )
-        style = tile.styleSheet()
+        config = load_config(ROOT / "configs" / "default.toml")
+        panel = ControllerPanel(config.instrument("temperature"))
+        style = panel.styleSheet()
         self.assertIn("background: #ffffff", style)
         self.assertIn("color: #202124", style)
         self.assertIn("color: #6f6f6f", style)
-        tile.close()
+        panel.close()
 
     def test_live_trend_coalesces_visible_redraws_and_stops_them_when_hidden(
         self,
@@ -206,11 +229,8 @@ class StatusTileTests(unittest.TestCase):
     def test_tile_distinguishes_reconnecting_and_faulted_states(
         self,
     ) -> None:
-        tile = StatusTile(
-            "temperature",
-            "Temperature",
-            InstrumentKind.TEMPERATURE,
-        )
+        config = load_config(ROOT / "configs" / "default.toml")
+        panel = ControllerPanel(config.instrument("temperature"))
         snapshot = InstrumentSnapshot(
             "temperature",
             "Temperature",
@@ -220,15 +240,15 @@ class StatusTileTests(unittest.TestCase):
             message="Retrying for up to 60 seconds",
             connection_state=InstrumentConnectionState.RECONNECTING,
         )
-        tile.update_snapshot(snapshot)
-        self.assertEqual(tile.state_label.text(), "Reconnecting")
-        self.assertIn("Retrying", tile.detail_label.text())
+        panel.update_snapshot(snapshot)
+        self.assertEqual(panel.state_label.text(), "Reconnecting")
+        self.assertIn("Retrying", panel.detail_label.text())
         snapshot.connection_state = InstrumentConnectionState.FAULTED
         snapshot.message = "Reconnect deadline exceeded"
-        tile.update_snapshot(snapshot)
-        self.assertEqual(tile.state_label.text(), "Faulted")
-        self.assertIn("deadline", tile.detail_label.text())
-        tile.close()
+        panel.update_snapshot(snapshot)
+        self.assertEqual(panel.state_label.text(), "Faulted")
+        self.assertIn("deadline", panel.detail_label.text())
+        panel.close()
 
     def test_secondary_temperature_tile_and_dialog_are_display_only(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")
@@ -237,15 +257,10 @@ class StatusTileTests(unittest.TestCase):
             id="temperature_backup",
             control_enabled=False,
         )
-        tile = StatusTile(
-            secondary.id,
-            secondary.display_name,
-            secondary.kind,
-            secondary.control_enabled,
-        )
+        panel = ControllerPanel(secondary)
         emitted: list[str] = []
-        tile.doubleClicked.connect(emitted.append)
-        tile.update_snapshot(
+        panel.controlRequested.connect(emitted.append)
+        panel.update_snapshot(
             InstrumentSnapshot(
                 secondary.id,
                 secondary.display_name,
@@ -257,14 +272,14 @@ class StatusTileTests(unittest.TestCase):
                 1.0,
             )
         )
-        tile.show()
-        QTest.mouseDClick(tile, Qt.MouseButton.LeftButton)
+        panel.show()
+        QTest.mouseDClick(panel, Qt.MouseButton.LeftButton)
         self.assertEqual(emitted, [])
-        self.assertIn("Display only", tile.detail_label.text())
-        self.assertEqual(tile.cursor().shape(), Qt.CursorShape.ArrowCursor)
+        self.assertIn("Display only", panel.detail_label.text())
+        self.assertEqual(panel.cursor().shape(), Qt.CursorShape.ArrowCursor)
         with self.assertRaises(ValueError):
             ManualControlDialog(secondary)
-        tile.close()
+        panel.close()
 
     def test_alert_dialog_is_deleted_after_close(self) -> None:
         dialog = AlertDialog(
@@ -291,17 +306,18 @@ class StatusTileTests(unittest.TestCase):
             "field", "Magnetic Field", InstrumentKind.FIELD, now, "Oe",
             123.456, 200.0, 5000.0, InstrumentActivity.MOVING,
         )
-        temperature_tile = StatusTile("temperature", "Temperature", InstrumentKind.TEMPERATURE)
-        field_tile = StatusTile("field", "Magnetic Field", InstrumentKind.FIELD)
-        temperature_tile.update_snapshot(temperature)
-        field_tile.update_snapshot(field)
-        self.assertEqual(temperature_tile.value_label.text(), "300.124 K")
-        self.assertIn("Target 299.900 K", temperature_tile.detail_label.text())
-        self.assertEqual(field_tile.value_label.text(), "123.46 Oe")
-        self.assertIn("Target 200.00 Oe", field_tile.detail_label.text())
-        self.assertIn("5000.00 Oe/min", field_tile.detail_label.text())
-        temperature_tile.close()
-        field_tile.close()
+        config = load_config(ROOT / "configs" / "default.toml")
+        temperature_panel = ControllerPanel(config.instrument("temperature"))
+        field_panel = ControllerPanel(config.instrument("field"))
+        temperature_panel.update_snapshot(temperature)
+        field_panel.update_snapshot(field)
+        self.assertEqual(temperature_panel.value_label.text(), "300.124 K")
+        self.assertIn("Target 299.900 K", temperature_panel.detail_label.text())
+        self.assertEqual(field_panel.value_label.text(), "123.46 Oe")
+        self.assertIn("Target 200.00 Oe", field_panel.detail_label.text())
+        self.assertIn("5000.00 Oe/min", field_panel.detail_label.text())
+        temperature_panel.close()
+        field_panel.close()
 
     def test_control_dialogs_match_unit_precision_and_convert_field_unit(self) -> None:
         config = load_config(ROOT / "configs" / "default.toml")

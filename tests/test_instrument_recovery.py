@@ -30,15 +30,18 @@ def _write_instrument(
     kinds: str = '"temperature"',
 ) -> None:
     directory.mkdir(parents=True)
+    panel_template = "readout" if kinds == '"monitor"' else "controller"
     (directory / "instrument.toml").write_text(
         (
             'id = "recovery_test"\n'
             'name = "Recovery Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "2"\n'
+            'api_version = "3"\n'
             'backend = "backend:RecoveryInstrument"\n'
             f"kinds = [{kinds}]\n"
             'main_reading = "value"\n'
+            '[panel]\n'
+            f'template = "{panel_template}"\n'
             '[readings.value]\nlabel = "Value"\nunit = "K"\n'
         ),
         encoding="utf-8",

@@ -74,6 +74,9 @@ VISA Session。
 ```toml
 main_reading = "temp_b"
 
+[panel]
+template = "controller"
+
 [readings.temp_b]
 label = "Sample Temperature (Temp B)"
 unit = "K"
@@ -94,7 +97,9 @@ decimals = 2
 `config.auxiliary_readings` 中；`read_status()` 的 `auxiliary` 必须完整返回这些键。键和顺序
 在运行中不能变化。
 
-前面板会在主读数右侧依次显示辅助卡片。结构化字典保留数值类型、单位和精度；不要把多个
+前面板主读数使用清单选择的模板；`readout` 以 2×2 最多放四个读数，第五个开始放到右侧
+下一个 `readout`。控制面板的辅助读数也按相同规则排列。结构化字典保留数值类型、单位和
+精度；不要把多个
 值拼成一段字符串。
 
 ## 两类数据文件

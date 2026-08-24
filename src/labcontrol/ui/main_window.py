@@ -100,6 +100,7 @@ from .measurement_modules import (
     ModuleWindow,
 )
 from .module_monitor import ModuleMonitorPanel
+from .instrument_panels import InstrumentPanelHost
 from .trust_dialogs import confirm_measurement_module_trust
 from .preferences import UiPreferences, UiPreferenceStore
 from .scaling import (
@@ -110,7 +111,7 @@ from .scaling import (
 )
 from .sequence_editor import SequenceEditorWidget
 from .trend import TrendDialog
-from .widgets import ElidedLabel, InstrumentStatusPanel, StatusTile
+from .widgets import ElidedLabel
 from .window_sizing import (
     fit_initial_window_width,
     preserve_restored_window_size,
@@ -174,7 +175,6 @@ class MainWindow(QMainWindow):
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_snapshots: dict[str, InstrumentSnapshot] = {}
         self.current_run_state = RunState.IDLE
-        self.status_tiles: dict[str, StatusTile] = {}
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
@@ -504,18 +504,8 @@ class MainWindow(QMainWindow):
         dock.setObjectName("statusDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        panel = InstrumentStatusPanel()
-        for instrument in self.config.instruments:
-            tile = StatusTile(
-                instrument.id,
-                instrument.display_name,
-                instrument.kind,
-                instrument.control_enabled,
-            )
-            if instrument.control_enabled:
-                tile.doubleClicked.connect(self._open_manual_control)
-            self.status_tiles[instrument.id] = tile
-            panel.add_tile(tile)
+        panel = InstrumentPanelHost(self.config.instruments)
+        panel.controlRequested.connect(self._open_manual_control)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -1636,15 +1626,7 @@ class MainWindow(QMainWindow):
     def _handle_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         self.current_snapshots = snapshots
         for instrument_id, snapshot in snapshots.items():
-            tile = self.status_tiles.get(instrument_id)
-            if tile is not None:
-                tile.update_snapshot(snapshot)
-            self.status_panel.update_metrics(
-                instrument_id,
-                snapshot.display_name,
-                snapshot.metrics,
-                connected=snapshot.connected,
-            )
+            self.status_panel.update_snapshot(snapshot)
             dialog = self.manual_dialogs.get(instrument_id)
             if dialog is not None:
                 dialog.update_snapshot(snapshot)

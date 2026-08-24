@@ -12,7 +12,10 @@ fails before hardware use. The monitor example is read-only.
 Backends use ordinary synchronous methods:
 `open/read_status/read_measurement/set_target/hold/close`. Read methods return
 plain dictionaries. Reading labels, units and precision belong only in
-`instrument.toml`; the core builds timestamps and runtime snapshots.
+`instrument.toml`; the required `[panel]` table selects `controller` or
+`readout`. The core builds timestamps and runtime snapshots. A `readout` panel
+shows up to four readings in a 2x2 grid; a fifth reading starts the next panel
+to its right. Controller appearance remains unchanged.
 
 ## Manual offline installation
 

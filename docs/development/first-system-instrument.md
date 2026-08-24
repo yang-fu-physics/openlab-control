@@ -27,12 +27,15 @@ system_instruments/my_thermometer/
 id = "my_thermometer"
 name = "My Thermometer"
 version = "0.1.0"
-api_version = "2"
+api_version = "3"
 core_requires = ">=0.16,<0.17"
 backend = "backend:MyThermometer"
 kinds = ["monitor"]
 dependencies = []
 main_reading = "temperature"
+
+[panel]
+template = "readout"
 
 [discovery]
 identity_pattern = "(?i)expected maker.*expected model"
@@ -51,11 +54,13 @@ decimals = 3
 | `backend` | `Python 文件名:类名` |
 | `kinds` | 可用作 `temperature`、`field` 或 `monitor` |
 | `main_reading` | 前面板和标准 DAT 使用的主读数 |
+| `[panel].template` | 底部面板；只读值用 `readout`，温度/磁场控制用 `controller` |
 | `[readings.<键>]` | 每个读数的英文名称、单位和显示小数位 |
 | `identity_pattern` | 扫描器用 `*IDN?` 返回值自动建议这份实现 |
 | `dependencies` | 仅填写框架没有提供的额外包；PyVISA 不用重复写 |
 
-`main_reading` 必须对应一个 `[readings.<键>]`。除主读数外，其余 `[readings]` 会自动成为扫描器
+`[panel]` 必须明确填写，不会猜测旧清单。`main_reading` 必须对应一个
+`[readings.<键>]`。除主读数外，其余 `[readings]` 会自动成为扫描器
 里的可选辅助读数，不需要再列第二遍。
 
 清单只接受教程列出的字段。字段拼错或继续填写旧的辅助读数列表会直接显示为 Invalid，
@@ -170,5 +175,5 @@ typing_extensions 使用框架锁定版本。
 
 ## 6. 再增加控制
 
-温度或磁场控制器再实现 `set_target()` 和 `hold()`，并在现场配置中写
+温度或磁场控制器再把 `panel.template` 改为 `controller`，实现 `set_target()` 和 `hold()`，并在现场配置中写
 `control_enabled = true`、真实上下限和最大速率。继续阅读[控制与安全](instrument-control-safety.md)。

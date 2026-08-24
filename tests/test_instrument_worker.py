@@ -35,12 +35,13 @@ def _external_instrument(
 ) -> Path:
     instrument = root / "isolated_test"
     instrument.mkdir(parents=True)
+    panel_template = "readout" if kinds == '"monitor"' else "controller"
     (instrument / "instrument.toml").write_text(
         (
             'id = "isolated_test"\n'
             'name = "Isolated Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "2"\n'
+            'api_version = "3"\n'
             'backend = "backend:IsolatedTestInstrument"\n'
             f"kinds = [{kinds}]\n"
             + (
@@ -49,6 +50,8 @@ def _external_instrument(
                 else ""
             )
             + 'main_reading = "value"\n'
+            + '[panel]\n'
+            + f'template = "{panel_template}"\n'
             + '[readings.value]\nlabel = "Value"\nunit = "K"\n'
         ),
         encoding="utf-8",
