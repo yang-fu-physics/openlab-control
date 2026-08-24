@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.1 - 2026-08-25
+
+- 首个正式发布的 0.17 Windows 包，包含 0.17.0 源码标签中的 System Instrument API 3、
+  清单驱动面板、System Instrument SEQ 指令、通用开关面板和 TCP 地址录入。
+- Windows 发布测试先完成隔离仪表进程、timeout 和回收测试，再加载 PySide6 面板测试，避免
+  Python 3.13.15 runner 在 Qt 已加载时结束超时 worker 导致测试进程直接退出。
+- 发布工作流使用 verbose unittest 输出；若以后出现进程级退出，日志会保留最后开始执行的
+  测试名，而不是只留下无法定位的点号。
+- System Instrument 仓库中的 ZLAN 6408 压缩机实现与本版本兼容；DI1 显示状态，DO1 执行
+  `Compressor On` / `Compressor Off`，仍需按现场接线和 Modbus TCP 配置独立验证。
+
 ## 0.17.0 - 2026-08-25
 
 - System Instrument API 升级为不兼容的版本 3。`instrument.toml` 直接选择
