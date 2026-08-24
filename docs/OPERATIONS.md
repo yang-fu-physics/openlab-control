@@ -91,7 +91,8 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 - 右侧 `Sequence Command Bar`：双击命令后设置参数并插入。
 - 底部 `Instrument Status`：Temperature、Magnetic Field、`2nd Stage` 等控制/Monitor；
   `controller` 保持当前值、目标、速率和稳定状态样式，`readout` 以 2×2 最多显示四个读数，
-  第五个开始放到右侧的下一个面板。面板使用固定浅色配色，不跟随 Windows 深色主题变色；
+  第五个开始放到右侧的下一个面板，`switch` 显示 0/1 状态和简单系统指令按钮。面板使用
+  固定浅色配色，不跟随 Windows 深色主题变色；
   不再显示测量 Transport 块。
 - 工具栏 `Modules`：测量模块管理。
 - `Run Log`：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。

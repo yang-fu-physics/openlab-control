@@ -23,8 +23,9 @@ Get-Content .\OpenLabControl-v0.16.0-windows-x64.zip.sha256
 ## 第一次启动
 
 1. 双击 `OpenLabControl.exe`。需要确认仪表地址时，双击同目录的
-   `InstrumentScanner.exe`。扫描器会自动读取已有配置并开始一次只读扫描；识别到唯一的
-   System Instrument 时会自动选择它，主读数和监控读数仍由操作者确认。两个程序共享同一个
+   `InstrumentScanner.exe`。扫描器会自动读取已有配置并开始一次只读 VISA 扫描；TCP 仪表
+   只填写地址和端口，不发送识别指令。VISA 识别到唯一的 System Instrument 时会自动选择，
+   TCP 由操作者选择实现。两个程序共享同一个
    `_internal`，不要单独移动任一 EXE。
 2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
 3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。

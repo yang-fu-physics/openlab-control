@@ -46,7 +46,8 @@ PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享�
 `--no-index --only-binary=:all: --require-hashes`，并验证 `requirements.lock`、wheel、
 runtime marker 和依赖树摘要。
 
-System Instrument 的作者接口是同步的 `open/read_status/read_measurement/set_target/hold/close`。
+System Instrument 的作者接口是同步的
+`open/read_status/read_measurement/set_target/hold/execute_sequence_command/close`。
 驱动只返回包含 `value` 和可选 `target/rate/moving/ready/auxiliary` 的普通字典；核心统一生成
 时间戳、连接状态和内部快照。`instrument.toml` 是主读数及显示元数据的唯一来源；资源表只
 保存物理地址、实现选择和操作者勾选的辅助读数；现场主配置只保存控制许可与安全参数。

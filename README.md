@@ -115,7 +115,8 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 
 1. 把完整 System Instrument 文件夹复制到 `system_instruments/<instrument-id>/`。
 2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
-   `InstrumentScanner.exe`。程序打开后自动进行一次只读 VISA 扫描，再由操作者确认地址、
+   `InstrumentScanner.exe`。程序打开后自动进行一次只读 VISA 扫描；TCP 仪表只输入地址和
+   端口，不连接、不发送识别指令。随后由操作者确认地址、
    用途、System Instrument 和辅助读数；唯一识别的实现会自动选择，主读数由该实现固定，
    辅助读数使用复选框。结果写入 `configs/instruments.local.toml`。已有文件会先自动载入，
    保存前会逐项列出新增、替换、删除和保持不变的资源。
@@ -130,14 +131,16 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 6. 核对首次信任窗口。发现目录不会连接仪表，只有现场配置引用的资源才会启动。
 
 System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的
-`open/read_status/read_measurement/set_target/hold/close`。通讯命令建议单独放在
+`open/read_status/read_measurement/set_target/hold/execute_sequence_command/close`。通讯命令建议单独放在
 `instrument.py`，让 `backend.py` 只处理生命周期、安全判断和读数组装。
 
 一份 System Instrument 代码对应一种物理仪表型号/协议，不对应 TempA、TempB 这样的单个
 通道。同一地址只建立一个会话；主读数写入 `value`，其余读数放入 `auxiliary` 字典，
-System Instrument API 3 清单必须选择 `controller` 或 `readout` 面板。`controller` 保持当前
-值、目标、速率和稳定状态样式；`readout` 以 2×2 最多显示四个读数，第五个开始放到右侧的
-下一个面板。多个不同资源各有独立进程，可以同时连接和并发轮询。
+System Instrument API 3 清单必须选择 `controller`、`readout` 或 `switch` 面板。`controller`
+保持当前值、目标、速率和稳定状态样式；`readout` 以 2×2 最多显示四个读数，第五个开始放到
+右侧的下一个面板；`switch` 显示 0/1 状态，并把清单声明的无参数指令显示为按钮。同一指令
+也直接出现在右侧 `System Commands` 中，不写 DAT。多个不同资源各有独立进程，可以同时
+连接和并发轮询。
 
 从[仪表扫描与地址配置](docs/guides/instrument-scanner.md)和
 [System Instrument 教程](docs/development/system-instrument.md)开始学习。

@@ -54,7 +54,7 @@ decimals = 3
 | `backend` | `Python 文件名:类名` |
 | `kinds` | 可用作 `temperature`、`field` 或 `monitor` |
 | `main_reading` | 前面板和标准 DAT 使用的主读数 |
-| `[panel].template` | 底部面板；只读值用 `readout`，温度/磁场控制用 `controller` |
+| `[panel].template` | 底部面板；普通只读值用 `readout`，温度/磁场控制用 `controller`，0/1 状态和简单按钮用 `switch` |
 | `[readings.<键>]` | 每个读数的英文名称、单位和显示小数位 |
 | `identity_pattern` | 扫描器用 `*IDN?` 返回值自动建议这份实现 |
 | `dependencies` | 仅填写框架没有提供的额外包；PyVISA 不用重复写 |
@@ -177,3 +177,7 @@ typing_extensions 使用框架锁定版本。
 
 温度或磁场控制器再把 `panel.template` 改为 `controller`，实现 `set_target()` 和 `hold()`，并在现场配置中写
 `control_enabled = true`、真实上下限和最大速率。继续阅读[控制与安全](instrument-control-safety.md)。
+
+需要压缩机这类简单开关时，使用 `switch`，在清单加入无参数 `[[sequence_commands]]`，并在
+后端实现 `execute_sequence_command(command_id)`。清单中的指令会同时成为底部按钮和右侧
+System Commands，不要再写第二套界面动作名称。

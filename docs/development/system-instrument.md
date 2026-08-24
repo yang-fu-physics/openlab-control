@@ -1,7 +1,7 @@
 # System Instrument 从这里开始
 
-System Instrument 负责实验期间一直存在的仪表，例如主温控仪、主磁场控制器，以及一直显示的
-冷头温度、压力或液位监视仪表。
+System Instrument 负责实验期间一直存在的仪表，例如主温控仪、主磁场控制器、压缩机开关，
+以及一直显示的冷头温度、压力或液位监视仪表。
 
 电阻表、电压表、换向器和只在 `Measure` 时工作的测量组合属于 Measurement Module。
 
@@ -12,6 +12,7 @@ System Instrument 负责实验期间一直存在的仪表，例如主温控仪�
 | `Set Temperature` 或 `Scan Temperature` 控制它 | System Instrument |
 | `Set Field` 或 `Scan Field` 控制它 | System Instrument |
 | 程序一直显示，但从不设置 | System Instrument（`monitor`） |
+| 程序一直显示，并提供简单的 On/Off 系统指令 | System Instrument（`monitor` + `switch`） |
 | 只在 `Measure` 时读取 | Measurement Module |
 | 有测量通道、设置窗口或模块 SEQ 指令 | Measurement Module |
 
@@ -29,16 +30,17 @@ configs/site.local.toml 的 [[instruments]]
 system_instruments/<id>/instrument.toml
         │ backend + 面板模板 + 主读数 + 所有读数的名称/单位/精度
         ▼
-独立子进程 ── 串行访问 ── VISA / 串口 / 厂商库 ── 真实仪表
+独立子进程 ── 串行访问 ── VISA / TCP / 串口 / 厂商库 ── 真实仪表
 ```
 
-后端只有六个容易理解的方法：
+后端只有几个容易理解的方法：
 
 - `open()`：连接并确认身份和初始状态；
 - `read_status()`：完整状态，供前面板、安全检查、判稳和状态日志使用；
 - `read_measurement()`：可选的快速主读数；不写时自动调用 `read_status()`；
 - `set_target()`：可控温度或磁场仪表设置目标；
 - `hold()`：用新鲜读数保持当前状态；
+- `execute_sequence_command()`：可选，执行清单声明的简单无参数指令；
 - `close()`：释放通讯，不擅自改变输出。
 
 这些方法都是普通同步函数。核心负责子进程、超时、调用顺序、时间戳和内部状态对象。
@@ -120,9 +122,29 @@ max_rate_per_minute = 10.0
 控制的 temperature/field 仍可显示和记录；monitor 永远不能启用控制。
 
 `instrument.toml` 必须在 `[panel]` 中选择一个模板：`controller` 显示当前值、目标、速率和
-稳定状态，并在获准控制时允许双击；`readout` 以 2×2 最多显示四个读数。选中的辅助读数
-统一进入 `readout`；第五个读数开始使用右侧的下一个 `readout`。可控实例必须使用
-`controller`，其主控制面板样式不因辅助读数改变。
+稳定状态，并在获准控制时允许双击；`readout` 以 2×2 最多显示四个读数；`switch` 把主读数
+0/1 显示为 Off/On，并把该清单的全部 `sequence_commands` 显示为按钮。按钮和 SEQ 使用同一
+指令 ID，不需要再写第二份面板 action 列表。选中的辅助读数统一进入 `readout`；第五个读数
+开始使用右侧的下一个 `readout`。可控温度/磁场实例必须使用 `controller`。
+
+简单系统指令在清单中这样声明：
+
+```toml
+[panel]
+template = "switch"
+
+[[sequence_commands]]
+id = "compressor_on"
+label = "Compressor On"
+
+[[sequence_commands]]
+id = "compressor_off"
+label = "Compressor Off"
+```
+
+只有现场配置实际选择这份 System Instrument 时，`Compressor On` 和 `Compressor Off` 才会
+直接出现在右侧 **System Commands**。它们没有参数、不会生成 DAT 测量行；Warning 继续 SEQ，
+Error 中止。`switch` 面板的按钮只在 SEQ 空闲时可用，核心仍会在运行时阻止抢占 SEQ 控制权。
 
 ## 阅读顺序
 

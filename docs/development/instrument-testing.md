@@ -38,7 +38,7 @@
 ## 用假的通讯对象测试命令顺序
 
 底层仪表命令最好放在独立的 `instrument.py`，后台的 `backend.py` 只保留
-`open/read_status/read_measurement/set_target/hold/close`。假的通讯对象按顺序返回手册中的
+`open/read_status/read_measurement/set_target/hold/execute_sequence_command/close`。假的通讯对象按顺序返回手册中的
 响应，并记录收到的命令：
 
 ```python

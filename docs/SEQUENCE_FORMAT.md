@@ -191,6 +191,23 @@ T End Scan
 duration 范围为 0 到 31536000 秒，`steps` 范围为 1 到 1000000。
 解析器和执行器都会验证这些边界，不会把非法值静默截断为零或一点。
 
+### System Instrument 简单指令
+
+配置中的 System Instrument 可以声明无参数指令。它们会直接出现在右侧 **System Commands**，
+SEQ 文本就是显示名称：
+
+```text
+T Compressor On
+T Compressor Off
+```
+
+- 只有对应 System Instrument 已安装且被现场配置引用时才会注册；
+- 双击后直接插入，不弹参数窗口；
+- 指令本身不写 DAT；
+- Warning 报警后继续，Error 中止 SEQ；
+- 底部 `switch` 面板可以调用同一指令，但 SEQ 运行时禁用手动按钮；
+- 实现缺失时 Load 保留原文并给 Warning，Run 预检阻止执行。
+
 ### Measurement Module 自定义指令
 
 模块完成 Enable 后，可以在右侧以自己的名称注册普通指令和扫描指令。SEQ 使用固定的

@@ -10,12 +10,13 @@ The controller example contains no real protocol commands and deliberately
 fails before hardware use. The monitor example is read-only.
 
 Backends use ordinary synchronous methods:
-`open/read_status/read_measurement/set_target/hold/close`. Read methods return
+`open/read_status/read_measurement/set_target/hold/execute_sequence_command/close`. Read methods return
 plain dictionaries. Reading labels, units and precision belong only in
-`instrument.toml`; the required `[panel]` table selects `controller` or
-`readout`. The core builds timestamps and runtime snapshots. A `readout` panel
+`instrument.toml`; the required `[panel]` table selects `controller`, `readout`,
+or `switch`. The core builds timestamps and runtime snapshots. A `readout` panel
 shows up to four readings in a 2x2 grid; a fifth reading starts the next panel
-to its right. Controller appearance remains unchanged.
+to its right. A `switch` panel displays a 0/1 main reading and uses all declared
+no-parameter `sequence_commands` as buttons. Controller appearance remains unchanged.
 
 ## Manual offline installation
 

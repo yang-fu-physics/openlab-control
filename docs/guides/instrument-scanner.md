@@ -1,7 +1,8 @@
 # 扫描并配置仪表
 
-这个独立工具解决一件事：找到电脑当前能看到的 VISA 地址，让你确认每个地址对应哪台物理
-仪表，再把结果保存到一个本机配置文件。以后 USB 枚举或 GPIB 地址变化，只改这一份文件。
+这个独立工具解决一件事：列出电脑当前能看到的 VISA 地址，或让你录入 TCP 地址和端口，
+再确认每个地址对应哪台物理仪表并保存到本机配置文件。以后 USB 枚举、GPIB 地址或 TCP
+端点变化，只改这一份文件。
 
 ## 打开工具
 
@@ -26,7 +27,8 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 0.16 使用 `schema_version = 2`。旧资源文件不会自动迁移；先保留旧文件作参考，再重新扫描并
 人工确认。扫描器不会覆盖一个无法按当前 Schema 读取的文件。
 
-工具打开时会自动读取这份文件，随后自动执行一次 VISA 扫描。旧资源会先显示为仪表卡片，
+工具打开时会自动读取这份文件，随后自动执行一次 VISA 扫描。TCP 端点不会自动扫描；在
+顶部填写 **TCP address** 和 **Port** 后点击 **Add TCP**。旧资源会先显示为仪表卡片，
 扫描结果再与旧表合并；没有在本次扫描中出现的旧地址也会保留，除非你明确把它的 `Use` 改为
 `Ignore`。需要重新检查连接时仍可点击 **Scan VISA instruments**。
 
@@ -34,7 +36,8 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 
 - System Instrument 的名称、型号匹配规则和可选读数全部来自各自的 `instrument.toml`；
 - 扫描器不会为了发现这些信息而导入 `backend.py`；
-- 唯一匹配的 System Instrument 会自动预选；主读数由该实现固定，辅助读数由操作者勾选。
+- VISA 身份唯一匹配时会自动预选 System Instrument；TCP 不发送识别命令，因此由操作者
+  选择实现。主读数由该实现固定，辅助读数由操作者勾选。
 
 扫描器不读取 Measurement Module 目录，也不把地址绑定到某个模块。Measurement 资源保存后
 会出现在模块的 Settings 中，具体地址在 Enable 模块后选择。
@@ -54,6 +57,10 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 `*IDN?` 只用于辅助认出型号。卡片顶部只显示制造商和型号；点击 **Device details** 可查看
 完整返回值和扫描状态。完整内容也会原样保存，不会因为默认折叠而丢失。
 
+TCP 的 **Add TCP** 只检查地址和端口格式，然后保存为 `tcp://地址:端口`。它不会打开
+socket，也不会发送 `*IDN?` 或厂商命令；卡片会明确显示 `Not probed`。后端在 OpenLab
+Control 启动时才按自己的协议连接并核对状态。
+
 !!! warning "扫描不是安全认证"
 
     识别成功只能说明地址在扫描时返回了一段身份文字。System Instrument 和 Measurement
@@ -65,7 +72,7 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 | --- | --- |
 | `Use` | 不使用选 Ignore；温度、磁场和长期监控选 System；测量仪表选 Measurement |
 | `Resource name (ID)` | 自己容易记住且长期不变的名称，例如 `cryocon_main`、`keithley_2400_1` |
-| `System Instrument` | 只有 System 资源需要；唯一匹配型号时自动选择，否则由操作者确认 |
+| `System Instrument` | 只有 System 资源需要；VISA 身份唯一匹配时自动选择，TCP 或未知型号由操作者确认 |
 | `Main reading` | 只读显示；由所选 System Instrument 清单固定 |
 | `Auxiliary readings` | 勾选需要显示和记录的同一物理仪表附加读数 |
 

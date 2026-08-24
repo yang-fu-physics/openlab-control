@@ -88,8 +88,9 @@ Measurement Module 是“完成一次测量”的小程序，例如读取电阻�
 仪表不会同时执行两次通讯；当前完整指令完成后，测量读取会先于等待中的后台刷新。
 
 连接仪表前，先打开[扫描与配置仪表](guides/instrument-scanner.md)。工具会自动列出 VISA
-地址，并在只匹配到一个 System Instrument 时自动选择它；操作者只需确认主读数和需要显示的
-监控读数。Measurement Module 的具体地址仍在 Enable 后的 Settings 中选择。
+地址，也可只录入 TCP 地址和端口。VISA 身份只匹配到一个 System Instrument 时会自动选择；
+TCP 不发送识别指令，由操作者选择实现。Measurement Module 的具体地址仍在 Enable 后的
+Settings 中选择。
 
 ## 先记住一条原则
 
