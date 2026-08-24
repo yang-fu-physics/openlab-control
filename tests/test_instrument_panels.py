@@ -28,7 +28,11 @@ from labcontrol.models import (  # noqa: E402
     LabEvent,
     Severity,
 )
-from labcontrol.sequence.model import SPECS_BY_TYPE, CommandType  # noqa: E402
+from labcontrol.sequence.model import (  # noqa: E402
+    SPECS_BY_TYPE,
+    CommandType,
+    SystemInstrumentCommandSpec,
+)
 from labcontrol.ui.dialogs import (  # noqa: E402
     AlertDialog,
     CommandDialog,
@@ -39,6 +43,7 @@ from labcontrol.ui.instrument_panels import (  # noqa: E402
     ControllerPanel,
     InstrumentPanelHost,
     ReadoutPanel,
+    SwitchPanel,
 )
 
 
@@ -182,6 +187,61 @@ class InstrumentPanelTests(unittest.TestCase):
         )
         self.assertEqual(list(second.value_labels), ["d"])
         self.assertLess(host._row.indexOf(first), host._row.indexOf(second))
+        host.close()
+
+    def test_switch_panel_displays_state_and_emits_declared_action(self) -> None:
+        config = load_config(ROOT / "configs" / "default.toml")
+        instrument = replace(
+            config.instrument("second_stage"),
+            id="compressor",
+            display_name="Compressor",
+            panel_template="switch",
+        )
+        commands = (
+            SystemInstrumentCommandSpec(
+                "compressor",
+                "compressor_on",
+                "Compressor On",
+            ),
+            SystemInstrumentCommandSpec(
+                "compressor",
+                "compressor_off",
+                "Compressor Off",
+            ),
+        )
+        host = InstrumentPanelHost((instrument,), commands)
+        panel = host.main_panels["compressor"]
+        self.assertIsInstance(panel, SwitchPanel)
+        self.assertFalse(panel.buttons["compressor_on"].isEnabled())
+        requested: list[tuple[str, str]] = []
+        host.actionRequested.connect(
+            lambda instrument_id, command_id: requested.append(
+                (instrument_id, command_id)
+            )
+        )
+
+        host.update_snapshot(
+            InstrumentSnapshot(
+                instrument_id="compressor",
+                display_name="Compressor",
+                kind=InstrumentKind.MONITOR,
+                timestamp=time.monotonic(),
+                current=1.0,
+            )
+        )
+        self.assertEqual(panel.value_label.text(), "On")
+        self.assertTrue(panel.buttons["compressor_on"].isEnabled())
+        QTest.mouseClick(
+            panel.buttons["compressor_off"],
+            Qt.MouseButton.LeftButton,
+        )
+        self.assertEqual(
+            requested,
+            [("compressor", "compressor_off")],
+        )
+
+        host.set_actions_enabled(False)
+        self.assertFalse(panel.buttons["compressor_on"].isEnabled())
         host.close()
 
     def test_status_cards_keep_fixed_light_colors(self) -> None:

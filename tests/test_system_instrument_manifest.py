@@ -188,8 +188,47 @@ class SystemInstrumentManifestTests(unittest.TestCase):
             unknown = load_instrument_manifest(instrument)
             self.assertFalse(unknown.valid)
             self.assertIn(
-                "panel.template must be controller or readout",
+                "panel.template must be controller, readout, or switch",
                 unknown.error,
+            )
+
+    def test_switch_panel_uses_declared_sequence_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            instrument = _write_instrument(
+                Path(temporary),
+                sequence_commands=(
+                    '[[sequence_commands]]\n'
+                    'id = "compressor_on"\n'
+                    'label = "Compressor On"\n'
+                    '[[sequence_commands]]\n'
+                    'id = "compressor_off"\n'
+                    'label = "Compressor Off"\n'
+                ),
+            )
+            manifest = instrument / "instrument.toml"
+            source = manifest.read_text(encoding="utf-8")
+            manifest.write_text(
+                source.replace(
+                    'template = "controller"',
+                    'template = "switch"',
+                ),
+                encoding="utf-8",
+            )
+            descriptor = load_instrument_manifest(instrument)
+            self.assertTrue(descriptor.valid, descriptor.error)
+
+            manifest.write_text(
+                source.replace(
+                    'template = "controller"',
+                    'template = "switch"',
+                ).split("[[sequence_commands]]", 1)[0],
+                encoding="utf-8",
+            )
+            missing_commands = load_instrument_manifest(instrument)
+            self.assertFalse(missing_commands.valid)
+            self.assertIn(
+                "switch panel requires at least one sequence command",
+                missing_commands.error,
             )
 
     def test_manifest_rejects_obsolete_or_misspelled_fields(self) -> None:

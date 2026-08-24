@@ -328,6 +328,20 @@ class RuntimeService:
         assert self.instruments is not None
         return self._submit(self.instruments.hold_instrument(instrument_id, origin="manual"))
 
+    def instrument_action(
+        self,
+        instrument_id: str,
+        command_id: str,
+    ) -> Future[Any]:
+        assert self.instruments is not None
+        return self._submit(
+            self.instruments.execute_sequence_command(
+                instrument_id,
+                command_id,
+                origin="manual",
+            )
+        )
+
     def enable_module(self, module_id: str) -> Future[Any]:
         assert self.modules is not None
         return self._submit(self.modules.enable(module_id))

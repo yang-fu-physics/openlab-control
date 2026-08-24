@@ -528,8 +528,12 @@ class MainWindow(QMainWindow):
         dock.setObjectName("statusDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
-        panel = InstrumentPanelHost(self.config.instruments)
+        panel = InstrumentPanelHost(
+            self.config.instruments,
+            self._instrument_sequence_commands,
+        )
         panel.controlRequested.connect(self._open_manual_control)
+        panel.actionRequested.connect(self._manual_instrument_action)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -1545,6 +1549,7 @@ class MainWindow(QMainWindow):
             window.set_sequence_running(not editable)
         for dialog in self.manual_dialogs.values():
             dialog.set_runtime_editable(editable)
+        self.status_panel.set_actions_enabled(editable)
 
     def _drain_runtime_messages(self) -> None:
         for message in self.runtime.drain_messages():
@@ -2294,6 +2299,33 @@ class MainWindow(QMainWindow):
             (future, f"Hold Current confirmed for {instrument_id}")
         )
         self.statusBar().showMessage(f"Requesting Hold Current for {instrument_id}...")
+
+    def _manual_instrument_action(
+        self,
+        instrument_id: str,
+        command_id: str,
+    ) -> None:
+        if (
+            self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        ):
+            QMessageBox.warning(
+                self,
+                "SEQ Is Running",
+                "Manual instrument actions are available only while the SEQ is idle.",
+            )
+            return
+        spec = self._instrument_sequence_command_specs[
+            (instrument_id, command_id)
+        ]
+        future = self.runtime.instrument_action(
+            instrument_id,
+            command_id,
+        )
+        self._pending_manual_operations.append(
+            (future, f"{spec.label} confirmed")
+        )
+        self.statusBar().showMessage(f"Sending {spec.label}...")
 
     def _show_graph(self) -> None:
         self.trend_dialog.show()

@@ -1421,8 +1421,10 @@ class InstrumentManager:
         self,
         instrument_id: str,
         command_id: str,
+        *,
+        origin: str = "sequence",
     ) -> bool:
-        """串行执行一条仪表 SEQ 指令；Warning 继续，Error 中止。"""
+        """串行执行一条清单指令；SEQ 与手动面板共用同一后端入口。"""
 
         if not self.has_sequence_command(instrument_id, command_id):
             raise InstrumentError(
@@ -1439,7 +1441,7 @@ class InstrumentManager:
                 lambda: self.instruments[
                     instrument_id
                 ].execute_sequence_command(command_id),
-                origin="sequence",
+                origin=origin,
             )
         except InstrumentWarning as exc:
             self.events.report(

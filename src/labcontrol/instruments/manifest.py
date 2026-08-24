@@ -285,13 +285,13 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         errors.append("at least one supported instrument kind is required")
     if len(kinds) != len(set(kinds)):
         errors.append("supported instrument kinds must be unique")
-    if panel_template not in {"controller", "readout"}:
-        errors.append("panel.template must be controller or readout")
+    if panel_template not in {"controller", "readout", "switch"}:
+        errors.append("panel.template must be controller, readout, or switch")
     if (
         panel_template == "controller"
         and InstrumentKind.MONITOR in kinds
     ):
-        errors.append("monitor instruments must use the readout panel template")
+        errors.append("monitor instruments must use the readout or switch panel template")
     if identity_pattern:
         if len(identity_pattern) > 256:
             errors.append("discovery.identity_pattern is too long")
@@ -360,6 +360,8 @@ def load_instrument_manifest(path: Path) -> SystemInstrumentDescriptor:
         {item.label.casefold() for item in sequence_commands}
     ) != len(sequence_commands):
         errors.append("sequence command labels must be unique")
+    if panel_template == "switch" and not sequence_commands:
+        errors.append("the switch panel requires at least one sequence command")
     errors.extend(dependency_compatibility_errors)
     for raw_requirement in declared_dependencies:
         try:

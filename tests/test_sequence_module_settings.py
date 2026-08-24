@@ -277,6 +277,7 @@ class SequenceModuleSettingsTests(unittest.TestCase):
 
             class FakeRuntime:
                 def __init__(self) -> None:
+                    self.instrument_sequence_commands = ()
                     self.module_descriptors = (
                         SimpleNamespace(
                             id="requested",

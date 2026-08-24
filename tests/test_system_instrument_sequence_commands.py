@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 import os
 import sys
 import unittest
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from labcontrol.config import load_config  # noqa: E402
@@ -22,7 +24,11 @@ from labcontrol.instruments.manifest import (  # noqa: E402
     InstrumentSequenceCommandDescriptor,
     SystemInstrumentDescriptor,
 )
-from labcontrol.models import InstrumentKind, RunState  # noqa: E402
+from labcontrol.models import (  # noqa: E402
+    InstrumentKind,
+    InstrumentSnapshot,
+    RunState,
+)
 from labcontrol.sequence.engine import SequenceEngine  # noqa: E402
 from labcontrol.sequence.model import (  # noqa: E402
     CommandType,
@@ -239,6 +245,57 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
             [("temperature", "compressor_on")],
         )
         self.assertEqual(logger.mock_calls, [])
+
+    def test_switch_panel_uses_the_same_command_as_a_manual_action(self) -> None:
+        descriptor = _descriptor(
+            "compressor",
+            "compressor_on",
+            "Compressor On",
+        )
+        instrument = replace(
+            self.config.instrument("second_stage"),
+            id="compressor",
+            display_name="Compressor",
+            backend="compressor",
+            panel_template="switch",
+        )
+        config = replace(self.config, instruments=(instrument,))
+        specs = configured_system_instrument_commands(
+            config,
+            (descriptor,),
+        )
+        completed = Future()
+        completed.set_result(True)
+        runtime = Mock()
+        runtime.instrument_sequence_commands = specs
+        runtime.instrument_action.return_value = completed
+        runtime.drain_messages.return_value = []
+        with patch(
+            "labcontrol.ui.main_window.RuntimeService",
+            return_value=runtime,
+        ):
+            window = MainWindow(config)
+        try:
+            panel = window.status_panel.main_panels["compressor"]
+            window.status_panel.update_snapshot(
+                InstrumentSnapshot(
+                    "compressor",
+                    "Compressor",
+                    InstrumentKind.MONITOR,
+                    0.0,
+                    current=0.0,
+                )
+            )
+            QTest.mouseClick(
+                panel.buttons["compressor_on"],
+                Qt.MouseButton.LeftButton,
+            )
+            runtime.instrument_action.assert_called_once_with(
+                "compressor",
+                "compressor_on",
+            )
+        finally:
+            window.close()
 
 
 if __name__ == "__main__":

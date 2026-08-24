@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -21,6 +22,7 @@ from ..models import (
     InstrumentSnapshot,
     StabilityState,
 )
+from ..sequence.model import SystemInstrumentCommandSpec
 from .scaling import scaled
 
 
@@ -219,18 +221,111 @@ class ReadoutPanel(QFrame):
         self.setStyleSheet(_instrument_panel_style(state))
 
 
+class SwitchPanel(QFrame):
+    """显示一个开关状态，并调用该仪表声明的无参数指令。"""
+
+    actionRequested = Signal(str, str)
+
+    def __init__(
+        self,
+        config: InstrumentConfig,
+        commands: tuple[SystemInstrumentCommandSpec, ...],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        if not commands:
+            raise ValueError("A switch panel requires at least one command")
+        self.config = config
+        self.buttons: dict[str, QPushButton] = {}
+        self._actions_enabled = True
+        self._connected = False
+        self.setObjectName("instrumentPanel")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setMinimumWidth(scaled(260))
+        self.setMaximumHeight(scaled(105))
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+
+        layout = _panel_layout(self)
+        self.title_label, self.state_label = _panel_header(
+            layout,
+            config.display_name,
+        )
+        self.value_label = _value_label(layout)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(scaled(5))
+        for command in commands:
+            button = QPushButton(command.label)
+            button.clicked.connect(
+                lambda checked=False, command_id=command.command_id: (
+                    self.actionRequested.emit(config.id, command_id)
+                )
+            )
+            button.setEnabled(False)
+            button_row.addWidget(button)
+            self.buttons[command.command_id] = button
+        layout.addLayout(button_row)
+        self._set_state_style("disconnected")
+
+    def set_actions_enabled(self, enabled: bool) -> None:
+        self._actions_enabled = enabled
+        for button in self.buttons.values():
+            button.setEnabled(enabled and self._connected)
+
+    def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
+        self._connected = snapshot.connected
+        for button in self.buttons.values():
+            button.setEnabled(
+                self._actions_enabled and self._connected
+            )
+        if not snapshot.connected:
+            self.value_label.setText("—")
+            self.state_label.setText(_connection_state_text(snapshot))
+            self.setToolTip(snapshot.message)
+            self._set_state_style(snapshot.connection_state.value)
+            return
+        self.setToolTip("")
+        if snapshot.current is None:
+            self.value_label.setText("—")
+            self.state_label.setText("No Reading")
+            self._set_state_style("stale")
+            return
+        self.value_label.setText(
+            "On"
+            if snapshot.current == 1.0
+            else "Off"
+            if snapshot.current == 0.0
+            else f"{snapshot.current:.9g}"
+        )
+        self.state_label.setText("Monitoring")
+        self._set_state_style("stable")
+
+    def _set_state_style(self, state: str) -> None:
+        self.setStyleSheet(_instrument_panel_style(state))
+
+
 class InstrumentPanelHost(QWidget):
     """按配置创建主面板，并把辅助读数面板依次放在右侧。"""
 
     controlRequested = Signal(str)
+    actionRequested = Signal(str, str)
 
     def __init__(
         self,
         instruments: tuple[InstrumentConfig, ...],
+        instrument_commands: tuple[
+            SystemInstrumentCommandSpec,
+            ...,
+        ] = (),
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.main_panels: dict[str, ControllerPanel | ReadoutPanel] = {}
+        self.main_panels: dict[
+            str,
+            ControllerPanel | ReadoutPanel | SwitchPanel,
+        ] = {}
         self.readout_panels: dict[tuple[str, int], ReadoutPanel] = {}
         self._readout_panels_by_instrument: dict[
             str,
@@ -268,6 +363,21 @@ class InstrumentPanelHost(QWidget):
                     instrument.main_reading,
                     *instrument.auxiliary_readings,
                 )
+            elif instrument.panel_template == "switch":
+                switch_panel = SwitchPanel(
+                    instrument,
+                    tuple(
+                        command
+                        for command in instrument_commands
+                        if command.instrument_id == instrument.id
+                    ),
+                    self,
+                )
+                switch_panel.actionRequested.connect(
+                    self.actionRequested
+                )
+                panel = switch_panel
+                readout_keys = instrument.auxiliary_readings
             else:
                 raise ValueError(
                     f"Unknown instrument panel template: {instrument.panel_template}"
@@ -283,7 +393,7 @@ class InstrumentPanelHost(QWidget):
             instrument_readouts: list[ReadoutPanel] = []
             for group_index, reading_keys in enumerate(groups):
                 title = instrument.display_name
-                if instrument.panel_template == "controller":
+                if instrument.panel_template in {"controller", "switch"}:
                     title += " Readouts"
                 if len(groups) > 1:
                     title += f" ({group_index + 1})"
@@ -318,12 +428,17 @@ class InstrumentPanelHost(QWidget):
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
         main_panel = self.main_panels[snapshot.instrument_id]
-        if isinstance(main_panel, ControllerPanel):
+        if isinstance(main_panel, (ControllerPanel, SwitchPanel)):
             main_panel.update_snapshot(snapshot)
         for readout_panel in self._readout_panels_by_instrument[
             snapshot.instrument_id
         ]:
             readout_panel.update_snapshot(snapshot)
+
+    def set_actions_enabled(self, enabled: bool) -> None:
+        for panel in self.main_panels.values():
+            if isinstance(panel, SwitchPanel):
+                panel.set_actions_enabled(enabled)
 
 
 def _panel_layout(panel: QFrame) -> QVBoxLayout:
@@ -425,7 +540,19 @@ def _instrument_panel_style(state: str) -> str:
         "border: 1px solid #dedede; border-radius: 2px; }"
         "QFrame#instrumentPanel QLabel#readoutName { color: #6f6f6f; }"
         "QFrame#instrumentPanel QLabel#readoutValue { color: #202124; }"
+        "QFrame#instrumentPanel QPushButton { background: #f7f8fa; "
+        "color: #202124; border: 1px solid #b8bec6; border-radius: 3px; "
+        "padding: 2px 8px; }"
+        "QFrame#instrumentPanel QPushButton:hover { background: #eef2f7; }"
+        "QFrame#instrumentPanel QPushButton:pressed { background: #e2e8f0; }"
+        "QFrame#instrumentPanel QPushButton:disabled { color: #8a8a8a; "
+        "background: #eeeeee; }"
     )
 
 
-__all__ = ["ControllerPanel", "InstrumentPanelHost", "ReadoutPanel"]
+__all__ = [
+    "ControllerPanel",
+    "InstrumentPanelHost",
+    "ReadoutPanel",
+    "SwitchPanel",
+]
