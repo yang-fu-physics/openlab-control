@@ -6,16 +6,16 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 
 ## 下载与校验
 
-当前稳定版本为 `v0.17.1`：
+当前稳定版本为 `v0.17.2`：
 
-- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.17.1/OpenLabControl-v0.17.1-windows-x64.zip)
-- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.17.1/OpenLabControl-v0.17.1-windows-x64.zip.sha256)
+- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.17.2/OpenLabControl-v0.17.2-windows-x64.zip)
+- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.17.2/OpenLabControl-v0.17.2-windows-x64.zip.sha256)
 
 在 PowerShell 中校验：
 
 ```powershell
-Get-FileHash .\OpenLabControl-v0.17.1-windows-x64.zip -Algorithm SHA256
-Get-Content .\OpenLabControl-v0.17.1-windows-x64.zip.sha256
+Get-FileHash .\OpenLabControl-v0.17.2-windows-x64.zip -Algorithm SHA256
+Get-Content .\OpenLabControl-v0.17.2-windows-x64.zip.sha256
 ```
 
 两处哈希必须完全一致。不要直接从 ZIP 内运行程序；先完整解压到普通可写目录。
