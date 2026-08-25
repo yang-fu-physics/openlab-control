@@ -28,7 +28,7 @@ id = "my_thermometer"
 name = "My Thermometer"
 version = "0.1.0"
 api_version = "3"
-core_requires = ">=0.17,<0.18"
+core_requires = ">=0.18,<0.19"
 backend = "backend:MyThermometer"
 kinds = ["monitor"]
 dependencies = []

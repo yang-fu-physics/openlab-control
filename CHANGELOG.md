@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0 - 2026-08-25
+
+- SEQ 正常完成、Stop、Error、任务取消和应用关闭都不再向 System Instrument 发送 Set 或
+  Hold；Measurement Module 仍按既有原因收到 `run_end`。已删除的 `[abort]` 配置会在启动时
+  明确报错，不提供旧行为兼容。
+- System Instrument 可用纯数据 `EventResponseSpec` 为自身 Warning/Error 代码注册核心响应。
+  首版只提供磁场 `zero`：使用目标磁场的默认速率，并继续经过控制许可、上下限、超时、IPC
+  和单仪表串行队列。
+- 事件响应高于普通控制和读取；同一活动事件只执行一次并锁定目标。报警前已排队但尚未执行的
+  Set、Hold 或 System Instrument 指令会在真正执行前再次检查锁，不能覆盖响应；源事件解除且
+  响应完成后才允许人工复位。当前正式 System Instrument 没有注册任何响应。
+- 主窗口关闭提示、README、配置说明、运维文档和开发教程已同步。源码完整测试通过 295 项，
+  严格文档构建和嵌套扫描无界面示例通过。
+
 ## 0.17.2 - 2026-08-25
 
 - 恢复 `controller` 面板的粗体标题、大号当前值和紧凑三层布局；修正通用面板对象名与主窗口
