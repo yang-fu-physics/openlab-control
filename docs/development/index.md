@@ -73,9 +73,10 @@ close：再次确认输出关闭并释放连接
 ## 推荐阅读顺序
 
 1. [第一个测量模块](first-module.md)
-2. [多通道数据](results-and-slots.md)
-3. [设置与状态窗口](frontend.md)（需要设置时再看）
-4. [一台仪表一个文件](instrument-drivers.md)（连接真实仪表前再看）
-5. [模块自己的 SEQ 指令](sequence-commands.md)（确实需要时再看）
+2. [多台相同测量仪表复用一个模块](reuse-identical-instruments.md)（现场有同型号仪表时再看）
+3. [多通道数据](results-and-slots.md)
+4. [设置与状态窗口](frontend.md)（需要设置时再看）
+5. [一台仪表一个文件](instrument-drivers.md)（连接真实仪表前再看）
+6. [模块自己的 SEQ 指令](sequence-commands.md)（确实需要时再看）
 
 更完整、也更偏技术的内容放在 [完整开发规范](../DEVELOPMENT_REFERENCE.md) 中。初学者不需要先读。
