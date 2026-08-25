@@ -44,7 +44,8 @@
 - [ ] completed、stopped、error 三种 `run_end` 都执行模块定义的收尾。
 - [ ] 若允许跨 SEQ 保持输出：默认仍关闭；保持前读回输出和关键设置；下一次
   `run_start` 不产生短暂掉电；Apply、Disable、退出和测量异常仍关闭。
-- [ ] Stop/Error 后温度和磁场保持当前状态。
+- [ ] 完成、Stop、Error 后没有向 System Instrument 发送 Set 或 Hold。
+- [ ] 若 System Instrument 注册事件响应：重复事件只执行一次，源事件解除前不能复位目标锁。
 - [ ] `close` 可重复调用，并在部分初始化后工作。
 - [ ] 即使一个仪表关闭失败，也继续释放其他会话。
 

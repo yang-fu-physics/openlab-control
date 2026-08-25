@@ -16,7 +16,7 @@
 - [ ] 所有 Measurement Module 启动时都是 Disabled。
 - [ ] 能打开 `examples/nested_scan.seq` 并在无真实硬件时运行。
 - [ ] 每次 Run 在 `runs/` 下产生独立目录、DAT、事件和仪表状态日志。
-- [ ] Stop 后温度和磁场保持当前状态，而不是自动归零。
+- [ ] Stop 后温度和磁场继续仪表原有动作，框架没有发送 Set 或 Hold。
 
 !!! info "先判断要接入哪一类"
 

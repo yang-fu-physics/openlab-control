@@ -144,6 +144,58 @@ class InstrumentWorkerTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_external_event_responses_cross_json_worker_boundary(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = (
+                    "from labcontrol.instruments.base import EventResponseSpec, SystemInstrument\n"
+                    "class IsolatedTestInstrument(SystemInstrument):\n"
+                    "    def open(self): pass\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self): return {'value': 12.5}\n"
+                    "    def event_responses(self):\n"
+                    "        return (EventResponseSpec(code='TEMP_ALARM', action='zero'),)\n"
+                )
+                _external_instrument(root, source)
+                state = root / "state"
+                temperature = replace(
+                    self.config.instrument("temperature"),
+                    backend="isolated_test",
+                )
+                config = replace(
+                    self.config,
+                    system_instruments=replace(
+                        self.config.system_instruments,
+                        directory=str(root),
+                        state_directory=str(state),
+                    ),
+                    instruments=(
+                        temperature,
+                        self.config.instrument("field"),
+                    ),
+                )
+                descriptors = discover_system_instruments(config)
+                ContentTrustStore(
+                    state / "trusted_content.json"
+                ).trust("instrument", descriptors[0])
+                manager = InstrumentManager(
+                    config,
+                    EventManager(),
+                    descriptors,
+                )
+                try:
+                    await manager.connect_all()
+                    response, target = manager.event_responses[
+                        ("temperature", "TEMP_ALARM", "")
+                    ]
+                    self.assertEqual(response.action, "zero")
+                    self.assertEqual(target, "field")
+                finally:
+                    await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
     def test_declared_sequence_command_reaches_external_worker_once(self) -> None:
         async def scenario() -> None:
             with tempfile.TemporaryDirectory() as temporary:

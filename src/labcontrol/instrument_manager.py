@@ -20,7 +20,13 @@ from copy import deepcopy
 from typing import TypeVar
 
 from .config import AppConfig, InstrumentConfig
-from .instruments.base import InstrumentError, SystemInstrument, InstrumentWarning, SafetyViolation
+from .instruments.base import (
+    EventResponseSpec,
+    InstrumentError,
+    SystemInstrument,
+    InstrumentWarning,
+    SafetyViolation,
+)
 from .instruments.manifest import (
     SystemInstrumentDescriptor,
     instrument_dependency_directory,
@@ -38,6 +44,7 @@ from .package_support.dependencies import (
 from .package_support.loading import load_import_object, load_source_object
 from .package_support.trust import ContentTrustStore, content_tree_digest
 from .models import (
+    EventNotice,
     InstrumentActivity,
     InstrumentConnectionState,
     InstrumentKind,
@@ -58,6 +65,7 @@ _METRIC_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 # 同一台仪表始终只允许一个操作进入后端。控制与安全操作不能被读数越过；
 # 测量专用读取可以越过尚未开始的后台状态轮询，但不会中断已经开始的仪表事务。
 _INSTRUMENT_CONTROL_PRIORITY = 0
+_INSTRUMENT_EVENT_RESPONSE_PRIORITY = -10
 _INSTRUMENT_MEASUREMENT_PRIORITY = 10
 _INSTRUMENT_BACKGROUND_PRIORITY = 20
 
@@ -155,9 +163,154 @@ class InstrumentManager:
             str,
             tuple[tuple[str, str, str, int | None], ...],
         ] = {}
+        self.event_responses: dict[
+            tuple[str, str, str],
+            tuple[EventResponseSpec, str],
+        ] = {}
+        self._latched_event_responses: dict[
+            str,
+            tuple[EventResponseSpec, str],
+        ] = {}
+        self._event_response_target_locks: dict[str, set[str]] = {}
+        self._event_response_tasks: dict[str, asyncio.Task[None]] = {}
         self._shutting_down = False
         self.latest: dict[str, InstrumentSnapshot] = {}
         self._load_instruments()
+        self.events.subscribe(self._on_event_response)
+
+    def _register_event_responses(
+        self,
+        source: str,
+        responses: tuple[EventResponseSpec, ...],
+    ) -> None:
+        """把一台后端的声明绑定到逻辑仪表 ID，并解析唯一目标磁场。"""
+
+        for response in responses:
+            key = (source, response.code, response.context)
+            if key in self.event_responses:
+                raise InstrumentError(
+                    f"Duplicate event response for {source}/{response.code}/"
+                    f"{response.context}",
+                    "INVALID_EVENT_RESPONSES",
+                    source,
+                )
+            try:
+                target = self.resolve_instrument_id(
+                    InstrumentKind.FIELD,
+                    response.target_instrument or None,
+                )
+            except InstrumentError as exc:
+                raise InstrumentError(
+                    f"Invalid event response {source}/{response.code}: {exc}",
+                    "INVALID_EVENT_RESPONSES",
+                    source,
+                ) from exc
+            self.event_responses[key] = (response, target)
+
+    def _on_event_response(self, notice: EventNotice) -> None:
+        """首次事件状态变化时锁存并调度已注册响应。"""
+
+        if notice.is_resolution or notice.event.severity is Severity.INFO:
+            return
+        event = notice.event
+        registered = self.event_responses.get(
+            (event.source, event.code, event.context)
+        )
+        if registered is None or event.key in self._latched_event_responses:
+            return
+        response, target = registered
+        self._latched_event_responses[event.key] = registered
+        self._event_response_target_locks.setdefault(target, set()).add(
+            event.key
+        )
+        task = asyncio.create_task(
+            self._execute_event_response(event.key, response, target)
+        )
+        self._event_response_tasks[event.key] = task
+
+    async def _execute_event_response(
+        self,
+        event_key: str,
+        response: EventResponseSpec,
+        target: str,
+    ) -> None:
+        """执行一条锁存响应；zero 使用目标磁场的默认速率。"""
+
+        try:
+            if response.action == "zero":
+                config = self.instrument_configs[target]
+                applied = await self.set_target(
+                    target,
+                    0.0,
+                    config.default_rate_per_minute,
+                    "Sweep",
+                    origin="event_response",
+                )
+                if not applied:
+                    raise InstrumentError(
+                        "Target instrument did not apply the event response",
+                        "EVENT_RESPONSE_NOT_APPLIED",
+                        target,
+                    )
+                self.events.report(
+                    Severity.INFO,
+                    "runtime",
+                    "EVENT_RESPONSE_EXECUTED",
+                    f"Event response set {config.display_name} target to zero",
+                    event_key,
+                )
+        except InstrumentError as exc:
+            self.events.report(
+                Severity.ERROR,
+                "runtime",
+                "EVENT_RESPONSE_FAILED",
+                f"Event response failed: {exc}",
+                event_key,
+            )
+        finally:
+            self._event_response_tasks.pop(event_key, None)
+
+    def reset_event_response(self, event_key: str) -> None:
+        """在源事件解除后人工释放该响应对目标仪表的控制锁。"""
+
+        if any(event.key == event_key for event in self.events.active_events()):
+            raise InstrumentWarning(
+                "The source event is still active",
+                "EVENT_RESPONSE_STILL_ACTIVE",
+                event_key,
+            )
+        if event_key in self._event_response_tasks:
+            raise InstrumentWarning(
+                "The event response is still running",
+                "EVENT_RESPONSE_IN_PROGRESS",
+                event_key,
+            )
+        _response, target = self._latched_event_responses.pop(event_key)
+        target_locks = self._event_response_target_locks[target]
+        target_locks.remove(event_key)
+        if not target_locks:
+            self._event_response_target_locks.pop(target)
+        self.events.report(
+            Severity.INFO,
+            "runtime",
+            "EVENT_RESPONSE_RESET",
+            f"Event response lock released for {target}",
+            event_key,
+        )
+
+    def _ensure_event_response_control(
+        self,
+        instrument_id: str,
+        origin: str,
+    ) -> None:
+        event_keys = self._event_response_target_locks.get(instrument_id)
+        if event_keys and origin != "event_response":
+            raise InstrumentWarning(
+                f"Instrument {instrument_id} is locked by event response "
+                + ", ".join(sorted(event_keys)),
+                "EVENT_RESPONSE_LOCKED",
+                instrument_id,
+            )
 
     def _load_instruments(self) -> None:
         """根据已验证配置创建仪表客户端，但暂不连接真实仪表。
@@ -695,6 +848,13 @@ class InstrumentManager:
             gate = self._operation_gates[instrument_id]
             await gate.acquire(priority)
             try:
+                if operation in {"set_target", "hold"} or operation.startswith(
+                    "sequence_command:"
+                ):
+                    self._ensure_event_response_control(
+                        instrument_id,
+                        origin or "",
+                    )
                 if origin == "manual" and self._control_owner == "sequence":
                     raise InstrumentWarning(
                         f"{config.display_name} manual control is blocked while a SEQ owns control",
@@ -703,7 +863,13 @@ class InstrumentManager:
                     )
                 if (
                     operation
-                    not in {"open", "close", "poll", "poll_measurement"}
+                    not in {
+                        "open",
+                        "close",
+                        "event_responses",
+                        "poll",
+                        "poll_measurement",
+                    }
                     and self._connection_states[instrument_id]
                     is not InstrumentConnectionState.CONNECTED
                 ):
@@ -755,6 +921,15 @@ class InstrumentManager:
 
         async def connect(instrument_id: str, instrument: object) -> None:
             try:
+                responses = await self._operate(
+                    instrument_id,
+                    "event_responses",
+                    instrument.event_responses,
+                )
+                self._register_event_responses(
+                    instrument_id,
+                    responses,
+                )
                 await self._operate(instrument_id, "open", instrument.open)
                 self._connection_states[instrument_id] = (
                     InstrumentConnectionState.CONNECTED
@@ -762,6 +937,8 @@ class InstrumentManager:
                 self.events.resolve(instrument_id, "CONNECT_FAILED")
                 self.events.report(Severity.INFO, instrument_id, "CONNECTED", "Instrument connected")
             except InstrumentError as exc:
+                if exc.code == "INVALID_EVENT_RESPONSES":
+                    raise
                 if self.isolate_processes:
                     self._begin_recovery(instrument_id, exc)
                     return
@@ -794,6 +971,15 @@ class InstrumentManager:
         """停止恢复任务并有界断开全部仪表，用于应用关闭。"""
 
         self._shutting_down = True
+        response_tasks = tuple(self._event_response_tasks.values())
+        for task in response_tasks:
+            task.cancel()
+        if response_tasks:
+            await asyncio.gather(
+                *response_tasks,
+                return_exceptions=True,
+            )
+        self._event_response_tasks.clear()
         self._generation = {
             instrument_id: generation + 1
             for instrument_id, generation in self._generation.items()
@@ -1341,6 +1527,7 @@ class InstrumentManager:
         """设置目标；手动来源在 SEQ 持有控制租约时会被运行时拒绝。"""
 
         try:
+            self._ensure_event_response_control(instrument_id, origin)
             self.validate_target(instrument_id, value, rate_per_minute)
             await self._operate(
                 instrument_id,
@@ -1351,6 +1538,11 @@ class InstrumentManager:
                     mode,
                 ),
                 origin=origin,
+                priority=(
+                    _INSTRUMENT_EVENT_RESPONSE_PRIORITY
+                    if origin == "event_response"
+                    else _INSTRUMENT_CONTROL_PRIORITY
+                ),
             )
         except InstrumentWarning as exc:
             self.events.report(Severity.WARNING, instrument_id, exc.code, str(exc), exc.context)
@@ -1435,6 +1627,7 @@ class InstrumentManager:
             )
         operation = f"sequence_command:{command_id}"
         try:
+            self._ensure_event_response_control(instrument_id, origin)
             await self._operate(
                 instrument_id,
                 operation,
@@ -1481,22 +1674,11 @@ class InstrumentManager:
 
         async def hold(instrument_id: str) -> bool:
             config = self.instrument_configs[instrument_id]
-            if not config.control_enabled:
+            if not config.control_enabled or config.kind not in (
+                InstrumentKind.TEMPERATURE,
+                InstrumentKind.FIELD,
+            ):
                 return True
-            if config.kind is InstrumentKind.TEMPERATURE:
-                strategy = self.config.abort_temperature
-            elif config.kind is InstrumentKind.FIELD:
-                strategy = self.config.abort_field
-            else:
-                return True
-            if strategy != "hold_current":
-                self.events.report(
-                    Severity.WARNING,
-                    "runtime",
-                    "UNKNOWN_ABORT_STRATEGY",
-                    f"Unknown abort strategy {strategy}; using hold_current",
-                    instrument_id,
-                )
             if (
                 self._connection_states[instrument_id]
                 is not InstrumentConnectionState.CONNECTED
@@ -1512,6 +1694,10 @@ class InstrumentManager:
                 )
                 return False
             try:
+                self._ensure_event_response_control(
+                    instrument_id,
+                    "manual",
+                )
                 await self._operate(
                     instrument_id,
                     "hold",
@@ -1526,6 +1712,15 @@ class InstrumentManager:
                     snapshot.target = snapshot.current
                     snapshot.activity = InstrumentActivity.HOLDING
                 return True
+            except InstrumentWarning as exc:
+                self.events.report(
+                    Severity.WARNING,
+                    instrument_id,
+                    exc.code,
+                    str(exc),
+                    exc.context,
+                )
+                return False
             except InstrumentError as exc:
                 if self._uncertain_write_error(exc):
                     await self._fault_uncertain_write(
@@ -1574,6 +1769,7 @@ class InstrumentManager:
                 instrument_id,
             )
         try:
+            self._ensure_event_response_control(instrument_id, origin)
             await self._operate(
                 instrument_id,
                 "hold",

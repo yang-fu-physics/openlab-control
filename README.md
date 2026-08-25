@@ -27,7 +27,7 @@ Module 每次启动默认 Disabled，由用户按需 Enable。
 - 一个 `Measure` 按所有 Enabled 模块的通道槽位展开，每个通道一行；同一槽位的模块并行。
 - 模块可返回多行结果、数字状态码和独立 `rawdata`；无结果或报错的值保持空单元格。
 - Warning 继续运行并按 Source/Code/Context 去重；Error 中止 SEQ。
-- Stop/Error 后温度和磁场保持当前状态，不自动回零；2nd Stage 只显示。
+- SEQ 完成、Stop 或 Error 都不控制 System Instrument；只有仪表明确注册的事件响应才会执行联动动作。2nd Stage 只显示。
 - 保存 SEQ 时同时保存模块设置伴随文件；Load SEQ 会导入设置，但不自动 Enable 或 Apply。
 - Enabled 模块可在命令栏注册自己的 SEQ 指令；Disable 后立即移除。
 - 模块监视卡显示在 `Sequence Status` 下，可查看最近值并恢复最小化的模块窗口。
@@ -131,7 +131,7 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 6. 核对首次信任窗口。发现目录不会连接仪表，只有现场配置引用的资源才会启动。
 
 System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的
-`open/read_status/read_measurement/set_target/hold/execute_sequence_command/close`。通讯命令建议单独放在
+`open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close`。通讯命令建议单独放在
 `instrument.py`，让 `backend.py` 只处理生命周期、安全判断和读数组装。
 
 一份 System Instrument 代码对应一种物理仪表型号/协议，不对应 TempA、TempB 这样的单个
@@ -193,6 +193,6 @@ tools/                    源码开发工具（发布包不复制该目录）
 ## 真实仪表安全门槛
 
 当前版本没有真实硬件验证，不应直接用于无人值守实验。接入真实仪表前必须完成只读身份
-确认、有限通讯超时、低风险写入、三层上下限、写后回读、Hold 新鲜读数、写超时不重放、
-失联恢复、Stop/Error、进程强杀和硬件联锁测试。软件进程隔离不能替代限流、限压、限温、
+确认、有限通讯超时、低风险写入、三层上下限、写后回读、手动 Hold 新鲜读数、写超时不重放、
+失联恢复、SEQ 退出不控制仪表、注册事件响应、进程强杀和硬件联锁测试。软件进程隔离不能替代限流、限压、限温、
 磁体保护或人工急停。

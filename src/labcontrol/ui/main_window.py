@@ -2426,7 +2426,8 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self,
                 "Sequence Is Running",
-                "Closing will stop the sequence and hold the current temperature and field. Close anyway?",
+                "Closing will stop the sequence. OpenLab Control will not send Set or Hold "
+                "to System Instruments; their current actions will continue. Close anyway?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

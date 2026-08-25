@@ -1293,7 +1293,7 @@ class MeasurementModuleService:
         """并行结束本次模块运行，并在任何结果下解除冻结状态。
 
         先切回 running 是为了释放仍停在 Pause checkpoint 的 worker，使其能够执行
-        ``run_end``。返回 False 由 SequenceEngine 转为 Faulted 并尝试 Hold。
+        ``run_end``。返回 False 由 SequenceEngine 转为 Faulted；SEQ 不控制 System Instrument。
         """
 
         async def end(module_id: str) -> bool:

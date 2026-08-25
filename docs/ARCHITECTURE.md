@@ -34,7 +34,7 @@ GUI 不直接操作仪表。每个模块内部请求串行，不同模块可并�
 System Instrument 与 Measurement Module 分开：
 
 - System Instrument 提供温度、磁场或 Monitor；核心负责控制许可、上下限、速率、失联恢复和
-  Hold 策略。
+  已注册事件响应的安全调度。
 - Measurement Module 拥有完成一次测量所需的仪表、切换器、时序、状态码和安全动作；
   它只能读取温场快照，不能控制温度或磁场。
 
@@ -47,7 +47,7 @@ PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享�
 runtime marker 和依赖树摘要。
 
 System Instrument 的作者接口是同步的
-`open/read_status/read_measurement/set_target/hold/execute_sequence_command/close`。
+`open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close`。
 驱动只返回包含 `value` 和可选 `target/rate/moving/ready/auxiliary` 的普通字典；核心统一生成
 时间戳、连接状态和内部快照。`instrument.toml` 是主读数及显示元数据的唯一来源；资源表只
 保存物理地址、实现选择和操作者勾选的辅助读数；现场主配置只保存控制许可与安全参数。
@@ -110,9 +110,10 @@ sidecar。
 
 ## SEQ 与安全收尾
 
-SEQ 解析为树；Scan 可任意嵌套，Call Sequence 在预检时展开并检查递归。Pause 不主动
-改变输出。Stop、Error、任务取消和应用退出都会让可控温场仪表尝试 Hold Current；Hold
-必须基于新鲜读回，无法确认时最终状态为 Faulted。
+SEQ 解析为树；Scan 可任意嵌套，Call Sequence 在预检时展开并检查递归。Pause、正常完成、
+Stop、Error 和任务取消都不向 System Instrument 发送 Set 或 Hold。System Instrument 可以
+注册纯数据事件响应；核心负责匹配、最高优先级执行、锁存和人工复位，仪表代码不能直接取得
+另一台仪表对象。
 
 模块在 `run_end` 中按自身协议完成一次 Run 的输出关闭或状态保持，`close` 只在 Disable
 和应用退出执行。若 `run_end` 或 `close` 失败，核心报告 Error 并有界回收 worker；进程

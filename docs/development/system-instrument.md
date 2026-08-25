@@ -41,6 +41,7 @@ system_instruments/<id>/instrument.toml
 - `set_target()`：可控温度或磁场仪表设置目标；
 - `hold()`：用新鲜读数保持当前状态；
 - `execute_sequence_command()`：可选，执行清单声明的简单无参数指令；
+- `event_responses()`：可选，为该仪表产生的稳定事件代码注册核心响应；
 - `close()`：释放通讯，不擅自改变输出。
 
 这些方法都是普通同步函数。核心负责子进程、超时、调用顺序、时间戳和内部状态对象。
@@ -146,6 +147,28 @@ label = "Compressor Off"
 只有现场配置实际选择这份 System Instrument 时，`Compressor On` 和 `Compressor Off` 才会
 直接出现在右侧 **System Commands**。它们没有参数、不会生成 DAT 测量行；Warning 继续 SEQ，
 Error 中止。`switch` 面板的按钮只在 SEQ 空闲时可用，核心仍会在运行时阻止抢占 SEQ 控制权。
+
+设备相关的事件响应也写在 System Instrument 代码中，而不是写进核心。最小声明如下：
+
+```python
+from labcontrol.instruments.base import EventResponseSpec
+
+
+def event_responses(self):
+    return (
+        EventResponseSpec(
+            code="COLD_HEAD_ALARM",
+            context="A",
+            action="zero",
+        ),
+    )
+```
+
+`source` 自动使用当前逻辑仪表 ID。省略 `target_instrument` 时选择唯一可控磁场仪表；明确
+填写时必须是一个可控 `field` ID。`zero` 使用目标磁场配置中的
+`default_rate_per_minute`，仍经过核心上下限、超时和串行队列。后端不能取得另一台仪表
+对象，也不能传入 Python 回调。当前正式 System Instrument 暂未注册任何响应，所以默认
+运行行为不变。完整安全语义见[控制与安全](instrument-control-safety.md)。
 
 ## 阅读顺序
 

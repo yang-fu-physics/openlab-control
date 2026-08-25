@@ -22,6 +22,19 @@ from labcontrol.units import UnitConversionError, convert_value  # noqa: E402
 
 
 class InstrumentManagerTests(unittest.TestCase):
+    def test_configuration_rejects_removed_abort_section(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "removed-abort.toml"
+            config_path.write_text(
+                '[abort]\ntemperature = "hold"\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                r"\[abort\] is not supported",
+            ):
+                load_config(config_path)
+
     def test_simulated_control_and_monitor_instruments_load(self) -> None:
         async def scenario() -> None:
             config = load_config(ROOT / "configs" / "default.toml")
@@ -592,13 +605,9 @@ max_rate_per_minute = 10.0
 
         asyncio.run(scenario())
 
-    def test_programmatic_abort_policy_cannot_bypass_hold_current(self) -> None:
+    def test_explicit_hold_all_holds_controllable_instruments(self) -> None:
         async def scenario() -> None:
-            config = replace(
-                load_config(ROOT / "configs" / "default.toml"),
-                abort_temperature="keep_target",
-                abort_field="keep_target",
-            )
+            config = load_config(ROOT / "configs" / "default.toml")
             manager = InstrumentManager(
                 config,
                 EventManager(),

@@ -18,10 +18,6 @@ timestamp_epoch = "labview_1904"
 flush_every_row = true
 allow_external_paths = false
 
-[abort]
-temperature = "hold_current"
-field = "hold_current"
-
 [alarms]
 stability_timeout = "error"
 stale_reading = "warning"

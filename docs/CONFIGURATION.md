@@ -66,17 +66,8 @@ Windows 单文件名，不得包含目录、盘符、保留名、控制字符或
 自定义目录。无论实验 DAT 选到哪里，SEQ、配置、仪表状态和模块快照始终保留在自动运行
 目录。状态周期独立于 `poll_interval_seconds`；提高轮询频率不会自动增加状态文件写入量。
 
-## `[abort]`
-
-```toml
-[abort]
-temperature = "hold_current"
-field = "hold_current"
-```
-
-- `hold_current`：Stop/Error 后读取并保持当前值。
-
-当前版本只接受 `hold_current`，并同时作用于温度和磁场；其他值会在启动时被拒绝。测量模块在 SEQ 完成、Stop、Error 时收到 `on_event("run_end", {"reason": ...}, api)`；只有 Disable 和应用退出调用 `close(api)`。
+SEQ 完成、Stop 或 Error 都不会向 System Instrument 发送 Set 或 Hold。测量模块会收到
+`on_event("run_end", {"reason": ...}, api)`；只有 Disable 和应用退出调用 `close(api)`。
 
 ## `[alarms]`
 

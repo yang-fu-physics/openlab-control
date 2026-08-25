@@ -4,8 +4,8 @@ SequenceEngine 只在核心 asyncio 线程运行。所有耗时等待都基于�
 扣除用户 Pause 和主仪表重连等待，因此恢复后不会把暂停时间误判为 dwell/settle 已完成
 或稳定超时。
 
-Stop/Error 都沿协作路径退出当前命令，再尝试温度和磁场 Hold Current；Stop 不把目标
-改回起始值。强制取消仅用于应用关闭超时，并仍会尝试 Hold 与模块收尾。
+Stop/Error 都沿协作路径退出当前命令，但不改变任何 System Instrument 的目标或状态。
+强制取消仅用于应用关闭超时；所有退出路径仍会发送 Measurement Module 的 run_end。
 """
 
 from __future__ import annotations
@@ -250,17 +250,9 @@ class SequenceEngine:
             await self._execute_commands(document.commands, [])
             self._check_control()
         except SequenceAbort:
-            # 用户 Stop 和事件 Error 共用这里。二者都 Hold Current，区别只在最终
-            # STOPPED/FAULTED；Hold 无法确认时必须升级为 FAULTED。
+            # 用户 Stop 和事件 Error 共用这里，区别只在最终 STOPPED/FAULTED。
+            # SEQ 只结束 Measurement Module 的本次运行，不控制 System Instrument。
             self.state = RunState.FAULTED if self._fatal_abort else RunState.STOPPED
-            hold_succeeded = await self.instruments.hold_all()
-            if not hold_succeeded:
-                self.state = RunState.FAULTED
-                self._fatal_abort = True
-                self._abort_message = (
-                    "Sequence stopped, but one or more control instruments "
-                    "could not confirm Hold Current"
-                )
             code = "RUN_FAULTED" if self._fatal_abort else "RUN_STOPPED"
             self.events.report(
                 Severity.INFO,
@@ -269,19 +261,13 @@ class SequenceEngine:
                 self._abort_message or ("Aborted due to error" if self._fatal_abort else "Stopped by user"),
             )
         except asyncio.CancelledError:
-            # 只有应用关闭等待超时才应走强制 task cancellation。即使如此仍先尝试
-            # Hold，再把取消继续抛给 RuntimeService 完成其余资源回收。
+            # 只有应用关闭等待超时才应走强制 task cancellation。继续抛给
+            # RuntimeService 完成资源回收，不向 System Instrument 发送控制指令。
             self._fatal_abort = True
             self._abort_message = (
                 "Sequence task was cancelled during shutdown"
             )
             self.state = RunState.FAULTED
-            hold_succeeded = await self.instruments.hold_all()
-            if not hold_succeeded:
-                self._abort_message += (
-                    "; one or more control instruments could not confirm "
-                    "Hold Current"
-                )
             self.events.report(
                 Severity.ERROR,
                 "sequence",
@@ -293,13 +279,11 @@ class SequenceEngine:
             self._fatal_abort = True
             self._abort_message = str(exc)
             self.state = RunState.FAULTED
-            await self.instruments.hold_all()
             self.events.report(Severity.ERROR, "sequence", exc.code, str(exc), exc.context)
         except Exception as exc:
             self._fatal_abort = True
             self._abort_message = str(exc)
             self.state = RunState.FAULTED
-            await self.instruments.hold_all()
             self.events.report(Severity.ERROR, "sequence", "UNHANDLED_EXCEPTION", str(exc))
         else:
             self.state = RunState.COMPLETED
@@ -314,7 +298,6 @@ class SequenceEngine:
             if not cleanup_succeeded:
                 self.state = RunState.FAULTED
                 self._abort_message = "One or more modules failed to end the sequence safely"
-                await self.instruments.hold_all()
                 self.events.report(
                     Severity.INFO,
                     "sequence",
@@ -365,9 +348,9 @@ class SequenceEngine:
     def request_stop(self, fatal: bool = False, message: str = "Stopped by user") -> None:
         """设置 Stop 标志并唤醒所有 Pause checkpoint。
 
-        本方法必须快速且不做仪表 I/O。真正的 Hold 在 ``run`` 捕获
-        :class:`SequenceAbort` 后异步执行；模块通过 ``cancel_operations`` 在自己的
-        checkpoint 收到协作取消。正在阻塞的第三方驱动调用仍受模块操作总超时约束。
+        本方法必须快速且不做仪表 I/O。模块通过 ``cancel_operations`` 在自己的
+        checkpoint 收到协作取消。SEQ 退出不控制 System Instrument；正在阻塞的
+        第三方驱动调用仍受模块操作总超时约束。
         """
 
         if self.state not in (RunState.RUNNING, RunState.PAUSED, RunState.STOPPING):

@@ -81,7 +81,7 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
 
 接收端不再接受 `target_qq`，避免持有 Token 的发射端任意选择收件人。远程接收器必须
 使用 HTTPS。报警网络故障只产生本地 Warning，不会替代仪表互锁，也不会改变 Error
-中止 SEQ、Stop 后温场 Hold Current 的行为。
+中止 SEQ 或“SEQ 退出不控制 System Instrument”的行为。
 
 ## 主窗口
 
@@ -317,7 +317,7 @@ Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也
 
 Stop 后：
 
-- 温度和磁场执行 Hold Current；
+- 温度和磁场保持仪表原有目标、速率和动作，框架不发送 Set 或 Hold；
 - 模块收到 `run_end`，reason 为 `stopped`；
 - 不执行模块 close，模块仍 Enabled，窗口保持可用。
 
@@ -355,13 +355,18 @@ Stop 后：
 
 - 弹窗标题 `Error / Operation Stopped`；
 - Running/Paused SEQ 进入 Faulted；
-- 温场执行 Hold；
+- 未注册特殊响应时，不向 System Instrument 发送控制指令；
 - 模块收到 reason 为 `error` 的 `run_end`，不调用 close；
 - 已写数据保留。
 
 典型：仪表掉线、互锁、二级冷头过温、源表硬件报警、模块 Schema 违规。
 
 如果同一故障被轮询/多次测量反复报告，只会更新计数，不会连续弹窗轰炸。恢复后事件 RESOLVED；再次发生才重新弹。
+
+System Instrument 可以为自己的稳定事件代码注册响应。命中后核心会独立执行该动作；例如
+`zero` 会按目标磁场的默认速率把目标设为零。同一活动事件只执行一次，并锁定目标，直到
+源事件解除并人工复位。当前正式 System Instrument 没有注册任何响应，因此默认不会发生
+跨仪表联动。
 
 ## Data Browser
 
@@ -417,7 +422,7 @@ Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，
 
 ## 关闭程序
 
-SEQ 运行中关闭主窗口会确认；确认后请求 Stop/Hold/End。随后：
+SEQ 运行中关闭主窗口会确认；确认后请求 Stop/End。随后：
 
 1. 保存所有 Enabled 模块 Settings；
 2. 对每个 Enabled 模块调用 `close(api)`；

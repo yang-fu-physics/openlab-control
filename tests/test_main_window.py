@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
+from labcontrol.models import RunState  # noqa: E402
 from labcontrol.sequence.model import CommandType  # noqa: E402
 from labcontrol.sequence.module_settings import (  # noqa: E402
     SequenceModuleSettings,
@@ -245,6 +246,23 @@ class MainWindowLayoutTests(unittest.TestCase):
                 .isVisible()
             )
         finally:
+            window.close()
+
+    def test_close_running_sequence_explains_system_instruments_continue(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.current_run_state = RunState.RUNNING
+            with patch(
+                "labcontrol.ui.main_window.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.No,
+            ) as question:
+                self.assertFalse(window.close())
+
+            message = question.call_args.args[2]
+            self.assertIn("will not send Set or Hold", message)
+            self.assertIn("current actions will continue", message)
+        finally:
+            window.current_run_state = RunState.IDLE
             window.close()
 
     def test_remembered_window_layout_round_trips(

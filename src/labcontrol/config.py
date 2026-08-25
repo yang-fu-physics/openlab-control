@@ -198,8 +198,6 @@ class AppConfig:
     modules: ModuleConfig
     system_instruments: SystemInstrumentConfig
     instrument_resources: tuple[InstrumentResource, ...]
-    abort_temperature: str
-    abort_field: str
     instruments: tuple[InstrumentConfig, ...]
 
     @property
@@ -647,11 +645,15 @@ def load_config(path: str | Path) -> AppConfig:
     with source.open("rb") as handle:
         raw = tomllib.load(handle)
 
+    if "abort" in raw:
+        raise ConfigurationError(
+            "[abort] is not supported; SEQ exit does not control System Instruments"
+        )
+
     application = raw.get("application", {})
     logging_raw = raw.get("logging", {})
     alarm_raw = raw.get("alarms", {})
     reporting_raw = alarm_raw.get("reporting", {})
-    abort_raw = raw.get("abort", {})
     module_raw = raw.get("modules", {})
     system_instrument_raw = raw.get("system_instruments", {})
     resource_file_value = str(
@@ -750,16 +752,6 @@ def load_config(path: str | Path) -> AppConfig:
     if timestamp_epoch not in {"labview_1904", "unix"}:
         raise ConfigurationError(
             "logging.timestamp_epoch must be labview_1904 or unix"
-        )
-    abort_temperature = str(
-        abort_raw.get("temperature", "hold_current")
-    ).strip().casefold()
-    abort_field = str(
-        abort_raw.get("field", "hold_current")
-    ).strip().casefold()
-    if abort_temperature != "hold_current" or abort_field != "hold_current":
-        raise ConfigurationError(
-            "abort.temperature and abort.field currently support only hold_current"
         )
     data_file_name = _windows_file_name(
         logging_raw.get("data_file_name", "experiment.dat"),
@@ -983,7 +975,5 @@ def load_config(path: str | Path) -> AppConfig:
             ),
         ),
         instrument_resources=instrument_resources,
-        abort_temperature=abort_temperature,
-        abort_field=abort_field,
         instruments=instruments,
     )

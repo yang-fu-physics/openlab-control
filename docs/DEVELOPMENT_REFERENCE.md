@@ -325,8 +325,8 @@ Apply 按钮、窗口关闭规则、未应用设置比较和 Run 期间 Settings
 
 ## System Instrument
 
-System Instrument 使用同步 `SystemInstrument` 接口。作者只返回普通读数字典；核心统一处理
-子进程、超时、时间戳、连接状态、控制上限、失联恢复和 Hold：
+System Instrument 使用同步 `SystemInstrument` 接口。作者只返回普通读数字典和可选事件响应
+声明；核心统一处理子进程、超时、时间戳、连接状态、控制上限、失联恢复和响应调度：
 
 ```python
 class MyController(SystemInstrument):
@@ -346,6 +346,7 @@ class MyController(SystemInstrument):
     def set_target(self, value, rate_per_minute, mode="Settle"): ...
     def hold(self): ...
     def execute_sequence_command(self, command_id): ...
+    def event_responses(self): return ()
     def close(self): ...
 ```
 
@@ -361,8 +362,13 @@ GUI 不直接操作仪表。主配置限制手动控制、SEQ 参数窗口和运
 不能因为提供快速测量读取而停止执行。
 
 同一 System Instrument 的方法不会并发执行。已经开始的完整仪表事务不会被抢占；它返回或
-超时后，控制与安全操作优先，等待中的 `read_measurement()` 再先于后台 `read_status()`。后台
+超时后，事件响应优先于控制，等待中的 `read_measurement()` 再先于后台 `read_status()`。后台
 不得另开线程绕过核心队列并访问同一 VISA Session，否则这个保证不再成立。
+
+后端可用 `EventResponseSpec(code=..., context=..., action="zero")` 为自身稳定事件代码注册
+响应。省略目标时使用唯一可控磁场仪表，`zero` 使用目标的默认速率。声明通过 JSON IPC
+传回核心，不能包含回调或仪表对象。SEQ 完成、Stop、Error 和取消本身都不会调用 Set/Hold；
+只有明确注册的响应才会联动 System Instrument。
 
 ## 依赖与离线安装
 

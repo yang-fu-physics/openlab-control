@@ -390,6 +390,18 @@ class RuntimeService:
             return
         self._loop.call_soon_threadsafe(self.events.resolve, source, code, context)
 
+    def reset_event_response(self, event_key: str) -> Future[Any]:
+        """在源事件解除后请求释放对应的 System Instrument 响应锁。"""
+
+        assert self.instruments is not None
+        return self._submit(
+            self._reset_event_response(event_key)
+        )
+
+    async def _reset_event_response(self, event_key: str) -> None:
+        assert self.instruments is not None
+        self.instruments.reset_event_response(event_key)
+
     def shutdown(self, timeout: float = 8.0) -> None:
         """从调用线程执行有总时限的关闭，并确认 runtime 线程真正退出。"""
 
@@ -416,7 +428,7 @@ class RuntimeService:
     async def _shutdown_async(self) -> None:
         """按安全依赖顺序关闭运行时。
 
-        1. 请求 SEQ Stop，使正常路径有机会 Hold 并发送模块 run_end；
+        1. 请求 SEQ Stop，使正常路径有机会发送模块 run_end；
         2. 最多等待 3 秒，超时才取消 task；
         3. 停止轮询，避免清理期间又产生新仪表请求；
         4. 调用模块 close 并回收 worker；
@@ -434,7 +446,7 @@ class RuntimeService:
                     timeout=3.0,
                 )
             except asyncio.TimeoutError:
-                # 取消是最后手段；SequenceEngine 的 CancelledError 分支仍会尝试 Hold。
+                # 取消是最后手段；SequenceEngine 仍会发送模块 run_end，但不控制仪表。
                 sequence_task.cancel()
                 await asyncio.gather(
                     sequence_task,

@@ -350,7 +350,7 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertEqual(len(warning_notices), 1)
             self.assertTrue(warning_notices[0].show_popup)
 
-    def test_error_aborts_and_holds_current_values(self) -> None:
+    def test_error_aborts_without_changing_system_instrument_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
             document = SequenceDocument([
@@ -365,7 +365,7 @@ class SequenceEngineTests(unittest.TestCase):
             state, snapshots, _ = asyncio.run(self._run(config, document, notices))
             field = snapshots["field"]
             self.assertEqual(state, RunState.FAULTED)
-            self.assertAlmostEqual(field.target or 0.0, field.current or 0.0, places=4)
+            self.assertAlmostEqual(field.target or 0.0, 10_000.0, places=4)
 
     def test_latched_idle_error_repeated_while_running_requests_fatal_stop(self) -> None:
         events = EventManager()
@@ -469,7 +469,7 @@ class SequenceEngineTests(unittest.TestCase):
                 scenario(self._fast_config(Path(temp)))
             )
 
-    def test_task_cancellation_attempts_hold_before_exiting(self) -> None:
+    def test_task_cancellation_does_not_hold_system_instruments(self) -> None:
         async def scenario(config) -> None:
             events = EventManager()
             manager = InstrumentManager(
@@ -488,6 +488,12 @@ class SequenceEngineTests(unittest.TestCase):
             )
             await manager.connect_all()
             await manager.poll_all()
+            held: list[str] = []
+            for instrument_id in ("temperature", "field"):
+                async def record_hold(selected=instrument_id):
+                    held.append(selected)
+
+                manager.instruments[instrument_id].hold = record_hold  # type: ignore[method-assign]
             task = asyncio.create_task(
                 engine.run(
                     SequenceDocument(
@@ -505,12 +511,7 @@ class SequenceEngineTests(unittest.TestCase):
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
-            for instrument_id in ("temperature", "field"):
-                snapshot = manager.latest[instrument_id]
-                self.assertAlmostEqual(
-                    snapshot.target or 0.0,
-                    snapshot.current or 0.0,
-                )
+            self.assertEqual(held, [])
             await modules.shutdown()
             await manager.disconnect_all()
 
@@ -647,7 +648,7 @@ class SequenceEngineTests(unittest.TestCase):
                         ],
                     )
 
-    def test_stop_becomes_faulted_when_hold_current_is_not_confirmed(self) -> None:
+    def test_stop_does_not_call_hold_all(self) -> None:
         async def scenario(config) -> None:
             events = EventManager()
             notices = []
@@ -659,10 +660,10 @@ class SequenceEngineTests(unittest.TestCase):
             await manager.connect_all()
             await manager.poll_all()
 
-            async def failed_hold() -> bool:
-                return False
+            async def unexpected_hold() -> bool:
+                raise AssertionError("SEQ Stop must not control System Instruments")
 
-            manager.hold_all = failed_hold  # type: ignore[method-assign]
+            manager.hold_all = unexpected_hold  # type: ignore[method-assign]
             run_task = asyncio.create_task(
                 engine.run(
                     SequenceDocument(
@@ -674,10 +675,10 @@ class SequenceEngineTests(unittest.TestCase):
             await asyncio.sleep(0.03)
             engine.request_stop(False, "Stopped by test")
             state = await asyncio.wait_for(run_task, timeout=1.0)
-            self.assertEqual(state, RunState.FAULTED)
-            self.assertIn("could not confirm Hold Current", engine._abort_message)
+            self.assertEqual(state, RunState.STOPPED)
+            self.assertEqual(engine._abort_message, "Stopped by test")
             self.assertIn(
-                "RUN_FAULTED",
+                "RUN_STOPPED",
                 [notice.event.code for notice in notices],
             )
             await modules.shutdown()

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 from ..config import InstrumentConfig
@@ -33,6 +34,59 @@ class InstrumentWarning(RuntimeError):
 
 class SafetyViolation(InstrumentError):
     """目标值、速率或操作违反框架安全边界。"""
+
+
+@dataclass(frozen=True, slots=True)
+class EventResponseSpec:
+    """System Instrument 为自身事件注册的一条核心响应声明。
+
+    ``source`` 由加载该后端的逻辑仪表 ID 自动绑定，仪表代码只声明稳定事件代码和动作。
+    第一版仅支持把一个可控磁场仪表设为零；实际写入仍由核心执行安全限制、串行化和超时。
+    """
+
+    code: str
+    action: str
+    context: str = ""
+    target_instrument: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.code or self.code != self.code.strip():
+            raise ValueError("Event response code must be non-empty and trimmed")
+        if self.action != "zero":
+            raise ValueError("Event response action must be zero")
+        if self.context != self.context.strip():
+            raise ValueError("Event response context must be trimmed")
+        if self.target_instrument != self.target_instrument.strip():
+            raise ValueError("Event response target_instrument must be trimmed")
+
+    def to_payload(self) -> dict[str, str]:
+        """返回可通过受限 JSON IPC 传递的纯数据。"""
+
+        return {
+            "code": self.code,
+            "action": self.action,
+            "context": self.context,
+            "target_instrument": self.target_instrument,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, object]) -> EventResponseSpec:
+        """在 IPC 边界把 JSON 对象恢复为已验证声明。"""
+
+        expected = {"code", "action", "context", "target_instrument"}
+        if set(payload) != expected:
+            raise ValueError(
+                "Event response fields must be code, action, context, and "
+                "target_instrument"
+            )
+        if not all(isinstance(payload[key], str) for key in expected):
+            raise TypeError("Event response fields must be text")
+        return cls(
+            code=str(payload["code"]),
+            action=str(payload["action"]),
+            context=str(payload["context"]),
+            target_instrument=str(payload["target_instrument"]),
+        )
 
 
 class SystemInstrument(ABC):
@@ -92,3 +146,8 @@ class SystemInstrument(ABC):
             "UNSUPPORTED_SEQUENCE_COMMAND",
             command_id,
         )
+
+    def event_responses(self) -> tuple[EventResponseSpec, ...]:
+        """声明由核心执行的事件响应；默认不注册任何响应。"""
+
+        return ()

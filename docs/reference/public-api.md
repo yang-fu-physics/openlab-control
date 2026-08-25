@@ -46,6 +46,10 @@ Frontend 是普通 QWidget，只通过这个桥请求后端 Action 或状态刷�
         - read_measurement
         - set_target
         - hold
+        - execute_sequence_command
+        - event_responses
+
+::: labcontrol.instruments.base.EventResponseSpec
 
 ::: labcontrol.instruments.base.InstrumentWarning
 

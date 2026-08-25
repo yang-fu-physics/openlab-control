@@ -24,7 +24,13 @@ from ..config import InstrumentConfig
 from ..package_support.dependencies import dependency_runtime_errors
 from ..package_support.loading import load_import_object, load_source_object
 from ..package_support.trust import content_tree_digest
-from .base import InstrumentError, SystemInstrument, InstrumentWarning, SafetyViolation
+from .base import (
+    EventResponseSpec,
+    InstrumentError,
+    SystemInstrument,
+    InstrumentWarning,
+    SafetyViolation,
+)
 
 
 MAX_INSTRUMENT_MESSAGE_BYTES = 1024 * 1024
@@ -190,6 +196,50 @@ def _reading_payload(reading: object) -> dict[str, Any]:
     return result
 
 
+def _event_response_payload(responses: object) -> dict[str, Any]:
+    """验证 System Instrument 注册边界并生成 JSON 结果。"""
+
+    if not isinstance(responses, tuple) or not all(
+        isinstance(item, EventResponseSpec) for item in responses
+    ):
+        raise InstrumentError(
+            "event_responses() must return a tuple of EventResponseSpec",
+            "INVALID_EVENT_RESPONSES",
+        )
+    return {"responses": [item.to_payload() for item in responses]}
+
+
+def _event_responses_from_payload(
+    payload: dict[str, Any],
+) -> tuple[EventResponseSpec, ...]:
+    """验证 worker 返回的响应声明，拒绝扩展 IPC 对象。"""
+
+    if set(payload) != {"responses"} or not isinstance(
+        payload["responses"],
+        list,
+    ):
+        raise InstrumentError(
+            "Instrument worker returned invalid event responses",
+            "INVALID_EVENT_RESPONSES",
+        )
+    items = payload["responses"]
+    if not all(isinstance(item, dict) for item in items):
+        raise InstrumentError(
+            "Instrument worker returned invalid event responses",
+            "INVALID_EVENT_RESPONSES",
+        )
+    try:
+        return tuple(
+            EventResponseSpec.from_payload(item)
+            for item in items
+        )
+    except (TypeError, ValueError) as exc:
+        raise InstrumentError(
+            f"Instrument worker returned invalid event responses: {exc}",
+            "INVALID_EVENT_RESPONSES",
+        ) from exc
+
+
 def _activate_dependency_directory(path: str) -> None:
     """把已验证 System Instrument 的私有 site-packages 放到 worker 导入路径首位。"""
 
@@ -319,6 +369,16 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
                 value = backend.execute_sequence_command(
                     str(payload["command_id"])
                 )
+            elif action == "event_responses":
+                try:
+                    value = _event_response_payload(
+                        backend.event_responses()
+                    )
+                except Exception as exc:
+                    raise InstrumentError(
+                        f"Invalid event responses: {exc}",
+                        "INVALID_EVENT_RESPONSES",
+                    ) from exc
             else:
                 raise InstrumentError(
                     f"Unknown instrument worker action: {action}",
@@ -750,6 +810,20 @@ class IsolatedInstrumentClient:
             raise self._translate(exc) from exc
         await self._request("open")
 
+    async def event_responses(self) -> tuple[EventResponseSpec, ...]:
+        """启动 worker 但不连接仪表，并读取后端的纯数据响应声明。"""
+
+        try:
+            await asyncio.to_thread(
+                self.worker.start,
+                self.startup_timeout_seconds,
+            )
+        except InstrumentWorkerError as exc:
+            raise self._translate(exc) from exc
+        return _event_responses_from_payload(
+            await self._request("event_responses")
+        )
+
     async def close(self) -> None:
         await self._request("close_instrument", shutdown=True)
 
@@ -804,6 +878,23 @@ class InProcessInstrumentClient:
 
     async def open(self) -> None:
         await asyncio.to_thread(self.backend.open)
+
+    async def event_responses(self) -> tuple[EventResponseSpec, ...]:
+        try:
+            return _event_responses_from_payload(
+                _event_response_payload(
+                    await asyncio.to_thread(
+                        self.backend.event_responses
+                    )
+                )
+            )
+        except Exception as exc:
+            if isinstance(exc, InstrumentError):
+                raise
+            raise InstrumentError(
+                f"Invalid event responses: {exc}",
+                "INVALID_EVENT_RESPONSES",
+            ) from exc
 
     async def close(self) -> None:
         await asyncio.to_thread(self.backend.close)
