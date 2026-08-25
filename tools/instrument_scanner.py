@@ -339,10 +339,14 @@ class InstrumentScannerWindow(QMainWindow):
         instrument_directory: Path,
         *,
         timeout_seconds: float = 1.0,
+        template_path: Path | None = None,
     ) -> None:
         super().__init__()
         self.output_path = output_path.resolve()
         self.instrument_directory = instrument_directory.resolve()
+        self.template_path = (
+            template_path or ROOT / "configs" / "default.toml"
+        ).resolve()
         self.timeout_seconds = timeout_seconds
         self.descriptors = discover_scan_descriptors(
             self.instrument_directory
@@ -509,8 +513,8 @@ class InstrumentScannerWindow(QMainWindow):
             )
         else:
             self.existing_label.setText(
-                "This configuration file does not exist yet. It will be "
-                "created after every selected instrument is complete."
+                "This site configuration does not exist yet. Saving will "
+                "copy default.toml first, then add the confirmed resource records."
             )
 
     def _update_discovery_label(self) -> None:
@@ -1123,7 +1127,7 @@ class InstrumentScannerWindow(QMainWindow):
     def choose_output(self) -> None:
         selected, _filter = QFileDialog.getSaveFileName(
             self,
-            "Save Instrument Resource Configuration",
+            "Save OpenLab Control Site Configuration",
             str(self.output_path),
             "TOML configuration (*.toml)",
         )
@@ -1269,6 +1273,7 @@ class InstrumentScannerWindow(QMainWindow):
             write_instrument_resources(
                 self.output_path,
                 resources,
+                template_path=self.template_path,
             )
         except (OSError, InstrumentResourceError) as exc:
             QMessageBox.critical(
@@ -1302,7 +1307,7 @@ def _arguments(
     parser = argparse.ArgumentParser(
         description=(
             "Read-only VISA scan and OpenLab Control "
-            "instrument resource configuration"
+            "site configuration"
         )
     )
     parser.add_argument(
@@ -1311,7 +1316,7 @@ def _arguments(
         default=(
             ROOT
             / "configs"
-            / "instruments.local.toml"
+            / "site.local.toml"
         ),
     )
     parser.add_argument(

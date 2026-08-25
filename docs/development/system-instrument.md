@@ -21,11 +21,9 @@ System Instrument 通常随实验系统固定；Measurement Module 会按实验�
 ## 运行流程
 
 ```text
-configs/instruments.local.toml
-        │ 地址 + System Instrument ID + 选中的辅助读数
-        ▼
-configs/site.local.toml 的 [[instruments]]
-        │ resource + 控制许可 + 安全范围
+configs/site.local.toml
+        │ [[resources]]：地址 + System Instrument ID + 选中的辅助读数
+        │ [[instruments]]：resource + 控制许可 + 安全范围
         ▼
 system_instruments/<id>/instrument.toml
         │ backend + 面板模板 + 主读数 + 所有读数的名称/单位/精度
@@ -60,7 +58,7 @@ system_instruments/my_temperature_controller/
 不要按 TempA、TempB 或“主/副温度”拆目录。同一地址只创建一个实例和一个通讯会话；一台仪表
 返回的其他值放在 `auxiliary` 字典中。不同物理地址各有独立子进程，可以并发轮询。
 
-## 三份文件各管一件事
+## 两份文件各管一件事
 
 `instrument.toml` 由作者提供，描述实现和读数：
 
@@ -84,7 +82,7 @@ unit = "K"
 decimals = 3
 ```
 
-`configs/instruments.local.toml` 由扫描器生成，描述实验室里的实际仪表：
+`configs/site.local.toml` 由操作者保存在本机。扫描器只更新其中的资源区块：
 
 ```toml
 [[resources]]
@@ -93,11 +91,7 @@ address = "USB0::...::INSTR"
 purpose = "system"
 system_instrument = "cryocon_22c_24c"
 auxiliary_readings = ["temp_a"]
-```
 
-`configs/site.local.toml` 描述该实例是否可控和现场安全范围：
-
-```toml
 [[instruments]]
 id = "temperature"
 display_name = "Temperature"
@@ -109,8 +103,9 @@ max_value = 400.0
 max_rate_per_minute = 10.0
 ```
 
-同一个信息只写一次：地址和实现选择在资源表；面板模板、主读数、单位和精度在清单；控制许可和安全
-范围在现场主配置。外部 System Instrument 的 `[[instruments]]` 不再接受重复的 `backend`、
+同一个信息只写一次：地址和实现选择在同一现场配置的资源区块；面板模板、主读数、单位和
+精度在清单；控制许可和安全范围在同一现场配置的 `[[instruments]]`。扫描器不会改写安全
+范围。外部 System Instrument 的 `[[instruments]]` 不再接受重复的 `backend`、
 `unit`、旧 `role` 或仿真的 `initial_value`。清单中的未知字段也会直接标记为 Invalid。
 
 ## `kind` 与控制许可

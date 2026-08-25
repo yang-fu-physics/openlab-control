@@ -194,6 +194,7 @@ class ReleaseContractTests(unittest.TestCase):
             "$process.Kill($true)",
             "Get-FileHash",
             "headless_demo.log",
+            "configs\\site.local.toml",
             "forbiddenNames",
             "gh release create",
         ):
@@ -229,6 +230,8 @@ class ReleaseContractTests(unittest.TestCase):
             "labcontrol.devices",
             "api.devices()",
             "device.toml",
+            "instruments.local.toml",
+            "resource_file",
         ):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, current_documents)
@@ -243,6 +246,8 @@ class ReleaseContractTests(unittest.TestCase):
             "measurement-modules-repository",
             "system-instruments-repository",
             "instrument.toml",
+            "site.local.toml",
+            "[[resources]]",
             "[[instruments]]",
             "backend",
         ):

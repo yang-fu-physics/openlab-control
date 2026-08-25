@@ -133,7 +133,7 @@ jobs:
           Get-ChildItem -LiteralPath $runs -Force | Remove-Item -Recurse -Force
           $generatedPaths = @(
             (Join-Path $releaseRoot "headless_demo.log"),
-            (Join-Path $releaseRoot "configs\instruments.local.toml")
+            (Join-Path $releaseRoot "configs\site.local.toml")
           )
           foreach ($generatedPath in $generatedPaths) {
             if (Test-Path -LiteralPath $generatedPath) {
@@ -175,7 +175,7 @@ jobs:
               $name = $_.FullName.Replace("\", "/")
               $name -match "(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)(/|$)" -or
               $name -match "\.(pyc|pyo)$" -or
-              $name -eq "OpenLabControl/configs/instruments.local.toml" -or
+              $name -eq "OpenLabControl/configs/site.local.toml" -or
               $name -eq "OpenLabControl/headless_demo.log" -or
               ($name.StartsWith("OpenLabControl/runs/") -and -not $name.EndsWith("/"))
             })

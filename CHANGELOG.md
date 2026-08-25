@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.1 - 2026-08-26
+
+- 修正 0.18.0 遗漏的单文件现场配置：System 与 Measurement 物理地址记录现在直接位于
+  `configs/site.local.toml` 的 `[[resources]]` 区块，不再由
+  `[system_instruments].resource_file` 引用第二个 `instruments.local.toml`。
+- Instrument Scanner 默认读取和更新 `site.local.toml`，只原子替换标记的资源区块；报警、
+  日志、System Instrument 控制许可和安全范围保持不变。文件尚不存在时，以
+  `default.toml` 为模板生成完整配置；主程序下次启动会自动优先加载现场配置。
+- `purpose` 继续区分同一资源区块中的 System 与 Measurement 记录；现有 Measurement Module
+  仍通过 `api.resources()` 和 `api.resource_address()` 选择扫描记录，不需要修改。
+- 每次 Run 的 `configuration.toml` 已包含资源地址与安全范围，因此删除重复的
+  `instrument-resources.toml` 快照。旧的双文件配置不提供兼容读取，继续使用
+  `resource_file` 会在启动时明确报错。
+- README、配置手册、扫描器教程、System Instrument 教程和发布检查已同步；完整核心测试
+  现为 301 项。
+
 ## 0.18.0 - 2026-08-25
 
 - SEQ 正常完成、Stop、Error、任务取消和应用关闭都不再向 System Instrument 发送 Set 或

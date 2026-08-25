@@ -6,16 +6,16 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 
 ## 下载与校验
 
-当前稳定版本为 `v0.18.0`：
+当前稳定版本为 `v0.18.1`：
 
-- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.18.0/OpenLabControl-v0.18.0-windows-x64.zip)
-- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.18.0/OpenLabControl-v0.18.0-windows-x64.zip.sha256)
+- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.18.1/OpenLabControl-v0.18.1-windows-x64.zip)
+- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.18.1/OpenLabControl-v0.18.1-windows-x64.zip.sha256)
 
 在 PowerShell 中校验：
 
 ```powershell
-Get-FileHash .\OpenLabControl-v0.18.0-windows-x64.zip -Algorithm SHA256
-Get-Content .\OpenLabControl-v0.18.0-windows-x64.zip.sha256
+Get-FileHash .\OpenLabControl-v0.18.1-windows-x64.zip -Algorithm SHA256
+Get-Content .\OpenLabControl-v0.18.1-windows-x64.zip.sha256
 ```
 
 两处哈希必须完全一致。不要直接从 ZIP 内运行程序；先完整解压到普通可写目录。
@@ -25,8 +25,9 @@ Get-Content .\OpenLabControl-v0.18.0-windows-x64.zip.sha256
 1. 双击 `OpenLabControl.exe`。需要确认仪表地址时，双击同目录的
    `InstrumentScanner.exe`。扫描器会自动读取已有配置并开始一次只读 VISA 扫描；TCP 仪表
    只填写地址和端口，不发送识别指令。VISA 识别到唯一的 System Instrument 时会自动选择，
-   TCP 由操作者选择实现。两个程序共享同一个
-   `_internal`，不要单独移动任一 EXE。
+   TCP 由操作者选择实现。System 与 Measurement 地址记录写入同一个
+   `configs/site.local.toml`；若该文件不存在，保存时会从 `default.toml` 创建。OpenLab Control
+   下次启动会自动优先加载该文件。两个程序共享同一个 `_internal`，不要单独移动任一 EXE。
 2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
 3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。
 4. 保持列表为空，打开 `examples/nested_scan.seq`。
@@ -69,9 +70,8 @@ modules/simulated_transport/
 `simulated_transport` 用于体验最小 Enable/Measure/Disable 流程，没有自定义设置。开发者
 教程中的 `tutorial_resistance` 是另一个示例，用来学习设置窗口、四行结果和模块附加功能。
 
-需要现场配置时，把 `configs/default.toml` 复制为 `configs/site.local.toml`，然后用
-`OpenLabControl.exe --config configs\site.local.toml` 启动。不要把含真实地址的配置上传到
-公开仓库。
+需要现场配置时，把 `configs/default.toml` 复制为 `configs/site.local.toml`，然后正常启动
+`OpenLabControl.exe`；程序会自动优先加载现场配置。不要把含真实地址的配置上传到公开仓库。
 
 !!! danger "改地址不等于可以控制真机"
 

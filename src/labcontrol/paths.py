@@ -14,6 +14,10 @@ def project_root() -> Path:
 
 
 def default_config_path() -> Path:
-    """返回默认主配置文件位置，不受启动时工作目录影响。"""
+    """优先返回本机现场配置，否则返回随程序提供的仿真配置。"""
 
-    return project_root() / "configs" / "default.toml"
+    configs = project_root() / "configs"
+    site_config = configs / "site.local.toml"
+    if site_config.is_file():
+        return site_config
+    return configs / "default.toml"

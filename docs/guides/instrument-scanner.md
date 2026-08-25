@@ -1,8 +1,8 @@
 # 扫描并配置仪表
 
 这个独立工具解决一件事：列出电脑当前能看到的 VISA 地址，或让你录入 TCP 地址和端口，
-再确认每个地址对应哪台物理仪表并保存到本机配置文件。以后 USB 枚举、GPIB 地址或 TCP
-端点变化，只改这一份文件。
+再确认每个地址对应哪台物理仪表并保存到现场主配置。以后 USB 枚举、GPIB 地址或 TCP
+端点变化，只改 `configs/site.local.toml`。
 
 ## 打开工具
 
@@ -22,12 +22,12 @@ VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通�
 打开扫描器即可，不需要重新打包 OpenLab Control。扫描失败弹窗提供可点击的
 [NI-VISA 官方下载链接](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)。
 
-默认输出是 `configs/instruments.local.toml`。该文件已被 Git 忽略。
+默认读取和写入 `configs/site.local.toml`。该文件已被 Git 忽略。地址记录、安全范围、报警和
+日志设置都在这一份文件中；扫描器只替换明确标记的资源区块。如果文件尚不存在，第一次保存
+会以 `configs/default.toml` 为模板创建完整现场配置。OpenLab Control 下次正常启动会自动
+优先加载它，不需要再传入 `--config`。
 
-0.16 使用 `schema_version = 2`。旧资源文件不会自动迁移；先保留旧文件作参考，再重新扫描并
-人工确认。扫描器不会覆盖一个无法按当前 Schema 读取的文件。
-
-工具打开时会自动读取这份文件，随后自动执行一次 VISA 扫描。TCP 端点不会自动扫描；在
+工具打开时会自动读取这份现场配置，随后自动执行一次 VISA 扫描。TCP 端点不会自动扫描；在
 顶部填写 **TCP address** 和 **Port** 后点击 **Add TCP**。旧资源会先显示为仪表卡片，
 扫描结果再与旧表合并；没有在本次扫描中出现的旧地址也会保留，除非你明确把它的 `Use` 改为
 `Ignore`。需要重新检查连接时仍可点击 **Scan VISA instruments**。
@@ -107,7 +107,7 @@ label = "Heater Range"
 ```
 
 `panel.template` 选择底部主面板，`main_reading` 必须对应一个 `[readings]`。其他读数自动成为
-辅助复选项。资源文件只保存勾选结果，不再重复面板、主读数、单位或显示精度。
+辅助复选项。资源区块只保存勾选结果，不再重复面板、主读数、单位或显示精度。
 
 ## 为什么 TempA 和 TempB 不拆成两台
 
@@ -131,7 +131,7 @@ System Instrument 在一次 `read_status()` 中读取完整状态：TempB 写入
 
 ## 保存前检查
 
-点击 **Review changes and save** 后，工具会显示完整 TOML 和目标路径。确认：
+点击 **Review changes and save** 后，工具会显示将写入的完整资源区块和目标路径。确认：
 
 - 每个选中地址和前面板型号一致；
 - 没有把同一地址登记两次；
@@ -149,17 +149,23 @@ System Instrument 在一次 `read_status()` 中读取完整状态：TempB 写入
 Measurement 的卡片必须填写 `Resource name (ID)`。只要有缺项，
 工具就不会写文件，而会定位并标红第一张未完成卡片。不需要的地址可以明确选 `Ignore`。
 
-保存采用同目录临时文件再原子替换，不会留下半个 TOML。程序启动时会再次严格验证；有
-未知资源、重复地址、错误用途或 System Instrument 不匹配时，会在连接真实仪表前停止。
-如果旧资源文件本身无法读取，扫描器也不会覆盖它，因为这时无法可靠列出将被替换的内容。
+保存采用同目录临时文件再原子替换，不会留下半个 TOML；资源区块外的控制许可、安全范围、
+报警和日志设置保持原样。程序启动时会再次严格验证；有未知资源、重复地址、错误用途或
+System Instrument 不匹配时，会在连接真实仪表前停止。如果现场配置本身无法读取，扫描器
+也不会覆盖它，因为这时无法可靠保留其他设置或列出将被替换的内容。
 
 ## 主配置怎样引用
 
-`configs/site.local.toml` 只引用稳定资源 ID：
+资源记录和引用它的 System Instrument 都在 `configs/site.local.toml`：
 
 ```toml
-[system_instruments]
-resource_file = "configs/instruments.local.toml"
+[[resources]]
+id = "cryocon_main"
+address = "USB0::...::INSTR"
+identity = "Cryo-con,24C,SERIAL,1.0"
+purpose = "system"
+system_instrument = "cryocon_22c_24c"
+auxiliary_readings = ["temp_a"]
 
 [[instruments]]
 id = "temperature"
@@ -172,8 +178,7 @@ max_value = 400.0
 max_rate_per_minute = 10.0
 ```
 
-每次 Run 会同时保存 `configuration.toml` 和解析后的 `instrument-resources.toml`，便于日后
-核对当时实际使用的地址。
+每次 Run 只需保存一份 `configuration.toml`，其中已经包含当时实际使用的地址和安全范围。
 
 ## Measurement Module 怎样使用
 

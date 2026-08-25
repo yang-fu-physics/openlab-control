@@ -6,7 +6,7 @@
 ## 安装运行依赖
 
 ```powershell
-git clone --branch v0.18.0 https://github.com/yang-fu-physics/openlab-control.git
+git clone --branch v0.18.1 https://github.com/yang-fu-physics/openlab-control.git
 cd openlab-control
 .\setup.bat
 .\run.bat
@@ -23,11 +23,12 @@ cd openlab-control
 
 ```powershell
 Copy-Item .\configs\default.toml .\configs\site.local.toml
-.\run.bat --config configs\site.local.toml
+.\run.bat
 ```
 
-只在 `site.local.toml` 中填写仪表地址和现场安全范围。需要给团队一个起点时，提交删去真实
-地址和秘密的 `site.example.toml`，不要提交本机文件。
+运行 Instrument Scanner 后，System 与 Measurement 地址记录会写入这同一份
+`site.local.toml`；控制许可和现场安全范围也只在这里填写。主程序会自动优先加载该文件；
+需要给团队一个起点时，提交删去真实地址和秘密的 `site.example.toml`，不要提交本机文件。
 
 ## 运行完整测试
 

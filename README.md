@@ -9,7 +9,7 @@ OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Pyt
 两者有不同目录、清单和生命周期。System Instrument 一般随实验系统固定；Measurement
 Module 每次启动默认 Disabled，由用户按需 Enable。
 
-当前稳定版本：`0.18.0`。默认配置全部使用内置仿真仪表，尚未完成真机验证。
+当前稳定版本：`0.18.1`。默认配置全部使用内置仿真仪表，尚未完成真机验证。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站包含面向初学者的中文
 使用教程、Measurement Module 教程和完整 System Instrument 教程。
@@ -114,20 +114,22 @@ System Instrument 示例，不宣称一个示例可以控制任意真实仪表�
 安装时：
 
 1. 把完整 System Instrument 文件夹复制到 `system_instruments/<instrument-id>/`。
-2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
+2. 把 `configs/default.toml` 复制为 `configs/site.local.toml`。
+3. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
    `InstrumentScanner.exe`。程序打开后自动进行一次只读 VISA 扫描；TCP 仪表只输入地址和
    端口，不连接、不发送识别指令。随后由操作者确认地址、
    用途、System Instrument 和辅助读数；唯一识别的实现会自动选择，主读数由该实现固定，
-   辅助读数使用复选框。结果写入 `configs/instruments.local.toml`。已有文件会先自动载入，
-   保存前会逐项列出新增、替换、删除和保持不变的资源。
+   辅助读数使用复选框。System 与 Measurement 地址记录都写入同一个
+   `configs/site.local.toml`；应用设置、控制许可和安全范围保持不变。已有记录会先自动载入，
+   保存前会逐项列出新增、替换、删除和保持不变的资源。若现场配置尚不存在，第一次保存会
+   先复制 `default.toml`，再加入地址记录。
    System Instrument 名称和可选读数来自 `system_instruments/` 中的清单，扫描器不写死
    具体仪表，也不选择或绑定 Measurement Module。
-3. 把 `configs/default.toml` 复制为 `configs/site.local.toml`。
 4. 在现场副本的 `[[instruments]]` 中设置 `resource = "<资源 ID>"`、是否允许控制、安全
    上下限、最大速率和超时。实现、主读数、单位和显示精度由资源选择及仪表清单自动得到；
    `initial_value` 只属于内置仿真，不写入真实仪表条目。
-5. 使用 `run.bat --config configs\site.local.toml` 启动；打包版使用
-   `OpenLabControl.exe --config configs\site.local.toml`。
+5. 正常启动 OpenLab Control。程序发现 `configs/site.local.toml` 后会自动优先加载；只有
+   需要临时使用其他配置时才传入 `--config`。
 6. 核对首次信任窗口。发现目录不会连接仪表，只有现场配置引用的资源才会启动。
 
 System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的

@@ -5,19 +5,19 @@
 
 ```powershell
 Copy-Item .\configs\default.toml .\configs\site.local.toml
-.\run.bat --config configs\site.local.toml
+.\run.bat
 ```
 
-发布包使用 `OpenLabControl.exe --config configs\site.local.toml`。`configs/*.local.toml` 已被
-Git 忽略；若团队需要共享模板，另存为脱敏的 `site.example.toml` 再提交。相对路径以配置
-文件所在项目的根目录解析：配置位于 `configs/` 时，项目根目录是它的上一级。
+源码版和发布包发现 `configs/site.local.toml` 后都会自动优先加载；只有临时使用其他配置时
+才传入 `--config`。`configs/*.local.toml` 已被 Git 忽略；若团队需要共享模板，另存为脱敏的
+`site.example.toml` 再提交。相对路径以配置文件所在项目的根目录解析：配置位于 `configs/`
+时，项目根目录是它的上一级。
 
-真实 VISA 地址单独保存在 `configs/instruments.local.toml`。推荐用
-`tools/instrument_scanner.py` 生成，不要把同一地址复制到主配置和多个模块设置中。
+真实 VISA/TCP 地址与现场安全范围保存在同一个 `configs/site.local.toml`。推荐用
+`tools/instrument_scanner.py` 更新其中标记的资源区块，不要把同一地址复制到多个模块设置中。
 
-每次 Run 会把实际使用的主配置复制为 `configuration.toml`，并把已解析的资源表复制为
-`instrument-resources.toml`。它们有助于复现实验，但包含真实地址和本机路径；分享、上传
-或提交整个运行目录前必须检查并脱敏。
+每次 Run 会把实际使用的完整现场配置复制为 `configuration.toml`。它包含资源地址、安全
+范围和本机路径；分享、上传或提交整个运行目录前必须检查并脱敏。
 
 ## `[application]`
 
@@ -164,7 +164,6 @@ runtime_packages/module/<module-id>/<content-fingerprint>/site-packages/
 ```toml
 [system_instruments]
 directory = "system_instruments"
-resource_file = "configs/instruments.local.toml"
 state_directory = "trust_state"
 runtime_directory = "runtime_packages"
 shared_wheels_directory = "wheels"
@@ -177,7 +176,6 @@ reconnect_interval_seconds = 2.0
 | 键 | 说明 |
 |---|---|
 | `directory` | System Instrument 的手动安装目录 |
-| `resource_file` | 仪表扫描工具生成的现场物理地址表；相对项目根目录解析 |
 | `state_directory` | 本机内容指纹信任记录；不得作为共享配置提交 |
 | `runtime_directory` | Instrument/Module 各自额外依赖的共同隔离根目录 |
 | `shared_wheels_directory` | 可选的额外依赖离线 wheel 公共池 |
@@ -190,12 +188,13 @@ reconnect_interval_seconds = 2.0
 `runtime_packages/instrument/<instrument-id>/<content-fingerprint>/site-packages/`。安装、哈希和
 runtime 完整性规则与模块相同；框架共享依赖仍直接使用核心版本。
 
-## 仪表资源表
+## `[[resources]]`
 
-`resource_file` 指向独立 TOML。每个条目是一台物理仪表，不是一个通道：
+资源条目直接位于 `site.local.toml` 的扫描器管理区块中。每个条目是一台物理仪表，不是一个
+通道：
 
 ```toml
-schema_version = 2
+# BEGIN OPENLAB INSTRUMENT RESOURCES
 
 [[resources]]
 id = "cryocon_main"
@@ -212,6 +211,8 @@ identity = "KEITHLEY INSTRUMENTS INC.,MODEL 2400,SERIAL,1.0"
 purpose = "measurement"
 system_instrument = ""
 auxiliary_readings = []
+
+# END OPENLAB INSTRUMENT RESOURCES
 ```
 
 - `id` 是以后引用的稳定名称，地址变化时不需要改模块设置。
@@ -219,8 +220,13 @@ auxiliary_readings = []
 - System 资源必须选择已安装的 `system_instrument`。主读数由其清单固定；扫描器用复选框显示
   清单中的其他读数，并保存操作者选择的 `auxiliary_readings`。
 - 同一地址不能登记两次；同一 System 资源也不能由两个 `[[instruments]]` 实例同时打开。
-- Measurement Module 前端与后台都可用 `api.resources()` 取得深拷贝；System 地址不会暴露。
+- Measurement Module 前端与后台都可用 `api.resources()` 取得 Measurement 记录的深拷贝；
+  System 地址不会暴露。
 - 扫描只做资源枚举和一次 `*IDN?`，不会替用户设置上下限、PID、输出或模块参数。
+
+`purpose` 在合并后的单文件中仍是必需字段，因为 System 与 Measurement 地址记录现在位于
+同一个资源区块。扫描器只替换两个标记之间的内容；`[[instruments]]`、报警、日志和安全范围
+不会被改写。
 
 ## `[[instruments]]`
 
@@ -317,8 +323,9 @@ noise = 0.002
 使用 `resource` 引用资源表，主配置中的内联 `address` 会被拒绝。密码、令牌和私钥也不得
 提交到仓库。
 
-Measurement Module 的设置不放在主配置，而由其自定义 Settings UI 管理并保存到
-`module_data/<id>/settings.toml`。保存 SEQ 时，当前实验关联值还会复制到同目录同名
+Measurement 仪表的地址记录位于主配置的 `[[resources]]`，但 Measurement Module 的测量参数
+不放在主配置，而由其自定义 Settings UI 管理并保存到 `module_data/<id>/settings.toml`。保存
+SEQ 时，当前实验关联值还会复制到同目录同名
 `<sequence>.modules.toml`，使不同 SEQ 可以携带不同的模块参数。Load 只把值装入界面，
 不会自动 Enable 或 Apply；因此主配置的仪表安全限制和模块显式确认流程不会被绕过。
 

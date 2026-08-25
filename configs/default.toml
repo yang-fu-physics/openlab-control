@@ -49,7 +49,6 @@ shutdown_timeout_seconds = 3.0
 
 [system_instruments]
 directory = "system_instruments"
-resource_file = "configs/instruments.local.toml"
 state_directory = "trust_state"
 runtime_directory = "runtime_packages"
 shared_wheels_directory = "wheels"
@@ -57,6 +56,12 @@ python_executable = ""
 startup_timeout_seconds = 10.0
 reconnect_timeout_seconds = 60.0
 reconnect_interval_seconds = 2.0
+
+# BEGIN OPENLAB INSTRUMENT RESOURCES
+# Managed by InstrumentScanner after manual confirmation.
+# This section contains physical addresses; keep site.local.toml local.
+
+# END OPENLAB INSTRUMENT RESOURCES
 
 [[instruments]]
 id = "temperature"

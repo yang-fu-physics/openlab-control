@@ -170,7 +170,6 @@ class SystemInstrumentConfig:
     """System Instrument 的发现目录、信任状态、依赖目录和重连策略。"""
 
     directory: str = "system_instruments"
-    resource_file: str = "configs/instruments.local.toml"
     state_directory: str = "trust_state"
     runtime_directory: str = "runtime_packages"
     shared_wheels_directory: str = "wheels"
@@ -476,8 +475,8 @@ def _instrument_config(
 
     if "address" in raw:
         raise ConfigurationError(
-            f"{prefix} must store its physical address in the instrument "
-            "resource file and select it with resource"
+            f"{prefix} must store its physical address in site [[resources]] "
+            "and select it with resource"
         )
     resource_id = str(raw.get("resource", "")).strip()
     if resource_id:
@@ -656,17 +655,13 @@ def load_config(path: str | Path) -> AppConfig:
     reporting_raw = alarm_raw.get("reporting", {})
     module_raw = raw.get("modules", {})
     system_instrument_raw = raw.get("system_instruments", {})
-    resource_file_value = str(
-        system_instrument_raw.get(
-            "resource_file",
-            "configs/instruments.local.toml",
+    if "resource_file" in system_instrument_raw:
+        raise ConfigurationError(
+            "system_instruments.resource_file is no longer used; keep "
+            "[[resources]] in the same site configuration"
         )
-    )
-    resource_path = Path(resource_file_value)
-    if not resource_path.is_absolute():
-        resource_path = source.parent.parent / resource_path
     try:
-        instrument_resources = load_instrument_resources(resource_path)
+        instrument_resources = load_instrument_resources(source)
     except InstrumentResourceError as exc:
         raise ConfigurationError(str(exc)) from exc
     resources_by_id = {
@@ -950,7 +945,6 @@ def load_config(path: str | Path) -> AppConfig:
             directory=str(
                 system_instrument_raw.get("directory", "system_instruments")
             ),
-            resource_file=resource_file_value,
             state_directory=str(
                 system_instrument_raw.get("state_directory", "trust_state")
             ),

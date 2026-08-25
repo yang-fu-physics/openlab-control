@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tools"))
 
+from labcontrol.app import _arguments as application_arguments  # noqa: E402
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
@@ -27,12 +28,14 @@ from labcontrol.instrument_resources import (  # noqa: E402
 )
 from labcontrol.measurement.frontend_api import ModuleUIAPI  # noqa: E402
 from labcontrol.module_api import ModuleAPI, ModuleError  # noqa: E402
+from labcontrol.paths import default_config_path  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 from instrument_scanner import (  # noqa: E402
     InstrumentScannerWindow,
     NI_VISA_DOWNLOAD_URL,
     VisaScanResult,
+    _arguments,
     application_root,
     discover_scan_descriptors,
     match_descriptor,
@@ -75,6 +78,30 @@ def _write_system_instrument(
 
 
 class InstrumentResourceTests(unittest.TestCase):
+    def test_application_prefers_site_configuration_when_present(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            configs = root / "configs"
+            configs.mkdir()
+            default = configs / "default.toml"
+            default.write_text("", encoding="utf-8")
+            with patch("labcontrol.paths.project_root", return_value=root):
+                self.assertEqual(default_config_path(), default)
+                site = configs / "site.local.toml"
+                site.write_text("", encoding="utf-8")
+                self.assertEqual(default_config_path(), site)
+
+    def test_explicit_application_config_overrides_site_default(self) -> None:
+        explicit = Path("chosen.toml")
+        with patch(
+            "labcontrol.app.default_config_path",
+            return_value=Path("configs/site.local.toml"),
+        ):
+            self.assertEqual(
+                application_arguments(["--config", str(explicit)]).config,
+                explicit,
+            )
+
     def test_round_trip_preserves_system_and_measurement_resources(
         self,
     ) -> None:
@@ -95,15 +122,102 @@ class InstrumentResourceTests(unittest.TestCase):
             ),
         )
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "instruments.local.toml"
-            write_instrument_resources(path, resources)
+            path = Path(temp) / "site.local.toml"
+            write_instrument_resources(
+                path,
+                resources,
+                template_path=ROOT / "configs" / "default.toml",
+            )
             self.assertEqual(
                 load_instrument_resources(path),
                 resources,
             )
             text = path.read_text(encoding="utf-8")
-            self.assertIn("schema_version = 2", text)
+            self.assertIn("# BEGIN OPENLAB INSTRUMENT RESOURCES", text)
             self.assertIn('purpose = "system"', text)
+
+    def test_site_update_preserves_safety_settings_and_replaces_only_resources(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            site = Path(temp) / "site.local.toml"
+            source = (ROOT / "configs" / "default.toml").read_text(
+                encoding="utf-8"
+            ).replace("min_value = 1.8", "min_value = 2.0", 1)
+            site.write_text(source, encoding="utf-8")
+            write_instrument_resources(
+                site,
+                (
+                    InstrumentResource(
+                        "meter_old",
+                        "GPIB0::1::INSTR",
+                    ),
+                ),
+            )
+            write_instrument_resources(
+                site,
+                (
+                    InstrumentResource(
+                        "meter_new",
+                        "GPIB0::2::INSTR",
+                    ),
+                ),
+            )
+
+            text = site.read_text(encoding="utf-8")
+            self.assertIn("min_value = 2.0", text)
+            self.assertNotIn("meter_old", text)
+            self.assertIn("meter_new", text)
+            self.assertEqual(
+                text.count("# BEGIN OPENLAB INSTRUMENT RESOURCES"),
+                1,
+            )
+            self.assertEqual(
+                load_config(site).instrument("temperature").min_value,
+                2.0,
+            )
+
+    def test_missing_site_configuration_is_created_from_default_template(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            template = root / "default.toml"
+            destination = root / "site.local.toml"
+            shutil.copy2(ROOT / "configs" / "default.toml", template)
+
+            write_instrument_resources(
+                destination,
+                (InstrumentResource("meter", "GPIB0::24::INSTR"),),
+                template_path=template,
+            )
+
+            text = destination.read_text(encoding="utf-8")
+            self.assertIn('[application]', text)
+            self.assertIn('id = "temperature"', text)
+            self.assertEqual(
+                load_instrument_resources(destination)[0].address,
+                "GPIB0::24::INSTR",
+            )
+
+    def test_removed_resource_file_setting_fails_fast(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "configs").mkdir()
+            site = root / "configs" / "site.local.toml"
+            source = (ROOT / "configs" / "default.toml").read_text(
+                encoding="utf-8"
+            ).replace(
+                '[system_instruments]\n',
+                '[system_instruments]\nresource_file = "configs/instruments.local.toml"\n',
+                1,
+            )
+            site.write_text(source, encoding="utf-8")
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "resource_file is no longer used",
+            ):
+                load_config(site)
 
     def test_registry_rejects_duplicate_addresses_and_measurement_readings(
         self,
@@ -171,7 +285,7 @@ class InstrumentResourceTests(unittest.TestCase):
                 ("temp_a",),
             )
             write_instrument_resources(
-                root / "configs" / "instruments.local.toml",
+                config_path,
                 (
                     InstrumentResource(
                         "cryocon_main",
@@ -233,9 +347,12 @@ class InstrumentResourceTests(unittest.TestCase):
             )
             self.assertEqual(
                 load_instrument_resources(
-                    paths.instrument_resources_snapshot
+                    paths.configuration_snapshot
                 ),
                 config.instrument_resources,
+            )
+            self.assertFalse(
+                (paths.directory / "instrument-resources.toml").exists()
             )
             logger.close()
 
@@ -259,8 +376,12 @@ class InstrumentResourceTests(unittest.TestCase):
                 "field",
             )
             config_path = root / "configs" / "site.local.toml"
+            shutil.copy2(
+                ROOT / "configs" / "default.toml",
+                config_path,
+            )
             write_instrument_resources(
-                root / "configs" / "instruments.local.toml",
+                config_path,
                 (
                     InstrumentResource(
                         "temperature_controller",
@@ -277,7 +398,7 @@ class InstrumentResourceTests(unittest.TestCase):
                     ),
                 ),
             )
-            source = (ROOT / "configs" / "default.toml").read_text(
+            source = config_path.read_text(
                 encoding="utf-8"
             )
             source = source.replace(
@@ -336,7 +457,7 @@ class InstrumentResourceTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ConfigurationError, "resource file"):
+            with self.assertRaisesRegex(ConfigurationError, "site.*resources"):
                 load_config(config_path)
 
     def test_unknown_resource_fails_before_runtime(self) -> None:
@@ -443,12 +564,18 @@ class InstrumentScannerTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
 
+    def test_default_output_is_the_single_site_configuration(self) -> None:
+        self.assertEqual(
+            _arguments([]).output.resolve(),
+            (ROOT / "configs" / "site.local.toml").resolve(),
+        )
+
     def test_scanner_loads_existing_file_and_marks_incomplete_system_rows(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            output = root / "instruments.local.toml"
+            output = root / "site.local.toml"
             instrument = root / "system_instruments" / "controller"
             instrument.mkdir(parents=True)
             (instrument / "backend.py").write_text(
@@ -484,6 +611,7 @@ class InstrumentScannerTests(unittest.TestCase):
                         "Maker,Model,Serial,Version with a very long tail",
                     ),
                 ),
+                template_path=ROOT / "configs" / "default.toml",
             )
             with patch(
                 "instrument_scanner.QTimer.singleShot"
@@ -649,7 +777,7 @@ class InstrumentScannerTests(unittest.TestCase):
             root = Path(temp)
             with patch("instrument_scanner.QTimer.singleShot"):
                 window = InstrumentScannerWindow(
-                    root / "instruments.local.toml",
+                    root / "site.local.toml",
                     root / "system_instruments",
                 )
             try:
@@ -744,7 +872,7 @@ class InstrumentScannerTests(unittest.TestCase):
                 ),
             ):
                 window = InstrumentScannerWindow(
-                    root / "instruments.local.toml",
+                    root / "site.local.toml",
                     root / "system_instruments",
                 )
                 try:

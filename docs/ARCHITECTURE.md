@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.18.0 的当前边界。
+本文描述 OpenLab Control 0.18.1 的当前边界。
 
 ## 运行模型
 
@@ -49,8 +49,9 @@ runtime marker 和依赖树摘要。
 System Instrument 的作者接口是同步的
 `open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close`。
 驱动只返回包含 `value` 和可选 `target/rate/moving/ready/auxiliary` 的普通字典；核心统一生成
-时间戳、连接状态和内部快照。`instrument.toml` 是主读数及显示元数据的唯一来源；资源表只
-保存物理地址、实现选择和操作者勾选的辅助读数；现场主配置只保存控制许可与安全参数。
+时间戳、连接状态和内部快照。`instrument.toml` 是主读数及显示元数据的唯一来源；同一份
+`site.local.toml` 的资源区块保存物理地址、实现选择和操作者勾选的辅助读数，
+`[[instruments]]` 保存控制许可与安全参数。
 
 ## Measurement Module 协议
 
@@ -159,6 +160,6 @@ Measurement Module 的即时读取独立于这两个周期。
 
 ## 真实仪表边界
 
-OpenLab Control 0.18.0 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
+OpenLab Control 0.18.1 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
 限温、磁体保护、硬件互锁或人工急停。接入真机前必须保留并通过模块自己的命令顺序、
 读回、量程、timeout、异常清理与协议解析测试，再进行低风险现场验证。

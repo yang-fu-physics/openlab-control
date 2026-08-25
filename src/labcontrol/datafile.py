@@ -23,7 +23,6 @@ from . import __version__
 from .config import AppConfig
 from .events import EventManager
 from .formatting import control_decimals, fixed_number
-from .instrument_resources import write_instrument_resources
 from .models import InstrumentKind, InstrumentMetric, InstrumentSnapshot, EventNotice, Severity
 from .measurement.manifest import ModuleDescriptor
 from .measurement.settings import save_settings
@@ -43,7 +42,6 @@ class RunPaths:
     instrument_status_file: Path
     sequence_snapshot: Path
     configuration_snapshot: Path
-    instrument_resources_snapshot: Path
     module_settings_directory: Path
     raw_data_directory: Path
 
@@ -115,18 +113,11 @@ class DatRunLogger:
         )
         sequence_snapshot = directory / "sequence.seq"
         config_snapshot = directory / "configuration.toml"
-        instrument_resources_snapshot = (
-            directory / "instrument-resources.toml"
-        )
         module_settings_directory = directory / "module_settings"
         module_settings_directory.mkdir()
         raw_data_directory = directory / "rawdata"
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot)
-        write_instrument_resources(
-            instrument_resources_snapshot,
-            self.config.instrument_resources,
-        )
         self._module_descriptors = tuple(module_descriptors)
         initial_snapshots = instrument_snapshots or {}
         self._instrument_metric_schemas = {}
@@ -165,9 +156,6 @@ class DatRunLogger:
             instrument_status_file=instrument_status_file,
             sequence_snapshot=sequence_snapshot,
             configuration_snapshot=config_snapshot,
-            instrument_resources_snapshot=(
-                instrument_resources_snapshot
-            ),
             module_settings_directory=module_settings_directory,
             raw_data_directory=raw_data_directory,
         )
@@ -234,7 +222,6 @@ class DatRunLogger:
             self.paths.instrument_status_file.resolve(),
             self.paths.sequence_snapshot.resolve(),
             self.paths.configuration_snapshot.resolve(),
-            self.paths.instrument_resources_snapshot.resolve(),
             module_settings_resolved,
             raw_data_resolved,
         }
@@ -274,9 +261,6 @@ class DatRunLogger:
             instrument_status_file=self.paths.instrument_status_file,
             sequence_snapshot=self.paths.sequence_snapshot,
             configuration_snapshot=self.paths.configuration_snapshot,
-            instrument_resources_snapshot=(
-                self.paths.instrument_resources_snapshot
-            ),
             module_settings_directory=self.paths.module_settings_directory,
             raw_data_directory=self.paths.raw_data_directory,
         )
