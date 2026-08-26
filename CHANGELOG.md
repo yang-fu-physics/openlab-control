@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.19.0 - 2026-08-29
+
+- System Instrument API 升级为不兼容的 v4。作者清单只声明型号固定的字段、控制端点、读数和
+  面板模板；Instrument Scanner 为每台物理实例保存连接参数、面板开关、全局顺序、SEQ 角色、
+  控制限值和稳定参数。一台物理仪表只启动一个进程和一个通讯会话，其多个面板共享同一快照；
+  多个 Controller 回路分别保存目标、速率、动作和判稳状态。
+- 通用配置入口改为 `configs/general.toml`。未分配给 System Instrument 的 Measurement VISA
+  地址单独保存在 `configs/visa.resources.toml`；System Instrument 实例由扫描器完整生成到
+  `configs/instruments/<id>.toml`。删除 `site.local.toml`、旧内联 `[[instruments]]` 和旧配置
+  兼容读取；全新安装没有 System 面板也能启动，三个仿真默认全部关闭。
+- Instrument Scanner 改为面向操作者的多页流程：启动后自动执行一次有界 VISA 扫描；没有
+  `*IDN?` 回复的已发现地址仍可保存；本次缺失的 Measurement 地址灰显并默认保留；被 System
+  Instrument 选中的地址不能再分配给 Measurement。最后一页统一调整所有面板顺序、预览每个
+  覆盖/删除动作并一次保存完整配置。
+- PID 表从通用配置分离到 `configs/pid/<instance-id>.toml`。首次保存时复制仪表自带示例或
+  操作者选择的文件，之后扫描器绝不覆盖或删除已有 PID；空示例会明确阻止对应仪表启动，直到
+  填入现场验证值。
+- 标准温度和磁场 SEQ 命令按唯一的 `sample_temp` / `field` 面板角色路由，并把具体 control ID
+  通过 IPC 传给后台。删除旧 `using instrument` 语法；System Instrument 自己注册的无参数
+  指令仍只在该实例存在时加入 System Commands。
+- 每次 Run 的配置快照改为 `configuration/` 目录，包含 `general.toml`、可选
+  `visa.resources.toml`、全部生成的 System Instrument 文件和 PID 文件。正式 Windows 包在
+  干净环境中不携带任何现场地址、实例或 PID，GitHub Actions 会运行完整测试、严格文档构建和
+  两个 EXE 的自动冒烟测试后覆盖 Release 资产。
+- System Instrument 仓库同步升级 Cryocon 22C/24C、Lake Shore 340、ZLAN 6408 和示例；
+  Lake Shore 340 的 Temp A/Temp B 选择、PID 与连接参数由扫描器生成。Measurement Module
+  仓库保留独立资源选择，并修正 Keithley 6221/2182A Delta Apply Settings 的空回复问题。
+
 ## 0.18.1 - 2026-08-26
 
 - 修正 0.18.0 遗漏的单文件现场配置：System 与 Measurement 物理地址记录现在直接位于

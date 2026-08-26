@@ -312,6 +312,8 @@ class RuntimeService:
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
+        *,
+        control: str,
     ) -> Future[Any]:
         assert self.instruments is not None
         return self._submit(
@@ -320,13 +322,25 @@ class RuntimeService:
                 value,
                 rate_per_minute,
                 mode,
+                control=control,
                 origin="manual",
             )
         )
 
-    def hold_instrument(self, instrument_id: str) -> Future[Any]:
+    def hold_instrument(
+        self,
+        instrument_id: str,
+        *,
+        control: str,
+    ) -> Future[Any]:
         assert self.instruments is not None
-        return self._submit(self.instruments.hold_instrument(instrument_id, origin="manual"))
+        return self._submit(
+            self.instruments.hold_instrument(
+                instrument_id,
+                control=control,
+                origin="manual",
+            )
+        )
 
     def instrument_action(
         self,

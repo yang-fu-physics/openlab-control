@@ -9,7 +9,11 @@ OpenLab Control 使用带 `[Header]` / `[Data]` 段的逗号分隔 DAT。中央�
 ```text
 runs/20260723_120000_nested_scan/
 ├─ sequence.seq
-├─ configuration.toml
+├─ configuration/
+│  ├─ general.toml
+│  ├─ visa.resources.toml
+│  ├─ instruments/
+│  └─ pid/
 ├─ module_settings/
 │  ├─ simulated_transport.settings.toml
 │  └─ simulated_transport.status-at-start.json
@@ -21,7 +25,8 @@ runs/20260723_120000_nested_scan/
 ```
 
 - `sequence.seq`：实际执行文档快照，包括 T/F 状态。
-- `configuration.toml`：主配置完整副本。
+- `configuration/`：本次实际使用的通用配置、未分配 VISA、System Instrument 实例和 PID
+  文件快照；可选文件或目录只在源配置存在时出现。
 - `*.settings.toml`：本次 Run 时模块 Settings 页的期望值。
 - `*.status-at-start.json`：Run 开始前从模块后台读取的实际状态。
 - 只为 Enabled 模块生成设置/状态快照。
@@ -35,7 +40,7 @@ runs/20260723_120000_nested_scan/
 ```text
 [Header]
 ; OpenLab Control Data File (default extension .dat)
-BYAPP,OpenLab Control,0.18.1
+BYAPP,OpenLab Control,0.19.0
 INFO,...
 
 [Data]
@@ -191,20 +196,26 @@ Timestamp(s),ISO8601,Severity,Source,Code,State,Count,Context,Message
 ; OpenLab Control Instrument Status Log
 ...
 [Data]
-Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.Ready,temperature.Connection,temperature.ReadingAge(s),temperature.Message,...
+Timestamp(s),Time(s),temperature.main.Current(K),temperature.main.Target(K),temperature.main.Rate(K/min),temperature.main.Activity,temperature.main.Stability,temperature.main.Ready,temperature.Connection,temperature.ReadingAge(s),temperature.Message,...
 ```
 
-每个配置仪表拥有同一组固定列：
+每个已启用 `controller` 面板使用 `<仪表ID>.<面板ID>` 前缀，分别拥有：
 
 - `Current`、`Target`、`Rate`：读回值、当前目标和每分钟速率；Monitor 的后两项为空；
 - `Activity`：`idle`、`moving`、`holding`、`fault` 等仪表动作；
 - `Stability`：`moving`、`settling`、`stable`、`timed_out`、`stale` 或
   `not_applicable`；
 - `Ready`：仪表提供该状态时为 `true/false`；空值表示该 System Instrument 没有独立状态位；
+
+同一物理实例即使有多个 Controller，也只写一次以下物理状态，前缀仅为 `<仪表ID>`：
+
 - `Connection`：连接生命周期，例如 `connected`、`reconnecting`、`faulted`；
 - `ReadingAge(s)`：写入时刻与仪表单调采样时间的差，用于定位排队或旧读数；
-- System Instrument 声明的附加读数紧随该仪表固定列，例如辅助温度、加热输出和量程；
-- `Message`：驱动、恢复或状态说明。
+- `Message`：驱动、恢复或状态说明；
+- System Instrument 声明的附加读数，例如辅助温度、加热输出和量程。
+
+没有 Controller 的 Monitor 只写 `<仪表ID>.Current`，不会生成空的 Target、Rate 或稳定性
+列。关闭的 Controller 不进入本次 Run 的固定 Schema。
 
 文件使用和实验 DAT 相同的绝对时间 epoch、数值精度与逐行 Flush 策略。它只记录 Run
 期间状态；Idle 监视仍显示在状态块和 Live Trend，但不会为尚未开始的实验创建运行目录。

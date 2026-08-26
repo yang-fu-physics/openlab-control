@@ -18,10 +18,30 @@ from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.formatting import fixed_number  # noqa: E402
 from labcontrol.models import InstrumentKind, StabilityState  # noqa: E402
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
+from labcontrol.instruments.simulated import SimulatedTemperatureController  # noqa: E402
 from labcontrol.units import UnitConversionError, convert_value  # noqa: E402
+from tests.configuration_fixtures import (  # noqa: E402
+    load_simulated_config,
+    write_simulated_configuration,
+)
 
 
 class InstrumentManagerTests(unittest.TestCase):
+    def test_simulated_controller_stops_adding_noise_at_target(self) -> None:
+        config = load_simulated_config()
+        instrument = SimulatedTemperatureController(
+            config.instrument("temperature"),
+            simulation_speed=1_000_000.0,
+        )
+        instrument.open()
+        instrument.set_target(250.0, 10.0, control="main")
+        instrument._last_poll -= 1.0
+        first = instrument.read_status()
+        second = instrument.read_status()
+        instrument.close()
+        self.assertEqual(first["value"], 250.0)
+        self.assertEqual(second["value"], 250.0)
+
     def test_configuration_rejects_removed_abort_section(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config_path = Path(temporary) / "removed-abort.toml"
@@ -31,13 +51,13 @@ class InstrumentManagerTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 ConfigurationError,
-                r"\[abort\] is not supported",
+                r"Unknown general configuration fields: abort",
             ):
                 load_config(config_path)
 
     def test_simulated_control_and_monitor_instruments_load(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(config, events, isolate_processes=False)
             await manager.connect_all()
@@ -50,150 +70,41 @@ class InstrumentManagerTests(unittest.TestCase):
             self.assertIsNone(second_stage.target)
             self.assertNotIn("second_stage", manager._stability)
             with self.assertRaises(InstrumentError) as blocked:
-                await manager.set_target("second_stage", 5.0, 1.0)
+                await manager.set_target(
+                    "second_stage",
+                    5.0,
+                    1.0,
+                    control="main",
+                )
             self.assertEqual(blocked.exception.code, "TARGET_NOT_CONTROLLABLE")
             await manager.disconnect_all()
 
         asyncio.run(scenario())
 
     def test_safety_limits_reject_target(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        field = next(instrument for instrument in config.instruments if instrument.id == "field")
+        config = load_simulated_config()
+        field = next(
+            instrument
+            for instrument in config.instrument_instances
+            if instrument.id == "field"
+        )
         self.assertEqual(field.unit, "Oe")
         self.assertEqual(field.min_value, -90000.0)
         self.assertEqual(field.max_value, 90000.0)
         self.assertEqual(field.default_rate_per_minute, 5000.0)
         manager = InstrumentManager(config, EventManager(), isolate_processes=False)
         with self.assertRaises(SafetyViolation):
-            manager.validate_target("field", 200000.0, 5000.0)
+            manager.validate_target("field", 200000.0, 5000.0, control="main")
         with self.assertRaises(SafetyViolation):
-            manager.validate_target("temperature", 300.0, 100.0)
+            manager.validate_target("temperature", 300.0, 100.0, control="main")
         with self.assertRaises(SafetyViolation):
-            manager.validate_target("temperature", 300.0, math.nan)
+            manager.validate_target("temperature", 300.0, math.nan, control="main")
         with self.assertRaises(SafetyViolation):
-            manager.validate_target("temperature", math.inf, 10.0)
-
-    def test_kind_aliases_resolve_custom_ids_and_reject_wrong_kinds(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        custom = replace(
-            config,
-            instruments=tuple(
-                replace(
-                    instrument,
-                    id={
-                        "temperature": "cryostat_primary",
-                        "field": "magnet_primary",
-                    }.get(instrument.id, instrument.id),
-                )
-                for instrument in config.instruments
-            ),
-        )
-        manager = InstrumentManager(custom, EventManager(), isolate_processes=False)
-        self.assertEqual(
-            manager.resolve_instrument_id(InstrumentKind.TEMPERATURE, "temperature"),
-            "cryostat_primary",
-        )
-        self.assertEqual(
-            manager.resolve_instrument_id(InstrumentKind.FIELD, "magnet_primary"),
-            "magnet_primary",
-        )
-        with self.assertRaises(InstrumentError) as wrong_kind:
-            manager.resolve_instrument_id(InstrumentKind.TEMPERATURE, "magnet_primary")
-        self.assertEqual(wrong_kind.exception.code, "INSTRUMENT_KIND_MISMATCH")
-        with self.assertRaises(InstrumentError) as missing:
-            manager.resolve_instrument_id(InstrumentKind.FIELD, "missing")
-        self.assertEqual(missing.exception.code, "UNKNOWN_INSTRUMENT")
-
-    def test_second_instrument_is_read_only_when_control_is_disabled(self) -> None:
-        async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
-            primary = config.instrument("temperature")
-            secondary = replace(
-                primary,
-                id="temperature_backup",
-                display_name="Backup Temperature",
-                control_enabled=False,
-            )
-            custom = replace(
-                config,
-                instruments=(*config.instruments, secondary),
-            )
-            events = EventManager()
-            manager = InstrumentManager(
-                custom,
-                events,
-                isolate_processes=False,
-            )
-            self.assertEqual(
-                manager.first_instrument_id(InstrumentKind.TEMPERATURE),
-                "temperature",
-            )
-            with self.assertRaises(InstrumentError) as read_only:
-                manager.resolve_instrument_id(
-                    InstrumentKind.TEMPERATURE,
-                    "temperature_backup",
-                )
-            self.assertEqual(read_only.exception.code, "INSTRUMENT_READ_ONLY")
-            with self.assertRaises(InstrumentError) as target:
-                await manager.set_target("temperature_backup", 10.0, 1.0)
-            self.assertEqual(target.exception.code, "TARGET_NOT_CONTROLLABLE")
-            with self.assertRaises(InstrumentError) as hold:
-                await manager.hold_instrument("temperature_backup")
-            self.assertEqual(hold.exception.code, "INSTRUMENT_READ_ONLY")
-
-        asyncio.run(scenario())
-
-    def test_only_one_controller_per_kind_and_missing_control_is_read_only(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
-            secondary_block = """
-
-[[instruments]]
-id = "temperature_backup"
-display_name = "Backup Temperature"
-kind = "temperature"
-backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"
-unit = "K"
-initial_value = 300.0
-default_rate_per_minute = 5.0
-min_value = 1.8
-max_value = 400.0
-max_rate_per_minute = 10.0
-"""
-            valid_path = root / "valid.toml"
-            valid_path.write_text(source + secondary_block, encoding="utf-8")
-            valid = load_config(valid_path)
-            backup = valid.instrument("temperature_backup")
-            self.assertFalse(backup.control_enabled)
-
-            duplicate_path = root / "duplicate.toml"
-            duplicate_path.write_text(
-                source + secondary_block.replace(
-                    'unit = "K"',
-                    'control_enabled = true\nunit = "K"',
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ConfigurationError, "Only one controllable"):
-                load_config(duplicate_path)
-
-            implicit_path = root / "implicit.toml"
-            implicit_path.write_text(
-                "\n".join(
-                    line
-                    for line in source.splitlines()
-                    if not line.startswith("control_enabled = ")
-                ),
-                encoding="utf-8",
-            )
-            implicit = load_config(implicit_path)
-            self.assertFalse(implicit.instrument("temperature").control_enabled)
-            self.assertFalse(implicit.instrument("second_stage").control_enabled)
+            manager.validate_target("temperature", math.inf, 10.0, control="main")
 
     def test_sequence_control_lease_blocks_manual_writes_without_fatal_error(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(config, events, isolate_processes=False)
             await manager.connect_all()
@@ -205,11 +116,16 @@ max_rate_per_minute = 10.0
                     "temperature",
                     250.0,
                     5.0,
+                    control="main",
                     origin="manual",
                 )
                 self.assertFalse(applied)
                 with self.assertRaises(InstrumentWarning) as hold:
-                    await manager.hold_instrument("temperature", origin="manual")
+                    await manager.hold_instrument(
+                        "temperature",
+                        control="main",
+                        origin="manual",
+                    )
                 self.assertEqual(hold.exception.code, "MANUAL_CONTROL_BLOCKED")
             finally:
                 manager.release_sequence_control()
@@ -228,19 +144,22 @@ max_rate_per_minute = 10.0
     def test_configuration_rejects_nonfinite_and_nonpositive_safety_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
-            invalid_rate = temp_root / "invalid-rate.toml"
-            invalid_rate.write_text(
-                source.replace(
+            general = write_simulated_configuration(temp_root)
+            instrument = temp_root / "configs" / "instruments" / "simulated_temperature.toml"
+            instrument.write_text(
+                instrument.read_text(encoding="utf-8").replace(
                     "max_rate_per_minute = 30.0",
                     "max_rate_per_minute = nan",
-                    1,
                 ),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ConfigurationError, "finite"):
-                load_config(invalid_rate)
+                load_config(general)
 
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            general = write_simulated_configuration(temp_root)
+            source = general.read_text(encoding="utf-8")
             invalid_poll = temp_root / "invalid-poll.toml"
             invalid_poll.write_text(
                 source.replace(
@@ -253,6 +172,10 @@ max_rate_per_minute = 10.0
             with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
                 load_config(invalid_poll)
 
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            general = write_simulated_configuration(temp_root)
+            source = general.read_text(encoding="utf-8")
             invalid_control_poll = temp_root / "invalid-control-poll.toml"
             invalid_control_poll.write_text(
                 source.replace(
@@ -265,60 +188,10 @@ max_rate_per_minute = 10.0
             with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
                 load_config(invalid_control_poll)
 
-            invalid_timeout = temp_root / "invalid-timeout.toml"
-            invalid_timeout.write_text(
-                source.replace(
-                    "operation_timeout_seconds = 10.0",
-                    "operation_timeout_seconds = 0",
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ConfigurationError, "greater than zero"):
-                load_config(invalid_timeout)
-
-    def test_configuration_rejects_unaddressable_instrument_ids(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            temp_root = Path(temp)
-            source = (ROOT / "configs" / "default.toml").read_text(
-                encoding="utf-8"
-            )
-            invalid_ids = ("", " temperature ", "temperature\\nprimary")
-            for index, invalid_id in enumerate(invalid_ids):
-                target = temp_root / f"invalid-instrument-id-{index}.toml"
-                target.write_text(
-                    source.replace(
-                        'id = "temperature"',
-                        f'id = "{invalid_id}"',
-                        1,
-                    ),
-                    encoding="utf-8",
-                )
-                with self.subTest(instrument_id=invalid_id):
-                    with self.assertRaisesRegex(
-                        ConfigurationError,
-                        "Instrument id must be",
-                    ):
-                        load_config(target)
-
-            internal_space = temp_root / "internal-space.toml"
-            internal_space.write_text(
-                source.replace(
-                    'id = "temperature"',
-                    'id = "cryostat primary"',
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            self.assertEqual(
-                load_config(internal_space).instruments[0].id,
-                "cryostat primary",
-            )
-
     def test_configuration_confines_and_separates_run_log_file_names(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
+            source = (ROOT / "configs" / "general.toml").read_text(encoding="utf-8")
 
             escaped = temp_root / "escaped.toml"
             escaped.write_text(
@@ -383,7 +256,7 @@ max_rate_per_minute = 10.0
 
     def test_completed_poll_cannot_overwrite_a_new_target(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             manager = InstrumentManager(
                 config,
                 EventManager(),
@@ -405,7 +278,7 @@ max_rate_per_minute = 10.0
             monitor.read_status = delayed_monitor_poll  # type: ignore[method-assign]
             poll_task = asyncio.create_task(manager.poll_all())
             await monitor_started.wait()
-            await manager.set_target("field", 100.0, 5000.0)
+            await manager.set_target("field", 100.0, 5000.0, control="main")
             release_monitor.set()
             await poll_task
             self.assertEqual(manager.latest["field"].target, 100.0)
@@ -415,7 +288,7 @@ max_rate_per_minute = 10.0
 
     def test_measurement_poll_precedes_queued_background_poll(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             manager = InstrumentManager(
                 config,
                 EventManager(),
@@ -500,7 +373,7 @@ max_rate_per_minute = 10.0
 
     def test_poll_timeout_quarantines_instrument_until_restart(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             notices = []
             events.subscribe_occurrences(notices.append)
@@ -539,7 +412,7 @@ max_rate_per_minute = 10.0
 
     def test_set_target_warning_does_not_publish_unconfirmed_target(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
@@ -551,15 +424,26 @@ max_rate_per_minute = 10.0
             original_target = manager.latest["temperature"].target
             original_rate = manager.latest["temperature"].rate_per_minute
 
-            async def warned_set_target(value, rate_per_minute, mode="Settle"):
-                del value, rate_per_minute, mode
+            async def warned_set_target(
+                value,
+                rate_per_minute,
+                mode="Settle",
+                *,
+                control,
+            ):
+                del value, rate_per_minute, mode, control
                 raise InstrumentWarning(
                     "controller did not confirm the target",
                     "TARGET_NOT_CONFIRMED",
                 )
 
             temperature.set_target = warned_set_target  # type: ignore[method-assign]
-            applied = await manager.set_target("temperature", 250.0, 5.0)
+            applied = await manager.set_target(
+                "temperature",
+                250.0,
+                5.0,
+                control="main",
+            )
             self.assertFalse(applied)
             self.assertEqual(manager.latest["temperature"].target, original_target)
             self.assertEqual(
@@ -577,7 +461,7 @@ max_rate_per_minute = 10.0
 
     def test_hold_timeout_is_reported_as_an_unconfirmed_safe_state(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             notices = []
             events.subscribe(notices.append)
@@ -590,7 +474,8 @@ max_rate_per_minute = 10.0
                 operation_timeout_seconds=0.02,
             )
 
-            async def hung_hold():
+            async def hung_hold(*, control):
+                del control
                 await asyncio.sleep(5.0)
 
             field.hold = hung_hold  # type: ignore[method-assign]
@@ -607,7 +492,7 @@ max_rate_per_minute = 10.0
 
     def test_explicit_hold_all_holds_controllable_instruments(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             manager = InstrumentManager(
                 config,
                 EventManager(),
@@ -616,7 +501,8 @@ max_rate_per_minute = 10.0
             called: list[str] = []
 
             for instrument_id in ("temperature", "field"):
-                async def record_hold(selected=instrument_id):
+                async def record_hold(*, control, selected=instrument_id):
+                    del control
                     called.append(selected)
 
                 manager.instruments[instrument_id].hold = record_hold  # type: ignore[method-assign]
@@ -633,12 +519,12 @@ max_rate_per_minute = 10.0
 
     def test_failed_poll_marks_old_snapshot_stale_and_recovery_resolves_it(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             config = replace(
                 config,
-                instruments=tuple(
+                instrument_instances=tuple(
                     replace(instrument, stale_after_seconds=0.01)
-                    for instrument in config.instruments
+                    for instrument in config.instrument_instances
                 ),
             )
             events = EventManager()
@@ -683,7 +569,7 @@ max_rate_per_minute = 10.0
 
     def test_nonfinite_instrument_snapshot_is_rejected(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             notices = []
             events.subscribe(notices.append)

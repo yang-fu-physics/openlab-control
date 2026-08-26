@@ -34,6 +34,10 @@ return {
 | `ready` | 否 | 仪表自己的就绪/稳定状态字 |
 | `auxiliary` | 否 | 选中的附加读数 |
 
+上表是单控制端点的简写。若同一实例启用了多个不同的 control，顶层仍返回 `value` 和
+`auxiliary`，但每个回路的 `target/rate/moving/ready` 必须放进
+`controls[control_id]`。完整示例见 [System Instrument 从这里开始](system-instrument.md#multiple-controls)。
+
 核心从 `instrument.toml` 取得名称、单位和小数位，并负责时间戳、连接状态和内部快照。后端
 不要重复返回这些元数据。数值必须有限；附加值可以是有限数值、短文字、布尔值或 `None`。
 
@@ -69,13 +73,35 @@ VISA Session。
 
 ## 一台仪表返回多个值
 
-在清单中声明一次：
+在 API v4 清单中分别声明固定面板和读数：
 
 ```toml
-main_reading = "temp_b"
+[[controls]]
+id = "loop_1"
+label = "Loop 1"
 
-[panel]
+[[panels]]
+id = "control"
+label = "Sample Temperature"
 template = "controller"
+control = "loop_1"
+reading_options = ["temp_b"]
+default_reading = "temp_b"
+min_value = 2.0
+max_value = 400.0
+default_rate_per_minute = 1.0
+max_rate_per_minute = 10.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.05
+stability_dwell_seconds = 30.0
+stability_timeout_seconds = 1800.0
+stability_window_seconds = 30.0
+
+[[panels]]
+id = "monitor"
+label = "Temperature and Heater"
+template = "readout_grid"
+readings = ["temp_a", "heater_output"]
 
 [readings.temp_b]
 label = "Sample Temperature (Temp B)"
@@ -93,23 +119,24 @@ unit = "%FS"
 decimals = 2
 ```
 
-除 `main_reading` 外的条目自动显示为扫描器复选项。操作者勾选的键在
-`config.auxiliary_readings` 中；`read_status()` 的 `auxiliary` 必须完整返回这些键。键和顺序
-在运行中不能变化。
+扫描器为实例列出这两个固定面板。操作者可以分别开启、关闭和排序它们，并给 controller
+选择 `temp_b` 与角色；不能临时创建作者未声明的面板。运行时会收集所有已开启面板引用的
+读数。`read_status()` 的 `auxiliary` 应返回这些附加键，键集合在运行中不能变化。
 
-前面板主读数使用清单选择的模板；`readout` 只显示主读数，`readout_grid` 以 2×2 最多
-放四个读数，第五个开始放到右侧下一个网格面板；`switch` 把 0/1 主读数显示为 Off/On，
-并显示清单指令按钮。控制面板和开关面板的辅助读数也按网格规则排列。即使 `readout`
-不显示辅助读数，已选择的辅助读数仍会进入状态日志。结构化字典保留数值类型、单位和
-精度；不要把多个
-值拼成一段字符串。
+`readout` 显示一个读数，`readout_grid` 显示一到四个，`switch` 把 0/1 状态显示为 Off/On
+并提供清单引用的指令按钮。多个面板仍共用同一物理实例和通讯会话。结构化字典保留数值
+类型、单位和精度；不要把多个值拼成一段字符串。
+
+一个实例有多个 Controller 时，各面板分别保存目标、速率、动作、ready 和核心判定的
+稳定状态。标准温度或磁场角色对应的回路仍作为实验 DAT 的主控制值；所有已启用 Controller
+的完整独立状态都写入 `instrument_status.dat`。
 
 ## 两类数据文件
 
 | 文件 | 何时写 | 内容 |
 | --- | --- | --- |
 | 实验 DAT | 每个 `Measure` 结果行 | 与模块测量同步的主值和本次即时辅助值 |
-| `instrument_status.dat` | Run 期间按独立周期 | 完整值、目标、速率、稳定性、连接和辅助读数 |
+| `instrument_status.dat` | Run 期间按独立周期 | 每个 Controller 的独立状态，以及每台物理仪表一次连接信息和辅助读数 |
 
 Data Browser 可打开任意 DAT，不绑定当前 Run。Live Trend 使用已有快照，不会额外读取仪表。
 

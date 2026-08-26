@@ -1,86 +1,76 @@
 # 配置参考
 
-`configs/default.toml` 是可提交的仿真模板，不要把真实仪表地址、报警 Token 或实验室路径
-直接写进去。部署真实仪表时先复制一份本机配置：
+OpenLab Control 的配置分为四类。只有 `configs/general.toml` 是通用设置；仪表相关文件由
+Instrument Scanner 生成或初始化：
 
-```powershell
-Copy-Item .\configs\default.toml .\configs\site.local.toml
-.\run.bat
+```text
+configs/
+├─ general.toml                         # 唯一通用配置
+├─ visa.resources.toml                  # 未分配的 VISA，供 Measurement Module 使用
+├─ instruments/<instrument-id>.toml     # System Instrument 实例与面板选择
+└─ pid/<instance-id>.toml               # 某个物理实例自己的 PID 数据
 ```
 
-源码版和发布包发现 `configs/site.local.toml` 后都会自动优先加载；只有临时使用其他配置时
-才传入 `--config`。`configs/*.local.toml` 已被 Git 忽略；若团队需要共享模板，另存为脱敏的
-`site.example.toml` 再提交。相对路径以配置文件所在项目的根目录解析：配置位于 `configs/`
-时，项目根目录是它的上一级。
+直接运行 `run.bat` 或 `OpenLabControl.exe` 时会读取 `configs/general.toml`。它不保存物理仪表
+地址、System 面板或 PID 数据。全新安装可以没有 `visa.resources.toml`、`instruments/` 和
+`pid/`；此时没有 System Instrument 面板，程序仍能启动。三个内置仿真也都默认关闭，需在
+Instrument Scanner 最后一页明确勾选。
 
-真实 VISA/TCP 地址与现场安全范围保存在同一个 `configs/site.local.toml`。推荐用
-`tools/instrument_scanner.py` 更新其中标记的资源区块，不要把同一地址复制到多个模块设置中。
+每次 Run 会在运行目录建立 `configuration/` 快照，按原目录结构保存本次实际使用的
+`general.toml`、存在时的 `visa.resources.toml`、`instruments/*.toml` 和 `pid/*.toml`。
+其中可能包含真实地址、本机路径和现场 PID；分享运行目录前必须检查并脱敏。
 
-每次 Run 会把实际使用的完整现场配置复制为 `configuration.toml`。它包含资源地址、安全
-范围和本机路径；分享、上传或提交整个运行目录前必须检查并脱敏。
+## `configs/general.toml`
 
-## `[application]`
+### `[application]`
 
 | 键 | 默认值 | 说明 |
-|---|---:|---|
+| --- | ---: | --- |
 | `title` | `OpenLab Control` | 主窗口标题 |
-| `ui_scale` | `auto` | `auto` 或 0.75–2.0；用于 1080p/2K/4K 缩放 |
+| `ui_scale` | `auto` | `auto` 或 0.75–2.0；现场界面缩放 |
 | `ui_refresh_ms` | `200` | GUI 消息刷新周期 |
-| `poll_interval_seconds` | `1.0` | 前面板和常规状态的仪表轮询周期；测量时的即时采样不受此值限制 |
-| `control_poll_interval_seconds` | `0.20` | SEQ 正在运行、暂停或停止收尾时的仪表判稳采样周期；不会提高前面板刷新率 |
+| `poll_interval_seconds` | `1.0` | 前面板和常规状态的轮询周期 |
+| `control_poll_interval_seconds` | `0.20` | SEQ 控制和判稳时的采样周期 |
 | `simulation_speed` | `120.0` | 仿真控制器的时间倍率 |
 | `default_sequence` | `examples/nested_scan.seq` | 启动时打开的 SEQ |
-| `language` | `en_US` | 预留语言标识；当前 UI 以英文为主 |
+| `language` | `en_US` | 语言标识；当前界面以英文为主 |
 
-`ui_scale = "auto"` 根据主屏原生分辨率和 DPI 选择缩放。手动值同时影响字体、固定宽高、
-图标和窗口初始尺寸。它是现场默认值；用户在 **View → Appearance** 保存个人整体缩放后，
-个人值优先。Appearance 还提供独立的 70%–150% 文字倍率和窗口布局记忆，这些值保存在
-操作系统用户配置目录，不属于主配置，也不会进入运行快照。
+`ui_scale = "auto"` 根据主屏分辨率和 DPI 选择缩放。用户在 **View → Appearance** 保存的
+个人设置优先，并保存在 Windows 用户配置目录，不写入这里。
 
-Measurement Module 在测量时调用 `api.instruments()` 会请求一次即时仪表采样，不会复用最多
-一个常规周期以前的前面板缓存，也不会永久改变 `poll_interval_seconds`。
-System Instrument 实现可选 `read_measurement()` 后，这次采样可以只查询主测量值；未在该次
-查询中读取的附加列写空，完整监视值仍由常规 `read_status()` 写入
-`instrument_status.dat`。
-SEQ 控制期间则使用 `control_poll_interval_seconds` 更新安全状态和稳定性；快照消息仍按
-`poll_interval_seconds` 节流，所以界面不会因为内部判稳而快速闪动。
+Measurement Module 调用 `api.instruments()` 时会请求一次即时仪表采样，不会把常规前面板
+缓存冒充同步测量值。System Instrument 可实现较快的 `read_measurement()`；未在该次请求中
+读取的附加列写空。SEQ 控制使用 `control_poll_interval_seconds` 做安全检查和判稳，但界面
+快照仍按 `poll_interval_seconds` 节流。
 
-## `[logging]`
+### `[logging]`
 
 | 键 | 默认值 | 说明 |
-|---|---|---|
+| --- | ---: | --- |
 | `directory` | `runs` | 自动运行目录根位置 |
-| `data_file_name` | `experiment.dat` | 默认实验数据文件名 |
+| `data_file_name` | `experiment.dat` | 实验数据文件名 |
 | `event_file_name` | `events.dat` | 事件文件名 |
 | `instrument_status_file_name` | `instrument_status.dat` | 连续仪表状态文件名 |
-| `instrument_status_interval_seconds` | `1.0` | Run 中仪表状态写入周期，必须大于 0 |
-| `timestamp_epoch` | `labview_1904` | `labview_1904` 或 Unix 秒 |
-| `flush_every_row` | `true` | 每写一行立即 Flush，降低断电损失 |
-| `allow_external_paths` | `false` | 是否全局允许绝对/越界数据路径 |
+| `instrument_status_interval_seconds` | `1.0` | Run 中状态写入周期 |
+| `timestamp_epoch` | `labview_1904` | `labview_1904` 或 `unix` |
+| `flush_every_row` | `true` | 每行立即刷新，降低断电损失 |
+| `allow_external_paths` | `false` | 是否允许数据文件写到项目目录外 |
 
-`data_file_name`、`event_file_name` 与 `instrument_status_file_name` 必须是三个互不相同的
-Windows 单文件名，不得包含目录、盘符、保留名、控制字符或尾随空格/句点。该限制防止
-默认日志绕过自动运行目录，也避免三类文件互相覆盖。
+三个日志文件名必须互不相同，并且是普通 Windows 文件名，不能包含目录或盘符。推荐保持
+`allow_external_paths = false`，仅在单条 `Set Datafile` 中明确授权外部目录。
 
-推荐保持 `allow_external_paths = false`，由单条 `Set Datafile ... external ...` 明确授权
-自定义目录。无论实验 DAT 选到哪里，SEQ、配置、仪表状态和模块快照始终保留在自动运行
-目录。状态周期独立于 `poll_interval_seconds`；提高轮询频率不会自动增加状态文件写入量。
+### `[alarms]`
 
-SEQ 完成、Stop 或 Error 都不会向 System Instrument 发送 Set 或 Hold。测量模块会收到
-`on_event("run_end", {"reason": ...}, api)`；只有 Disable 和应用退出调用 `close(api)`。
-
-## `[alarms]`
-
-| 键 | 可选值/类型 | 说明 |
-|---|---|---|
-| `stability_timeout` | `info/warning/error` | 判稳超时级别，默认 `error` |
+| 键 | 可选值 | 说明 |
+| --- | --- | --- |
+| `stability_timeout` | `info/warning/error` | 判稳超时级别 |
 | `stale_reading` | `info/warning/error` | 读数过期级别 |
 | `popup_warnings` | bool | Warning 是否弹窗 |
 | `popup_errors` | bool | Error 是否弹窗 |
 
-弹窗开关不影响事件记录或 SEQ 的 Error 中止语义。
+弹窗开关不改变事件记录或 Error 中止 SEQ 的语义。
 
-### `[alarms.reporting]`
+#### `[alarms.reporting]`
 
 ```toml
 [alarms.reporting]
@@ -96,250 +86,182 @@ shutdown_timeout_seconds = 2.0
 allow_insecure_http = false
 ```
 
-报警发射默认关闭。开启后只订阅已经去重的 Warning/Error 状态变化，不发送 Info、恢复
-事件或同一 Source/Code/Context 尚未恢复时的重复报告。HTTP 在独立后台线程执行，
-网络失败不会阻塞或改变 SEQ；连续失败在本地记录为 `ALARM_DELIVERY_FAILED` Warning，
-之后任一报警投递成功会解除该 Warning。
+报警发射默认关闭。开启后只发送已经去重的 Warning/Error 状态变化；网络工作位于独立线程，
+失败会记录本地 Warning，但不会阻塞或改变 SEQ。Token 优先放在 `token_env` 指定的环境变量
+中，也可放在 `token_file` 指向的单行文件中。非本机 HTTP 地址必须使用 HTTPS，除非明确
+允许不安全的明文连接。
 
-发射端只发送 `event_id`、`level` 和 `message`。接收端按服务器配置选择 QQ：
-Warning 仅测试员，Error 为管理员与测试员的并集。`event_id` 在 HTTP 重试期间保持
-不变，配套 NoneBot 接收器可避免成功收件人收到重复消息。
-
-Token 不应直接写进主 TOML，因为每次 Run 会保存配置快照。优先通过
-`token_env` 指定的环境变量提供；也可把单行 Token 放入 `token_file` 指向的独立文件。
-非本机地址默认必须使用 HTTPS；只有明确设置 `allow_insecure_http = true` 才允许远程
-明文 HTTP，此时 Token 和报警正文可能被窃听。配套接收器位于
-`integrations/nonebot_alarm_receiver/`，未配置 Token 时会 fail-closed。
-
-## `[modules]`
+### `[modules]`
 
 ```toml
 [modules]
 directory = "modules"
 data_directory = "module_data"
-state_directory = "trust_state"
-shared_wheels_directory = "wheels"
-python_executable = ""
-runtime_directory = "runtime_packages"
 startup_timeout_seconds = 10.0
 operation_timeout_seconds = 120.0
 shutdown_timeout_seconds = 3.0
 ```
 
 | 键 | 说明 |
-|---|---|
-| `directory` | 启动/Refresh 扫描的模块源码根目录 |
-| `data_directory` | 自动保存 `<module_id>/settings.toml` 的目录，必须与源码分离 |
-| `state_directory` | 本机内容信任记录目录，不得作为共享配置提交 |
-| `shared_wheels_directory` | 仅供模块额外依赖共用的离线 wheel 目录 |
-| `python_executable` | 安装额外依赖时使用的 Python；源码运行留空即使用当前 Python |
-| `runtime_directory` | 每模块额外依赖隔离 runtime 的根目录 |
-| `startup_timeout_seconds` | 模块工作进程启动并完成源码加载的上限 |
-| `operation_timeout_seconds` | open、configure、measure、event 等单次 IPC 操作的总上限 |
-| `shutdown_timeout_seconds` | Disable/退出时模块 close + worker shutdown 的总上限 |
+| --- | --- |
+| `directory` | 启动和 Refresh 时查找 Measurement Module 的目录 |
+| `data_directory` | 自动保存 `<module-id>/settings.toml` 的目录 |
+| `startup_timeout_seconds` | 模块进程启动并加载源码的总上限 |
+| `operation_timeout_seconds` | open、configure、measure、event 等一次调用的总上限 |
+| `shutdown_timeout_seconds` | close 与 worker shutdown 的总上限 |
 
-PySide6 6.11.1、QtAwesome 1.4.2、packaging 26.2、PyVISA 1.16.2 和
-typing_extensions 4.16.0 是框架共享依赖，源码环境和正式 EXE 均直接提供。所有模块
-默认使用这一组版本；manifest 中兼容的声明不会生成 runtime，也不会显示
-`Install Dependencies`。
+这些值必须是有限正数。真实模块仍要给每次 VISA、串口、网络或 SDK 调用设置更短的协议
+超时。模块与 System Instrument 共用核心锁定依赖，不在运行中安装另一套 Python 环境。
 
-发布 EXE 不能把自身当作 pip。只有准备框架未提供的额外依赖时，才需要放置
-`runtime/python/python.exe`，或把 `python_executable` 指向完全离线的便携 Python。
-每个模块的额外依赖安装到：
-
-```text
-runtime_packages/module/<module-id>/<content-fingerprint>/site-packages/
-```
-
-额外依赖不进入 GUI/核心进程，也不能覆盖框架共享包；特殊模块仍可在自己的隔离目录中
-使用不同的额外包版本。安装只读取模块 `requirements.lock`、模块 `wheels/` 和共享
-`wheels/`；lock 中每一项必须是精确 `==` 版本并携带 SHA-256。程序固定使用
-`--no-index --only-binary=:all: --require-hashes`，没有在线安装回退。
-
-三个超时必须是大于零的有限秒数。框架超时是防止工作进程永久挂起的最终上限；真实
-模块仍须为每次 VISA、串口、TCP 或 SDK 调用设置更短的协议超时。
-
-## `[system_instruments]`
+### `[system_instruments]`
 
 ```toml
 [system_instruments]
 directory = "system_instruments"
-state_directory = "trust_state"
-runtime_directory = "runtime_packages"
-shared_wheels_directory = "wheels"
-python_executable = ""
 startup_timeout_seconds = 10.0
 reconnect_timeout_seconds = 60.0
 reconnect_interval_seconds = 2.0
 ```
 
 | 键 | 说明 |
-|---|---|
-| `directory` | System Instrument 的手动安装目录 |
-| `state_directory` | 本机内容指纹信任记录；不得作为共享配置提交 |
-| `runtime_directory` | Instrument/Module 各自额外依赖的共同隔离根目录 |
-| `shared_wheels_directory` | 可选的额外依赖离线 wheel 公共池 |
-| `python_executable` | 为额外依赖准备的 Python；源码运行留空使用当前 Python |
-| `startup_timeout_seconds` | 每个仪表工作进程启动/首次连接最终上限 |
-| `reconnect_timeout_seconds` | 读链路失联后的总恢复窗，默认 60 秒 |
-| `reconnect_interval_seconds` | 恢复窗内两次重新连接尝试之间的间隔 |
+| --- | --- |
+| `directory` | System Instrument 手动安装目录 |
+| `startup_timeout_seconds` | 每个仪表进程启动和首次连接的总上限 |
+| `reconnect_timeout_seconds` | 普通读链路失联后的总恢复窗口 |
+| `reconnect_interval_seconds` | 两次重连尝试之间的间隔 |
 
-每个 System Instrument 的额外依赖路径为
-`runtime_packages/instrument/<instrument-id>/<content-fingerprint>/site-packages/`。安装、哈希和
-runtime 完整性规则与模块相同；框架共享依赖仍直接使用核心版本。
+恢复成功后程序读取仪表的实际 target/rate，不重放写命令。写入超时属于结果不确定的故障，
+会立即停止，不自动重试。
 
-## `[[resources]]`
+## `configs/visa.resources.toml`
 
-资源条目直接位于 `site.local.toml` 的扫描器管理区块中。每个条目是一台物理仪表，不是一个
-通道：
+这个文件只保存尚未分配给 System Instrument 的 VISA 地址，供 Measurement Module 在设置窗口
+中选择。每条记录只有三个字段：
 
 ```toml
-# BEGIN OPENLAB INSTRUMENT RESOURCES
-
-[[resources]]
-id = "cryocon_main"
-address = "USB0::0x1234::0x5678::SERIAL::INSTR"
-identity = "Cryo-con,24C,SERIAL,1.0"
-purpose = "system"
-system_instrument = "cryocon_22c_24c"
-auxiliary_readings = ["temp_a", "heater_output", "heater_range"]
-
 [[resources]]
 id = "keithley_2400_1"
 address = "GPIB0::24::INSTR"
-identity = "KEITHLEY INSTRUMENTS INC.,MODEL 2400,SERIAL,1.0"
-purpose = "measurement"
-system_instrument = ""
-auxiliary_readings = []
-
-# END OPENLAB INSTRUMENT RESOURCES
+identity = "KEITHLEY INSTRUMENTS INC.,MODEL 2400,..."
 ```
 
-- `id` 是以后引用的稳定名称，地址变化时不需要改模块设置。
-- `purpose` 只能是 `system` 或 `measurement`。
-- System 资源必须选择已安装的 `system_instrument`。主读数由其清单固定；扫描器用复选框显示
-  清单中的其他读数，并保存操作者选择的 `auxiliary_readings`。
-- 同一地址不能登记两次；同一 System 资源也不能由两个 `[[instruments]]` 实例同时打开。
-- Measurement Module 前端与后台都可用 `api.resources()` 取得 Measurement 记录的深拷贝；
-  System 地址不会暴露。
-- 扫描只做资源枚举和一次 `*IDN?`，不会替用户设置上下限、PID、输出或模块参数。
+- `id` 是模块长期保存的稳定名称，格式为小写字母、数字和下划线，并以字母开头。
+- `address` 是 VISA 资源地址；比较时忽略大小写，同一地址只能出现一次。
+- `identity` 是扫描时得到的完整 `*IDN?` 文本；没有响应时可为空。
 
-`purpose` 在合并后的单文件中仍是必需字段，因为 System 与 Measurement 地址记录现在位于
-同一个资源区块。扫描器只替换两个标记之间的内容；`[[instruments]]`、报警、日志和安全范围
-不会被改写。
+System Instrument 选中一个 VISA 地址后，该地址写入它自己的实例，并从本文件移除。因此
+System Instrument 与 Measurement Module 不会同时打开同一个 VISA 会话。曾经保存、但本次
+扫描没有发现的 Measurement 资源会以灰色卡片显示，并默认保留；取消 **Keep for
+Measurement Module** 才会删除。
 
-## `[[instruments]]`
+## `configs/instruments/<instrument-id>.toml`
 
-仪表只用于温度、磁场与只读 Monitor。外部 System Instrument 的条目通过 `resource` 自动
-取得实现、地址、主读数、单位和精度：
+每个文件对应一种已安装的 System Instrument 模板，可以有多个 `[[instances]]`，即多台同
+型号物理仪表。文件名、顶层 `id` 和 `system_instruments/<id>/instrument.toml` 的 ID 必须
+一致。
 
-| 键 | 必需 | 说明 |
-|---|---|---|
-| `id` | 是 | 全局唯一 ID，SEQ 通过它选择仪表；必须是非空可打印文本且不得有首尾空白，内部空格允许 |
-| `display_name` | 是 | 英文 UI 名称 |
-| `kind` | 是 | `temperature`、`field` 或 `monitor` |
-| `resource` | 外部实现必需 | 资源表中的物理仪表 ID；内置仿真不得填写 |
-| `backend` | 仅内置仿真 | `package.module:ClassName`；外部实现不得重复填写 |
-| `control_enabled` | 否 | 默认 `false`；标准 SEQ 自动选择同 kind 中唯一的 `true` 实例 |
-| `unit` | 仅内置仿真 | 外部实现的单位来自 `instrument.toml` |
-| `initial_value` | 仅内置仿真 | 仿真初始值；真实 `resource` 条目填写该键会被拒绝 |
-| `stale_after_seconds` | 否 | 读数超过该时间未更新视为 Stale，默认 3 秒 |
-| `operation_timeout_seconds` | 否 | Open/Read/Set/Hold 的框架最终上限，默认 10 秒 |
-| `shutdown_timeout_seconds` | 否 | Close 的框架最终上限，默认 3 秒 |
-
-每个 temperature/field kind 最多一个 `control_enabled = true` 的实例。SEQ 自动选择它，
-Run 前要求其已 Connected 且有新鲜读回。其他实例可以同时显示并保持只读。测量仪表应写成
-完整 Measurement Module，而不是加入 `[[instruments]]`。
-
-一台多通道温控仪只写一个条目。主样品温度由后端的 `value` 返回，TempA、加热功率、量程等通过
-后端的 `auxiliary` 字典返回。多个不同物理仪表可以写多个条目；连接和轮询会并发进行。
-
-仪表超时必须是大于零的有限秒数。读取/连接链路失败后，核心终止旧仪表进程并在
-`system_instruments.reconnect_timeout_seconds` 内重建连接；运行中的主仪表恢复期间冻结 SEQ
-活动计时。成功恢复后核对实际 target/rate，不重放写命令。Set/Hold 写超时是歧义
-故障，立即 Faulted，不自动重试。真实驱动仍须设置更短的 VISA/串口/TCP/SDK 协议
-超时；框架最终上限不能替代硬件互锁。
-
-### 温度/磁场专用键
-
-| 键 | 说明 |
-|---|---|
-| `default_rate_per_minute` | 新建 SEQ/手动控制的默认速率 |
-| `min_value` / `max_value` | Target 硬限制；SEQ 弹窗与运行时共用 |
-| `max_rate_per_minute` | 最大速率硬限制 |
-| `stability_tolerance` | 当前值与目标值允许偏差 |
-| `stability_max_slope_per_minute` | 判稳窗口最大绝对斜率 |
-| `stability_dwell_seconds` | 同时满足偏差/斜率后需持续的时间 |
-| `stability_timeout_seconds` | 本次目标的判稳超时 |
-| `stability_window_seconds` | 计算斜率的窗口 |
-
-`stability_timeout_seconds` 同时是 Settle 判稳和 Sweep 到达目标的最终等待上限；即使读取持续只返回 Warning、没有新快照，SEQ 也会按 `alarms.stability_timeout` 结束等待，不会无限挂起。
-
-所有值使用仪表原生单位。默认磁场原生单位为 Oe：
+Instrument Scanner 从作者的 API v4 清单复制静态元数据，例如 `config_fields`、`controls`、
+`readings`、`discovery` 和 `sequence_commands`，但不复制 `panels` 模板。每个实例只保存
+物理连接字段、型号专用配置和对固定面板 ID 的选择。例如：
 
 ```toml
-[[instruments]]
-id = "field"
-display_name = "Magnetic Field"
-kind = "field"
-backend = "labcontrol.instruments.simulated:SimulatedFieldController"
-control_enabled = true
-unit = "Oe"
-min_value = -90000.0
-max_value = 90000.0
-default_rate_per_minute = 5000.0
-max_rate_per_minute = 10000.0
-```
+id = "lakeshore340"
+name = "Lake Shore Model 340 Temperature Controller"
+version = "0.2.0"
+api_version = "4"
+backend = "backend:LakeShore340"
+kinds = ["temperature"]
 
-SEQ 仍可使用 T，中央会换算为仪表 Oe 后再检查上下限和速率。UI/SEQ 中 Oe 保留两位小数，T 保留六位，温度保留三位。
+[[config_fields]]
+id = "visa_timeout_ms"
+label = "VISA I/O Timeout (ms)"
+type = "integer"
+default = 1000
+min = 1
 
-### Monitor
+[[controls]]
+id = "main"
+label = "Main Temperature"
 
-Monitor 是只读仪表，只需 `read_status()` 返回 `value`。它：
+[discovery]
+identity_pattern = "^LSCI,MODEL340(?:,|$)"
 
-- 不接受 Set/Hold；
-- 不参与标准温度/磁场自动选择或中央判稳；
-- 在底部和 Live Trend 显示；
-- 在每个模块结果行中由中央记录到 DAT；
-- 可由 System Instrument 产生系统 Error，例如二级冷头过温。
-
-默认示例：
-
-```toml
-[[instruments]]
-id = "second_stage"
-display_name = "2nd Stage"
-kind = "monitor"
-backend = "labcontrol.instruments.simulated:SimulatedReadOnlyMonitor"
+[readings.temp_a]
+label = "Temp A"
 unit = "K"
-initial_value = 4.2
-noise = 0.002
+decimals = 3
+
+[[instances]]
+id = "sample_controller"
+resource = "GPIB0::12::INSTR"
+identity = "LSCI,MODEL340,..."
+visa_timeout_ms = 1000
+
+[[instances.panels]]
+id = "control"
+enabled = true
+order = 1
+role = "sample_temp"
+reading = "temp_a"
+min_value = 1.8
+max_value = 400.0
+default_rate_per_minute = 1.0
+max_rate_per_minute = 30.0
+stability_tolerance = 0.01
+stability_max_slope_per_minute = 0.01
+stability_dwell_seconds = 5.0
+stability_timeout_seconds = 1800.0
+stability_window_seconds = 5.0
+
+[[instances.panels]]
+id = "temperatures"
+enabled = true
+order = 2
+role = "none"
 ```
 
-## System Instrument 自定义键
+上例只展示一部分静态读数，实际生成文件会包含清单中除面板模板外的完整静态元数据。实例
+字段由清单的 `config_fields` 决定；有 `discovery.identity_pattern` 的模板还会保存
+`resource` 和 `identity`。没有 VISA 发现规则的专用网络仪表可在自己的 `config_fields` 中
+声明 `host`、`port` 等输入，扫描器会在该仪表页面显示这些字段。
 
-未被框架识别的仪表键进入 `InstrumentConfig.extras`，例如仿真 `noise`，或具体型号的
-`baud_rate`、`termination`、PID 表等。物理地址是例外：真实外部 System Instrument 必须
-使用 `resource` 引用资源表，主配置中的内联 `address` 会被拒绝。密码、令牌和私钥也不得
-提交到仓库。
+实例面板不能增加作者未声明的模板。每个模板都必须出现一次：关闭时只保存 `id` 和
+`enabled = false`；开启时再保存全局 `order` 与 `role`。`controller` 还保存 `reading`、
+上下限、速率与稳定参数。`readout`、`readout_grid` 和 `switch` 的角色必须是 `none`。
 
-Measurement 仪表的地址记录位于主配置的 `[[resources]]`，但 Measurement Module 的测量参数
-不放在主配置，而由其自定义 Settings UI 管理并保存到 `module_data/<id>/settings.toml`。保存
-SEQ 时，当前实验关联值还会复制到同目录同名
-`<sequence>.modules.toml`，使不同 SEQ 可以携带不同的模块参数。Load 只把值装入界面，
-不会自动 Enable 或 Apply；因此主配置的仪表安全限制和模块显式确认流程不会被绕过。
+角色只有：
 
-## 配置验证
+- `none`：显示、记录或提供面板指令，但不接管温场 SEQ；
+- `sample_temp`：供 Temperature/Scan Temperature 使用，必须属于支持 temperature 的
+  `controller`；
+- `field`：供 Field/Scan Field 使用，必须属于支持 field 的 `controller`。
 
-启动会拒绝：
+所有已开启面板的 `order` 必须从 1 开始连续且全局不重复。`sample_temp` 和 `field` 各自
+全局最多一个。`none` 可以重复。没有任何生成文件或没有开启面板都是有效配置。
 
-- 无仪表条目、重复仪表 ID，或空白/控制字符导致无法寻址的仪表 ID；
-- 未知仪表 kind；
-- 外部 System Instrument 未选择资源、主配置内联物理地址，或内置仿真占用真实资源；
-- 同一种类多个可控仪表、monitor 启用控制，或仍使用已经删除的 `role`；
-- `min_value >= max_value`；
-- 非正默认/最大速率；
-- `ui_scale` 越界；
-- 无法解析的严重 TOML 错误。
+扫描器保存的是最后预览中的完整结果：它原子覆盖将保留的生成文件，并删除预览中标为
+DELETE 的其他 `configs/instruments/*.toml`。不要把它当作局部追加工具；保存前应检查完整
+预览和面板顺序。
 
-模块清单错误不会阻止主程序启动；对应行显示 Invalid/说明并禁止 Enable，便于修复其他仪表或模块。
+## `configs/pid/<instance-id>.toml`
+
+当作者把某个 `config_fields` 项声明为 `type = "pid_file"` 时，第一次保存实例会把清单指定
+的示例文件复制为 `configs/pid/<instance-id>.toml`。第一次也可以选择另一份已经验证的 TOML
+作为复制来源。生成的实例只保存这一目标路径。
+
+目标 PID 文件一旦存在，扫描器会禁用来源选择；以后保存或移除实例都不会覆盖或删除它。
+这让每台物理仪表保留独立的现场 PID 数据。某些作者示例会故意使用 `zones = []`；例如
+Cryo-con 22C/24C 会在连接前拒绝空 `zones`，必须先填入该冷却系统已经验证的区间。
+
+## 保存与启动验证
+
+Instrument Scanner 的最后一页会显示 CREATE、OVERWRITE、UNCHANGED、DELETE 和 PID 复制动作。
+确认后才执行完整保存：
+
+1. 新 PID 文件先创建，现有 PID 文件保持不动；
+2. 所有选中的 System Instrument 生成文件原子写入；
+3. `visa.resources.toml` 以当前 Measurement 选择完整替换；
+4. 未出现在预览中的生成文件删除。
+
+OpenLab Control 启动时还会严格检查 ID、未知字段、VISA 地址重复、面板顺序、角色唯一性、
+读数引用、数值范围和 PID 文件。失败发生在连接真实仪表之前，不会猜测或补全配置。

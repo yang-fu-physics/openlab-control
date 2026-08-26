@@ -11,7 +11,6 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.config import load_config  # noqa: E402
 from labcontrol.instruments.base import InstrumentError, SafetyViolation  # noqa: E402
 from labcontrol.instruments.worker import (  # noqa: E402
     InstrumentWorkerError,
@@ -21,18 +20,20 @@ from labcontrol.instruments.worker import (  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.models import (  # noqa: E402
+    InstrumentControlState,
     InstrumentKind,
     InstrumentMetric,
     InstrumentSnapshot,
 )
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 
 
 class _FreshInstruments:
     def __init__(self) -> None:
-        self.config = load_config(ROOT / "configs" / "default.toml")
+        self.config = load_simulated_config()
         self.instrument_configs = {
-            item.id: item for item in self.config.instruments
+            item.id: item for item in self.config.instrument_instances
         }
         self.poll_calls = 0
         self.full_poll_calls = 0
@@ -179,7 +180,7 @@ class InstrumentMetricTests(unittest.TestCase):
 
     def test_metric_schema_is_validated_and_hold_path_remains_independent(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             manager = InstrumentManager(
                 config,
                 EventManager(),
@@ -187,10 +188,10 @@ class InstrumentMetricTests(unittest.TestCase):
             )
             await manager.connect_all()
             await manager.poll_all()
-            await manager.hold_instrument("temperature")
+            await manager.hold_instrument("temperature", control="main")
             await manager.disconnect_all()
 
-            instrument = config.instruments[0]
+            instrument = config.instrument_instances[0]
             valid = InstrumentSnapshot(
                 instrument_id=instrument.id,
                 display_name=instrument.display_name,
@@ -200,6 +201,11 @@ class InstrumentMetricTests(unittest.TestCase):
                 current=4.2,
                 metrics={
                     "heater": InstrumentMetric("Heater", 1.0, "%", 2),
+                },
+                controls={
+                    instrument.panels[0].id: InstrumentControlState(
+                        current=4.2,
+                    ),
                 },
             )
             manager._metric_schemas.pop(instrument.id, None)

@@ -18,15 +18,20 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QCheckBox, QFrame  # noqa: E402
 
-from labcontrol.config import InstrumentReadingConfig, load_config  # noqa: E402
+from labcontrol.config import (  # noqa: E402
+    InstrumentPanelConfig,
+    InstrumentReadingConfig,
+)
 from labcontrol.models import (  # noqa: E402
     InstrumentActivity,
     InstrumentConnectionState,
+    InstrumentControlState,
     InstrumentKind,
     InstrumentMetric,
     InstrumentSnapshot,
     LabEvent,
     Severity,
+    StabilityState,
 )
 from labcontrol.sequence.model import (  # noqa: E402
     SPECS_BY_TYPE,
@@ -39,6 +44,7 @@ from labcontrol.ui.dialogs import (  # noqa: E402
     ManualControlDialog,
 )
 from labcontrol.ui.trend import TrendCanvas  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 from labcontrol.ui.instrument_panels import (  # noqa: E402
     ControllerPanel,
     InstrumentPanelHost,
@@ -54,9 +60,10 @@ class InstrumentPanelTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_monitor_readout_panel_is_display_only(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        host = InstrumentPanelHost((config.instrument("second_stage"),))
-        panel = host.main_panels["second_stage"]
+        config = load_simulated_config()
+        instrument = config.instrument("second_stage")
+        host = InstrumentPanelHost((instrument,), instrument.panels)
+        panel = host.panels["second_stage.main"]
         self.assertIsInstance(panel, ReadoutPanel)
         emitted: list[str] = []
         host.controlRequested.connect(emitted.append)
@@ -74,7 +81,10 @@ class InstrumentPanelTests(unittest.TestCase):
         QTest.mouseDClick(panel, Qt.MouseButton.LeftButton)
         self.assertEqual(emitted, [])
         self.assertEqual(panel.value_label.text(), "4.234 K")
-        self.assertEqual(panel.name_label.text(), "2nd Stage")
+        self.assertEqual(
+            panel.name_label.text(),
+            instrument.panel("main").display_name,
+        )
         self.assertEqual(panel.minimumWidth(), 205)
         self.assertEqual(panel.maximumHeight(), 105)
         self.assertEqual(
@@ -101,24 +111,33 @@ class InstrumentPanelTests(unittest.TestCase):
         host.close()
 
     def test_controller_auxiliary_readings_share_four_value_panel(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+        config = load_simulated_config()
         base = config.instrument("temperature")
-        instrument = replace(
-            base,
-            auxiliary_readings=(
+        auxiliary_panel = InstrumentPanelConfig(
+            id="auxiliary",
+            instrument_id=base.id,
+            display_name="Auxiliary",
+            template="readout_grid",
+            enabled=True,
+            order=2,
+            readings=(
                 "second_stage",
                 "heater_output",
                 "heater_range",
             ),
+        )
+        instrument = replace(
+            base,
             readings=(
                 base.reading(base.main_reading),
                 InstrumentReadingConfig("second_stage", "2nd Stage", "K", 3),
                 InstrumentReadingConfig("heater_output", "Heater", "%", 2),
                 InstrumentReadingConfig("heater_range", "Range"),
             ),
+            panels=(*base.panels, auxiliary_panel),
         )
-        host = InstrumentPanelHost((instrument,))
-        panel = host.main_panels["temperature"]
+        host = InstrumentPanelHost((instrument,), instrument.panels)
+        panel = host.panels["temperature.main"]
         snapshot = InstrumentSnapshot(
             instrument_id="temperature",
             display_name="Temperature",
@@ -128,6 +147,13 @@ class InstrumentPanelTests(unittest.TestCase):
             current=4.2,
             target=4.0,
             rate_per_minute=1.0,
+            controls={
+                "main": InstrumentControlState(
+                    current=4.2,
+                    target=4.0,
+                    rate_per_minute=1.0,
+                )
+            },
             metrics={
                 "second_stage": InstrumentMetric(
                     "2nd Stage", 20.1254, "K", 3
@@ -141,10 +167,10 @@ class InstrumentPanelTests(unittest.TestCase):
         host.update_snapshot(snapshot)
 
         self.assertEqual(
-            list(host.readout_panels),
-            [("temperature", 0)],
+            list(host.panels),
+            ["temperature.main", "temperature.auxiliary"],
         )
-        readout = host.readout_panels[("temperature", 0)]
+        readout = host.panels["temperature.auxiliary"]
         self.assertIsInstance(readout, ReadoutGridPanel)
         self.assertEqual(
             readout.value_labels["second_stage"].text(),
@@ -174,16 +200,163 @@ class InstrumentPanelTests(unittest.TestCase):
             readout.value_labels["second_stage"].text(),
             "—",
         )
-        self.assertEqual(len(host.readout_panels), 1)
+        self.assertEqual(len(host.panels), 2)
         host.close()
 
-    def test_readout_fifth_value_starts_a_panel_to_the_right(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        base = config.instrument("second_stage")
+    def test_controller_uses_titled_explicit_auxiliary_sections(self) -> None:
+        config = load_simulated_config()
+        base = config.instrument("temperature")
+        auxiliary = (
+            "auxiliary_temperature",
+            "loop_1_output",
+            "loop_1_range",
+            "loop_1_setpoint",
+            "loop_1_ramping",
+            "loop_2_output",
+            "loop_2_setpoint",
+            "loop_2_ramping",
+        )
+        temperature_panel_config = InstrumentPanelConfig(
+            id="temperature_b",
+            instrument_id=base.id,
+            display_name="Temp B",
+            template="readout",
+            enabled=True,
+            order=2,
+            readings=("auxiliary_temperature",),
+        )
+        loop_1_panel_config = InstrumentPanelConfig(
+            id="loop_1",
+            instrument_id=base.id,
+            display_name="Loop 1 - Temp A",
+            template="readout_grid",
+            enabled=True,
+            order=3,
+            readings=(
+                "loop_1_output",
+                "loop_1_range",
+                "loop_1_setpoint",
+                "loop_1_ramping",
+            ),
+        )
+        loop_2_panel_config = InstrumentPanelConfig(
+            id="loop_2",
+            instrument_id=base.id,
+            display_name="Loop 2 - Temp B",
+            template="readout_grid",
+            enabled=False,
+            order=4,
+            readings=(
+                "loop_2_output",
+                "loop_2_setpoint",
+                "loop_2_ramping",
+            ),
+        )
         instrument = replace(
             base,
-            panel_template="readout_grid",
-            auxiliary_readings=("a", "b", "c", "d"),
+            readings=(
+                base.reading(base.main_reading),
+                InstrumentReadingConfig(
+                    "auxiliary_temperature",
+                    "Auxiliary Temperature",
+                    "K",
+                    3,
+                ),
+                InstrumentReadingConfig("loop_1_output", "Output", "%", 1),
+                InstrumentReadingConfig("loop_1_range", "Range"),
+                InstrumentReadingConfig("loop_1_setpoint", "Setpoint", "K", 3),
+                InstrumentReadingConfig("loop_1_ramping", "Ramping"),
+                InstrumentReadingConfig("loop_2_output", "Output 2", "%", 1),
+                InstrumentReadingConfig("loop_2_setpoint", "Setpoint 2", "K", 3),
+                InstrumentReadingConfig("loop_2_ramping", "Ramping 2"),
+            ),
+            panels=(
+                *base.panels,
+                temperature_panel_config,
+                loop_1_panel_config,
+                loop_2_panel_config,
+            ),
+        )
+        host = InstrumentPanelHost(
+            (instrument,),
+            tuple(panel for panel in instrument.panels if panel.enabled),
+        )
+        host.update_snapshot(
+            InstrumentSnapshot(
+                instrument_id="temperature",
+                display_name="Temperature",
+                kind=InstrumentKind.TEMPERATURE,
+                timestamp=time.monotonic(),
+                unit="K",
+                current=4.2,
+                target=4.0,
+                controls={
+                    "main": InstrumentControlState(
+                        current=4.2,
+                        target=4.0,
+                    )
+                },
+                metrics={
+                    key: InstrumentMetric(
+                        instrument.reading(key).display_name,
+                        {
+                            "auxiliary_temperature": 20.125,
+                            "loop_1_output": 12.3,
+                            "loop_1_range": 4,
+                            "loop_1_setpoint": 4.0,
+                            "loop_1_ramping": True,
+                        }.get(key),
+                        instrument.reading(key).unit,
+                        instrument.reading(key).decimals,
+                    )
+                    for key in auxiliary
+                },
+            )
+        )
+
+        self.assertEqual(
+            list(host.panels),
+            [
+                "temperature.main",
+                "temperature.temperature_b",
+                "temperature.loop_1",
+            ],
+        )
+        temperature_panel = host.panels["temperature.temperature_b"]
+        self.assertIsInstance(temperature_panel, ReadoutPanel)
+        self.assertEqual(temperature_panel.name_label.text(), "Temp B")
+        self.assertEqual(temperature_panel.value_label.text(), "20.125 K")
+        loop_1_panel = host.panels["temperature.loop_1"]
+        self.assertIsInstance(loop_1_panel, ReadoutGridPanel)
+        self.assertEqual(loop_1_panel.title_label.text(), "Loop 1 - Temp A")
+        self.assertEqual(
+            loop_1_panel.value_labels["loop_1_ramping"].text(),
+            "On",
+        )
+        self.assertNotIn("temperature.loop_2", host.panels)
+        controller = host.panels["temperature.main"]
+        self.assertEqual(controller.detail_label.text(), "Target 4.000 K")
+        host.close()
+
+    def test_explicit_readout_grids_keep_fifth_value_to_the_right(self) -> None:
+        config = load_simulated_config()
+        base = config.instrument("second_stage")
+        first_config = replace(
+            base.panel("main"),
+            template="readout_grid",
+            readings=("value", "a", "b", "c"),
+        )
+        second_config = InstrumentPanelConfig(
+            id="remaining",
+            instrument_id=base.id,
+            display_name="Remaining",
+            template="readout_grid",
+            enabled=True,
+            order=4,
+            readings=("d",),
+        )
+        instrument = replace(
+            base,
             readings=(
                 base.reading(base.main_reading),
                 InstrumentReadingConfig("a", "A", "K", 1),
@@ -191,12 +364,12 @@ class InstrumentPanelTests(unittest.TestCase):
                 InstrumentReadingConfig("c", "C", "K", 1),
                 InstrumentReadingConfig("d", "D", "K", 1),
             ),
+            panels=(first_config, second_config),
         )
-        host = InstrumentPanelHost((instrument,))
-        first = host.readout_panels[("second_stage", 0)]
-        second = host.readout_panels[("second_stage", 1)]
+        host = InstrumentPanelHost((instrument,), instrument.panels)
+        first = host.panels["second_stage.main"]
+        second = host.panels["second_stage.remaining"]
 
-        self.assertIs(host.main_panels["second_stage"], first)
         self.assertEqual(
             list(first.value_labels),
             ["value", "a", "b", "c"],
@@ -206,31 +379,44 @@ class InstrumentPanelTests(unittest.TestCase):
         host.close()
 
     def test_single_readout_does_not_display_auxiliary_readings(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+        config = load_simulated_config()
         base = config.instrument("second_stage")
         instrument = replace(
             base,
-            auxiliary_readings=("extra",),
             readings=(
                 base.reading(base.main_reading),
                 InstrumentReadingConfig("extra", "Extra", "K", 2),
             ),
         )
-        host = InstrumentPanelHost((instrument,))
+        host = InstrumentPanelHost((instrument,), instrument.panels)
 
-        panel = host.main_panels["second_stage"]
+        panel = host.panels["second_stage.main"]
         self.assertIsInstance(panel, ReadoutPanel)
-        self.assertEqual(panel.name_label.text(), "2nd Stage")
-        self.assertEqual(host.readout_panels, {})
+        self.assertEqual(
+            panel.name_label.text(),
+            instrument.panel("main").display_name,
+        )
+        self.assertEqual(list(host.panels), ["second_stage.main"])
         host.close()
 
     def test_switch_panel_displays_state_and_emits_declared_action(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+        config = load_simulated_config()
+        base = config.instrument("second_stage")
+        switch = InstrumentPanelConfig(
+            id="main",
+            instrument_id="compressor",
+            display_name="Compressor",
+            template="switch",
+            enabled=True,
+            order=1,
+            reading=base.main_reading,
+            commands=("compressor_on", "compressor_off"),
+        )
         instrument = replace(
-            config.instrument("second_stage"),
+            base,
             id="compressor",
             display_name="Compressor",
-            panel_template="switch",
+            panels=(switch,),
         )
         commands = (
             SystemInstrumentCommandSpec(
@@ -244,8 +430,8 @@ class InstrumentPanelTests(unittest.TestCase):
                 "Compressor Off",
             ),
         )
-        host = InstrumentPanelHost((instrument,), commands)
-        panel = host.main_panels["compressor"]
+        host = InstrumentPanelHost((instrument,), (switch,), commands)
+        panel = host.panels["compressor.main"]
         self.assertIsInstance(panel, SwitchPanel)
         self.assertFalse(panel.buttons["compressor_on"].isEnabled())
         requested: list[tuple[str, str]] = []
@@ -280,8 +466,9 @@ class InstrumentPanelTests(unittest.TestCase):
         host.close()
 
     def test_status_cards_keep_fixed_light_colors(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        panel = ControllerPanel(config.instrument("temperature"))
+        config = load_simulated_config()
+        instrument = config.instrument("temperature")
+        panel = ControllerPanel(instrument, instrument.panel("main"))
         self.assertEqual(panel.title_label.objectName(), "panelTitle")
         self.assertEqual(panel.value_label.objectName(), "panelValue")
         self.assertEqual(panel.detail_label.objectName(), "panelDetail")
@@ -327,8 +514,9 @@ class InstrumentPanelTests(unittest.TestCase):
     def test_tile_distinguishes_reconnecting_and_faulted_states(
         self,
     ) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        panel = ControllerPanel(config.instrument("temperature"))
+        config = load_simulated_config()
+        instrument = config.instrument("temperature")
+        panel = ControllerPanel(instrument, instrument.panel("main"))
         snapshot = InstrumentSnapshot(
             "temperature",
             "Temperature",
@@ -348,23 +536,33 @@ class InstrumentPanelTests(unittest.TestCase):
         self.assertIn("deadline", panel.detail_label.text())
         panel.close()
 
-    def test_secondary_temperature_tile_and_dialog_are_display_only(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        secondary = replace(
-            config.instrument("temperature"),
-            id="temperature_backup",
-            control_enabled=False,
+    def test_secondary_temperature_readout_is_display_only(self) -> None:
+        config = load_simulated_config()
+        instrument = config.instrument("temperature")
+        readout_config = InstrumentPanelConfig(
+            id="secondary",
+            instrument_id=instrument.id,
+            display_name="Secondary Temperature",
+            template="readout",
+            enabled=True,
+            readings=(instrument.main_reading,),
+            reading=instrument.main_reading,
         )
-        panel = ControllerPanel(secondary)
-        emitted: list[str] = []
-        panel.controlRequested.connect(emitted.append)
-        panel.update_snapshot(
+        host = InstrumentPanelHost((instrument,), (readout_config,))
+        panel = host.panels["temperature.secondary"]
+        emitted: list[tuple[str, str]] = []
+        host.controlRequested.connect(
+            lambda instrument_id, panel_id: emitted.append(
+                (instrument_id, panel_id)
+            )
+        )
+        host.update_snapshot(
             InstrumentSnapshot(
-                secondary.id,
-                secondary.display_name,
-                secondary.kind,
+                instrument.id,
+                instrument.display_name,
+                instrument.kind,
                 time.monotonic(),
-                secondary.unit,
+                instrument.unit,
                 10.0,
                 10.0,
                 1.0,
@@ -373,11 +571,10 @@ class InstrumentPanelTests(unittest.TestCase):
         panel.show()
         QTest.mouseDClick(panel, Qt.MouseButton.LeftButton)
         self.assertEqual(emitted, [])
-        self.assertIn("Display only", panel.detail_label.text())
         self.assertEqual(panel.cursor().shape(), Qt.CursorShape.ArrowCursor)
         with self.assertRaises(ValueError):
-            ManualControlDialog(secondary)
-        panel.close()
+            ManualControlDialog(instrument, readout_config)
+        host.close()
 
     def test_alert_dialog_is_deleted_after_close(self) -> None:
         dialog = AlertDialog(
@@ -399,32 +596,72 @@ class InstrumentPanelTests(unittest.TestCase):
         temperature = InstrumentSnapshot(
             "temperature", "Temperature", InstrumentKind.TEMPERATURE, now, "K",
             300.1236, 299.9, 10.0, InstrumentActivity.MOVING,
+            controls={
+                "main": InstrumentControlState(
+                    current=300.1236,
+                    target=299.9,
+                    rate_per_minute=10.0,
+                    activity=InstrumentActivity.MOVING,
+                    stability=StabilityState.MOVING,
+                )
+            },
         )
         field = InstrumentSnapshot(
             "field", "Magnetic Field", InstrumentKind.FIELD, now, "Oe",
             123.456, 200.0, 5000.0, InstrumentActivity.MOVING,
+            controls={
+                "main": InstrumentControlState(
+                    current=123.456,
+                    target=200.0,
+                    rate_per_minute=5000.0,
+                    activity=InstrumentActivity.MOVING,
+                    stability=StabilityState.MOVING,
+                )
+            },
         )
-        config = load_config(ROOT / "configs" / "default.toml")
-        temperature_panel = ControllerPanel(config.instrument("temperature"))
-        field_panel = ControllerPanel(config.instrument("field"))
+        config = load_simulated_config()
+        temperature_config = config.instrument("temperature")
+        field_config = config.instrument("field")
+        temperature_panel = ControllerPanel(
+            temperature_config,
+            temperature_config.panel("main"),
+        )
+        field_panel = ControllerPanel(
+            field_config,
+            field_config.panel("main"),
+        )
         temperature_panel.update_snapshot(temperature)
         field_panel.update_snapshot(field)
         self.assertEqual(temperature_panel.value_label.text(), "300.124 K")
         self.assertIn("Target 299.900 K", temperature_panel.detail_label.text())
-        self.assertEqual(field_panel.value_label.text(), "123.46 Oe")
-        self.assertIn("Target 200.00 Oe", field_panel.detail_label.text())
-        self.assertIn("5000.00 Oe/min", field_panel.detail_label.text())
+        self.assertEqual(field_panel.value_label.text(), "123.456 Oe")
+        self.assertIn("Target 200.000 Oe", field_panel.detail_label.text())
+        self.assertIn("5000.000 Oe/min", field_panel.detail_label.text())
         temperature_panel.close()
         field_panel.close()
 
     def test_control_dialogs_match_unit_precision_and_convert_field_unit(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        temperature_config = next(instrument for instrument in config.instruments if instrument.id == "temperature")
-        field_config = next(instrument for instrument in config.instruments if instrument.id == "field")
-        temperature_dialog = ManualControlDialog(temperature_config)
-        field_dialog = ManualControlDialog(field_config)
+        config = load_simulated_config()
+        temperature_config = next(
+            instrument
+            for instrument in config.instrument_instances
+            if instrument.id == "temperature"
+        )
+        field_config = next(
+            instrument
+            for instrument in config.instrument_instances
+            if instrument.id == "field"
+        )
+        temperature_dialog = ManualControlDialog(
+            temperature_config,
+            temperature_config.panel("main"),
+        )
+        field_dialog = ManualControlDialog(
+            field_config,
+            field_config.panel("main"),
+        )
         self.assertEqual(temperature_dialog.target_input.decimals(), 3)
-        self.assertEqual(field_dialog.target_input.decimals(), 2)
+        self.assertEqual(field_dialog.target_input.decimals(), 3)
 
         spec = SPECS_BY_TYPE[CommandType.SET_FIELD]
         command = spec.create()
@@ -472,24 +709,27 @@ class InstrumentPanelTests(unittest.TestCase):
         dialog.close()
 
     def test_sequence_dialog_uses_configured_target_and_rate_limits(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+        config = load_simulated_config()
 
         temperature_spec = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE]
         temperature_dialog = CommandDialog(
             temperature_spec.create(),
             temperature_spec,
-            instrument_configs=config.instruments,
+            instrument_configs=config.instrument_instances,
         )
         self.assertAlmostEqual(temperature_dialog.inputs["target"].minimum(), 1.8)
         self.assertAlmostEqual(temperature_dialog.inputs["target"].maximum(), 400.0)
         self.assertAlmostEqual(temperature_dialog.inputs["rate"].maximum(), 30.0)
-        self.assertIn("Configured limits (temperature)", temperature_dialog.limit_label.text())
+        self.assertIn(
+            "Configured limits (temperature.main)",
+            temperature_dialog.limit_label.text(),
+        )
 
         temperature_scan_spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
         temperature_scan_dialog = CommandDialog(
             temperature_scan_spec.create(),
             temperature_scan_spec,
-            instrument_configs=config.instruments,
+            instrument_configs=config.instrument_instances,
         )
         for name in ("start", "stop"):
             self.assertAlmostEqual(temperature_scan_dialog.inputs[name].minimum(), 1.8)
@@ -500,7 +740,7 @@ class InstrumentPanelTests(unittest.TestCase):
         field_dialog = CommandDialog(
             field_spec.create(),
             field_spec,
-            instrument_configs=config.instruments,
+            instrument_configs=config.instrument_instances,
         )
         self.assertAlmostEqual(field_dialog.inputs["target"].minimum(), -90000.0)
         self.assertAlmostEqual(field_dialog.inputs["target"].maximum(), 90000.0)
@@ -515,7 +755,7 @@ class InstrumentPanelTests(unittest.TestCase):
         field_scan_dialog = CommandDialog(
             field_scan_spec.create(),
             field_scan_spec,
-            instrument_configs=config.instruments,
+            instrument_configs=config.instrument_instances,
         )
         for name in ("start", "stop"):
             self.assertAlmostEqual(field_scan_dialog.inputs[name].minimum(), -90000.0)
@@ -527,21 +767,34 @@ class InstrumentPanelTests(unittest.TestCase):
         field_dialog.close()
         field_scan_dialog.close()
 
-    def test_sequence_dialog_selects_custom_instrument_ids_and_their_limits(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+    def test_sequence_dialog_selects_role_bound_panel_and_its_limits(self) -> None:
+        config = load_simulated_config()
         temperature = next(
-            instrument for instrument in config.instruments
+            instrument for instrument in config.instrument_instances
             if instrument.kind is InstrumentKind.TEMPERATURE
         )
+        primary_panel = replace(
+            temperature.panel("main"),
+            instrument_id="cryostat_primary",
+        )
+        backup_panel = replace(
+            temperature.panel("main"),
+            instrument_id="cryostat_backup",
+            role="none",
+            min_value=2.0,
+            max_value=350.0,
+            max_rate_per_minute=12.0,
+        )
         custom_instruments = (
-            replace(temperature, id="cryostat_primary"),
             replace(
                 temperature,
                 id="cryostat_backup",
-                control_enabled=False,
-                min_value=2.0,
-                max_value=350.0,
-                max_rate_per_minute=12.0,
+                panels=(backup_panel,),
+            ),
+            replace(
+                temperature,
+                id="cryostat_primary",
+                panels=(primary_panel,),
             ),
         )
         spec = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE]
@@ -550,11 +803,9 @@ class InstrumentPanelTests(unittest.TestCase):
             spec,
             instrument_configs=custom_instruments,
         )
-        instrument_input = dialog.inputs["instrument_id"]
-        self.assertEqual(instrument_input.currentText(), "cryostat_primary")
-        self.assertEqual(instrument_input.count(), 1)
+        self.assertNotIn("instrument_id", dialog.inputs)
         self.assertEqual(dialog.inputs["target"].maximum(), 400.0)
-        self.assertEqual(dialog.values()["instrument_id"], "cryostat_primary")
+        self.assertIn(primary_panel.key, dialog.limit_label.text())
         dialog.close()
 
     def test_set_datafile_dialog_uses_native_file_chooser_for_save_and_open(
@@ -605,9 +856,13 @@ class InstrumentPanelTests(unittest.TestCase):
             dialog.close()
 
     def test_temperature_list_dialog_rejects_points_outside_configured_limits(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+        config = load_simulated_config()
         spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
-        dialog = CommandDialog(spec.create(), spec, instrument_configs=config.instruments)
+        dialog = CommandDialog(
+            spec.create(),
+            spec,
+            instrument_configs=config.instrument_instances,
+        )
         dialog.inputs["point_mode"].setCurrentText("List")
         dialog.inputs["points"].setText("300, 500")
 

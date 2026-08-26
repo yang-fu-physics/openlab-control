@@ -94,4 +94,4 @@ T End Scan
 不要提供“任意仪表命令”输入框。它很容易绕过范围检查和安全步骤。
 
 完整可运行例子在
-`templates/measurement-modules-repository/modules/tutorial_resistance/backend.py`。
+`modules/tutorial_resistance/backend.py`。

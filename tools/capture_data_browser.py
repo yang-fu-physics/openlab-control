@@ -23,7 +23,7 @@ from labcontrol.ui.main_window import MainWindow  # noqa: E402
 def main() -> int:
     output = ROOT / "docs" / "data-browser-preview.png"
     application = QApplication([])
-    config = load_config(ROOT / "configs" / "default.toml")
+    config = load_config(ROOT / "configs" / "general.toml")
     configure_qt_appearance(application, config.ui_scale)
     window = MainWindow(config)
     window.resize(1480, 900)

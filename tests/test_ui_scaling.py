@@ -63,8 +63,8 @@ class UiScalingTests(unittest.TestCase):
         self.assertEqual(scaled_text(20), 18)
 
     def test_configuration_accepts_auto_and_manual_scale(self) -> None:
-        default_text = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
-        self.assertIsNone(load_config(ROOT / "configs" / "default.toml").ui_scale)
+        default_text = (ROOT / "configs" / "general.toml").read_text(encoding="utf-8")
+        self.assertIsNone(load_config(ROOT / "configs" / "general.toml").ui_scale)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manual.toml"
             path.write_text(

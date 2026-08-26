@@ -1,0 +1,28 @@
+id = "simulated_second_stage"
+name = "Simulated 2nd Stage"
+version = "1.0.0"
+api_version = "4"
+backend = "labcontrol.instruments.simulated:SimulatedReadOnlyMonitor"
+kinds = ["monitor"]
+
+[[panels]]
+id = "main"
+label = "Simulated 2nd Stage"
+template = "readout"
+readings = ["value"]
+
+[readings.value]
+label = "Simulated 2nd Stage"
+unit = "K"
+decimals = 3
+
+[[instances]]
+id = "second_stage"
+initial_value = 4.2
+noise = 0.002
+
+[[instances.panels]]
+id = "main"
+enabled = true
+order = 3
+role = "none"

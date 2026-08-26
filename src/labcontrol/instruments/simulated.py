@@ -50,7 +50,9 @@ class _SimulatedRampController(SystemInstrument):
             self._current = self._target
         else:
             self._current += math.copysign(max_step, difference)
-        observed = self._current + self._random.gauss(0.0, self._noise)
+        observed = self._current
+        if self._current != self._target:
+            observed += self._random.gauss(0.0, self._noise)
         return {
             "value": observed,
             "target": self._target,
@@ -58,13 +60,22 @@ class _SimulatedRampController(SystemInstrument):
             "moving": self._current != self._target,
         }
 
-    def set_target(self, value: float, rate_per_minute: float, mode: str = "Settle") -> None:
+    def set_target(
+        self,
+        value: float,
+        rate_per_minute: float,
+        mode: str = "Settle",
+        *,
+        control: str,
+    ) -> None:
+        del mode, control
         if not self._connected:
             raise InstrumentError("Instrument is not connected", "NOT_CONNECTED")
         self._target = value
         self._rate = rate_per_minute
 
-    def hold(self) -> None:
+    def hold(self, *, control: str) -> None:
+        del control
         if not self._connected:
             raise InstrumentError("Instrument is not connected", "NOT_CONNECTED")
         self._target = self._current

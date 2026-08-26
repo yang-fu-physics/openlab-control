@@ -5,7 +5,8 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - "templates/**"
+      - "modules/**"
+      - "system_instruments/**"
       - "src/labcontrol/module_api.py"
       - "src/labcontrol/measurement/frontend_api.py"
       - "src/labcontrol/instruments/base.py"

@@ -7,6 +7,8 @@
 
 ### 连接
 
+- `instrument.toml` 使用 API v4，`config_fields`、`controls`、`panels`、`readings` 和
+  `sequence_commands` 的 ID 与引用全部有效。
 - 正确型号可以连接并读到第一份有效状态。
 - 错误型号立即拒绝，且不发送任何设置命令。
 - 打开通讯后任一步失败，句柄仍会关闭。
@@ -21,6 +23,7 @@
 
 ### 控制
 
+- 每个 `controller` 都引用已声明的 control 和 reading；扫描器生成的现场限制能传到后台。
 - 最小值、最大值、最大速率边界恰好可用。
 - 边界外、零速率、负速率、`NaN` 和无穷在发送前被拒绝。
 - 设置 PID、速率和目标的顺序与仪表手册一致。
@@ -30,6 +33,9 @@
 
 ### 故障
 
+- 同一 VISA 地址重复分配、面板顺序不连续、两个 `sample_temp` 或两个 `field` 会在连接前
+  被拒绝。
+- `pid_file` 缺失、损坏或含空 `zones` 时，依赖这些区间的实现会在连接前明确失败。
 - 普通读失败进入重连，恢复后核对实际状态。
 - 超过恢复时间转为故障。
 - 安全报警不会被当成普通通讯错误重试。
@@ -66,14 +72,12 @@ class FakeTransport:
 
 ## 仓库中的参考测试
 
-核心模板位于：
+核心示例位于：
 
 ```text
-templates/system-instruments-repository/
-├─ instruments/
-│  ├─ example_controller/
-│  └─ example_monitor/
-└─ tests/test_repository_layout.py
+system_instruments/
+├─ example_controller/
+└─ example_monitor/
 ```
 
 模板后台故意不能控制真实仪表。复制后请为具体型号新增协议测试，不要把“能 import”当成
@@ -89,9 +93,14 @@ templates/system-instruments-repository/
 
 再把一个副本手动复制到核心的 `system_instruments/`，使用仿真或假的通讯后端检查：
 
-- 首次信任和源码变化后重新信任；
+- Instrument Scanner 能从作者清单生成表单，并把除面板模板外的静态元数据写入
+  `configs/instruments/<id>.toml`；
+- 同一种型号可以保存多个 `[[instances]]`，每个实例仍只有一个进程和通讯会话；
+- 分配给 System Instrument 的 VISA 地址不会留在 `configs/visa.resources.toml`；
+- 三个仿真默认关闭，没有 System 面板时主程序仍可启动；
+- 再次保存会按最终预览完整覆盖生成配置，但不覆盖或删除现有 PID 文件；
 - 源码版与 Windows 打包版发现结果一致；
-- 额外依赖只能从本地 wheel 安装；
+- 所需 Python 包已包含在核心锁定依赖中；
 - 前面板、Live Trend、实验 DAT 和 `instrument_status.dat` 字段一致；
 - Stop、Error、退出和重建窗口不会增加通讯会话。
 

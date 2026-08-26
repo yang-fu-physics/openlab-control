@@ -92,19 +92,14 @@ T Wait For 10.0 secs
 Pause 会冻结等待进度；Stop/Error 可在最多约一个运行时检查周期内打断。
 等待时间必须在 0 到 31536000 秒之间；手写 SEQ 与运行时使用同一限制。
 
-### 仪表选择
+### 标准温场仪表
 
-温度/磁场 Set 和 Scan 都可在末尾显式选择配置中的仪表：
+Temperature 和 Scan Temperature 固定使用全局唯一的 `sample_temp` 面板；Field 和 Scan
+Field 固定使用全局唯一的 `field` 面板。角色由 Instrument Scanner 写入 System Instrument
+实例，SEQ 文本不保存物理实例 ID，也不接受 `using instrument` 后缀。
 
-```text
-T Set Temperature 20.000 K at 5.000 K/min in Settle mode using instrument "cryostat_primary"
-T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using instrument "magnet A"
-```
-
-参数窗口按仪表类型列出允许控制的配置 ID，并随选择项切换上下限和最大速率。省略
-`using instrument` 时选择该类型唯一的 primary；旧文件中的 `temperature`/`field` 角色名也
-按此规则兼容。显式 ID 会随保存和重新打开保持，ID 不得指向错误类型、只读仪表或未连接
-仪表。
+参数窗口直接使用相应 controller 面板的上下限与最大速率。缺少对应角色、角色重复或面板
+不是可控制 controller 时，程序会在连接真实仪表或执行命令前明确拒绝配置。
 
 ### Set Temperature
 
@@ -201,7 +196,7 @@ T Compressor On
 T Compressor Off
 ```
 
-- 只有对应 System Instrument 已安装且被现场配置引用时才会注册；
+- 只有对应 System Instrument 已安装，并且扫描器生成了该物理实例时才会注册；
 - 双击后直接插入，不弹参数窗口；
 - 指令本身不写 DAT；
 - Warning 报警后继续，Error 中止 SEQ；

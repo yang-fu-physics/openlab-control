@@ -1,20 +1,21 @@
 from __future__ import annotations
 
+import csv
 import shutil
 import sys
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SIMULATED_MODULE = (
     ROOT
-    / "templates"
-    / "measurement-modules-repository"
     / "modules"
     / "simulated_transport"
 )
@@ -26,23 +27,105 @@ from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     InstrumentActivity,
     InstrumentConnectionState,
+    InstrumentControlState,
     InstrumentKind,
     InstrumentMetric,
     InstrumentSnapshot,
     Severity,
+    StabilityState,
 )
 from labcontrol.measurement.manifest import ModuleColumn, load_manifest  # noqa: E402
+from tests.configuration_fixtures import write_simulated_configuration  # noqa: E402
 
 
 class DatafileTests(unittest.TestCase):
+    def test_run_snapshot_copies_complete_site_configuration_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            configs = temp_root / "configs"
+            instruments = configs / "instruments"
+            pid = configs / "pid"
+            instruments.mkdir(parents=True)
+            pid.mkdir()
+            general = configs / "general.toml"
+            shutil.copy2(ROOT / "configs" / "general.toml", general)
+            visa_text = (
+                '[[resources]]\n'
+                'id = "meter"\n'
+                'address = "GPIB0::1::INSTR"\n'
+                'identity = ""\n'
+            )
+            (configs / "visa.resources.toml").write_text(
+                visa_text,
+                encoding="utf-8",
+            )
+            instrument_text = """id = "simulated_second_stage"
+name = "Simulated 2nd Stage"
+version = "1.0.0"
+api_version = "4"
+backend = "labcontrol.instruments.simulated:SimulatedReadOnlyMonitor"
+kinds = ["monitor"]
+
+[[panels]]
+id = "main"
+label = "Simulated 2nd Stage"
+template = "readout"
+readings = ["value"]
+
+[readings.value]
+label = "Simulated 2nd Stage"
+unit = "K"
+decimals = 3
+
+[[instances]]
+id = "second_stage"
+initial_value = 4.2
+noise = 0.002
+
+[[instances.panels]]
+id = "main"
+enabled = true
+order = 1
+role = "none"
+"""
+            instrument_path = instruments / "simulated_second_stage.toml"
+            instrument_path.write_text(instrument_text, encoding="utf-8")
+            pid_text = "zones = []\n"
+            (pid / "unused.toml").write_text(pid_text, encoding="utf-8")
+
+            logger = DatRunLogger(load_config(general), EventManager())
+            paths = logger.open_run("snapshot.seq", "T End Sequence\n")
+            with self.assertRaisesRegex(ValueError, "reserved run artifact"):
+                logger.set_datafile("configuration/overwrite.dat")
+            logger.close()
+
+            snapshot = paths.configuration_snapshot
+            self.assertTrue(snapshot.is_dir())
+            self.assertEqual(
+                (snapshot / "general.toml").read_text(encoding="utf-8"),
+                general.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                (snapshot / "visa.resources.toml").read_text(encoding="utf-8"),
+                visa_text,
+            )
+            self.assertEqual(
+                (snapshot / "instruments" / instrument_path.name).read_text(
+                    encoding="utf-8"
+                ),
+                instrument_text,
+            )
+            self.assertEqual(
+                (snapshot / "pid" / "unused.toml").read_text(encoding="utf-8"),
+                pid_text,
+            )
+
     def test_instrument_metrics_have_frozen_columns_in_measurement_and_status_files(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = temp_root / "configs" / "default.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
             logger = DatRunLogger(config, EventManager())
             now = time.monotonic()
@@ -57,6 +140,14 @@ class DatafileTests(unittest.TestCase):
                     target=4.0,
                     rate_per_minute=1.0,
                     activity=InstrumentActivity.HOLDING,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=4.2,
+                            target=4.0,
+                            rate_per_minute=1.0,
+                            activity=InstrumentActivity.HOLDING,
+                        )
+                    },
                     metrics={
                         "second_stage": InstrumentMetric(
                             "2nd Stage",
@@ -148,12 +239,160 @@ class DatafileTests(unittest.TestCase):
                 self.assertIn("temperature.heater_range", text)
                 self.assertIn("20.125,12.35,LOW", text)
 
+    def test_instrument_status_logs_each_controller_panel_and_physical_state_once(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            base_config = load_config(write_simulated_configuration(temp_root))
+            instruments = {
+                instrument.id: instrument
+                for instrument in base_config.instrument_instances
+            }
+            temperature = instruments["temperature"]
+            main_panel = temperature.panel("main")
+            temperature = replace(
+                temperature,
+                panels=(
+                    replace(
+                        main_panel,
+                        id="sample",
+                        control_id="sample",
+                    ),
+                    replace(
+                        main_panel,
+                        id="shield",
+                        control_id="shield",
+                        role="none",
+                    ),
+                    replace(
+                        main_panel,
+                        id="disabled",
+                        control_id="disabled",
+                        enabled=False,
+                        order=None,
+                        role="none",
+                    ),
+                ),
+            )
+            config = SimpleNamespace(
+                source_path=base_config.source_path,
+                logging=base_config.logging,
+                instrument_instances=(
+                    temperature,
+                    instruments["field"],
+                    instruments["second_stage"],
+                ),
+                resolve_project_path=base_config.resolve_project_path,
+            )
+            now = time.monotonic()
+            snapshots = {
+                "temperature": InstrumentSnapshot(
+                    instrument_id="temperature",
+                    display_name="Temperature",
+                    kind=InstrumentKind.TEMPERATURE,
+                    timestamp=now,
+                    unit="K",
+                    current=999.0,
+                    controls={
+                        "sample": InstrumentControlState(
+                            current=3.1236,
+                            target=3.0,
+                            rate_per_minute=1.0,
+                            activity=InstrumentActivity.MOVING,
+                            stability=StabilityState.SETTLING,
+                            ready=False,
+                        ),
+                        "shield": InstrumentControlState(
+                            current=5.6789,
+                            target=5.5,
+                            rate_per_minute=0.25,
+                            activity=InstrumentActivity.HOLDING,
+                            stability=StabilityState.STABLE,
+                            ready=True,
+                        ),
+                    },
+                    metrics={
+                        "heater_output": InstrumentMetric(
+                            "Heater",
+                            12.345,
+                            "%",
+                            2,
+                        )
+                    },
+                ),
+                "field": InstrumentSnapshot(
+                    instrument_id="field",
+                    display_name="Field",
+                    kind=InstrumentKind.FIELD,
+                    timestamp=now,
+                    unit="Oe",
+                    current=888.0,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=123.456,
+                            target=100.0,
+                            rate_per_minute=10.0,
+                            activity=InstrumentActivity.HOLDING,
+                            stability=StabilityState.STABLE,
+                            ready=True,
+                        )
+                    },
+                ),
+                "second_stage": InstrumentSnapshot(
+                    instrument_id="second_stage",
+                    display_name="Second Stage",
+                    kind=InstrumentKind.MONITOR,
+                    timestamp=now,
+                    unit="K",
+                    current=4.2345,
+                ),
+            }
+            logger = DatRunLogger(config, EventManager())
+            paths = logger.open_run(
+                "panels.seq",
+                "T End Sequence\n",
+                instrument_snapshots=snapshots,
+            )
+            logger.write_instrument_status(snapshots, force=True)
+            logger.close()
+
+            status = paths.instrument_status_file.read_text(encoding="utf-8")
+            reader = csv.DictReader(
+                status.split("[Data]\n", 1)[1].splitlines()
+            )
+            columns = reader.fieldnames
+            self.assertIsNotNone(columns)
+            assert columns is not None
+            row = next(reader)
+
+            self.assertEqual(row["temperature.sample.Current(K)"], "3.124")
+            self.assertEqual(row["temperature.sample.Target(K)"], "3.000")
+            self.assertEqual(row["temperature.sample.Rate(K/min)"], "1.000")
+            self.assertEqual(row["temperature.sample.Activity"], "moving")
+            self.assertEqual(row["temperature.sample.Stability"], "settling")
+            self.assertEqual(row["temperature.sample.Ready"], "false")
+            self.assertEqual(row["temperature.shield.Current(K)"], "5.679")
+            self.assertEqual(row["temperature.shield.Ready"], "true")
+            self.assertEqual(row["field.main.Current(Oe)"], "123.456")
+            self.assertEqual(row["second_stage.Current(K)"], "4.234")
+            self.assertEqual(row["temperature.heater_output(%)"], "12.35")
+
+            self.assertNotIn("temperature.Current(K)", columns)
+            self.assertNotIn("field.Current(Oe)", columns)
+            self.assertNotIn("temperature.disabled.Current(K)", columns)
+            self.assertNotIn("second_stage.Target(K)", columns)
+            self.assertEqual(columns.count("temperature.Connection"), 1)
+            self.assertEqual(columns.count("temperature.ReadingAge(s)"), 1)
+            self.assertEqual(columns.count("temperature.Message"), 1)
+            self.assertEqual(columns.count("temperature.heater_output(%)"), 1)
+            self.assertNotIn("temperature.sample.Connection", columns)
+            self.assertNotIn("temperature.shield.Connection", columns)
+
     def test_writes_header_sparse_rows_and_event_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = temp_root / "configs" / "default.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
             events = EventManager()
             logger = DatRunLogger(config, events)
@@ -172,8 +411,44 @@ class DatafileTests(unittest.TestCase):
             )
             now = time.monotonic()
             snapshots = {
-                "temperature": InstrumentSnapshot("temperature", "温度", InstrumentKind.TEMPERATURE, now, "K", 3.1236, 3.0, 1.0, InstrumentActivity.HOLDING),
-                "field": InstrumentSnapshot("field", "磁场", InstrumentKind.FIELD, now, "Oe", 123.456, 100.0, 10.0, InstrumentActivity.HOLDING),
+                "temperature": InstrumentSnapshot(
+                    "temperature",
+                    "温度",
+                    InstrumentKind.TEMPERATURE,
+                    now,
+                    "K",
+                    3.1236,
+                    3.0,
+                    1.0,
+                    InstrumentActivity.HOLDING,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=3.1236,
+                            target=3.0,
+                            rate_per_minute=1.0,
+                            activity=InstrumentActivity.HOLDING,
+                        )
+                    },
+                ),
+                "field": InstrumentSnapshot(
+                    "field",
+                    "磁场",
+                    InstrumentKind.FIELD,
+                    now,
+                    "Oe",
+                    123.456,
+                    100.0,
+                    10.0,
+                    InstrumentActivity.HOLDING,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=123.456,
+                            target=100.0,
+                            rate_per_minute=10.0,
+                            activity=InstrumentActivity.HOLDING,
+                        )
+                    },
+                ),
                 "second_stage": InstrumentSnapshot("second_stage", "2nd Stage", InstrumentKind.MONITOR, now, "K", 4.2345),
             }
             self.assertTrue(
@@ -244,12 +519,12 @@ class DatafileTests(unittest.TestCase):
             self.assertIn("RESOLVED", event_data)
             self.assertIn(",2,", event_data)
             self.assertIn(
-                "temperature.Current(K),"
-                "temperature.Target(K),"
-                "temperature.Rate(K/min),"
-                "temperature.Activity,"
-                "temperature.Stability,"
-                "temperature.Ready,"
+                "temperature.main.Current(K),"
+                "temperature.main.Target(K),"
+                "temperature.main.Rate(K/min),"
+                "temperature.main.Activity,"
+                "temperature.main.Stability,"
+                "temperature.main.Ready,"
                 "temperature.Connection,"
                 "temperature.ReadingAge(s),"
                 "temperature.Message",
@@ -285,14 +560,7 @@ class DatafileTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = (
-                temp_root / "configs" / "default.toml"
-            )
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                config_path,
-            )
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
             module = load_manifest(SIMULATED_MODULE)
             logger = DatRunLogger(config, EventManager())
@@ -371,9 +639,7 @@ class DatafileTests(unittest.TestCase):
     def test_explicit_custom_folder_is_allowed_without_weakening_legacy_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = temp_root / "configs" / "default.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
 
             custom_events = EventManager()
@@ -411,9 +677,7 @@ class DatafileTests(unittest.TestCase):
     def test_invalid_mode_and_schema_mismatch_preserve_existing_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = temp_root / "configs" / "default.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
             logger = DatRunLogger(config, EventManager())
             logger.open_run("safe.seq", "T End Sequence\n")
@@ -474,9 +738,7 @@ class DatafileTests(unittest.TestCase):
     def test_matching_schema_appends_and_empty_run_creates_default_dat(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = temp_root / "configs" / "default.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
             target = temp_root / "shared.dat"
 
@@ -504,9 +766,7 @@ class DatafileTests(unittest.TestCase):
     def test_run_directory_allocation_retries_an_atomic_creation_race(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            (temp_root / "configs").mkdir()
-            config_path = temp_root / "configs" / "default.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", config_path)
+            config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
             runs_root = temp_root / "runs"
             resolved_runs_root = runs_root.resolve()

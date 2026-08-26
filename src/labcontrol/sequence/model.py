@@ -296,7 +296,6 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         FieldSpec("text", "Remark", "text", "Remark"),
     )),
     CommandSpec(CommandType.SCAN_FIELD, "Scan Field", "System Commands", (
-        FieldSpec("instrument_id", "Field instrument", "text", "field"),
         FieldSpec("start", "Start", "float", 0.0),
         FieldSpec("stop", "Stop", "float", 10000.0),
         FieldSpec("unit", "Unit", "choice", "Oe", choices=("Oe", "T")),
@@ -311,7 +310,6 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         ),
     )),
     CommandSpec(CommandType.SCAN_TEMPERATURE, "Scan Temperature", "System Commands", (
-        FieldSpec("instrument_id", "Temperature instrument", "text", "temperature"),
         FieldSpec("point_mode", "Point definition", "choice", "Linear", choices=("Linear", "List")),
         FieldSpec("start", "Start (K)", "float", 300.0),
         FieldSpec("stop", "Stop (K)", "float", 10.0),
@@ -330,14 +328,12 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         FieldSpec("steps", "Points", "int", 60, 1, 1000000),
     )),
     CommandSpec(CommandType.SET_FIELD, "Set Field", "System Commands", (
-        FieldSpec("instrument_id", "Field instrument", "text", "field"),
         FieldSpec("target", "Target", "float", 0.0),
         FieldSpec("unit", "Unit", "choice", "Oe", choices=("Oe", "T")),
         FieldSpec("rate", "Rate per minute", "float", 5000.0, 0.000001),
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.SET_TEMPERATURE, "Set Temperature", "System Commands", (
-        FieldSpec("instrument_id", "Temperature instrument", "text", "temperature"),
         FieldSpec("target", "Target (K)", "float", 300.0),
         FieldSpec("rate", "Rate (K/min)", "float", 5.0, 0.000001),
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),

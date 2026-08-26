@@ -18,7 +18,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from labcontrol.config import load_config  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.instruments.manifest import (  # noqa: E402
     InstrumentSequenceCommandDescriptor,
@@ -54,7 +54,6 @@ def _descriptor(
         name=instrument_id,
         version="1.0.0",
         path=ROOT,
-        panel_template="controller",
         backend="backend:Instrument",
         kinds=(InstrumentKind.TEMPERATURE,),
         sequence_commands=(
@@ -70,7 +69,7 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
-        cls.config = load_config(ROOT / "configs" / "default.toml")
+        cls.config = load_simulated_config()
 
     def test_configured_command_round_trips_as_direct_seq_text(self) -> None:
         descriptor = _descriptor(
@@ -79,10 +78,10 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
             "Compressor On",
         )
         instrument = replace(
-            self.config.instruments[0],
+            self.config.instrument_instances[0],
             backend="compressor",
         )
-        config = replace(self.config, instruments=(instrument,))
+        config = replace(self.config, instrument_instances=(instrument,))
         specs = configured_system_instrument_commands(
             config,
             (descriptor,),
@@ -115,12 +114,12 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
         first = _descriptor("first", "on", "Compressor On")
         second = _descriptor("second", "start", "compressor on")
         instruments = (
-            replace(self.config.instruments[0], backend="first"),
-            replace(self.config.instruments[1], backend="second"),
+            replace(self.config.instrument_instances[0], backend="first"),
+            replace(self.config.instrument_instances[1], backend="second"),
         )
         with self.assertRaisesRegex(ValueError, "conflicts with"):
             configured_system_instrument_commands(
-                replace(self.config, instruments=instruments),
+                replace(self.config, instrument_instances=instruments),
                 (first, second),
             )
 
@@ -129,9 +128,9 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
             configured_system_instrument_commands(
                 replace(
                     self.config,
-                    instruments=(
+                    instrument_instances=(
                         replace(
-                            self.config.instruments[0],
+                            self.config.instrument_instances[0],
                             backend="first",
                         ),
                     ),
@@ -150,9 +149,9 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
         specs = configured_system_instrument_commands(
             replace(
                 self.config,
-                instruments=(
+                instrument_instances=(
                     replace(
-                        self.config.instruments[0],
+                        self.config.instrument_instances[0],
                         backend="compressor",
                     ),
                 ),
@@ -200,9 +199,9 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
         specs = configured_system_instrument_commands(
             replace(
                 self.config,
-                instruments=(
+                instrument_instances=(
                     replace(
-                        self.config.instruments[0],
+                        self.config.instrument_instances[0],
                         backend="compressor",
                     ),
                 ),
@@ -252,14 +251,24 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
             "compressor_on",
             "Compressor On",
         )
+        base = self.config.instrument("second_stage")
+        switch = replace(
+            base.panel("main"),
+            instrument_id="compressor",
+            display_name="Compressor",
+            template="switch",
+            reading=base.main_reading,
+            readings=(),
+            commands=("compressor_on",),
+        )
         instrument = replace(
-            self.config.instrument("second_stage"),
+            base,
             id="compressor",
             display_name="Compressor",
             backend="compressor",
-            panel_template="switch",
+            panels=(switch,),
         )
-        config = replace(self.config, instruments=(instrument,))
+        config = replace(self.config, instrument_instances=(instrument,))
         specs = configured_system_instrument_commands(
             config,
             (descriptor,),
@@ -276,7 +285,7 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
         ):
             window = MainWindow(config)
         try:
-            panel = window.status_panel.main_panels["compressor"]
+            panel = window.status_panel.panels["compressor.main"]
             window.status_panel.update_snapshot(
                 InstrumentSnapshot(
                     "compressor",

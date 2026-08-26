@@ -126,14 +126,20 @@ jobs:
             -TimeoutMilliseconds 15000
           Invoke-PackagedProgram `
             -Path (Join-Path $releaseRoot "OpenLabControl.exe") `
-            -Arguments @("--headless-demo", "--timeout", "120") `
+            -Arguments @(
+              "--headless-demo",
+              "--sequence",
+              "examples\headless_smoke.seq",
+              "--timeout",
+              "120"
+            ) `
             -TimeoutMilliseconds 180000
 
           $runs = Join-Path $releaseRoot "runs"
           Get-ChildItem -LiteralPath $runs -Force | Remove-Item -Recurse -Force
           $generatedPaths = @(
             (Join-Path $releaseRoot "headless_demo.log"),
-            (Join-Path $releaseRoot "configs\site.local.toml")
+            (Join-Path $releaseRoot "configs\visa.resources.toml")
           )
           foreach ($generatedPath in $generatedPaths) {
             if (Test-Path -LiteralPath $generatedPath) {
@@ -168,6 +174,9 @@ jobs:
             $rootScanner = @($entries | Where-Object {
               $_.FullName.Replace("\", "/") -eq "OpenLabControl/InstrumentScanner.exe"
             })
+            $generalConfig = @($entries | Where-Object {
+              $_.FullName.Replace("\", "/") -eq "OpenLabControl/configs/general.toml"
+            })
             $toolsEntries = @($entries | Where-Object {
               $_.FullName.Replace("\", "/").StartsWith("OpenLabControl/tools/")
             })
@@ -175,12 +184,17 @@ jobs:
               $name = $_.FullName.Replace("\", "/")
               $name -match "(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)(/|$)" -or
               $name -match "\.(pyc|pyo)$" -or
-              $name -eq "OpenLabControl/configs/site.local.toml" -or
+              $name -eq "OpenLabControl/configs/visa.resources.toml" -or
+              ($name.StartsWith("OpenLabControl/configs/instruments/") -and -not $name.EndsWith("/")) -or
+              ($name.StartsWith("OpenLabControl/configs/pid/") -and -not $name.EndsWith("/")) -or
               $name -eq "OpenLabControl/headless_demo.log" -or
               ($name.StartsWith("OpenLabControl/runs/") -and -not $name.EndsWith("/"))
             })
             if ($rootScanner.Count -ne 1) {
               throw "Archive must contain exactly one root InstrumentScanner.exe"
+            }
+            if ($generalConfig.Count -ne 1) {
+              throw "Archive must contain exactly one configs/general.toml"
             }
             if ($toolsEntries.Count -ne 0) {
               throw "Archive unexpectedly contains tools entries"

@@ -14,10 +14,6 @@ def project_root() -> Path:
 
 
 def default_config_path() -> Path:
-    """优先返回本机现场配置，否则返回随程序提供的仿真配置。"""
+    """Return the single application configuration entry point."""
 
-    configs = project_root() / "configs"
-    site_config = configs / "site.local.toml"
-    if site_config.is_file():
-        return site_config
-    return configs / "default.toml"
+    return project_root() / "configs" / "general.toml"

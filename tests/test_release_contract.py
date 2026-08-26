@@ -13,11 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol import __version__  # noqa: E402
-from labcontrol.package_support.dependencies import (  # noqa: E402
-    FRAMEWORK_DEPENDENCY_VERSIONS,
-)
-
-
 class ReleaseContractTests(unittest.TestCase):
     def test_source_and_project_versions_match(self) -> None:
         with (ROOT / "pyproject.toml").open("rb") as handle:
@@ -79,13 +74,13 @@ class ReleaseContractTests(unittest.TestCase):
                 ]
             )
         }
+        locked = {
+            canonicalize_name(entry.split("==", 1)[0]): entry.split("==", 1)[1]
+            for entry in entries
+        }
         self.assertEqual(
             declared,
-            {
-                name: str(version)
-                for name, version
-                in FRAMEWORK_DEPENDENCY_VERSIONS.items()
-            },
+            {name: locked[name] for name in declared},
         )
 
         setup_script = (ROOT / "setup.bat").read_text(encoding="utf-8")
@@ -98,7 +93,12 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn(r".venv\Scripts\pythonw.exe", source_launcher)
         self.assertEqual(source_launcher.count("run.py %*"), 2)
         source_ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
-        self.assertIn("/configs/*.local.toml", source_ignore)
+        for local_configuration in (
+            "/configs/visa.resources.toml",
+            "/configs/instruments/*.toml",
+            "/configs/pid/*.toml",
+        ):
+            self.assertIn(local_configuration, source_ignore)
 
         specification = (ROOT / "OpenLabControl.spec").read_text(encoding="utf-8")
         self.assertIn(
@@ -151,18 +151,19 @@ class ReleaseContractTests(unittest.TestCase):
             "configs",
             "examples",
             "docs",
-            "templates",
-            "integrations",
             "modules",
+            "system_instruments",
         ):
             self.assertIn(f'"{name}"', staging_script)
         self.assertNotIn("module_runtime", staging_script)
         for name in (
-            "system_instruments",
+            "templates",
+            "integrations",
             "runtime_packages",
             "trust_state",
+            "wheels",
         ):
-            self.assertIn(f'"{name}"', staging_script)
+            self.assertNotIn(f'"{name}"', staging_script)
         for generated_name in (
             "__pycache__",
             ".pytest_cache",
@@ -194,20 +195,20 @@ class ReleaseContractTests(unittest.TestCase):
             "$process.Kill($true)",
             "Get-FileHash",
             "headless_demo.log",
-            "configs\\site.local.toml",
+            "OpenLabControl/configs/general.toml",
+            "configs\\visa.resources.toml",
+            "examples\\headless_smoke.seq",
             "forbiddenNames",
             "gh release create",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, workflow)
-        self.assertIn(
-            '-Arguments @("--headless-demo", "--timeout", "120")',
-            workflow,
-        )
+        self.assertIn('"--headless-demo"', workflow)
+        self.assertIn('"--sequence"', workflow)
         self.assertIn("-TimeoutMilliseconds 180000", workflow)
         self.assertNotIn("tools/InstrumentScanner.exe", workflow)
 
-    def test_current_docs_describe_shared_framework_and_isolated_extras(self) -> None:
+    def test_current_docs_describe_shared_framework_dependencies(self) -> None:
         current_documents = "\n".join(
             (ROOT / relative_path).read_text(encoding="utf-8")
             for relative_path in (
@@ -232,23 +233,33 @@ class ReleaseContractTests(unittest.TestCase):
             "device.toml",
             "instruments.local.toml",
             "resource_file",
+            "runtime_packages",
+            "trust_state",
+            "requirements.lock",
+            "content-fingerprint",
+            "content fingerprint",
+            "共享离线 wheels",
+            "site.local.toml",
+            "configs/default.toml",
+            "[[instruments]]",
+            "control_enabled",
+            "configuration.toml",
         ):
             with self.subTest(obsolete=obsolete):
                 self.assertNotIn(obsolete, current_documents)
         for required in (
-            "runtime_packages",
-            "--no-index",
-            "requirements.lock",
-            "fingerprint",
             "PyVISA",
             "框架共享",
-            "额外依赖",
-            "measurement-modules-repository",
-            "system-instruments-repository",
+            "modules/",
+            "system_instruments/",
             "instrument.toml",
-            "site.local.toml",
+            "general.toml",
+            "visa.resources.toml",
+            "configs/instruments/",
+            "configs/pid/",
             "[[resources]]",
-            "[[instruments]]",
+            "[[instances]]",
+            "sample_temp",
             "backend",
         ):
             with self.subTest(required=required):

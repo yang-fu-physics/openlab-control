@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import ast
-import importlib.util
 import json
 import os
 import sys
@@ -53,7 +51,7 @@ def _raise_os_error(message: str):
 class AlarmReportingConfigTests(unittest.TestCase):
     def test_default_reporting_is_disabled_and_bounded(self) -> None:
         config = load_config(
-            ROOT / "configs" / "default.toml"
+            ROOT / "configs" / "general.toml"
         )
         reporting = config.alarms.reporting
         self.assertFalse(reporting.enabled)
@@ -70,9 +68,9 @@ class AlarmReportingConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "configs").mkdir()
-            destination = root / "configs" / "default.toml"
+            destination = root / "configs" / "general.toml"
             source = (
-                ROOT / "configs" / "default.toml"
+                ROOT / "configs" / "general.toml"
             ).read_text(encoding="utf-8")
             destination.write_text(
                 source.replace(
@@ -286,56 +284,6 @@ class AlarmReporterTests(unittest.TestCase):
             states[0] or "",
         )
         self.assertNotIn("test-secret", states[0] or "")
-
-
-class NoneBotReceiverReferenceTests(unittest.TestCase):
-    def test_receiver_is_valid_python_and_routes_server_side(
-        self,
-    ) -> None:
-        source_path = (
-            ROOT
-            / "integrations"
-            / "nonebot_alarm_receiver"
-            / "__init__.py"
-        )
-        source = source_path.read_text(encoding="utf-8")
-        ast.parse(source)
-        self.assertNotIn("target_qq", source)
-        self.assertIn("compare_digest", source)
-
-        routing_path = source_path.with_name("routing.py")
-        specification = (
-            importlib.util.spec_from_file_location(
-                "openlab_alarm_routing_test",
-                routing_path,
-            )
-        )
-        assert (
-            specification is not None
-            and specification.loader is not None
-        )
-        module = importlib.util.module_from_spec(
-            specification
-        )
-        specification.loader.exec_module(module)
-        admins = module.parse_qqs("[1001, 1002]")
-        testers = module.parse_qqs("1002,1003")
-        self.assertEqual(
-            module.recipients(
-                "warning",
-                admins,
-                testers,
-            ),
-            frozenset((1002, 1003)),
-        )
-        self.assertEqual(
-            module.recipients(
-                "error",
-                admins,
-                testers,
-            ),
-            frozenset((1001, 1002, 1003)),
-        )
 
 
 if __name__ == "__main__":

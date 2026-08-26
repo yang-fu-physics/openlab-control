@@ -3,6 +3,12 @@
 这一页只使用仿真温度和磁场，不需要连接仪表。SEQ 是一棵可以缩进的命令树；扫描命令下面
 可以继续放扫描或 `Measure`。
 
+## 先启用仿真面板
+
+全新安装不会自动启用 System Instrument。先关闭主程序并打开 Instrument Scanner，在最后
+一页勾选 **Simulated Temperature**、**Simulated Magnetic Field** 和 **Simulated 2nd Stage**，
+检查面板顺序后保存。然后再启动 OpenLab Control。这个操作只生成仿真配置，不连接真实仪表。
+
 ## 在界面中建立命令
 
 1. 启动程序，确认底部 Temperature、Magnetic Field 和 2nd Stage 都有仿真读数。
@@ -41,12 +47,15 @@ T End Sequence
 3. 打开 `runs/<时间>_first-run/`，应看到：
 
 ```text
-sequence.seq
-configuration.toml
-module_settings/
-experiment.dat
-instrument_status.dat
-events.dat
+runs/<时间>_first-run/
+├─ sequence.seq
+├─ configuration/
+│  ├─ general.toml
+│  └─ instruments/
+├─ module_settings/
+├─ experiment.dat
+├─ instrument_status.dat
+└─ events.dat
 ```
 
 如果没有 Enable 任何 Measurement Module，`Measure` 仍会写系统温场快照，并产生一条

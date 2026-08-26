@@ -10,7 +10,6 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
-import sys
 
 import qtawesome as qta
 from PySide6.QtCore import QEvent, QSize, QTimer, Qt
@@ -42,15 +41,6 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..config import AppConfig
 from ..instruments.manifest import SystemInstrumentDescriptor
-from ..package_support.dependencies import (
-    DependencyInstallError,
-    install_offline_dependencies,
-)
-from ..package_support.trust import (
-    ContentTrustError,
-    ContentTrustStore,
-    content_tree_digest,
-)
 from ..formatting import control_decimals, fixed_number
 from ..models import (
     InstrumentConnectionState,
@@ -71,9 +61,6 @@ from ..module_commands import (
 from ..measurement.manifest import (
     ModuleDescriptor,
     discover_modules,
-    missing_dependencies,
-    module_dependency_errors,
-    module_dependency_directory,
 )
 from ..measurement.settings import load_settings, save_settings
 from ..runtime import RuntimeService
@@ -102,7 +89,6 @@ from .measurement_modules import (
 )
 from .module_monitor import ModuleMonitorPanel
 from .instrument_panels import InstrumentPanelHost
-from .trust_dialogs import confirm_measurement_module_trust
 from .preferences import UiPreferences, UiPreferenceStore
 from .scaling import (
     current_font_scale,
@@ -141,12 +127,6 @@ class MainWindow(QMainWindow):
         self._skip_window_layout_save = False
         self._start_maximized = (
             self.ui_preferences.window_mode == "maximized"
-        )
-        self.content_trust_store = ContentTrustStore(
-            config.resolve_project_path(
-                config.modules.state_directory
-            )
-            / "trusted_content.json"
         )
         self.module_descriptors = self._discover_module_descriptors()
         self.runtime = RuntimeService(
@@ -233,19 +213,7 @@ class MainWindow(QMainWindow):
         self.timer.start(config.ui_refresh_ms)
 
     def _discover_module_descriptors(self) -> tuple[ModuleDescriptor, ...]:
-        descriptors = discover_modules(self.config)
-        for descriptor in descriptors:
-            if not descriptor.valid or descriptor.dependency_error:
-                continue
-            dependency_errors = module_dependency_errors(
-                self.config,
-                descriptor,
-            )
-            if dependency_errors:
-                descriptor.dependency_error = "; ".join(
-                    dependency_errors
-                )
-        return descriptors
+        return discover_modules(self.config)
 
     def _build_ui(self) -> None:
         self.mdi = QMdiArea()
@@ -529,7 +497,8 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         panel = InstrumentPanelHost(
-            self.config.instruments,
+            self.config.instrument_instances,
+            self.config.panels,
             self._instrument_sequence_commands,
         )
         panel.controlRequested.connect(self._open_manual_control)
@@ -565,7 +534,6 @@ class MainWindow(QMainWindow):
         self.module_manager = ModuleManagerDialog(self.module_descriptors, self)
         self.module_manager.enableRequested.connect(self._set_module_enabled)
         self.module_manager.refreshRequested.connect(self._refresh_modules)
-        self.module_manager.installRequested.connect(self._install_module_dependencies)
         self.module_manager.openRequested.connect(self._show_module_window)
         self.new_action = QAction(qta.icon("fa5s.file"), "New", self)
         self.open_action = QAction(qta.icon("fa5s.folder-open"), "Open", self)
@@ -627,11 +595,18 @@ class MainWindow(QMainWindow):
         graph_menu = menu.addMenu("Graph")
         graph_menu.addActions([self.graph_action, self.data_browser_action])
         instrument_menu = menu.addMenu("Instrument")
-        for instrument in self.config.instruments:
-            if not instrument.control_enabled:
+        for panel in self.config.panels:
+            if panel.template != "controller":
                 continue
-            action = instrument_menu.addAction(instrument.display_name)
-            action.triggered.connect(lambda checked=False, instrument_id=instrument.id: self._open_manual_control(instrument_id))
+            instrument = self.config.instrument(panel.instrument_id)
+            action = instrument_menu.addAction(
+                f"{instrument.display_name} — {panel.display_name}"
+            )
+            action.triggered.connect(
+                lambda checked=False, instrument_id=instrument.id, panel_id=panel.id: (
+                    self._open_manual_control(instrument_id, panel_id)
+                )
+            )
         modules_menu = menu.addMenu("Modules")
         modules_menu.addAction(self.modules_action)
         simulation_menu = menu.addMenu("Simulation")
@@ -1255,7 +1230,7 @@ class MainWindow(QMainWindow):
             command,
             spec,
             self,
-            instrument_configs=self.config.instruments,
+            instrument_configs=self.config.instrument_instances,
             data_directory=self._last_data_directory,
         )
         try:
@@ -1311,7 +1286,7 @@ class MainWindow(QMainWindow):
             command,
             spec,
             self,
-            instrument_configs=self.config.instruments,
+            instrument_configs=self.config.instrument_instances,
             data_directory=self._last_data_directory,
         )
         try:
@@ -1681,9 +1656,9 @@ class MainWindow(QMainWindow):
         self.current_snapshots = snapshots
         for instrument_id, snapshot in snapshots.items():
             self.status_panel.update_snapshot(snapshot)
-            dialog = self.manual_dialogs.get(instrument_id)
-            if dialog is not None:
-                dialog.update_snapshot(snapshot)
+            for dialog in self.manual_dialogs.values():
+                if dialog.config.id == instrument_id:
+                    dialog.update_snapshot(snapshot)
         self.trend_dialog.add_snapshots(snapshots)
         self._update_run_availability()
 
@@ -1695,8 +1670,13 @@ class MainWindow(QMainWindow):
             self.run_button.setEnabled(False)
             return
         reason = ""
-        for config in self.config.instruments:
-            if not config.control_enabled:
+        for config in self.config.instrument_instances:
+            if not any(
+                panel.enabled
+                and panel.template == "controller"
+                and panel.role != "none"
+                for panel in config.panels
+            ):
                 continue
             snapshot = self.current_snapshots.get(config.id)
             if snapshot is None:
@@ -1912,27 +1892,6 @@ class MainWindow(QMainWindow):
             return
         try:
             if enabled:
-                descriptor = self._module_descriptor(module_id)
-                current_fingerprint = content_tree_digest(
-                    descriptor.path
-                )
-                if current_fingerprint != descriptor.fingerprint:
-                    raise ContentTrustError(
-                        f"{descriptor.name} changed after discovery; "
-                        "refresh modules before enabling it"
-                    )
-                if not confirm_measurement_module_trust(
-                    self,
-                    self.content_trust_store,
-                    descriptor,
-                ):
-                    self.module_manager.update_state(
-                        module_id,
-                        False,
-                        "disabled",
-                        "Module was not trusted",
-                    )
-                    return
                 future = self.runtime.enable_module(module_id)
                 self._pending_module_operations[
                     module_id
@@ -1961,17 +1920,6 @@ class MainWindow(QMainWindow):
         if window is not None:
             return window
         descriptor = self._module_descriptor(module_id)
-        if (
-            content_tree_digest(descriptor.path)
-            != descriptor.fingerprint
-            or not self.content_trust_store.is_trusted(
-                "module",
-                descriptor,
-            )
-        ):
-            raise PermissionError(
-                f"{descriptor.name} changed or is not trusted"
-            )
         window = ModuleWindow(
             descriptor,
             self,
@@ -2144,134 +2092,24 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"Found {len(descriptors)} measurement modules", 3000)
 
-    def _module_python_executable(self) -> Path | None:
-        configured = self.config.modules.python_executable.strip()
-        if configured:
-            candidate = self.config.resolve_project_path(configured)
-            return candidate if candidate.exists() else None
-        if not getattr(sys, "frozen", False):
-            return Path(sys.executable)
-        candidate = self.config.project_root / "runtime" / "python" / "python.exe"
-        return candidate if candidate.exists() else None
-
-    def _install_module_dependencies(self, module_id: str) -> None:
-        if module_id in self.enabled_modules:
-            QMessageBox.warning(
-                self,
-                "Dependency Install Unavailable",
-                "Disable this measurement module before replacing "
-                "its isolated dependencies.",
-            )
-            return
-        descriptor = self._module_descriptor(module_id)
-        try:
-            current_fingerprint = content_tree_digest(
-                descriptor.path
-            )
-        except ContentTrustError as exc:
-            QMessageBox.critical(
-                self,
-                "Module Validation Failed",
-                str(exc),
-            )
-            return
-        if current_fingerprint != descriptor.fingerprint:
-            QMessageBox.warning(
-                self,
-                "Module Changed",
-                "Refresh modules before preparing dependencies.",
-            )
-            return
-        if not confirm_measurement_module_trust(
-            self,
-            self.content_trust_store,
-            descriptor,
-        ):
-            return
-        dependency_errors = module_dependency_errors(
-            self.config,
-            descriptor,
-        )
-        if not dependency_errors:
-            QMessageBox.information(
-                self,
-                "Dependencies",
-                "All declared dependencies are installed in "
-                "this module's isolated runtime.",
-            )
-            return
-        missing = missing_dependencies(
-            self.config,
-            descriptor,
-        )
-        python = self._module_python_executable()
-        if python is None:
-            QMessageBox.warning(
-                self,
-                "Python Runtime Not Configured",
-                "Set modules.python_executable in configs/default.toml or add runtime/python/python.exe.",
-            )
-            return
-        answer = QMessageBox.question(
-            self,
-            "Install Module Dependencies",
-            "Prepare the following packages in this module's "
-            "isolated runtime using local wheels only?\n\n"
-            + "\n".join(
-                missing or descriptor.dependencies
-            )
-            + "\n\nCurrent runtime issue:\n"
-            + "\n".join(dependency_errors),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            install_offline_dependencies(
-                python_executable=python,
-                package_directory=descriptor.path,
-                site_packages=module_dependency_directory(
-                    self.config,
-                    descriptor,
-                ),
-                shared_wheels_directory=(
-                    self.config.resolve_project_path(
-                        self.config.modules.shared_wheels_directory
-                    )
-                ),
-                dependencies=descriptor.dependencies,
-                fingerprint=descriptor.fingerprint,
-            )
-        except DependencyInstallError as exc:
-            QMessageBox.critical(
-                self,
-                "Offline Dependency Install Failed",
-                str(exc),
-            )
-            return
-        QMessageBox.information(
-            self,
-            "Dependencies Installed",
-            "Offline preparation completed for this module.",
-        )
-        self._refresh_modules()
-
-    def _open_manual_control(self, instrument_id: str) -> None:
+    def _open_manual_control(
+        self,
+        instrument_id: str,
+        panel_id: str,
+    ) -> None:
         config = self.config.instrument(instrument_id)
-        if not config.control_enabled:
-            self.statusBar().showMessage(f"{config.display_name} is display only", 3000)
-            return
-        dialog = self.manual_dialogs.get(instrument_id)
+        panel = config.panel(panel_id)
+        key = panel.key
+        dialog = self.manual_dialogs.get(key)
         if dialog is None:
-            dialog = ManualControlDialog(config, self)
+            dialog = ManualControlDialog(config, panel, self)
             dialog.setRequested.connect(self._manual_set_target)
             dialog.holdRequested.connect(self._manual_hold_instrument)
             self._restore_dialog_geometry(
                 dialog,
-                f"manual/{instrument_id}",
+                f"manual/{key}",
             )
-            self.manual_dialogs[instrument_id] = dialog
+            self.manual_dialogs[key] = dialog
         dialog.set_runtime_editable(
             self.current_run_state in self.TERMINAL_STATES
             and self._pending_run is None
@@ -2283,8 +2121,21 @@ class MainWindow(QMainWindow):
         dialog.raise_()
         dialog.activateWindow()
 
-    def _manual_set_target(self, instrument_id: str, value: float, rate: float, mode: str) -> None:
-        future = self.runtime.set_target(instrument_id, value, rate, mode)
+    def _manual_set_target(
+        self,
+        instrument_id: str,
+        control: str,
+        value: float,
+        rate: float,
+        mode: str,
+    ) -> None:
+        future = self.runtime.set_target(
+            instrument_id,
+            value,
+            rate,
+            mode,
+            control=control,
+        )
         snapshot = self.current_snapshots.get(instrument_id)
         precision = control_decimals(snapshot.kind, snapshot.unit) if snapshot is not None else 3
         self._pending_manual_operations.append(
@@ -2295,8 +2146,15 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"Sending target to {instrument_id}...")
 
-    def _manual_hold_instrument(self, instrument_id: str) -> None:
-        future = self.runtime.hold_instrument(instrument_id)
+    def _manual_hold_instrument(
+        self,
+        instrument_id: str,
+        control: str,
+    ) -> None:
+        future = self.runtime.hold_instrument(
+            instrument_id,
+            control=control,
+        )
         self._pending_manual_operations.append(
             (future, f"Hold Current confirmed for {instrument_id}")
         )

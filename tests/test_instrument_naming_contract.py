@@ -9,10 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.config import load_config  # noqa: E402
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
 from labcontrol.instruments.base import SystemInstrument  # noqa: E402
 from labcontrol.models import InstrumentSnapshot  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 
 
 class InstrumentNamingContractTests(unittest.TestCase):
@@ -27,13 +27,17 @@ class InstrumentNamingContractTests(unittest.TestCase):
         self.assertIsNone(importlib.util.find_spec("labcontrol.extensions"))
 
     def test_configuration_exposes_only_instrument_names(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
-        self.assertTrue(config.instruments)
+        config = load_simulated_config()
+        self.assertTrue(config.instrument_instances)
         self.assertEqual(config.system_instruments.directory, "system_instruments")
         self.assertFalse(hasattr(config, "devices"))
         self.assertFalse(hasattr(config, "plugins"))
-        self.assertTrue(all(hasattr(item, "backend") for item in config.instruments))
-        self.assertTrue(all(not hasattr(item, "plugin") for item in config.instruments))
+        self.assertTrue(
+            all(hasattr(item, "backend") for item in config.instrument_instances)
+        )
+        self.assertTrue(
+            all(not hasattr(item, "plugin") for item in config.instrument_instances)
+        )
 
     def test_removed_directories_and_manifests_are_absent(self) -> None:
         for relative in (

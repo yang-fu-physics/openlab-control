@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import InstrumentConfig
+from ..config import InstrumentConfig, InstrumentPanelConfig
 from ..formatting import control_decimals, field_decimals, fixed_number
 from ..models import InstrumentKind, InstrumentSnapshot, LabEvent, Severity
 from ..module_commands import ModuleCommandSpec
@@ -89,35 +89,7 @@ class CommandDialog(QDialog):
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         for field in spec.fields:
             value = command.params.get(field.name, field.default)
-            expected_kind = (
-                InstrumentKind.TEMPERATURE
-                if command.type in TEMPERATURE_COMMANDS
-                else InstrumentKind.FIELD
-            )
-            if (
-                field.name == "instrument_id"
-                and command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS
-            ):
-                widget = QComboBox()
-                candidates = [
-                    item.id
-                    for item in instrument_configs
-                    if item.kind is expected_kind and item.control_enabled
-                ]
-                widget.addItems(candidates)
-                requested = str(value).strip()
-                index = widget.findText(
-                    requested,
-                    Qt.MatchFlag.MatchFixedString,
-                )
-                if index >= 0:
-                    widget.setCurrentIndex(index)
-                elif requested and (
-                    requested != expected_kind.value or not candidates
-                ):
-                    widget.insertItem(0, requested)
-                    widget.setCurrentIndex(0)
-            elif field.field_type == "choice":
+            if field.field_type == "choice":
                 widget = QComboBox()
                 widget.addItems(field.choices)
                 index = widget.findText(str(value), Qt.MatchFlag.MatchFixedString)
@@ -200,11 +172,6 @@ class CommandDialog(QDialog):
             self.limit_label.setWordWrap(True)
             self.limit_label.setStyleSheet("color: #59636e;")
             layout.addWidget(self.limit_label)
-            instrument_input = self.inputs.get("instrument_id")
-            if isinstance(instrument_input, QLineEdit):
-                instrument_input.textChanged.connect(self._apply_instrument_limits)
-            elif isinstance(instrument_input, QComboBox):
-                instrument_input.currentTextChanged.connect(self._apply_instrument_limits)
             self._apply_instrument_limits()
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -325,23 +292,25 @@ class CommandDialog(QDialog):
                     return
         super().accept()
 
-    def _selected_instrument_config(self) -> InstrumentConfig | None:
-        """返回当前选择且类型匹配的可配置仪表。"""
+    def _selected_control(
+        self,
+    ) -> tuple[InstrumentConfig, InstrumentPanelConfig] | None:
+        """返回标准命令由全局角色选中的物理实例和控制面板。"""
 
-        instrument_input = self.inputs.get("instrument_id")
-        if isinstance(instrument_input, QLineEdit):
-            instrument_id = instrument_input.text().strip()
-        elif isinstance(instrument_input, QComboBox):
-            instrument_id = instrument_input.currentText().strip()
-        else:
-            instrument_id = str(self.command.params.get("instrument_id", "")).strip()
-        config = self._instrument_configs.get(instrument_id)
-        expected_kind = (
-            InstrumentKind.TEMPERATURE
+        role = (
+            "sample_temp"
             if self.command.type in TEMPERATURE_COMMANDS
-            else InstrumentKind.FIELD
+            else "field"
         )
-        return config if config is not None and config.kind is expected_kind else None
+        for config in self._instrument_configs.values():
+            for panel in config.panels:
+                if (
+                    panel.enabled
+                    and panel.template == "controller"
+                    and panel.role == role
+                ):
+                    return config, panel
+        return None
 
     def _command_unit(self) -> str:
         if self.command.type in TEMPERATURE_COMMANDS:
@@ -377,18 +346,23 @@ class CommandDialog(QDialog):
         self._reset_control_ranges()
         unit = self._command_unit()
         self._set_control_suffixes(unit)
-        config = self._selected_instrument_config()
-        if config is None:
+        selected = self._selected_control()
+        if selected is None:
             if self.limit_label is not None:
                 self.limit_label.setText(
-                    "No matching configured instrument limits; the sequence will still be "
-                    "validated before the instrument moves."
+                    "No controller panel is assigned the required role."
                 )
             return
+        config, panel = selected
+        instrument_unit = config.reading(panel.reading).unit
         try:
-            minimum = convert_value(config.min_value, config.unit, unit)
-            maximum = convert_value(config.max_value, config.unit, unit)
-            maximum_rate = convert_value(config.max_rate_per_minute, config.unit, unit)
+            minimum = convert_value(panel.min_value, instrument_unit, unit)
+            maximum = convert_value(panel.max_value, instrument_unit, unit)
+            maximum_rate = convert_value(
+                panel.max_rate_per_minute,
+                instrument_unit,
+                unit,
+            )
         except UnitConversionError as exc:
             if self.limit_label is not None:
                 self.limit_label.setText(f"Configured limits cannot be converted: {exc}")
@@ -398,7 +372,7 @@ class CommandDialog(QDialog):
         maximum = self._finite_limit(maximum, 1e12)
         maximum_rate = self._finite_limit(maximum_rate, 1e12)
         limit_tooltip = (
-            f"From instrument '{config.id}' in the configuration file: "
+            f"From controller panel '{panel.key}' in the configuration file: "
             "min_value, max_value, and max_rate_per_minute."
         )
         for name in ("target", "start", "stop"):
@@ -414,7 +388,7 @@ class CommandDialog(QDialog):
         if self.limit_label is not None:
             decimals = 3 if self.command.type in TEMPERATURE_COMMANDS else field_decimals(unit)
             self.limit_label.setText(
-                f"Configured limits ({config.id}): "
+                f"Configured limits ({panel.key}): "
                 f"{fixed_number(minimum, decimals)} to {fixed_number(maximum, decimals)} {unit}; "
                 f"rate > 0 to {fixed_number(maximum_rate, decimals)} {unit}/min."
             )
@@ -431,19 +405,21 @@ class CommandDialog(QDialog):
     def _validate_temperature_points(self, points: tuple[float, ...]) -> None:
         """逐点验证非线性温度列表，不允许某个中间点越过仪表边界。"""
 
-        config = self._selected_instrument_config()
-        if config is None:
+        selected = self._selected_control()
+        if selected is None:
             return
+        config, panel = selected
+        instrument_unit = config.reading(panel.reading).unit
         for index, point in enumerate(points, start=1):
             try:
-                instrument_value = convert_value(point, "K", config.unit)
+                instrument_value = convert_value(point, "K", instrument_unit)
             except UnitConversionError as exc:
                 raise ValueError(str(exc)) from exc
-            if not config.min_value <= instrument_value <= config.max_value:
+            if not panel.min_value <= instrument_value <= panel.max_value:
                 raise ValueError(
                     f"Temperature point {index} ({fixed_number(point, 3)} K) is outside "
-                    f"the configured range {fixed_number(config.min_value, 3)} to "
-                    f"{fixed_number(config.max_value, 3)} {config.unit}."
+                    f"the configured range {fixed_number(panel.min_value, 3)} to "
+                    f"{fixed_number(panel.max_value, 3)} {instrument_unit}."
                 )
 
     def _change_field_unit(self, new_unit: str) -> None:
@@ -492,17 +468,28 @@ class CommandDialog(QDialog):
 class ManualControlDialog(QDialog):
     """单台可控温度/磁场仪表的手动 Set/Hold 窗口。
 
-    数值控件直接采用 ``InstrumentConfig`` 的上下限和最大速率。SEQ 持有控制权或仪表失联时，
+    数值控件直接采用所选控制面板的上下限和最大速率。SEQ 持有控制权或仪表失联时，
     主窗口通过 ``set_runtime_editable`` 与快照共同禁用按钮。
     """
 
-    setRequested = Signal(str, float, float, str)
-    holdRequested = Signal(str)
+    setRequested = Signal(str, str, float, float, str)
+    holdRequested = Signal(str, str)
 
-    def __init__(self, config: InstrumentConfig, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        config: InstrumentConfig,
+        panel: InstrumentPanelConfig,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.config = config
-        self.setWindowTitle(f"{config.display_name} - Manual Control")
+        self.panel = panel
+        self.reading = config.reading(panel.reading)
+        self.kind = {
+            "sample_temp": InstrumentKind.TEMPERATURE,
+            "field": InstrumentKind.FIELD,
+        }.get(panel.role, config.kind)
+        self.setWindowTitle(f"{panel.display_name} - Manual Control")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         layout = QVBoxLayout(self)
         self.current_label = QLabel("Current: —")
@@ -510,24 +497,28 @@ class ManualControlDialog(QDialog):
         layout.addWidget(self.current_label)
 
         if (
-            config.kind not in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
-            or not config.control_enabled
+            panel.template != "controller"
+            or not panel.enabled
         ):
             raise ValueError("Manual control is available only for temperature and field instruments")
         self._runtime_editable = True
         self._connected = False
-        self._precision = control_decimals(config.kind, config.unit)
+        self._precision = (
+            self.reading.decimals
+            if self.reading.decimals is not None
+            else control_decimals(self.kind, self.reading.unit)
+        )
         form = QFormLayout()
         self.target_input = QDoubleSpinBox()
         self.target_input.setDecimals(self._precision)
-        self.target_input.setRange(config.min_value, config.max_value)
-        self.target_input.setSuffix(f" {config.unit}")
+        self.target_input.setRange(panel.min_value, panel.max_value)
+        self.target_input.setSuffix(f" {self.reading.unit}")
         self.target_input.setValue(config.initial_value)
         self.rate_input = QDoubleSpinBox()
         self.rate_input.setDecimals(self._precision)
-        self.rate_input.setRange(10 ** -self._precision, config.max_rate_per_minute)
-        self.rate_input.setSuffix(f" {config.unit}/min")
-        self.rate_input.setValue(config.default_rate_per_minute)
+        self.rate_input.setRange(10 ** -self._precision, panel.max_rate_per_minute)
+        self.rate_input.setSuffix(f" {self.reading.unit}/min")
+        self.rate_input.setValue(panel.default_rate_per_minute)
         self.mode_input = QComboBox()
         self.mode_input.addItems(["Settle", "Sweep"])
         form.addRow("Target", self.target_input)
@@ -539,7 +530,12 @@ class ManualControlDialog(QDialog):
         self.hold_button = QPushButton("Hold Current")
         close_button = QPushButton("Close")
         self.apply_button.clicked.connect(self._emit_set)
-        self.hold_button.clicked.connect(lambda: self.holdRequested.emit(config.id))
+        self.hold_button.clicked.connect(
+            lambda: self.holdRequested.emit(
+                config.id,
+                panel.control_id,
+            )
+        )
         close_button.clicked.connect(self.hide)
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.hold_button)
@@ -554,6 +550,7 @@ class ManualControlDialog(QDialog):
 
         self.setRequested.emit(
             self.config.id,
+            self.panel.control_id,
             self.target_input.value(),
             self.rate_input.value(),
             self.mode_input.currentText(),
@@ -564,15 +561,17 @@ class ManualControlDialog(QDialog):
 
         self._connected = snapshot.connected
         self._update_control_state()
-        if snapshot.current is not None:
-            if snapshot.kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
-                precision = control_decimals(snapshot.kind, snapshot.unit)
-                value = fixed_number(snapshot.current, precision)
-            else:
-                value = f"{snapshot.current:.9g}"
-            self.current_label.setText(f"Current: {value} {snapshot.unit}")
-        if snapshot.target is not None and not self.target_input.hasFocus():
-            self.target_input.setValue(snapshot.target)
+        if not snapshot.connected:
+            return
+        state = snapshot.controls[self.panel.id]
+        current = state.current
+        if isinstance(current, (int, float)) and not isinstance(current, bool):
+            value = fixed_number(current, self._precision)
+            self.current_label.setText(
+                f"Current: {value} {self.reading.unit}"
+            )
+        if state.target is not None and not self.target_input.hasFocus():
+            self.target_input.setValue(state.target)
 
     def set_runtime_editable(self, editable: bool) -> None:
         """设置运行时是否允许手动控制，例如 SEQ 运行期间为假。"""

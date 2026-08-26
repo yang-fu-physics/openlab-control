@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.18.1 的当前边界。
+本文描述 OpenLab Control 0.19.0 的当前边界。
 
 ## 运行模型
 
@@ -26,8 +26,8 @@ GUI 主线程
 GUI 不直接操作仪表。每个模块内部请求串行，不同模块可并行。IPC 不使用 pickle；单条
 消息限制为 1 MiB，并拒绝 NaN、Infinity、复杂对象和未知 DAT 列。
 
-进程隔离限制阻塞、崩溃和依赖影响，但不是恶意代码沙箱。模块 Frontend 仍在 GUI
-进程，因此首次加载必须核对来源、版本、路径和内容指纹。
+进程隔离限制阻塞和崩溃影响，但不是恶意代码沙箱。模块 Frontend 仍在 GUI 进程，
+因此只应把已审查的本地代码放进 `modules/` 或 `system_instruments/`。
 
 ## 两套接入边界
 
@@ -38,20 +38,46 @@ System Instrument 与 Measurement Module 分开：
 - Measurement Module 拥有完成一次测量所需的仪表、切换器、时序、状态码和安全动作；
   它只能读取温场快照，不能控制温度或磁场。
 
-模块目录最小为 `module.toml + backend.py`。清单只含名称、版本和可选额外依赖；DAT 列
-来自 `Module.columns`。发现阶段不导入模块源码，Enable 前再次验证完整目录指纹和依赖。
+模块目录最小为 `module.toml + backend.py`。清单只含名称和版本；DAT 列来自
+`Module.columns`。发现阶段不导入模块源码，Enable 后才在独立工作进程中加载后台。
 
-PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享依赖。只有额外
-依赖进入 `runtime_packages/<type>/<id>/<fingerprint>/site-packages`；离线安装固定使用
-`--no-index --only-binary=:all: --require-hashes`，并验证 `requirements.lock`、wheel、
-runtime marker 和依赖树摘要。
+PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享依赖。仪表或模块
+需要新包时更新核心依赖并重新构建发布包，不在运行中的程序里建立第二套 Python 环境。
 
 System Instrument 的作者接口是同步的
 `open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close`。
-驱动只返回包含 `value` 和可选 `target/rate/moving/ready/auxiliary` 的普通字典；核心统一生成
-时间戳、连接状态和内部快照。`instrument.toml` 是主读数及显示元数据的唯一来源；同一份
-`site.local.toml` 的资源区块保存物理地址、实现选择和操作者勾选的辅助读数，
-`[[instruments]]` 保存控制许可与安全参数。
+驱动只返回包含 `value`、可选 `auxiliary` 和控制状态的普通字典。单控制端点可在顶层返回
+`target/rate/moving/ready`；多个不同控制端点必须返回按 control ID 分组的 `controls`。
+核心统一生成时间戳、连接状态和内部快照，并按 Controller 面板独立判稳。
+
+配置边界也分层：
+
+```text
+configs/general.toml
+        通用应用、日志、报警和进程参数
+
+system_instruments/<id>/instrument.toml
+        API v4 作者模板：config_fields / controls / panels / readings / sequence_commands
+                    │ Instrument Scanner
+                    ▼
+configs/instruments/<id>.toml
+        一个或多个物理实例，只引用固定 panel ID 并保存现场选择与限制
+
+configs/visa.resources.toml
+        未分配给 System Instrument 的 VISA，只提供给 Measurement Module
+```
+
+扫描器把作者清单中除 `panels` 模板外的静态元数据复制到生成文件，并写入
+`[[instances]]`。每个物理实例只创建一个 worker 和通讯会话；多个面板与控制端点复用它。
+System 实例选中的 VISA 地址不会进入 Measurement 资源清单。专用网络仪表由自己的
+`config_fields` 提供 `host`、`port` 等连接值。
+
+实例面板的 `role` 只有 `none`、`sample_temp` 和 `field`。后两者各自全局最多一个，只能
+用于支持对应 kind 的 controller；`none` 可重复。没有任何生成 System 面板时配置仍有效，
+主程序可以启动。三个内置仿真也必须由操作者明确启用。
+
+扫描器保存的是生成配置全集：选中的文件原子覆盖，不在最终预览中的生成文件删除。PID
+文件是例外；第一次从作者示例或操作者选择的来源复制后，扫描器不再覆盖或删除。
 
 ## Measurement Module 协议
 
@@ -131,7 +157,11 @@ Stop、Error 和任务取消都不向 System Instrument 发送 Set 或 Hold。Sy
 ```text
 runs/<timestamp>_<sequence>/
 ├─ sequence.seq
-├─ configuration.toml
+├─ configuration/
+│  ├─ general.toml
+│  ├─ visa.resources.toml       # 原文件存在时
+│  ├─ instruments/*.toml
+│  └─ pid/*.toml
 ├─ module_settings/*.settings.toml
 ├─ module_settings/*.status-at-start.json
 ├─ rawdata/*.rawdata
@@ -160,6 +190,6 @@ Measurement Module 的即时读取独立于这两个周期。
 
 ## 真实仪表边界
 
-OpenLab Control 0.18.1 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
+OpenLab Control 0.19.0 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
 限温、磁体保护、硬件互锁或人工急停。接入真机前必须保留并通过模块自己的命令顺序、
 读回、量程、timeout、异常清理与协议解析测试，再进行低风险现场验证。

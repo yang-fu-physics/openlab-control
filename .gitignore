@@ -15,14 +15,8 @@ runs/*
 /gui_smoke.png
 /source-gui-smoke.png
 /docs/source-gui-smoke.png
-/configs/*.local.toml
+/configs/visa.resources.toml
+/configs/instruments/*.toml
+/configs/pid/*.toml
 /module_data/*
 !/module_data/.gitkeep
-/wheels/*
-!/wheels/.gitkeep
-/system_instruments/*
-!/system_instruments/.gitkeep
-/trust_state/*
-!/trust_state/.gitkeep
-/runtime_packages/*
-!/runtime_packages/.gitkeep

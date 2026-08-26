@@ -88,6 +88,18 @@ class InstrumentMetric:
 
 
 @dataclass(slots=True)
+class InstrumentControlState:
+    """一个 Controller 面板独立的当前值、目标值和稳定状态。"""
+
+    current: float | None = None
+    target: float | None = None
+    rate_per_minute: float | None = None
+    activity: InstrumentActivity = InstrumentActivity.IDLE
+    stability: StabilityState = StabilityState.NOT_APPLICABLE
+    ready: bool | None = None
+
+
+@dataclass(slots=True)
 class InstrumentSnapshot:
     """某一时刻的仪表读数快照。
 
@@ -109,6 +121,7 @@ class InstrumentSnapshot:
     connection_state: InstrumentConnectionState = InstrumentConnectionState.CONNECTED
     ready: bool | None = None
     metrics: dict[str, InstrumentMetric] = field(default_factory=dict)
+    controls: dict[str, InstrumentControlState] = field(default_factory=dict)
 
     @property
     def connected(self) -> bool:

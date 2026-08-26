@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from typing import TypeVar
 
-from .config import AppConfig, InstrumentConfig
+from .config import AppConfig, InstrumentConfig, InstrumentPanelConfig
 from .instruments.base import (
     EventResponseSpec,
     InstrumentError,
@@ -27,10 +27,7 @@ from .instruments.base import (
     InstrumentWarning,
     SafetyViolation,
 )
-from .instruments.manifest import (
-    SystemInstrumentDescriptor,
-    instrument_dependency_directory,
-)
+from .instruments.manifest import SystemInstrumentDescriptor
 from .instruments.worker import (
     InstrumentWorkerClient,
     InstrumentWorkerSpec,
@@ -38,15 +35,12 @@ from .instruments.worker import (
     IsolatedInstrumentClient,
 )
 from .events import EventManager
-from .package_support.dependencies import (
-    dependency_runtime_errors,
-)
 from .package_support.loading import load_import_object, load_source_object
-from .package_support.trust import ContentTrustStore, content_tree_digest
 from .models import (
     EventNotice,
     InstrumentActivity,
     InstrumentConnectionState,
+    InstrumentControlState,
     InstrumentKind,
     InstrumentMetric,
     InstrumentSnapshot,
@@ -146,7 +140,9 @@ class InstrumentManager:
         self.isolate_processes = isolate_processes
         self.instruments: dict[str, object] = {}
         self._client_factories: dict[str, Callable[[], object]] = {}
-        self.instrument_configs: dict[str, InstrumentConfig] = {item.id: item for item in config.instruments}
+        self.instrument_configs: dict[str, InstrumentConfig] = {
+            item.id: item for item in config.instrument_instances
+        }
         self._operation_gates: dict[str, _PriorityOperationGate] = {}
         self._stability: dict[str, StabilityEvaluator] = {}
         self._poll_issues: dict[str, set[tuple[str, str]]] = {}
@@ -157,8 +153,8 @@ class InstrumentManager:
         self._recovery_tasks: dict[str, asyncio.Task[None]] = {}
         self._recovery_clients: dict[str, object] = {}
         self._generation: dict[str, int] = {}
-        self._expected_targets: dict[str, float | None] = {}
-        self._expected_rates: dict[str, float | None] = {}
+        self._expected_targets: dict[tuple[str, str], float | None] = {}
+        self._expected_rates: dict[tuple[str, str], float | None] = {}
         self._metric_schemas: dict[
             str,
             tuple[tuple[str, str, str, int | None], ...],
@@ -239,11 +235,16 @@ class InstrumentManager:
         try:
             if response.action == "zero":
                 config = self.instrument_configs[target]
+                panel = self.resolve_control_panel(
+                    InstrumentKind.FIELD,
+                    target,
+                )
                 applied = await self.set_target(
                     target,
                     0.0,
-                    config.default_rate_per_minute,
+                    panel.default_rate_per_minute,
                     "Sweep",
+                    control=panel.control_id,
                     origin="event_response",
                 )
                 if not applied:
@@ -315,13 +316,11 @@ class InstrumentManager:
     def _load_instruments(self) -> None:
         """根据已验证配置创建仪表客户端，但暂不连接真实仪表。
 
-        外部 System Instrument 必须同时满足清单有效、目录指纹仍匹配信任记录、API 版本兼容
-        和隔离依赖完整；
-        不能通过在配置中直接写任意 ``module:class`` 来加载第三方代码。
+        外部 System Instrument 必须有有效且兼容的清单；不能通过在配置中直接写任意
+        ``module:class`` 来加载第三方代码。
         """
 
-        trust_store: ContentTrustStore | None = None
-        for instrument_config in self.config.instruments:
+        for instrument_config in self.config.instrument_instances:
             descriptor: SystemInstrumentDescriptor | None = None
             if ":" in instrument_config.backend:
                 module_name = instrument_config.backend.split(":", 1)[0]
@@ -345,43 +344,7 @@ class InstrumentManager:
                         f"System Instrument {descriptor.id} does not support "
                         f"{instrument_config.kind.value}"
                     )
-                current_fingerprint = content_tree_digest(descriptor.path)
-                if current_fingerprint != descriptor.fingerprint:
-                    raise PermissionError(
-                        f"System Instrument {descriptor.id} changed after discovery"
-                    )
-                if trust_store is None:
-                    trust_store = ContentTrustStore(
-                        self.config.resolve_project_path(
-                            self.config.system_instruments.state_directory
-                        )
-                        / "trusted_content.json"
-                    )
-                if not trust_store.is_trusted("instrument", descriptor):
-                    raise PermissionError(
-                        f"System Instrument {descriptor.id} has not been trusted"
-                    )
-                dependency_directory = instrument_dependency_directory(
-                    self.config,
-                    descriptor,
-                )
-                runtime_errors = dependency_runtime_errors(
-                    descriptor.dependencies,
-                    dependency_directory,
-                    descriptor.fingerprint,
-                )
-                if runtime_errors:
-                    raise PermissionError(
-                        f"System Instrument {descriptor.id} has invalid isolated "
-                        "dependencies: "
-                        + "; ".join(runtime_errors)
-                    )
             if self.isolate_processes:
-                dependency_directory = (
-                    ""
-                    if descriptor is None
-                    else str(instrument_dependency_directory(self.config, descriptor))
-                )
                 worker_spec = InstrumentWorkerSpec(
                     instrument_config=instrument_config,
                     simulation_speed=self.config.simulation_speed,
@@ -399,17 +362,6 @@ class InstrumentManager:
                         ""
                         if descriptor is None
                         else str(descriptor.path)
-                    ),
-                    fingerprint=(
-                        ""
-                        if descriptor is None
-                        else descriptor.fingerprint
-                    ),
-                    dependency_directory=dependency_directory,
-                    dependencies=(
-                        ()
-                        if descriptor is None
-                        else descriptor.dependencies
                     ),
                 )
                 def isolated_factory(
@@ -470,13 +422,84 @@ class InstrumentManager:
                 InstrumentConnectionState.STARTING
             )
             self._generation[instrument_config.id] = 0
-            if instrument_config.stability is not None:
-                self._stability[instrument_config.id] = StabilityEvaluator(instrument_config.stability)
+            for panel in instrument_config.panels:
+                if (
+                    panel.enabled
+                    and panel.template == "controller"
+                    and panel.stability is not None
+                ):
+                    self._stability[panel.key] = StabilityEvaluator(
+                        panel.stability
+                    )
 
     def connection_state(self, instrument_id: str) -> InstrumentConnectionState:
         """返回指定仪表当前连接生命周期状态。"""
 
         return self._connection_states[instrument_id]
+
+    @staticmethod
+    def _controller_panels(
+        config: InstrumentConfig,
+    ) -> tuple[InstrumentPanelConfig, ...]:
+        """Return enabled controller panels for one physical instance."""
+
+        return tuple(
+            panel
+            for panel in config.panels
+            if panel.enabled and panel.template == "controller"
+        )
+
+    @staticmethod
+    def _states_for_control(
+        config: InstrumentConfig,
+        snapshot: InstrumentSnapshot,
+        control: str,
+    ) -> tuple[InstrumentControlState, ...]:
+        """Return every panel state bound to one backend control endpoint."""
+
+        return tuple(
+            snapshot.controls[panel.id]
+            for panel in InstrumentManager._controller_panels(config)
+            if panel.control_id == control
+        )
+
+    @staticmethod
+    def _sync_primary_control_fields(
+        config: InstrumentConfig,
+        snapshot: InstrumentSnapshot,
+    ) -> None:
+        """让顶层字段始终表示该物理仪表承担的标准温度或磁场回路。"""
+
+        panels = InstrumentManager._controller_panels(config)
+        primary_role = {
+            InstrumentKind.TEMPERATURE: "sample_temp",
+            InstrumentKind.FIELD: "field",
+        }.get(config.kind)
+        primary = next(
+            (panel for panel in panels if panel.role == primary_role),
+            panels[0] if len(panels) == 1 else None,
+        )
+        if primary is None:
+            if panels:
+                snapshot.target = None
+                snapshot.rate_per_minute = None
+                snapshot.ready = None
+                snapshot.stability = StabilityState.NOT_APPLICABLE
+                snapshot.activity = (
+                    InstrumentActivity.MOVING
+                    if any(
+                        state.activity is InstrumentActivity.MOVING
+                        for state in snapshot.controls.values()
+                    )
+                    else InstrumentActivity.HOLDING
+                )
+            return
+        state = snapshot.controls[primary.id]
+        snapshot.target = state.target
+        snapshot.rate_per_minute = state.rate_per_minute
+        snapshot.ready = state.ready
+        snapshot.activity = state.activity
+        snapshot.stability = state.stability
 
     @property
     def control_ready(self) -> bool:
@@ -488,8 +511,13 @@ class InstrumentManager:
         """返回首个阻止手动控制或启动 SEQ 的原因。"""
 
         now = time.monotonic()
-        for config in self.config.instruments:
-            if not config.control_enabled:
+        for config in self.config.instrument_instances:
+            if not any(
+                panel.enabled
+                and panel.template == "controller"
+                and panel.role != "none"
+                for panel in config.panels
+            ):
                 continue
             state = self._connection_states[config.id]
             if state is not InstrumentConnectionState.CONNECTED:
@@ -530,10 +558,27 @@ class InstrumentManager:
                 timestamp=time.monotonic(),
                 unit=config.unit,
                 current=None,
-                target=self._expected_targets.get(instrument_id),
-                rate_per_minute=self._expected_rates.get(instrument_id),
                 connection_state=state,
+                controls={
+                    panel.id: InstrumentControlState(
+                        target=self._expected_targets.get(
+                            (instrument_id, panel.control_id)
+                        ),
+                        rate_per_minute=self._expected_rates.get(
+                            (instrument_id, panel.control_id)
+                        ),
+                    )
+                    for panel in self._controller_panels(config)
+                },
             )
+            self._sync_primary_control_fields(config, snapshot)
+        for control_state in snapshot.controls.values():
+            control_state.activity = (
+                InstrumentActivity.FAULT
+                if state is InstrumentConnectionState.FAULTED
+                else InstrumentActivity.DISCONNECTED
+            )
+            control_state.stability = StabilityState.STALE
         snapshot.activity = (
             InstrumentActivity.FAULT
             if state is InstrumentConnectionState.FAULTED
@@ -609,42 +654,54 @@ class InstrumentManager:
     ) -> None:
         """核对重连后的实际目标和速率，防止带着未知仪表状态继续运行。"""
 
-        expected_target = self._expected_targets.get(instrument_id)
-        if expected_target is None:
-            return
-        actual_target = snapshot.target
-        tolerance = max(1e-9, abs(expected_target) * 1e-9)
-        if (
-            actual_target is None
-            or not math.isclose(
-                actual_target,
-                expected_target,
-                rel_tol=1e-9,
-                abs_tol=tolerance,
+        config = self.instrument_configs[instrument_id]
+        checked_controls: set[str] = set()
+        for panel in self._controller_panels(config):
+            control = panel.control_id
+            if control in checked_controls:
+                continue
+            checked_controls.add(control)
+            expected_target = self._expected_targets.get(
+                (instrument_id, control)
             )
-        ):
-            raise InstrumentError(
-                f"{self.instrument_configs[instrument_id].display_name} reconnected with "
-                f"target {actual_target!r}, expected {expected_target:g}",
-                "INSTRUMENT_STATE_MISMATCH_AFTER_RECONNECT",
-                instrument_id,
-            )
-        expected_rate = self._expected_rates.get(instrument_id)
-        if expected_rate is not None and snapshot.rate_per_minute is not None:
-            rate_tolerance = max(1e-9, abs(expected_rate) * 1e-9)
-            if not math.isclose(
-                snapshot.rate_per_minute,
-                expected_rate,
-                rel_tol=1e-9,
-                abs_tol=rate_tolerance,
+            if expected_target is None:
+                continue
+            states = self._states_for_control(config, snapshot, control)
+            actual_target = states[0].target
+            tolerance = max(1e-9, abs(expected_target) * 1e-9)
+            if (
+                actual_target is None
+                or not math.isclose(
+                    actual_target,
+                    expected_target,
+                    rel_tol=1e-9,
+                    abs_tol=tolerance,
+                )
             ):
                 raise InstrumentError(
-                    f"{self.instrument_configs[instrument_id].display_name} reconnected "
-                    f"with rate {snapshot.rate_per_minute:g}, expected "
-                    f"{expected_rate:g}",
+                    f"{config.display_name} control {control!r} reconnected with "
+                    f"target {actual_target!r}, expected {expected_target:g}",
                     "INSTRUMENT_STATE_MISMATCH_AFTER_RECONNECT",
-                    instrument_id,
+                    panel.key,
                 )
+            expected_rate = self._expected_rates.get(
+                (instrument_id, control)
+            )
+            actual_rate = states[0].rate_per_minute
+            if expected_rate is not None and actual_rate is not None:
+                rate_tolerance = max(1e-9, abs(expected_rate) * 1e-9)
+                if not math.isclose(
+                    actual_rate,
+                    expected_rate,
+                    rel_tol=1e-9,
+                    abs_tol=rate_tolerance,
+                ):
+                    raise InstrumentError(
+                        f"{config.display_name} control {control!r} reconnected "
+                        f"with rate {actual_rate:g}, expected {expected_rate:g}",
+                        "INSTRUMENT_STATE_MISMATCH_AFTER_RECONNECT",
+                        panel.key,
+                    )
 
     async def _recover_instrument(
         self,
@@ -703,9 +760,15 @@ class InstrumentManager:
                             InstrumentConnectionState.CONNECTED
                         )
                         self._unavailable_after_timeout.pop(instrument_id, None)
-                        evaluator = self._stability.get(instrument_id)
-                        if evaluator is not None and snapshot.target is not None:
-                            evaluator.reset(snapshot.target, snapshot.timestamp)
+                        config = self.instrument_configs[instrument_id]
+                        for panel in self._controller_panels(config):
+                            state = snapshot.controls[panel.id]
+                            evaluator = self._stability.get(panel.key)
+                            if evaluator is not None and state.target is not None:
+                                evaluator.reset(
+                                    state.target,
+                                    snapshot.timestamp,
+                                )
                     finally:
                         gate.release()
                     self._recovery_clients.pop(instrument_id, None)
@@ -1070,6 +1133,7 @@ class InstrumentManager:
             ),
             return_exceptions=True,
         )
+        measured: dict[str, InstrumentSnapshot] = {}
         now = time.monotonic()
         for instrument_id, result in zip(instrument_ids, results, strict=True):
             if isinstance(result, Exception):
@@ -1100,16 +1164,18 @@ class InstrumentManager:
                         str(result),
                     )
             else:
+                measured[instrument_id] = result
                 self.events.resolve(instrument_id, "POLL_FAILED")
                 for code, context in self._poll_issues[instrument_id]:
                     self.events.resolve(instrument_id, code, context)
                 self._poll_issues[instrument_id].clear()
-            self._update_stale_state(
-                instrument_id,
-                now,
-                poll_succeeded=not isinstance(result, Exception),
-            )
-        return deepcopy(self.latest)
+            if not measurement:
+                self._update_stale_state(
+                    instrument_id,
+                    now,
+                    poll_succeeded=not isinstance(result, Exception),
+                )
+        return deepcopy(measured if measurement else self.latest)
 
     async def _poll_one(
         self,
@@ -1130,35 +1196,57 @@ class InstrumentManager:
                 reading,
                 measurement=measurement,
             )
-            self._validate_snapshot(instrument_id, snapshot)
+            self._validate_snapshot(
+                instrument_id,
+                snapshot,
+                measurement=measurement,
+            )
             self._connection_states[instrument_id] = (
                 InstrumentConnectionState.CONNECTED
             )
-            if instrument_id not in self._expected_targets:
-                self._expected_targets[instrument_id] = snapshot.target
-                self._expected_rates[instrument_id] = snapshot.rate_per_minute
-            evaluator = self._stability.get(instrument_id)
-            if evaluator is not None and snapshot.current is not None and snapshot.target is not None:
-                result = evaluator.update(
-                    snapshot.current,
-                    snapshot.target,
-                    snapshot.timestamp,
-                    ready=snapshot.ready,
-                )
-                snapshot.stability = result.state
-                timeout_code = "STABILITY_TIMEOUT"
-                if result.state is StabilityState.TIMED_OUT:
-                    self.events.report(
-                        self.config.alarms.stability_timeout,
-                        instrument_id,
-                        timeout_code,
-                        f"{snapshot.display_name} did not stabilize within {result.elapsed_seconds:.1f} seconds",
-                    )
-                else:
-                    self.events.resolve(instrument_id, timeout_code)
-            # 必须在仍持有仪表锁时发布：否则较早开始的 poll 可能在 set_target 完成后才返回，
-            # 用旧目标覆盖刚写入的新目标。
-            self.latest[instrument_id] = snapshot
+            if not measurement:
+                config = self.instrument_configs[instrument_id]
+                for panel in self._controller_panels(config):
+                    state = snapshot.controls[panel.id]
+                    control_key = (instrument_id, panel.control_id)
+                    if control_key not in self._expected_targets:
+                        self._expected_targets[control_key] = state.target
+                        self._expected_rates[control_key] = (
+                            state.rate_per_minute
+                        )
+                    evaluator = self._stability.get(panel.key)
+                    if (
+                        evaluator is not None
+                        and state.current is not None
+                        and state.target is not None
+                    ):
+                        result = evaluator.update(
+                            state.current,
+                            state.target,
+                            snapshot.timestamp,
+                            ready=state.ready,
+                        )
+                        state.stability = result.state
+                        timeout_code = "STABILITY_TIMEOUT"
+                        if result.state is StabilityState.TIMED_OUT:
+                            self.events.report(
+                                self.config.alarms.stability_timeout,
+                                instrument_id,
+                                timeout_code,
+                                f"{panel.display_name} did not stabilize within "
+                                f"{result.elapsed_seconds:.1f} seconds",
+                                panel.key,
+                            )
+                        else:
+                            self.events.resolve(
+                                instrument_id,
+                                timeout_code,
+                                panel.key,
+                            )
+                self._sync_primary_control_fields(config, snapshot)
+                # 必须在仍持有仪表锁时发布：否则较早开始的 poll 可能在 set_target 完成后才返回，
+                # 用旧目标覆盖刚写入的新目标。
+                self.latest[instrument_id] = snapshot
             return snapshot
 
         return await self._operate(
@@ -1182,7 +1270,7 @@ class InstrumentManager:
         """用框架配置把驱动的纯数值结果组装成内部快照。"""
 
         config = self.instrument_configs[instrument_id]
-        auxiliary = reading["auxiliary"]
+        auxiliary = reading.get("auxiliary", {})
         if not isinstance(auxiliary, dict):
             raise InstrumentError(
                 f"{config.display_name} returned invalid auxiliary readings",
@@ -1207,7 +1295,14 @@ class InstrumentManager:
                 "INVALID_INSTRUMENT_READING",
                 instrument_id,
             )
-        moving = bool(reading.get("moving", False))
+        moving_value = reading.get("moving", False)
+        if not isinstance(moving_value, bool):
+            raise InstrumentError(
+                f"{config.display_name} returned a non-boolean moving flag",
+                "INVALID_INSTRUMENT_READING",
+                instrument_id,
+            )
+        moving = moving_value
         activity = (
             InstrumentActivity.MOVING
             if moving
@@ -1227,7 +1322,7 @@ class InstrumentManager:
             for key in config.auxiliary_readings
             for metadata in (config.reading(key),)
         }
-        return InstrumentSnapshot(
+        snapshot = InstrumentSnapshot(
             instrument_id=instrument_id,
             display_name=config.display_name,
             kind=config.kind,
@@ -1253,11 +1348,115 @@ class InstrumentManager:
             ready=reading.get("ready"),
             metrics=metrics,
         )
+        if measurement:
+            return snapshot
+
+        panels = self._controller_panels(config)
+        required_controls = {panel.control_id for panel in panels}
+        declared_controls = {
+            panel.control_id
+            for panel in config.panels
+            if panel.template == "controller"
+        }
+        raw_controls = reading.get("controls")
+        if raw_controls is None:
+            if len(required_controls) > 1:
+                raise InstrumentError(
+                    f"{config.display_name} has multiple controls and must return "
+                    "a controls object from read_status",
+                    "INVALID_INSTRUMENT_READING",
+                    instrument_id,
+                )
+            control_payloads = (
+                {next(iter(required_controls)): reading}
+                if required_controls
+                else {}
+            )
+        else:
+            if not isinstance(raw_controls, dict):
+                raise InstrumentError(
+                    f"{config.display_name} returned invalid control states",
+                    "INVALID_INSTRUMENT_READING",
+                    instrument_id,
+                )
+            returned_controls = set(raw_controls)
+            if (
+                any(not isinstance(key, str) for key in returned_controls)
+                or returned_controls - declared_controls
+                or required_controls - returned_controls
+            ):
+                raise InstrumentError(
+                    f"{config.display_name} returned control states that do not "
+                    "match its configured controller panels",
+                    "INVALID_INSTRUMENT_READING",
+                    instrument_id,
+                )
+            control_payloads = raw_controls
+
+        for panel in panels:
+            payload = control_payloads[panel.control_id]
+            if not isinstance(payload, dict):
+                raise InstrumentError(
+                    f"{config.display_name} returned invalid state for control "
+                    f"{panel.control_id!r}",
+                    "INVALID_INSTRUMENT_READING",
+                    panel.key,
+                )
+            moving_value = payload.get("moving", False)
+            if not isinstance(moving_value, bool):
+                raise InstrumentError(
+                    f"{config.display_name} control {panel.control_id!r} returned "
+                    "a non-boolean moving flag",
+                    "INVALID_INSTRUMENT_READING",
+                    panel.key,
+                )
+            current_value = (
+                snapshot.current
+                if panel.reading == config.main_reading
+                else snapshot.metrics[panel.reading].value
+            )
+            if current_value is not None and (
+                isinstance(current_value, bool)
+                or not isinstance(current_value, (int, float))
+            ):
+                raise InstrumentError(
+                    f"{config.display_name} controller panel {panel.id!r} "
+                    "returned a non-numeric reading",
+                    "INVALID_INSTRUMENT_READING",
+                    panel.key,
+                )
+            snapshot.controls[panel.id] = InstrumentControlState(
+                current=(
+                    None
+                    if current_value is None
+                    else float(current_value)
+                ),
+                target=(
+                    None
+                    if payload.get("target") is None
+                    else float(payload["target"])
+                ),
+                rate_per_minute=(
+                    None
+                    if payload.get("rate") is None
+                    else float(payload["rate"])
+                ),
+                activity=(
+                    InstrumentActivity.MOVING
+                    if moving_value
+                    else InstrumentActivity.HOLDING
+                ),
+                ready=payload.get("ready"),
+            )
+        self._sync_primary_control_fields(config, snapshot)
+        return snapshot
 
     def _validate_snapshot(
         self,
         instrument_id: str,
         snapshot: InstrumentSnapshot,
+        *,
+        measurement: bool = False,
     ) -> None:
         """拒绝仪表 ID、类型、连接标志或数值不合法的后端快照。"""
 
@@ -1300,6 +1499,49 @@ class InstrumentManager:
                 "NONFINITE_INSTRUMENT_READING",
                 instrument_id,
             )
+        expected_control_panels = {
+            panel.id for panel in self._controller_panels(config)
+        }
+        if not measurement and set(snapshot.controls) != expected_control_panels:
+            raise InstrumentError(
+                f"{config.display_name} returned incomplete controller states",
+                "INVALID_INSTRUMENT_SNAPSHOT",
+                instrument_id,
+            )
+        for panel_id, state in snapshot.controls.items():
+            if not isinstance(state, InstrumentControlState):
+                raise InstrumentError(
+                    f"{config.display_name} returned invalid state for controller "
+                    f"panel {panel_id!r}",
+                    "INVALID_INSTRUMENT_SNAPSHOT",
+                    instrument_id,
+                )
+            if state.ready is not None and not isinstance(state.ready, bool):
+                raise InstrumentError(
+                    f"{config.display_name} controller panel {panel_id!r} returned "
+                    "a non-boolean ready flag",
+                    "INVALID_INSTRUMENT_SNAPSHOT",
+                    instrument_id,
+                )
+            control_values = (
+                state.current,
+                state.target,
+                state.rate_per_minute,
+            )
+            if any(
+                value is not None
+                and (
+                    isinstance(value, bool)
+                    or not math.isfinite(value)
+                )
+                for value in control_values
+            ):
+                raise InstrumentError(
+                    f"{config.display_name} controller panel {panel_id!r} returned "
+                    "a non-finite numeric state",
+                    "NONFINITE_INSTRUMENT_READING",
+                    instrument_id,
+                )
         metric_schema: list[tuple[str, str, str, int | None]] = []
         if not isinstance(snapshot.metrics, dict):
             raise InstrumentError(
@@ -1405,6 +1647,8 @@ class InstrumentManager:
         stale = age > config.stale_after_seconds
         if stale:
             snapshot.stability = StabilityState.STALE
+            for control_state in snapshot.controls.values():
+                control_state.stability = StabilityState.STALE
             snapshot.message = (
                 f"Reading is stale ({age:.1f} s old; "
                 f"limit {config.stale_after_seconds:g} s)"
@@ -1430,16 +1674,59 @@ class InstrumentManager:
     def first_instrument_id(self, kind: InstrumentKind) -> str:
         """取得指定类型的标准主控仪表 ID。"""
 
-        for config in self.config.instruments:
-            if (
-                config.kind is kind
-                and config.control_enabled
-            ):
-                return config.id
+        return self.resolve_control_panel(kind).instrument_id
+
+    @staticmethod
+    def _role_for_kind(kind: InstrumentKind) -> str:
+        """把标准 SEQ 控制类型映射到唯一面板角色。"""
+
+        if kind is InstrumentKind.TEMPERATURE:
+            return "sample_temp"
+        if kind is InstrumentKind.FIELD:
+            return "field"
         raise InstrumentError(
-            f"No controllable primary {kind.value} instrument is configured",
+            f"No standard control role exists for {kind.value}",
             "INSTRUMENT_NOT_CONFIGURED",
             kind.value,
+        )
+
+    def resolve_control_panel(
+        self,
+        kind: InstrumentKind,
+        requested: object | None = None,
+    ) -> InstrumentPanelConfig:
+        """按全局角色解析标准温度或磁场控制回路。"""
+
+        role = self._role_for_kind(kind)
+        candidate = str(requested or "").strip()
+        if candidate:
+            config = self.instrument_configs.get(candidate)
+            if config is None:
+                raise InstrumentError(
+                    f"Unknown {kind.value} instrument: {candidate}",
+                    "UNKNOWN_INSTRUMENT",
+                    candidate,
+                )
+            for panel in config.panels:
+                if (
+                    panel.enabled
+                    and panel.template == "controller"
+                    and panel.role == role
+                ):
+                    return panel
+            raise InstrumentError(
+                f"Instrument {candidate} is not assigned the {role} role",
+                "INSTRUMENT_ROLE_MISMATCH",
+                candidate,
+            )
+
+        for panel in self.config.panels:
+            if panel.template == "controller" and panel.role == role:
+                return panel
+        raise InstrumentError(
+            f"No controller panel is assigned the {role} role",
+            "INSTRUMENT_NOT_CONFIGURED",
+            role,
         )
 
     def resolve_instrument_id(
@@ -1447,47 +1734,50 @@ class InstrumentManager:
         kind: InstrumentKind,
         requested: object | None = None,
     ) -> str:
-        """解析 SEQ 可选仪表后缀，并限制其类型和控制权限。"""
+        """按标准角色解析仪表；显式目标仅供内部事件响应校验。"""
 
-        candidate = str(requested or "").strip()
-        if not candidate or (
-            candidate == kind.value and candidate not in self.instrument_configs
-        ):
-            candidate = self.first_instrument_id(kind)
-        config = self.instrument_configs.get(candidate)
+        return self.resolve_control_panel(kind, requested).instrument_id
+
+    def _controller_panel(
+        self,
+        instrument_id: str,
+        control: str,
+    ) -> InstrumentPanelConfig:
+        """返回物理实例中指定的已启用控制回路面板。"""
+
+        config = self.instrument_configs.get(instrument_id)
         if config is None:
             raise InstrumentError(
-                f"Unknown {kind.value} instrument: {candidate}",
+                f"Unknown instrument: {instrument_id}",
                 "UNKNOWN_INSTRUMENT",
-                candidate,
-            )
-        if config.kind is not kind:
-            raise InstrumentError(
-                f"Instrument {candidate} is {config.kind.value}, not {kind.value}",
-                "INSTRUMENT_KIND_MISMATCH",
-                candidate,
-            )
-        if not config.control_enabled:
-            raise InstrumentError(
-                f"Instrument {candidate} is read-only and cannot be used by control commands",
-                "INSTRUMENT_READ_ONLY",
-                candidate,
-            )
-        return candidate
-
-    def validate_target(self, instrument_id: str, value: float, rate_per_minute: float) -> None:
-        """在任何写入前强制检查有限值、上下限、最大速率和仪表角色。"""
-
-        config = self.instrument_configs[instrument_id]
-        if (
-            config.kind not in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
-            or not config.control_enabled
-        ):
-            raise InstrumentError(
-                f"{config.display_name} is display-only and cannot accept a target",
-                "TARGET_NOT_CONTROLLABLE",
                 instrument_id,
             )
+        for panel in config.panels:
+            if (
+                panel.enabled
+                and panel.template == "controller"
+                and panel.control_id == control
+            ):
+                return panel
+        raise InstrumentError(
+            f"Instrument {instrument_id} has no enabled control {control!r}",
+            "TARGET_NOT_CONTROLLABLE",
+            instrument_id,
+        )
+
+    def validate_target(
+        self,
+        instrument_id: str,
+        value: float,
+        rate_per_minute: float,
+        *,
+        control: str,
+    ) -> None:
+        """在任何写入前强制检查有限值、上下限、最大速率和仪表角色。"""
+
+        panel = self._controller_panel(instrument_id, control)
+        config = self.instrument_configs[instrument_id]
+        reading = config.reading(panel.reading)
         if not math.isfinite(value):
             raise SafetyViolation(
                 f"{config.display_name} target must be finite",
@@ -1500,17 +1790,17 @@ class InstrumentManager:
                 "RATE_NOT_FINITE",
                 instrument_id,
             )
-        if not config.min_value <= value <= config.max_value:
+        if not panel.min_value <= value <= panel.max_value:
             raise SafetyViolation(
-                f"{config.display_name} target {value:g} {config.unit} is outside the allowed range "
-                f"[{config.min_value:g}, {config.max_value:g}] {config.unit}",
+                f"{panel.display_name} target {value:g} {reading.unit} is outside the allowed range "
+                f"[{panel.min_value:g}, {panel.max_value:g}] {reading.unit}",
                 "TARGET_OUT_OF_RANGE",
                 instrument_id,
             )
-        if rate_per_minute <= 0 or rate_per_minute > config.max_rate_per_minute:
+        if rate_per_minute <= 0 or rate_per_minute > panel.max_rate_per_minute:
             raise SafetyViolation(
-                f"{config.display_name} rate {rate_per_minute:g} {config.unit}/min is outside the allowed range "
-                f"(0, {config.max_rate_per_minute:g}]",
+                f"{panel.display_name} rate {rate_per_minute:g} {reading.unit}/min is outside the allowed range "
+                f"(0, {panel.max_rate_per_minute:g}]",
                 "RATE_OUT_OF_RANGE",
                 instrument_id,
             )
@@ -1522,13 +1812,19 @@ class InstrumentManager:
         rate_per_minute: float,
         mode: str = "Settle",
         *,
+        control: str,
         origin: str = "sequence",
     ) -> bool:
         """设置目标；手动来源在 SEQ 持有控制租约时会被运行时拒绝。"""
 
         try:
             self._ensure_event_response_control(instrument_id, origin)
-            self.validate_target(instrument_id, value, rate_per_minute)
+            self.validate_target(
+                instrument_id,
+                value,
+                rate_per_minute,
+                control=control,
+            )
             await self._operate(
                 instrument_id,
                 "set_target",
@@ -1536,6 +1832,7 @@ class InstrumentManager:
                     value,
                     rate_per_minute,
                     mode,
+                    control=control,
                 ),
                 origin=origin,
                 priority=(
@@ -1562,16 +1859,28 @@ class InstrumentManager:
                 ) from exc
             self.events.report(Severity.ERROR, instrument_id, exc.code, str(exc), exc.context)
             raise
-        self._expected_targets[instrument_id] = value
-        self._expected_rates[instrument_id] = rate_per_minute
+        control_key = (instrument_id, control)
+        self._expected_targets[control_key] = value
+        self._expected_rates[control_key] = rate_per_minute
+        config = self.instrument_configs[instrument_id]
         snapshot = self.latest.get(instrument_id)
         if snapshot is not None:
-            snapshot.target = value
-            snapshot.rate_per_minute = rate_per_minute
-            snapshot.stability = StabilityState.MOVING
-        evaluator = self._stability.get(instrument_id)
-        if evaluator is not None:
-            evaluator.reset(value, time.monotonic())
+            for panel in self._controller_panels(config):
+                if panel.control_id != control:
+                    continue
+                state = snapshot.controls[panel.id]
+                state.target = value
+                state.rate_per_minute = rate_per_minute
+                state.activity = InstrumentActivity.MOVING
+                state.stability = StabilityState.MOVING
+            self._sync_primary_control_fields(config, snapshot)
+        reset_at = time.monotonic()
+        for panel in self._controller_panels(config):
+            if panel.control_id != control:
+                continue
+            evaluator = self._stability.get(panel.key)
+            if evaluator is not None:
+                evaluator.reset(value, reset_at)
         self.events.resolve(instrument_id, "TARGET_OUT_OF_RANGE", instrument_id)
         self.events.resolve(instrument_id, "RATE_OUT_OF_RANGE", instrument_id)
         return True
@@ -1582,18 +1891,18 @@ class InstrumentManager:
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
-        instrument_id: str | None = None,
         *,
         origin: str = "sequence",
     ) -> bool:
-        """供标准 SEQ 命令按类型选择主控仪表并设置目标。"""
+        """供标准 SEQ 命令按全局唯一角色选择控制面板并设置目标。"""
 
-        selected = self.resolve_instrument_id(kind, instrument_id)
+        panel = self.resolve_control_panel(kind)
         return await self.set_target(
-            selected,
+            panel.instrument_id,
             value,
             rate_per_minute,
             mode,
+            control=panel.control_id,
             origin=origin,
         )
 
@@ -1669,16 +1978,45 @@ class InstrumentManager:
             raise
         return True
 
+    def _record_confirmed_hold(
+        self,
+        instrument_id: str,
+        control: str,
+    ) -> None:
+        """Update cached state after one backend control endpoint confirms Hold."""
+
+        snapshot = self.latest.get(instrument_id)
+        if snapshot is None:
+            return
+        config = self.instrument_configs[instrument_id]
+        panels = tuple(
+            panel
+            for panel in self._controller_panels(config)
+            if panel.control_id == control
+        )
+        reference = snapshot.controls[panels[0].id]
+        control_key = (instrument_id, control)
+        self._expected_targets[control_key] = reference.current
+        self._expected_rates[control_key] = reference.rate_per_minute
+        reset_at = time.monotonic()
+        for panel in panels:
+            state = snapshot.controls[panel.id]
+            state.target = reference.current
+            state.activity = InstrumentActivity.HOLDING
+            state.stability = StabilityState.SETTLING
+            evaluator = self._stability.get(panel.key)
+            if evaluator is not None and reference.current is not None:
+                evaluator.reset(reference.current, reset_at)
+        self._sync_primary_control_fields(config, snapshot)
+
     async def hold_all(self) -> bool:
         """尽力 Hold 所有可控温度和磁场仪表，并返回是否全部成功。"""
 
-        async def hold(instrument_id: str) -> bool:
+        async def hold(
+            instrument_id: str,
+            control: str,
+        ) -> bool:
             config = self.instrument_configs[instrument_id]
-            if not config.control_enabled or config.kind not in (
-                InstrumentKind.TEMPERATURE,
-                InstrumentKind.FIELD,
-            ):
-                return True
             if (
                 self._connection_states[instrument_id]
                 is not InstrumentConnectionState.CONNECTED
@@ -1701,16 +2039,11 @@ class InstrumentManager:
                 await self._operate(
                     instrument_id,
                     "hold",
-                    lambda: self.instruments[instrument_id].hold(),  # type: ignore[attr-defined]
+                    lambda: self.instruments[instrument_id].hold(  # type: ignore[attr-defined]
+                        control=control
+                    ),
                 )
-                snapshot = self.latest.get(instrument_id)
-                if snapshot is not None:
-                    self._expected_targets[instrument_id] = snapshot.current
-                    self._expected_rates[instrument_id] = (
-                        snapshot.rate_per_minute
-                    )
-                    snapshot.target = snapshot.current
-                    snapshot.activity = InstrumentActivity.HOLDING
+                self._record_confirmed_hold(instrument_id, control)
                 return True
             except InstrumentWarning as exc:
                 self.events.report(
@@ -1747,8 +2080,15 @@ class InstrumentManager:
                 )
                 return False
 
+        controls = tuple(
+            dict.fromkeys(
+                (panel.instrument_id, panel.control_id)
+                for panel in self.config.panels
+                if panel.template == "controller"
+            )
+        )
         results = await asyncio.gather(
-            *(hold(instrument_id) for instrument_id in self.instruments)
+            *(hold(instrument_id, control) for instrument_id, control in controls)
         )
         return all(results)
 
@@ -1756,24 +2096,22 @@ class InstrumentManager:
         self,
         instrument_id: str,
         *,
+        control: str,
         origin: str = "manual",
     ) -> None:
         """Hold 单台仪表；同样执行控制权与连接状态检查。"""
 
         if instrument_id not in self.instruments:
             raise InstrumentError(f"Unknown instrument: {instrument_id}", "UNKNOWN_INSTRUMENT", instrument_id)
-        if not self.instrument_configs[instrument_id].control_enabled:
-            raise InstrumentError(
-                f"{self.instrument_configs[instrument_id].display_name} is read-only",
-                "INSTRUMENT_READ_ONLY",
-                instrument_id,
-            )
+        self._controller_panel(instrument_id, control)
         try:
             self._ensure_event_response_control(instrument_id, origin)
             await self._operate(
                 instrument_id,
                 "hold",
-                lambda: self.instruments[instrument_id].hold(),  # type: ignore[attr-defined]
+                lambda: self.instruments[instrument_id].hold(  # type: ignore[attr-defined]
+                    control=control
+                ),
                 origin=origin,
             )
         except (InstrumentError, InstrumentWarning) as exc:
@@ -1796,12 +2134,7 @@ class InstrumentManager:
             severity = Severity.WARNING if isinstance(exc, InstrumentWarning) else Severity.ERROR
             self.events.report(severity, instrument_id, exc.code, str(exc), exc.context)
             raise
-        snapshot = self.latest.get(instrument_id)
-        if snapshot is not None:
-            self._expected_targets[instrument_id] = snapshot.current
-            self._expected_rates[instrument_id] = snapshot.rate_per_minute
-            snapshot.target = snapshot.current
-            snapshot.activity = InstrumentActivity.HOLDING
+        self._record_confirmed_hold(instrument_id, control)
 
     def acquire_sequence_control(self) -> None:
         """由运行时在 SEQ 开始前取得唯一控制租约。"""

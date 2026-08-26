@@ -20,10 +20,6 @@ from typing import Any
 from ..datafile import DatRunLogger
 from ..instruments.base import InstrumentError
 from ..events import EventManager
-from ..package_support.trust import (
-    ContentTrustStore,
-    content_tree_digest,
-)
 from ..models import InstrumentSnapshot, Severity
 from ..module_commands import (
     ModuleCommandSpec,
@@ -32,7 +28,7 @@ from ..module_commands import (
 )
 from ..instrument_manager import InstrumentManager
 from ..sequence.model import Command, CommandType
-from .manifest import ModuleDescriptor, module_dependency_errors, module_dependency_directory
+from .manifest import ModuleDescriptor
 from .worker import ModuleWorkerClient, WorkerRequestError
 
 
@@ -66,7 +62,7 @@ class _ModuleSlotResult:
 
 
 class MeasurementModuleService:
-    """从核心事件循环协调模块信任、worker、SEQ 和 DAT 写入。
+    """从核心事件循环协调模块 worker、SEQ 和 DAT 写入。
 
     关键不变量：
 
@@ -88,12 +84,6 @@ class MeasurementModuleService:
         self.instruments = instruments
         self.app_config = instruments.config
         self.config = instruments.config.modules
-        self.trust_store = ContentTrustStore(
-            instruments.config.resolve_project_path(
-                instruments.config.modules.state_directory
-            )
-            / "trusted_content.json"
-        )
         self.message_callback = message_callback or (lambda _kind, _payload: None)
         self.records = {
             item.id: ModuleRuntimeRecord(item)
@@ -122,48 +112,12 @@ class MeasurementModuleService:
         self,
         descriptor: ModuleDescriptor,
     ) -> None:
-        """在每次 Enable 前重新核对内容、信任记录和隔离依赖。"""
+        """在每次 Enable 前拒绝发现阶段已经判定无效的模块。"""
 
         if not descriptor.can_enable:
             raise InstrumentError(
-                descriptor.error or descriptor.dependency_error,
+                descriptor.error,
                 "MODULE_NOT_ENABLEABLE",
-                descriptor.id,
-            )
-        # UI 发现与用户点击 Enable 之间可能隔很久；不能只相信发现阶段缓存的摘要。
-        current_fingerprint = content_tree_digest(
-            descriptor.path
-        )
-        if current_fingerprint != descriptor.fingerprint:
-            raise InstrumentError(
-                f"Measurement module {descriptor.id} changed "
-                "after discovery",
-                "MODULE_CHANGED_AFTER_DISCOVERY",
-                descriptor.id,
-            )
-        # UI 的首次信任发生在 RuntimeService 启动之后。UI 与 runtime 各自拥有
-        # 一个信任存储实例，因此这里必须刷新磁盘上的原子记录，不能继续使用
-        # runtime 启动时缓存的空快照。
-        self.trust_store.reload()
-        if not self.trust_store.is_trusted(
-            "module",
-            descriptor,
-        ):
-            raise InstrumentError(
-                f"Measurement module {descriptor.id} has not "
-                "been trusted",
-                "MODULE_NOT_TRUSTED",
-                descriptor.id,
-            )
-        dependency_errors = module_dependency_errors(
-            self.app_config,
-            descriptor,
-        )
-        if dependency_errors:
-            raise InstrumentError(
-                "Invalid isolated module dependencies: "
-                + "; ".join(dependency_errors),
-                "MODULE_DEPENDENCIES_INVALID",
                 descriptor.id,
             )
 
@@ -524,13 +478,7 @@ class MeasurementModuleService:
             self._ensure_descriptor_ready(
                 record.descriptor
             )
-            client = ModuleWorkerClient(
-                record.descriptor,
-                module_dependency_directory(
-                    self.app_config,
-                    record.descriptor,
-                ),
-            )
+            client = ModuleWorkerClient(record.descriptor)
             record.client = client
             columns = await asyncio.to_thread(
                 client.start,

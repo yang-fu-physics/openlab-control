@@ -16,11 +16,6 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_REPOSITORY = (
-    ROOT
-    / "templates"
-    / "measurement-modules-repository"
-)
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import Qt  # noqa: E402
@@ -35,12 +30,10 @@ from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.measurement.manifest import (  # noqa: E402
     ModuleColumn,
     ModuleDescriptor,
     discover_modules,
-    module_dependency_directory,
 )
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
 from labcontrol.measurement.settings import load_settings, save_settings  # noqa: E402
@@ -58,37 +51,27 @@ from labcontrol.ui.module_monitor import (  # noqa: E402
     format_compact_result,
 )
 from labcontrol.ui.scaling import scaled  # noqa: E402
+from tests.configuration_fixtures import write_simulated_configuration  # noqa: E402
 
 
 def copied_project(temp_root: Path):
-    (temp_root / "configs").mkdir()
-    shutil.copy2(ROOT / "configs" / "default.toml", temp_root / "configs" / "default.toml")
+    general = write_simulated_configuration(temp_root)
     shutil.copytree(
-        MODULE_REPOSITORY / "modules",
+        ROOT / "modules",
         temp_root / "modules",
     )
-    config = load_config(temp_root / "configs" / "default.toml")
-    store = ContentTrustStore(
-        config.resolve_project_path(
-            config.modules.state_directory
-        )
-        / "trusted_content.json"
-    )
-    for descriptor in discover_modules(config):
-        if descriptor.valid:
-            store.trust("module", descriptor)
-    return config
+    return load_config(general)
 
 
 class ManifestAndSettingsTests(unittest.TestCase):
     def test_module_timeouts_are_loaded_and_must_be_positive(self) -> None:
-        config = load_config(ROOT / "configs" / "default.toml")
+        config = load_config(ROOT / "configs" / "general.toml")
         self.assertEqual(config.modules.startup_timeout_seconds, 10.0)
         self.assertEqual(config.modules.operation_timeout_seconds, 120.0)
         self.assertEqual(config.modules.shutdown_timeout_seconds, 3.0)
         with tempfile.TemporaryDirectory() as temp:
             invalid = Path(temp) / "invalid.toml"
-            source = (ROOT / "configs" / "default.toml").read_text(encoding="utf-8")
+            source = (ROOT / "configs" / "general.toml").read_text(encoding="utf-8")
             invalid.write_text(
                 source.replace(
                     "operation_timeout_seconds = 120.0",
@@ -118,90 +101,23 @@ class ManifestAndSettingsTests(unittest.TestCase):
             save_settings(path, original)
             self.assertEqual(load_settings(path), original)
 
-    def test_conflicting_dependency_ranges_are_isolated_by_module(self) -> None:
+    def test_module_manifest_rejects_dependency_field(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(ROOT / "configs" / "default.toml", root / "configs" / "default.toml")
-            for module_id, dependency in (("first", "demo-package<2"), ("second", "demo-package>=2")):
-                folder = root / "modules" / module_id
-                folder.mkdir(parents=True)
-                (folder / "module.toml").write_text(
-                    "\n".join([
-                        f'name = "{module_id.title()}"',
-                        'version = "1.0.0"',
-                        f'dependencies = ["{dependency}"]',
-                    ]) + "\n",
-                    encoding="utf-8",
-                )
-                locked_version = (
-                    "1.5.0"
-                    if module_id == "first"
-                    else "2.5.0"
-                )
-                (folder / "requirements.lock").write_text(
-                    "demo-package=="
-                    + locked_version
-                    + " --hash=sha256:"
-                    + "0" * 64
-                    + "\n",
-                    encoding="utf-8",
-                )
-                (folder / "backend.py").write_text(
-                    "class Module:\n    pass\n",
-                    encoding="utf-8",
-                )
-            config = load_config(root / "configs" / "default.toml")
-            descriptors = discover_modules(config)
-            self.assertEqual(len(descriptors), 2)
-            self.assertTrue(
-                all(item.can_enable for item in descriptors),
-                [item.error for item in descriptors],
+            (root / "backend.py").write_text(
+                "class Module:\n    pass\n", encoding="utf-8"
             )
-            self.assertNotEqual(
-                module_dependency_directory(config, descriptors[0]),
-                module_dependency_directory(config, descriptors[1]),
+            (root / "module.toml").write_text(
+                'name = "Shared VISA"\nversion = "1.0.0"\n'
+                'dependencies = ["PyVISA==1.16.2"]\n',
+                encoding="utf-8",
             )
+            from labcontrol.measurement.manifest import load_manifest
 
-    def test_framework_dependencies_are_not_redeclared_by_modules(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
-            folder = root / "modules" / "shared_visa"
-            folder.mkdir(parents=True)
-            (folder / "module.toml").write_text(
-                "\n".join(
-                    [
-                        'name = "Shared VISA"',
-                        'version = "1.0.0"',
-                        (
-                            'dependencies = ['
-                            '"PyVISA>=1.16,<1.17", '
-                            '"typing_extensions>=4.16,<5"]'
-                        ),
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            (folder / "backend.py").write_text(
-                "class Module:\n    pass\n",
-                encoding="utf-8",
-            )
-            config = load_config(
-                root / "configs" / "default.toml"
-            )
-            descriptor = discover_modules(config)[0]
+            descriptor = load_manifest(root)
             self.assertFalse(descriptor.valid)
-            self.assertEqual(descriptor.dependencies, ())
             self.assertIn(
-                "already supplied and must not be declared",
+                "unknown module.toml fields: dependencies",
                 descriptor.error,
             )
 
@@ -374,64 +290,6 @@ class ModuleServiceTests(unittest.TestCase):
             del timeout_seconds
             self.actions.append("close")
             self.close_barrier.wait(timeout=2.0)
-
-    def test_enable_requires_trust_and_rechecks_module_content(
-        self,
-    ) -> None:
-        async def scenario(temp_root: Path) -> None:
-            config = copied_project(temp_root)
-            events = EventManager()
-            instruments = InstrumentManager(
-                config,
-                events,
-                isolate_processes=False,
-            )
-            descriptor = discover_modules(config)[0]
-            modules = MeasurementModuleService(
-                (descriptor,),
-                events,
-                instruments,
-            )
-            modules.trust_store.revoke(
-                "module",
-                descriptor.id,
-            )
-            with self.assertRaises(InstrumentError) as untrusted:
-                await modules.enable(descriptor.id)
-            self.assertEqual(
-                untrusted.exception.code,
-                "MODULE_NOT_TRUSTED",
-            )
-            self.assertEqual(
-                modules.records[descriptor.id].state,
-                "disabled",
-            )
-            self.assertIsNone(
-                modules.records[descriptor.id].client
-            )
-            modules.trust_store.trust(
-                "module",
-                descriptor,
-            )
-            backend = descriptor.path / "backend.py"
-            backend.write_text(
-                backend.read_text(encoding="utf-8")
-                + "\n# changed after trust\n",
-                encoding="utf-8",
-            )
-            with self.assertRaises(InstrumentError) as changed:
-                await modules.enable(descriptor.id)
-            self.assertEqual(
-                changed.exception.code,
-                "MODULE_CHANGED_AFTER_DISCOVERY",
-            )
-            self.assertEqual(
-                modules.records[descriptor.id].state,
-                "disabled",
-            )
-
-        with tempfile.TemporaryDirectory() as temp:
-            asyncio.run(scenario(Path(temp)))
 
     def test_measurement_rows_reject_nan_and_infinity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1323,41 +1181,6 @@ class ModuleWindowTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
 
-    def test_dependency_button_only_appears_for_extra_dependencies(
-        self,
-    ) -> None:
-        owner = QWidget()
-        shared = ModuleDescriptor(
-            id="shared",
-            name="Shared",
-            version="1.0.0",
-            path=ROOT,
-            dependencies=(),
-        )
-        extra = ModuleDescriptor(
-            id="extra",
-            name="Extra",
-            version="1.0.0",
-            path=ROOT,
-            dependencies=("module-only-demo==1.0.0",),
-        )
-        dialog = ModuleManagerDialog(
-            (shared, extra),
-            owner,
-        )
-        dialog.table.selectRow(0)
-        self.application.processEvents()
-        self.assertTrue(
-            dialog.install_button.isHidden()
-        )
-        dialog.table.selectRow(1)
-        self.application.processEvents()
-        self.assertFalse(
-            dialog.install_button.isHidden()
-        )
-        dialog.close()
-        owner.close()
-
     def test_compact_result_card_formats_slots_and_restores_window(self) -> None:
         owner = QWidget()
         descriptor = ModuleDescriptor(
@@ -1543,7 +1366,6 @@ class ModuleWindowTests(unittest.TestCase):
             ),
             version="0.1.0b1",
             path=ROOT,
-            dependencies=(),
         )
         dialog = ModuleManagerDialog(
             (descriptor,),

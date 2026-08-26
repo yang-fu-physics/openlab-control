@@ -11,16 +11,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.config import load_config  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.instruments.manifest import discover_system_instruments  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     InstrumentConnectionState,
     Severity,
 )
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 
 
 def _write_instrument(
@@ -30,18 +29,34 @@ def _write_instrument(
     kinds: str = '"temperature"',
 ) -> None:
     directory.mkdir(parents=True)
-    panel_template = "readout" if kinds == '"monitor"' else "controller"
+    monitor = kinds == '"monitor"'
+    panel = (
+        '[[panels]]\nid = "main"\nlabel = "Value"\n'
+        'template = "readout"\nreadings = ["value"]\n'
+        if monitor
+        else (
+            '[[controls]]\nid = "main"\nlabel = "Value"\n'
+            '[[panels]]\nid = "main"\nlabel = "Value"\n'
+            'template = "controller"\ncontrol = "main"\n'
+            'reading_options = ["value"]\ndefault_reading = "value"\n'
+            'min_value = 1.0\nmax_value = 400.0\n'
+            'default_rate_per_minute = 1.0\nmax_rate_per_minute = 30.0\n'
+            'stability_tolerance = 0.1\n'
+            'stability_max_slope_per_minute = 0.1\n'
+            'stability_dwell_seconds = 1.0\n'
+            'stability_timeout_seconds = 10.0\n'
+            'stability_window_seconds = 1.0\n'
+        )
+    )
     (directory / "instrument.toml").write_text(
         (
             'id = "recovery_test"\n'
             'name = "Recovery Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "3"\n'
+            'api_version = "4"\n'
             'backend = "backend:RecoveryInstrument"\n'
             f"kinds = [{kinds}]\n"
-            'main_reading = "value"\n'
-            '[panel]\n'
-            f'template = "{panel_template}"\n'
+            f"{panel}"
             '[readings.value]\nlabel = "Value"\nunit = "K"\n'
         ),
         encoding="utf-8",
@@ -95,10 +110,12 @@ def _source(
         "        if FAILURE.exists():\n"
         "            raise InstrumentError('temporary link failure', 'LINK_LOST')\n"
         "        return {'value': self.target, 'target': self.target, 'rate': self.rate}\n"
-        "    def set_target(self, value, rate_per_minute, mode='Settle'):\n"
+        "    def set_target(self, value, rate_per_minute, mode='Settle', *, control):\n"
+        "        del mode, control\n"
         f"{set_body}"
         "        self.rate = rate_per_minute\n"
-        "    def hold(self):\n"
+        "    def hold(self, *, control):\n"
+        "        del control\n"
         "        if not self.connected:\n"
         "            raise InstrumentError('not connected', 'NOT_CONNECTED')\n"
     )
@@ -115,14 +132,13 @@ class InstrumentRecoveryTests(unittest.TestCase):
         reconnect_timeout: float = 0.35,
         operation_timeout: float = 0.12,
     ) -> InstrumentManager:
-        base = load_config(ROOT / "configs" / "default.toml")
+        base = load_simulated_config()
         instrument_root = root / "instruments" / "recovery_test"
         _write_instrument(
             instrument_root,
             source,
             kinds='"monitor"' if monitor else '"temperature"',
         )
-        state = root / "state"
         if monitor:
             selected = replace(
                 base.instrument("second_stage"),
@@ -144,20 +160,15 @@ class InstrumentRecoveryTests(unittest.TestCase):
             system_instruments=replace(
                 base.system_instruments,
                 directory=str(root / "instruments"),
-                state_directory=str(state),
                 startup_timeout_seconds=0.8,
                 reconnect_timeout_seconds=reconnect_timeout,
                 reconnect_interval_seconds=0.02,
             ),
-            instruments=(selected,),
+            instrument_instances=(selected,),
         )
         descriptors = discover_system_instruments(config)
         self.assertEqual(len(descriptors), 1)
         self.assertTrue(descriptors[0].can_load, descriptors[0].error)
-        ContentTrustStore(state / "trusted_content.json").trust(
-            "instrument",
-            descriptors[0],
-        )
         return InstrumentManager(config, events, descriptors)
 
     def test_transient_read_failure_restarts_worker_and_resolves_warning(
@@ -326,6 +337,7 @@ class InstrumentRecoveryTests(unittest.TestCase):
                         "temperature",
                         250.0,
                         2.0,
+                        control="main",
                     )
                 self.assertEqual(
                     raised.exception.code,

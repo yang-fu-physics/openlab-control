@@ -343,15 +343,22 @@ class MyController(SystemInstrument):
     # 可选；完整状态很慢时只读取写测量行需要的主值
     def read_measurement(self):
         return {"value": 4.2}
-    def set_target(self, value, rate_per_minute, mode="Settle"): ...
-    def hold(self): ...
+    def set_target(self, value, rate_per_minute, mode="Settle", *, control): ...
+    def hold(self, *, control): ...
     def execute_sequence_command(self, command_id): ...
     def event_responses(self): return ()
     def close(self): ...
 ```
 
-GUI 不直接操作仪表。主配置限制手动控制、SEQ 参数窗口和运行时执行；具体后端还应再次检查
-仪表自身边界。写命令超时视为结果不确定，不自动重发。
+GUI 不直接操作仪表。扫描器生成的 controller 面板限制手动控制、SEQ 参数窗口和运行时
+执行；具体后端还应再次检查仪表自身边界。`control` 是作者清单中稳定的 control ID。写命令
+超时视为结果不确定，不自动重发。
+
+一个实例启用多个不同 control 时，`read_status()` 必须增加
+`"controls": {"loop_1": {...}, "loop_2": {...}}`，每项分别返回
+`target/rate/moving/ready`。各回路当前值仍来自其面板所选的 `value` 或 `auxiliary`；核心
+按面板独立判稳并在 `instrument_status.dat` 中分别记录。只有一个 control 时可继续使用
+示例中的顶层简写。
 
 同一物理仪表的辅助温度、加热功率或量程使用 `auxiliary` 返回，不能为了多显示一个值而对
 同一地址创建第二个通讯会话。`ready` 可作为核心独立误差、斜率和 dwell 判定的附加必要
@@ -373,8 +380,8 @@ GUI 不直接操作仪表。主配置限制手动控制、SEQ 参数窗口和运
 ## 依赖与离线安装
 
 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 使用框架锁定版本，两类内容
-不得重复声明。只有额外库才写入 `dependencies`，并携带精确带 SHA-256 的
-`requirements.lock` 和全部本地 wheel。安装固定使用 `--no-index --require-hashes`。
+不得重复声明，也不建立独立运行环境。需要新包时更新核心 `pyproject.toml` 和
+`requirements-lock.txt`，完成全部测试后重新构建完整发布包。
 
-安装时复制完整模块目录到 `modules/`，重启并核对来源、版本和内容指纹。不要提交仪表
-地址密码、令牌、私钥、实验 DAT、`runtime_packages`、`trust_state` 或 `module_data`。
+安装时复制完整模块目录到 `modules/` 后重启。不要提交仪表地址、密码、令牌、私钥、
+实验 DAT 或 `module_data`。

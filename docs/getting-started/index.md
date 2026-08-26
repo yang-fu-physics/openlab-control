@@ -12,9 +12,10 @@
 
 ## 五分钟检查点
 
-- [ ] 程序以仿真温度、仿真磁场和只读 2nd Stage 启动。
+- [ ] 全新安装在没有 System Instrument 面板时也能启动。
 - [ ] 所有 Measurement Module 启动时都是 Disabled。
-- [ ] 能打开 `examples/nested_scan.seq` 并在无真实硬件时运行。
+- [ ] 需要运行温场示例时，能先在 Instrument Scanner 最后一页明确启用对应仿真。
+- [ ] 启用仿真后，能打开 `examples/nested_scan.seq` 并在无真实硬件时运行。
 - [ ] 每次 Run 在 `runs/` 下产生独立目录、DAT、事件和仪表状态日志。
 - [ ] Stop 后温度和磁场继续仪表原有动作，框架没有发送 Set 或 Hold。
 
@@ -30,14 +31,15 @@
 
 | 你希望它做什么 | 应写什么 |
 | --- | --- |
-| 接受 SEQ 或手动界面的温度/磁场 Set、Hold | System Instrument |
-| 保留标准温度/磁场语义，但只读显示 | System Instrument（secondary temperature/field） |
-| 显示 2nd Stage 等一般辅助量 | System Instrument（Monitor） |
+| 接受标准温度/磁场 SEQ | System Instrument controller 面板，角色为 `sample_temp` 或 `field` |
+| 只供手动控制，不接管标准温场 SEQ | System Instrument controller 面板，角色为 `none` |
+| 显示 2nd Stage 等一般辅助量 | System Instrument 只读面板，角色为 `none` |
 | 在 `Measure` 时产生电阻、电压、电流等实验列 | Measurement Module |
 
-同一型号也可能承担不同职责。例如一台温控仪若负责主温度控制，就是 System Instrument；若只在
-底部按标准温度显示，则是 secondary temperature；若只在某个实验方案里读取传感器并写
-测量列，也可以属于 Measurement Module。Monitor 不参与标准温度/磁场控制。
+同一型号也可能承担不同职责。例如一台温控仪若负责标准样品温度控制，就把它的 controller
+面板角色设为 `sample_temp`；另一台温控仪可以保持 `none`，只显示或手动控制。若仪表只在
+某个实验方案里读取传感器并写测量列，也可以属于 Measurement Module。角色为 `none` 的
+面板不参与标准温度/磁场 SEQ。
 
 ## 推荐学习顺序
 

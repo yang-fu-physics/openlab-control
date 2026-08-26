@@ -55,7 +55,8 @@
 - [ ] `hold()` 使用新鲜读回，绝不代入缓存零或猜测值。
 - [ ] 读链路重连后读取真实 target/rate，不自动重放旧写命令。
 - [ ] 恢复窗结束后进入 Faulted，并阻止后续控制。
-- [ ] 同类仪表只有一个 `control_enabled = true`，其余保持只读。
+- [ ] `sample_temp` 和 `field` 角色各自全局最多一个，角色为 `none` 的 controller 不被标准
+  温场 SEQ 选择。
 
 ## 真机放行
 

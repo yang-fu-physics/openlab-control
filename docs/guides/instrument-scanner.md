@@ -1,8 +1,18 @@
 # 扫描并配置仪表
 
-这个独立工具解决一件事：列出电脑当前能看到的 VISA 地址，或让你录入 TCP 地址和端口，
-再确认每个地址对应哪台物理仪表并保存到现场主配置。以后 USB 枚举、GPIB 地址或 TCP
-端点变化，只改 `configs/site.local.toml`。
+Instrument Scanner 把“电脑看到哪些 VISA 地址”和“OpenLab Control 要怎样使用每台 System
+Instrument”放在一个向导里。它不会修改 `configs/general.toml`。
+
+保存结果分开存放：
+
+```text
+configs/visa.resources.toml              未分配的 VISA，供 Measurement Module 使用
+configs/instruments/<instrument-id>.toml System Instrument 实例和面板选择
+configs/pid/<instance-id>.toml           某个实例自己的 PID 数据
+```
+
+全新安装不必先创建这些文件。没有 System 面板时 OpenLab Control 仍能启动；三个仿真选项也
+都默认关闭。
 
 ## 打开工具
 
@@ -12,177 +22,167 @@
 .\.venv\Scripts\python.exe .\tools\instrument_scanner.py
 ```
 
-打包版直接双击程序根目录中的 `InstrumentScanner.exe`。它与同级的
-`OpenLabControl.exe` 共享唯一的 `_internal`，所以发布包不建立 `tools/`，也不会重复携带
-PySide6、PyVISA 和 Python 运行时。不要只复制扫描器 EXE；两个 EXE 都应与 `_internal`
-一起保留。源码版则直接复用主项目 `.venv` 中锁定的框架依赖。
+Windows 发布包直接双击根目录中的 `InstrumentScanner.exe`。它和
+`OpenLabControl.exe` 共用同一个 `_internal`；不要单独移动其中一个 EXE。
 
-PyVISA 是 Python 接口，不是 Windows 的 VISA implementation。如果启动后的自动扫描提示无法初始化
-VISA，请安装适合现场硬件的 VISA 实现；Windows 和 GPIB 环境通常使用 NI-VISA。安装后重新
-打开扫描器即可，不需要重新打包 OpenLab Control。扫描失败弹窗提供可点击的
-[NI-VISA 官方下载链接](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)。
+PyVISA 只是 Python 接口。连接 GPIB、USB 或其他 VISA 硬件时，还要安装与接口匹配的 VISA
+Runtime。若初始化失败，可使用弹窗中的
+[NI-VISA 官方下载链接](https://www.ni.com/en/support/downloads/drivers/download-ni-visa.html)，
+或安装接口厂商提供的 Runtime，然后重新打开扫描器。
 
-默认读取和写入 `configs/site.local.toml`。该文件已被 Git 忽略。地址记录、安全范围、报警和
-日志设置都在这一份文件中；扫描器只替换明确标记的资源区块。如果文件尚不存在，第一次保存
-会以 `configs/default.toml` 为模板创建完整现场配置。OpenLab Control 下次正常启动会自动
-优先加载它，不需要再传入 `--config`。
+## 向导的三个部分
 
-工具打开时会自动读取这份现场配置，随后自动执行一次 VISA 扫描。TCP 端点不会自动扫描；在
-顶部填写 **TCP address** 和 **Port** 后点击 **Add TCP**。旧资源会先显示为仪表卡片，
-扫描结果再与旧表合并；没有在本次扫描中出现的旧地址也会保留，除非你明确把它的 `Use` 改为
-`Ignore`。需要重新检查连接时仍可点击 **Scan VISA instruments**。
+左侧步骤按固定顺序排列：
 
-工具启动时还会自动读取同级的 `system_instruments/`：
+1. **VISA Resources**：扫描地址，决定哪些地址留给 Measurement Module。
+2. **每种 System Instrument 一页**：添加一个或多个物理实例，并确认该型号自己的字段与
+   固定面板。
+3. **Review & Save**：选择可选仿真、调整全部已开启面板的顺序、检查完整写入预览。
 
-- System Instrument 的名称、型号匹配规则和可选读数全部来自各自的 `instrument.toml`；
-- 扫描器不会为了发现这些信息而导入 `backend.py`；
-- VISA 身份唯一匹配时会自动预选 System Instrument；TCP 不发送识别命令，因此由操作者
-  选择实现。主读数由该实现固定，辅助读数由操作者勾选。
+System Instrument 的名称、字段、面板、读数和身份匹配规则都来自
+`system_instruments/<id>/instrument.toml`。扫描器只读取清单，不会为了显示表单而导入
+`backend.py`。
 
-扫描器不读取 Measurement Module 目录，也不把地址绑定到某个模块。Measurement 资源保存后
-会出现在模块的 Settings 中，具体地址在 Enable 模块后选择。
+## VISA 扫描会做什么
 
-## 扫描会做什么
+点击 **Scan VISA Resources** 后，扫描器会：
 
-1. 窗口首次打开时调用 PyVISA 列出资源；
-2. 每个地址只打开一次；
-3. 设置有限的打开和读取超时；
-4. 发送一次 `*IDN?`；
-5. 立即关闭该通讯会话。
+1. 让 PyVISA 列出当前资源；
+2. 每个地址只打开一次，并设置有限超时；
+3. 发送一次 `*IDN?`；
+4. 记录完整返回值或失败原因；
+5. 立即关闭临时会话。
 
-它不会发送 `*RST`、`clear`、输出开关、目标值、PID、量程或 Measurement Module 设置。
-有些旧仪表不支持 `*IDN?`。这时地址仍会显示，Device details 会保留失败原因，你可以根据
-前面板、线缆和手册人工确认。
+它不会发送复位、清除、输出开关、目标值、PID、量程或模块设置。某台仪表没有返回
+`*IDN?` 时，地址仍会显示；操作者必须根据仪表面板、线缆和手册确认它。
 
-`*IDN?` 只用于辅助认出型号。卡片顶部只显示制造商和型号；点击 **Device details** 可查看
-完整返回值和扫描状态。完整内容也会原样保存，不会因为默认折叠而丢失。
+!!! warning "身份文字不是安全认证"
 
-TCP 的 **Add TCP** 只检查地址和端口格式，然后保存为 `tcp://地址:端口`。它不会打开
-socket，也不会发送 `*IDN?` 或厂商命令；卡片会明确显示 `Not probed`。后端在 OpenLab
-Control 启动时才按自己的协议连接并核对状态。
+    `*IDN?` 只帮助识别型号。System Instrument 或 Measurement Module 正式连接时仍要核对
+    型号、状态、有限超时和安全边界。
 
-!!! warning "扫描不是安全认证"
+## VISA 资源页怎样选
 
-    识别成功只能说明地址在扫描时返回了一段身份文字。System Instrument 和 Measurement
-    Module 在正式连接时仍必须再次核对型号、有限超时、状态和安全边界。
+每张卡片包含地址、身份、Resource ID 和 **Keep for Measurement Module**：
 
-## 每张卡片怎样选
+- 新扫描到的地址默认保留给 Measurement Module，可修改稳定的 Resource ID。
+- 曾经保存、但本次没有发现的 Measurement 地址会灰显为 **Not detected**，并默认继续
+  保留；取消勾选才会从 `visa.resources.toml` 删除。
+- 某个地址被 System Instrument 实例选中后，Measurement 勾选会自动关闭并禁用。
+- 同一个 VISA 地址只能分配一次，不能同时被两个 System 实例或 System 与 Measurement
+  使用。
 
-| 项目 | 怎样选择 |
+这里的“默认保留”只适用于未分配的 Measurement VISA。旧 System Instrument 实例若使用的
+地址本次没有检测到，会显示 **Not detected — this instance will not be saved**，并从最终生成
+配置排除；System 页面只保存本次已经检测并完成配置的 VISA 实例。
+
+Resource ID 使用小写字母、数字和下划线，并以字母开头，例如 `keithley_2400_1`。Measurement
+Module 保存这个 ID，再由框架解析地址；模块不需要自己做一遍全盘 VISA 扫描。
+
+## 添加 System Instrument 实例
+
+每个已安装的模板有自己的步骤。点击 **Add Instrument** 后填写唯一的 Instance ID；同一种
+型号可以添加多台物理实例，每个实例有独立后台进程和通讯会话。
+
+有 `discovery.identity_pattern` 的模板会显示 **VISA Resource** 下拉框。只有本次确实发现的
+地址可选，身份唯一匹配时会标出匹配结果。分配给实例的地址和身份写入该实例，不会写进
+`visa.resources.toml`。
+
+没有 VISA 发现规则的仪表使用自己的清单字段。例如网络仪表可在 `config_fields` 中声明
+`host` 和 `port`，扫描器会在该仪表页面显示对应输入。连接方式、默认值和范围由这一型号的
+作者定义，VISA 资源页不负责它。
+
+### 型号专用字段
+
+API v4 清单可声明以下输入类型：
+
+| `type` | 扫描器控件 |
 | --- | --- |
-| `Use` | 不使用选 Ignore；温度、磁场和长期监控选 System；测量仪表选 Measurement |
-| `Resource name (ID)` | 自己容易记住且长期不变的名称，例如 `cryocon_main`、`keithley_2400_1` |
-| `System Instrument` | 只有 System 资源需要；VISA 身份唯一匹配时自动选择，TCP 或未知型号由操作者确认 |
-| `Main reading` | 只读显示；由所选 System Instrument 清单固定 |
-| `Auxiliary readings` | 勾选需要显示和记录的同一物理仪表附加读数 |
+| `string` | 文字框 |
+| `integer` | 整数框，可带 `min`/`max` |
+| `number` | 数值框，可带 `min`/`max` |
+| `boolean` | 复选框 |
+| `choice` | `options` 下拉框 |
+| `pid_file` | 第一次配置时选择复制来源 |
 
-安装的 System Instrument 在 `instrument.toml` 中给出身份匹配和全部读数。例如：
+每个字段都有作者给出的 `default`。请按该型号说明确认实际通道、协议超时和其他选项；不要
+把清单默认值当作现场验证。
 
-```toml
-main_reading = "temp_b"
+### 固定面板
 
-[panel]
-template = "controller"
+作者在 `[[panels]]` 中定义可以出现的面板。扫描器可以关闭、开启和排序这些固定面板，但
+不能临时增加另一种面板。四种模板是：
 
-[discovery]
-identity_pattern = "(?i)cryo-?con.*(?:22c|24c)"
+- `controller`：当前值、目标、速率和稳定状态；
+- `readout`：一个只读值；
+- `readout_grid`：一到四个只读值；
+- `switch`：一个状态值和清单声明的无参数指令按钮。
 
-[readings.temp_b]
-label = "Sample Temperature (Temp B)"
-unit = "K"
-decimals = 3
+开启面板后要选择角色：
 
-[readings.temp_a]
-label = "Cold Head Temperature (Temp A)"
-unit = "K"
-decimals = 3
+- `none`：只显示、记录或提供按钮；
+- `sample_temp`：由 Temperature/Scan Temperature 使用；
+- `field`：由 Field/Scan Field 使用。
 
-[readings.heater_output]
-label = "Heater Output"
-unit = "%FS"
-decimals = 2
+只有 `controller` 能使用 `sample_temp` 或 `field`，并且模板本身必须支持相应 kind。
+`sample_temp` 和 `field` 各自全局最多一个；`none` 可以重复。一个 `controller` 还要确认主
+读数、上下限、默认/最大速率和稳定参数。其他面板只选择开启状态与顺序，角色保持
+`none`。
 
-[readings.heater_range]
-label = "Heater Range"
+所有开启面板共用一个全局顺序。最后一页可用 **Move Up/Move Down** 调整，保存时会写成
+从 1 开始连续的 `order`。
+
+## PID 文件第一次怎样建立
+
+若某个模板有 `type = "pid_file"` 的字段，第一次保存实例时会把作者指定的示例复制为：
+
+```text
+configs/pid/<instance-id>.toml
 ```
 
-`panel.template` 选择底部主面板，`main_reading` 必须对应一个 `[readings]`。其他读数自动成为
-辅助复选项。资源区块只保存勾选结果，不再重复面板、主读数、单位或显示精度。
+第一次也可以点击 **Choose PID File…**，选择另一份已经验证的 TOML 作为复制来源。目标文件
+存在后，扫描器只显示“existing file will be preserved”，不会再让保存操作换来源。
 
-## 为什么 TempA 和 TempB 不拆成两台
+以后再次保存或删除这个实例，扫描器都不会覆盖或删除 PID 文件。作者示例可能故意不能
+直接运行；Cryo-con 22C/24C 的示例含 `zones = []`，应用会在连接前拒绝空区间。先填入该
+冷却系统已经验证的 PID 数据，再启动 OpenLab Control。
 
-如果 TempA、TempB 来自同一个 Cryo-con 地址，它们共用一个物理通讯会话。应登记一条资源：
+## 可选仿真与空配置
 
-```toml
-[[resources]]
-id = "cryocon_main"
-address = "USB0::...::INSTR"
-purpose = "system"
-system_instrument = "cryocon_22c_24c"
-auxiliary_readings = ["temp_a", "heater_output", "heater_range"]
-```
+最后一页提供：
 
-System Instrument 在一次 `read_status()` 中读取完整状态：TempB 写入 `value`，TempA、加热
-功率和量程放在 `auxiliary` 字典中。这样不会为了显示第二个温度并发打开同一个 USB 地址；
-界面把这些辅助值放入最多四格的 `readout_grid`，不会改变底层连接数量。
+- Simulated Temperature；
+- Simulated Magnetic Field；
+- Simulated 2nd Stage。
 
-如果实验室还有另一台独立温控仪或磁场电源，则为它登记另一个资源。核心会给每个不同资源
-建立独立进程，可以同时连接和并发轮询。
+三项默认都不勾选。勾选后才生成各自的 API v4 文件，并加入全局面板顺序。温度仿真自动
+使用 `sample_temp`，磁场仿真自动使用 `field`，因此不能与已有同名角色同时启用。全部不选
+也是有效结果；主程序会以没有 System 面板的状态启动。
 
-## 保存前检查
+## 保存前检查完整预览
 
-点击 **Review changes and save** 后，工具会显示将写入的完整资源区块和目标路径。确认：
+进入 **Review & Save** 后，预览会列出：
 
-- 每个选中地址和前面板型号一致；
-- 没有把同一地址登记两次；
-- System/Measurement 用途没有选反；
-- 主读数正确，辅助读数选择符合实验需要；
-- System Instrument 与型号一致。
+- `CREATE`：新文件；
+- `OVERWRITE`：将被完整替换的文件；
+- `UNCHANGED`：内容相同；
+- `DELETE`：不在当前选择中的生成文件；
+- `CREATE PID`：只在目标 PID 文件不存在时复制。
 
-保存窗口还会单独列出：
+还要检查完整的 `visa.resources.toml` 和每个 System Instrument 文件内容。未填完的实例不会
+保存，页面会明确列出其名称。
 
-- 哪些旧资源会被替换；
-- 哪些资源是新增或删除；
-- 哪些旧资源保持不变。
+保存不是局部追加。确认后会原子写入预览中的全部生成文件，用当前选择完整替换
+`visa.resources.toml`，并删除标为 DELETE 的其他 `configs/instruments/*.toml`。现有
+`configs/pid/*.toml` 始终不覆盖、不删除。
 
-选为 System 的卡片必须填写 `Resource name (ID)` 并选择 `System Instrument`；选为
-Measurement 的卡片必须填写 `Resource name (ID)`。只要有缺项，
-工具就不会写文件，而会定位并标红第一张未完成卡片。不需要的地址可以明确选 `Ignore`。
+因此每次保存前都要检查全部实例、面板、仿真与顺序，而不只检查刚改的一项。OpenLab
+Control 启动时还会再次验证重复 ID、重复地址、角色、顺序、引用和范围；有问题会在连接真
+实仪表前停止。
 
-保存采用同目录临时文件再原子替换，不会留下半个 TOML；资源区块外的控制许可、安全范围、
-报警和日志设置保持原样。程序启动时会再次严格验证；有未知资源、重复地址、错误用途或
-System Instrument 不匹配时，会在连接真实仪表前停止。如果现场配置本身无法读取，扫描器
-也不会覆盖它，因为这时无法可靠保留其他设置或列出将被替换的内容。
+## Measurement Module 怎样读取资源
 
-## 主配置怎样引用
-
-资源记录和引用它的 System Instrument 都在 `configs/site.local.toml`：
-
-```toml
-[[resources]]
-id = "cryocon_main"
-address = "USB0::...::INSTR"
-identity = "Cryo-con,24C,SERIAL,1.0"
-purpose = "system"
-system_instrument = "cryocon_22c_24c"
-auxiliary_readings = ["temp_a"]
-
-[[instruments]]
-id = "temperature"
-display_name = "Temperature"
-kind = "temperature"
-resource = "cryocon_main"
-control_enabled = true
-min_value = 2.0
-max_value = 400.0
-max_rate_per_minute = 10.0
-```
-
-每次 Run 只需保存一份 `configuration.toml`，其中已经包含当时实际使用的地址和安全范围。
-
-## Measurement Module 怎样使用
-
-Measurement Module 不需要自己再扫描全部 VISA。设置界面可以读取：
+扫描器只建立未分配 VISA 的清单，不绑定某个 Measurement Module。模块设置窗口可以读取：
 
 ```python
 resources = api.resources()
@@ -190,6 +190,5 @@ for resource_id, info in resources.items():
     combo.addItem(f"{resource_id} — {info['identity']}", resource_id)
 ```
 
-模块保存 `resource_id`，不是原始地址。后台在 `open` 或 `configure` 中同样调用
-`api.resource_address(resource_id)`。这样配置窗口和
-后台使用的是同一份只读快照，也不会让第三方模块修改核心资源表。
+模块保存 `resource_id`，后台再调用 `api.resource_address(resource_id)`。设置窗口与后台使用
+同一份只读快照，也不会让第三方模块修改资源文件。

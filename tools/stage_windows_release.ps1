@@ -29,9 +29,8 @@ $resourceDirectories = @(
     "configs",
     "examples",
     "docs",
-    "templates",
-    "integrations",
-    "modules"
+    "modules",
+    "system_instruments"
 )
 foreach ($directory in $resourceDirectories) {
     $source = Join-Path $projectRoot $directory
@@ -49,13 +48,22 @@ foreach ($file in @("README.md", "CHANGELOG.md", "SECURITY.md")) {
 foreach ($directory in @(
     "runs",
     "module_data",
-    "wheels",
     "modules",
-    "system_instruments",
-    "runtime_packages",
-    "trust_state"
+    "system_instruments"
 )) {
     New-Item -ItemType Directory -Path (Join-Path $resolvedReleaseRoot $directory) -Force | Out-Null
+}
+
+# Scanner output is local laboratory configuration and must never be packaged.
+foreach ($relativePath in @(
+    "configs\visa.resources.toml",
+    "configs\instruments",
+    "configs\pid"
+)) {
+    $stagedPath = Join-Path $resolvedReleaseRoot $relativePath
+    if (Test-Path -LiteralPath $stagedPath) {
+        Remove-Item -LiteralPath $stagedPath -Recurse -Force
+    }
 }
 
 $cacheNames = @("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")

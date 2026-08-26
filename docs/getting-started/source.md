@@ -6,37 +6,51 @@
 ## 安装运行依赖
 
 ```powershell
-git clone --branch v0.18.1 https://github.com/yang-fu-physics/openlab-control.git
+git clone --branch v0.19.0 https://github.com/yang-fu-physics/openlab-control.git
 cd openlab-control
 .\setup.bat
 .\run.bat
 ```
 
-`setup.bat` 创建 `.venv`，并安装 `requirements-lock.txt` 中经过验证的应用依赖。
+`requirements.txt` 与 `pyproject.toml` 声明核心直接依赖；`requirements-lock.txt` 锁定源码
+运行和发布验证使用的完整精确版本。`setup.bat` 创建 `.venv` 并安装这份锁定文件。
 `run.bat` 始终启动当前源码，不会误用 `dist/` 里的旧程序。
 
 上面固定到与本网站一致的稳定版。准备参与核心开发时，才改为克隆或切换到 `main`。
 
-## 使用本机配置
+## 配置仪表
 
-默认配置只用于仿真。接入真实仪表时先创建不会进入 Git 的本机副本：
+`configs/general.toml` 是唯一通用配置，安装后可直接运行：
 
 ```powershell
-Copy-Item .\configs\default.toml .\configs\site.local.toml
 .\run.bat
 ```
 
-运行 Instrument Scanner 后，System 与 Measurement 地址记录会写入这同一份
-`site.local.toml`；控制许可和现场安全范围也只在这里填写。主程序会自动优先加载该文件；
-需要给团队一个起点时，提交删去真实地址和秘密的 `site.example.toml`，不要提交本机文件。
+全新目录没有 System Instrument 面板也能启动，三个内置仿真默认关闭。需要面板或真实仪表
+时，再运行：
+
+```powershell
+.\.venv\Scripts\python.exe .\tools\instrument_scanner.py
+```
+
+扫描器分别写入：
+
+- `configs/visa.resources.toml`：未分配的 VISA，供 Measurement Module 选择；
+- `configs/instruments/<instrument-id>.toml`：System 实例、面板角色、顺序与限制；
+- `configs/pid/<instance-id>.toml`：只在第一次需要时从示例或选定文件复制。
+
+这些现场文件已被 Git 忽略。扫描器保存会按最后一页的完整预览覆盖生成配置；现有 PID 文件
+不会被覆盖或删除。详细步骤见[扫描并配置仪表](../guides/instrument-scanner.md)。
 
 ## 运行完整测试
 
 ```powershell
 .\.venv\Scripts\python.exe -m compileall -q src
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe run.py --headless-demo --sequence examples\nested_scan.seq
 ```
+
+要无界面运行包含温场命令的示例，先在 Instrument Scanner 中明确启用所需仿真，再运行
+`run.py --headless-demo ...`。三个仿真不会随源码环境自动开启。
 
 ## 本地预览开发者网站
 
@@ -63,6 +77,6 @@ Copy-Item .\configs\default.toml .\configs\site.local.toml
 
 !!! danger "不要提交实验室秘密"
 
-    仪表地址、令牌、私钥、真实实验 DAT、`module_data/`、`trust_state/` 和本机 runtime
-    都不应进入 Git。每次 Run 保存的 `runs/**/configuration.toml` 是本机配置的完整快照，
-    也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。
+    仪表地址、生成的现场仪表配置、令牌、私钥、真实实验 DAT 和 `module_data/`
+    都不应进入 Git。每次 Run 保存的 `runs/**/configuration/` 是本机通用配置、仪表实例、
+    未分配 VISA 和 PID 的快照，也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。

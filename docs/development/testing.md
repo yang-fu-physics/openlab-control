@@ -7,11 +7,11 @@
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover `
-  -s templates\measurement-modules-repository\tests -v
+  -s tests -p "test_bundled_*.py" -v
 ```
 
 这些测试会检查教学模块能否启动、应用设置、逐通道测量、报告超量程并安全关闭。完整例子在
-`templates/measurement-modules-repository/tests/test_tutorial_resistance.py`。
+`tests/test_bundled_tutorial_resistance.py`。
 
 ## 每个模块至少检查这些情况
 
@@ -44,7 +44,6 @@
 - Load SEQ 不会自动连接仪表或应用设置；
 - 状态更新只改变显示；
 - 初始宽度不出现横向滚动条；
-- 下拉列表没有展开时，滚轮不会误改数值。
 
 ## 修改主程序后运行完整测试
 

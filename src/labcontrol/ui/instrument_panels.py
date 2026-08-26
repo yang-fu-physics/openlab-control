@@ -15,10 +15,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import InstrumentConfig, InstrumentReadingConfig
+from ..config import (
+    InstrumentConfig,
+    InstrumentPanelConfig,
+    InstrumentReadingConfig,
+)
 from ..formatting import control_decimals, fixed_number
 from ..models import (
     InstrumentConnectionState,
+    InstrumentKind,
     InstrumentSnapshot,
     StabilityState,
 )
@@ -29,15 +34,18 @@ from .scaling import scaled
 class ControllerPanel(QFrame):
     """显示温度或磁场的当前值、目标、速率和稳定状态。"""
 
-    controlRequested = Signal(str)
+    controlRequested = Signal(str, str)
 
     def __init__(
         self,
         config: InstrumentConfig,
+        panel: InstrumentPanelConfig,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.config = config
+        self.panel = panel
+        self.reading = config.reading(panel.reading)
         self.setObjectName("instrumentPanel")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
@@ -46,23 +54,17 @@ class ControllerPanel(QFrame):
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
         )
-        self.setCursor(
-            Qt.CursorShape.PointingHandCursor
-            if config.control_enabled
-            else Qt.CursorShape.ArrowCursor
-        )
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = _panel_layout(self)
         self.title_label, self.state_label = _panel_header(
             layout,
-            config.display_name,
+            panel.display_name,
         )
         self.value_label = _value_label(layout)
         self.detail_label = _detail_label(
             layout,
-            "Double-click to control"
-            if config.control_enabled
-            else "Display only · not used for control",
+            "Double-click to control",
         )
         self._set_state_style("disconnected")
 
@@ -74,36 +76,42 @@ class ControllerPanel(QFrame):
                 snapshot.message
                 or (
                     "Instrument communication unavailable"
-                    if self.config.control_enabled
-                    else "Display only · not used for control"
                 )
             )
             self._set_state_style(snapshot.connection_state.value)
             return
 
-        precision = control_decimals(snapshot.kind, snapshot.unit)
+        kind = {
+            "sample_temp": InstrumentKind.TEMPERATURE,
+            "field": InstrumentKind.FIELD,
+        }.get(self.panel.role, snapshot.kind)
+        precision = (
+            self.reading.decimals
+            if self.reading.decimals is not None
+            else control_decimals(kind, self.reading.unit)
+        )
+        state = snapshot.controls[self.panel.id]
         current = (
             "—"
-            if snapshot.current is None
-            else f"{fixed_number(snapshot.current, precision)} {snapshot.unit}"
+            if state.current is None
+            else f"{fixed_number(state.current, precision)} {self.reading.unit}"
         )
         target = (
             "—"
-            if snapshot.target is None
-            else f"{fixed_number(snapshot.target, precision)} {snapshot.unit}"
+            if state.target is None
+            else f"{fixed_number(state.target, precision)} {self.reading.unit}"
         )
         rate = (
             "—"
-            if snapshot.rate_per_minute is None
-            else f"{fixed_number(snapshot.rate_per_minute, precision)} "
-            f"{snapshot.unit}/min"
+            if state.rate_per_minute is None
+            else f"{fixed_number(state.rate_per_minute, precision)} "
+            f"{self.reading.unit}/min"
         )
         self.value_label.setText(current)
-        self.detail_label.setText(
-            f"Target {target}  ·  {rate}"
-            if self.config.control_enabled
-            else "Display only · not used for control"
-        )
+        detail = f"Target {target}"
+        if state.rate_per_minute is not None:
+            detail += f"  ·  {rate}"
+        self.detail_label.setText(detail)
         self.state_label.setText(
             {
                 StabilityState.STABLE: "Stable",
@@ -111,9 +119,9 @@ class ControllerPanel(QFrame):
                 StabilityState.MOVING: "Moving",
                 StabilityState.TIMED_OUT: "Timed Out",
                 StabilityState.STALE: "Stale",
-            }.get(snapshot.stability, snapshot.activity.value)
+            }.get(state.stability, state.activity.value)
         )
-        self._set_state_style(snapshot.stability.value)
+        self._set_state_style(state.stability.value)
 
     def mouseDoubleClickEvent(
         self,
@@ -121,9 +129,8 @@ class ControllerPanel(QFrame):
     ) -> None:  # noqa: N802
         if (
             event.button() == Qt.MouseButton.LeftButton
-            and self.config.control_enabled
         ):
-            self.controlRequested.emit(self.config.id)
+            self.controlRequested.emit(self.config.id, self.panel.id)
         super().mouseDoubleClickEvent(event)
 
     def _set_state_style(self, state: str) -> None:
@@ -136,10 +143,13 @@ class ReadoutPanel(QFrame):
     def __init__(
         self,
         reading: InstrumentReadingConfig,
+        main_reading: str | None = None,
+        title: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.reading = reading
+        self.main_reading = main_reading or reading.key
         self.setObjectName("instrumentPanel")
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
@@ -152,7 +162,7 @@ class ReadoutPanel(QFrame):
 
         layout = _panel_layout(self)
         layout.addStretch(1)
-        self.name_label = QLabel(reading.display_name)
+        self.name_label = QLabel(title or reading.display_name)
         self.name_label.setObjectName("panelTitle")
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.value_label = QLabel("—")
@@ -175,15 +185,24 @@ class ReadoutPanel(QFrame):
             if self.reading.decimals is not None
             else 3
         )
+        value = (
+            snapshot.current
+            if self.reading.key == self.main_reading
+            else (
+                None
+                if self.reading.key not in snapshot.metrics
+                else snapshot.metrics[self.reading.key].value
+            )
+        )
         self.value_label.setText(
             _formatted_reading(
-                snapshot.current,
+                value,
                 self.reading.unit,
                 decimals,
             )
         )
         self._set_state_style(
-            "stable" if snapshot.current is not None else "stale"
+            "stable" if value is not None else "stale"
         )
 
     def _set_state_style(self, state: str) -> None:
@@ -197,6 +216,7 @@ class ReadoutGridPanel(QFrame):
         self,
         readings: tuple[InstrumentReadingConfig, ...],
         main_reading: str,
+        title: str = "",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -206,6 +226,7 @@ class ReadoutGridPanel(QFrame):
             )
         self.readings = readings
         self.main_reading = main_reading
+        self.title = title
         self.name_labels: dict[str, QLabel] = {}
         self.value_labels: dict[str, QLabel] = {}
         self.setObjectName("instrumentPanel")
@@ -219,6 +240,12 @@ class ReadoutGridPanel(QFrame):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
         layout = _panel_layout(self)
+        self.title_label: QLabel | None = None
+        if title:
+            self.title_label = QLabel(title)
+            self.title_label.setObjectName("panelTitle")
+            self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(self.title_label)
         readings_layout = QGridLayout()
         readings_layout.setContentsMargins(0, 0, 0, 0)
         readings_layout.setHorizontalSpacing(scaled(8))
@@ -244,6 +271,10 @@ class ReadoutGridPanel(QFrame):
             readings_layout.addWidget(cell, index // 2, index % 2)
             self.name_labels[reading.key] = name_label
             self.value_labels[reading.key] = value_label
+        readings_layout.setColumnStretch(0, 1)
+        readings_layout.setColumnStretch(1, 1)
+        readings_layout.setRowStretch(0, 1)
+        readings_layout.setRowStretch(1, 1)
         layout.addLayout(readings_layout)
         self._set_state_style("disconnected")
 
@@ -286,6 +317,7 @@ class SwitchPanel(QFrame):
     def __init__(
         self,
         config: InstrumentConfig,
+        panel: InstrumentPanelConfig,
         commands: tuple[SystemInstrumentCommandSpec, ...],
         parent: QWidget | None = None,
     ) -> None:
@@ -293,6 +325,8 @@ class SwitchPanel(QFrame):
         if not commands:
             raise ValueError("A switch panel requires at least one command")
         self.config = config
+        self.panel = panel
+        self.reading = config.reading(panel.reading)
         self.buttons: dict[str, QPushButton] = {}
         self._actions_enabled = True
         self._connected = False
@@ -308,7 +342,7 @@ class SwitchPanel(QFrame):
         layout = _panel_layout(self)
         self.title_label, self.state_label = _panel_header(
             layout,
-            config.display_name,
+            panel.display_name,
         )
         self.value_label = _value_label(layout)
         button_row = QHBoxLayout()
@@ -344,17 +378,22 @@ class SwitchPanel(QFrame):
             self._set_state_style(snapshot.connection_state.value)
             return
         self.setToolTip("")
-        if snapshot.current is None:
+        value = _snapshot_reading(
+            snapshot,
+            self.reading.key,
+            self.config.main_reading,
+        )
+        if value is None:
             self.value_label.setText("—")
             self.state_label.setText("No Reading")
             self._set_state_style("stale")
             return
         self.value_label.setText(
             "On"
-            if snapshot.current == 1.0
+            if value is True or value == 1.0
             else "Off"
-            if snapshot.current == 0.0
-            else f"{snapshot.current:.9g}"
+            if value is False or value == 0.0
+            else str(value)
         )
         self.state_label.setText("Monitoring")
         self._set_state_style("stable")
@@ -364,14 +403,15 @@ class SwitchPanel(QFrame):
 
 
 class InstrumentPanelHost(QWidget):
-    """按配置创建主面板，并把辅助读数面板依次放在右侧。"""
+    """按全局顺序创建面板，并把物理实例快照扇出到全部面板。"""
 
-    controlRequested = Signal(str)
+    controlRequested = Signal(str, str)
     actionRequested = Signal(str, str)
 
     def __init__(
         self,
         instruments: tuple[InstrumentConfig, ...],
+        panels: tuple[InstrumentPanelConfig, ...],
         instrument_commands: tuple[
             SystemInstrumentCommandSpec,
             ...,
@@ -379,20 +419,24 @@ class InstrumentPanelHost(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.main_panels: dict[
+        instrument_by_id = {
+            instrument.id: instrument for instrument in instruments
+        }
+        self.panels: dict[
             str,
             ControllerPanel
             | ReadoutPanel
             | ReadoutGridPanel
             | SwitchPanel,
         ] = {}
-        self.readout_panels: dict[
-            tuple[str, int],
-            ReadoutGridPanel,
-        ] = {}
-        self._readout_panels_by_instrument: dict[
+        self._panels_by_instrument: dict[
             str,
-            list[ReadoutGridPanel],
+            list[
+                ControllerPanel
+                | ReadoutPanel
+                | ReadoutGridPanel
+                | SwitchPanel
+            ],
         ] = {}
         self._row = QHBoxLayout(self)
         self._row.setContentsMargins(
@@ -408,106 +452,65 @@ class InstrumentPanelHost(QWidget):
             QSizePolicy.Policy.Preferred,
         )
 
-        right_panels: list[ReadoutGridPanel] = []
-        for instrument in instruments:
-            if instrument.panel_template == "controller":
-                controller_panel = ControllerPanel(
+        for panel_config in panels:
+            instrument = instrument_by_id[panel_config.instrument_id]
+            if panel_config.template == "controller":
+                panel = ControllerPanel(
                     instrument,
+                    panel_config,
                     self,
                 )
-                controller_panel.controlRequested.connect(
-                    self.controlRequested
-                )
-                panel: (
-                    ControllerPanel
-                    | ReadoutPanel
-                    | SwitchPanel
-                    | None
-                ) = controller_panel
-                readout_keys = instrument.auxiliary_readings
-            elif instrument.panel_template == "readout":
+                panel.controlRequested.connect(self.controlRequested)
+            elif panel_config.template == "readout":
                 panel = ReadoutPanel(
-                    instrument.reading(instrument.main_reading),
+                    instrument.reading(panel_config.readings[0]),
+                    instrument.main_reading,
+                    panel_config.display_name,
+                    parent=self,
+                )
+            elif panel_config.template == "readout_grid":
+                panel = ReadoutGridPanel(
+                    tuple(
+                        instrument.reading(key)
+                        for key in panel_config.readings
+                    ),
+                    instrument.main_reading,
+                    panel_config.display_name,
                     self,
                 )
-                readout_keys = ()
-            elif instrument.panel_template == "readout_grid":
-                panel = None
-                readout_keys = (
-                    instrument.main_reading,
-                    *instrument.auxiliary_readings,
-                )
-            elif instrument.panel_template == "switch":
-                switch_panel = SwitchPanel(
+            elif panel_config.template == "switch":
+                panel = SwitchPanel(
                     instrument,
+                    panel_config,
                     tuple(
                         command
                         for command in instrument_commands
                         if command.instrument_id == instrument.id
+                        and command.command_id in panel_config.commands
                     ),
                     self,
                 )
-                switch_panel.actionRequested.connect(
-                    self.actionRequested
-                )
-                panel = switch_panel
-                readout_keys = instrument.auxiliary_readings
+                panel.actionRequested.connect(self.actionRequested)
             else:
                 raise ValueError(
-                    f"Unknown instrument panel template: {instrument.panel_template}"
+                    f"Unknown instrument panel template: {panel_config.template}"
                 )
-            if panel is not None:
-                self.main_panels[instrument.id] = panel
-                self._row.insertWidget(self._row.count() - 1, panel)
-
-            groups = tuple(
-                readout_keys[index : index + 4]
-                for index in range(0, len(readout_keys), 4)
-            )
-            instrument_readouts: list[ReadoutGridPanel] = []
-            for group_index, reading_keys in enumerate(groups):
-                readout_panel = ReadoutGridPanel(
-                    tuple(
-                        instrument.reading(reading_key)
-                        for reading_key in reading_keys
-                    ),
-                    instrument.main_reading,
-                    self,
-                )
-                self.readout_panels[(instrument.id, group_index)] = readout_panel
-                instrument_readouts.append(readout_panel)
-                if (
-                    instrument.panel_template == "readout_grid"
-                    and group_index == 0
-                ):
-                    self.main_panels[instrument.id] = readout_panel
-                    self._row.insertWidget(
-                        self._row.count() - 1,
-                        readout_panel,
-                    )
-                else:
-                    right_panels.append(readout_panel)
-            self._readout_panels_by_instrument[
-                instrument.id
-            ] = instrument_readouts
-
-        for readout_panel in right_panels:
-            self._row.insertWidget(self._row.count() - 1, readout_panel)
+            self.panels[panel_config.key] = panel
+            self._panels_by_instrument.setdefault(
+                instrument.id,
+                [],
+            ).append(panel)
+            self._row.insertWidget(self._row.count() - 1, panel)
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
-        main_panel = self.main_panels[snapshot.instrument_id]
-        if isinstance(
-            main_panel,
-            (ControllerPanel, ReadoutPanel, SwitchPanel),
+        for panel in self._panels_by_instrument.get(
+            snapshot.instrument_id,
+            (),
         ):
-            main_panel.update_snapshot(snapshot)
-        for readout_panel in self._readout_panels_by_instrument[
-            snapshot.instrument_id
-        ]:
-            readout_panel.update_snapshot(snapshot)
+            panel.update_snapshot(snapshot)
 
     def set_actions_enabled(self, enabled: bool) -> None:
-        for panel in self.main_panels.values():
+        for panel in self.panels.values():
             if isinstance(panel, SwitchPanel):
                 panel.set_actions_enabled(enabled)
 
@@ -584,6 +587,19 @@ def _formatted_reading(
     else:
         text = str(value)
     return text + (f" {unit}" if unit and value is not None else "")
+
+
+def _snapshot_reading(
+    snapshot: InstrumentSnapshot,
+    reading_key: str,
+    main_reading: str,
+) -> float | int | str | bool | None:
+    """从一份物理实例快照读取指定面板值。"""
+
+    if reading_key == main_reading:
+        return snapshot.current
+    metric = snapshot.metrics.get(reading_key)
+    return None if metric is None else metric.value
 
 
 def _instrument_panel_style(state: str) -> str:

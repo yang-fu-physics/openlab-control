@@ -13,11 +13,6 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_REPOSITORY = (
-    ROOT
-    / "templates"
-    / "measurement-modules-repository"
-)
 sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt  # noqa: E402
@@ -49,13 +44,17 @@ from labcontrol.ui.preferences import (  # noqa: E402
     UiPreferences,
     UiPreferenceStore,
 )
+from tests.configuration_fixtures import (  # noqa: E402
+    load_simulated_config,
+    write_simulated_configuration,
+)
 
 
 class MainWindowLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
-        cls.config = load_config(ROOT / "configs" / "default.toml")
+        cls.config = load_simulated_config()
         configure_qt_appearance(cls.application, cls.config.ui_scale)
 
     def test_floating_windows_stay_inside_minimum_viewport(self) -> None:
@@ -157,7 +156,10 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(observed["minimum"], 1.8)
             self.assertEqual(observed["maximum"], 400.0)
             self.assertEqual(observed["max_rate"], 30.0)
-            self.assertIn("Configured limits (temperature)", observed["summary"])
+            self.assertIn(
+                "Configured limits (temperature.main)",
+                observed["summary"],
+            )
             QCoreApplication.sendPostedEvents(
                 None,
                 QEvent.Type.DeferredDelete,
@@ -166,7 +168,7 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_default_modules_directory_is_empty_and_has_no_measurement_tile(self) -> None:
+    def test_bundled_modules_are_discovered_but_start_disabled(self) -> None:
         window = MainWindow(self.config)
         try:
             window.resize(1180, 720)
@@ -179,14 +181,21 @@ class MainWindowLayoutTests(unittest.TestCase):
                 ["Enabled", "Name", "Version"],
             )
             self.assertEqual(
-                set(window.status_panel.main_panels),
-                {"temperature", "field", "second_stage"},
+                set(window.status_panel.panels),
+                {
+                    "temperature.main",
+                    "field.main",
+                    "second_stage.main",
+                },
             )
             self.assertEqual(
                 window.status_scroll.horizontalScrollBarPolicy(),
                 Qt.ScrollBarPolicy.ScrollBarAsNeeded,
             )
-            self.assertEqual(window.module_descriptors, ())
+            self.assertEqual(
+                [descriptor.id for descriptor in window.module_descriptors],
+                ["simulated_transport", "tutorial_resistance"],
+            )
             self.assertEqual(window.windowTitle(), self.config.title)
             self.assertEqual(
                 window.appearance_action.text(),
@@ -247,6 +256,23 @@ class MainWindowLayoutTests(unittest.TestCase):
             )
         finally:
             window.close()
+
+    def test_clean_configuration_constructs_and_closes_without_panels(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            configs = root / "configs"
+            configs.mkdir()
+            general = configs / "general.toml"
+            shutil.copy2(ROOT / "configs" / "general.toml", general)
+            (configs / "instruments").mkdir()
+
+            window = MainWindow(load_config(general))
+            try:
+                self.assertEqual(window.status_panel.panels, {})
+            finally:
+                window.close()
 
     def test_close_running_sequence_explains_system_instruments_continue(self) -> None:
         window = MainWindow(self.config)
@@ -366,7 +392,10 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertTrue(window.trend_dialog.isVisible())
             self.assertEqual(
                 set(window.current_snapshots),
-                {instrument.id for instrument in self.config.instruments},
+                {
+                    instrument.id
+                    for instrument in self.config.instrument_instances
+                },
             )
             self.assertTrue(
                 all(
@@ -408,71 +437,26 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_dependency_install_requires_selected_module_to_be_disabled(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
-            shutil.copytree(
-                MODULE_REPOSITORY / "modules",
-                root / "modules",
-            )
-            window = MainWindow(
-                load_config(root / "configs" / "default.toml")
-            )
-            try:
-                window.enabled_modules.add("simulated_transport")
-                with patch(
-                    "labcontrol.ui.main_window.QMessageBox.warning"
-                ) as warning:
-                    window._install_module_dependencies(
-                        "simulated_transport"
-                    )
-                warning.assert_called_once()
-                self.assertIn(
-                    "Disable this measurement module",
-                    warning.call_args.args[2],
-                )
-            finally:
-                window.close()
-
-    def test_first_module_trust_enables_without_application_restart(
+    def test_module_enables_without_application_restart(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
+            general = write_simulated_configuration(root)
             shutil.copytree(
-                MODULE_REPOSITORY / "modules",
+                ROOT / "modules",
                 root / "modules",
             )
             window = MainWindow(
                 load_config(
-                    root / "configs" / "default.toml"
+                    general
                 )
             )
             try:
-                # RuntimeService 已经在 MainWindow 构造阶段创建了自己的信任存储。
-                # 这里模拟用户随后第一次确认模块，确保后台能立即看见新记录，而
-                # 不是必须关闭并重开应用后才能 Enable。
-                with patch(
-                    "labcontrol.ui.trust_dialogs."
-                    "QMessageBox.question",
-                    return_value=(
-                        QMessageBox.StandardButton.Yes
-                    ),
-                ):
-                    window._set_module_enabled(
-                        "simulated_transport",
-                        True,
-                    )
+                window._set_module_enabled(
+                    "simulated_transport",
+                    True,
+                )
 
                 deadline = time.monotonic() + 5.0
                 while (
@@ -518,18 +502,14 @@ class MainWindowLayoutTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
+            general = write_simulated_configuration(root)
             shutil.copytree(
-                MODULE_REPOSITORY / "modules",
+                ROOT / "modules",
                 root / "modules",
             )
             window = MainWindow(
                 load_config(
-                    root / "configs" / "default.toml"
+                    general
                 )
             )
             try:
@@ -542,17 +522,10 @@ class MainWindowLayoutTests(unittest.TestCase):
                         "simulated_transport"
                     ]
                 )
-                with (
-                    patch(
-                        "labcontrol.ui.main_window."
-                        "confirm_measurement_module_trust",
-                        return_value=True,
-                    ),
-                    patch.object(
-                        window.runtime,
-                        "enable_module",
-                        return_value=failed,
-                    ),
+                with patch.object(
+                    window.runtime,
+                    "enable_module",
+                    return_value=failed,
                 ):
                     checkbox.click()
 
@@ -588,13 +561,9 @@ class MainWindowLayoutTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
+            general = write_simulated_configuration(root)
             shutil.copytree(
-                MODULE_REPOSITORY / "modules",
+                ROOT / "modules",
                 root / "modules",
             )
             sequence = root / "experiment.seq"
@@ -614,7 +583,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             )
             window = MainWindow(
                 load_config(
-                    root / "configs" / "default.toml"
+                    general
                 )
             )
             try:
@@ -675,11 +644,7 @@ class MainWindowLayoutTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
+            general = write_simulated_configuration(root)
             sequence = root / "saved.seq"
             sequence.write_text(
                 "T End Sequence\n",
@@ -687,7 +652,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             )
             window = MainWindow(
                 load_config(
-                    root / "configs" / "default.toml"
+                    general
                 )
             )
             try:
@@ -738,13 +703,9 @@ class MainWindowLayoutTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "configs").mkdir()
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                root / "configs" / "default.toml",
-            )
+            general = write_simulated_configuration(root)
             shutil.copytree(
-                MODULE_REPOSITORY / "modules",
+                ROOT / "modules",
                 root / "modules",
             )
             sequence = root / "enabled.seq"
@@ -754,7 +715,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             )
             window = MainWindow(
                 load_config(
-                    root / "configs" / "default.toml"
+                    general
                 )
             )
             fake_window = Mock()

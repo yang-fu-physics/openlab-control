@@ -1,24 +1,17 @@
 from __future__ import annotations
 
-import os
+from pathlib import Path
 import shutil
 import sys
 import tempfile
-from pathlib import Path
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "tools"))
 
-from labcontrol.app import _arguments as application_arguments  # noqa: E402
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
-from labcontrol.datafile import DatRunLogger  # noqa: E402
-from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.instrument_resources import (  # noqa: E402
     InstrumentResource,
     InstrumentResourceError,
@@ -26,1042 +19,595 @@ from labcontrol.instrument_resources import (  # noqa: E402
     render_instrument_resources,
     write_instrument_resources,
 )
-from labcontrol.measurement.frontend_api import ModuleUIAPI  # noqa: E402
-from labcontrol.module_api import ModuleAPI, ModuleError  # noqa: E402
-from labcontrol.paths import default_config_path  # noqa: E402
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
-from instrument_scanner import (  # noqa: E402
-    InstrumentScannerWindow,
-    NI_VISA_DOWNLOAD_URL,
-    VisaScanResult,
-    _arguments,
-    application_root,
-    discover_scan_descriptors,
-    match_descriptor,
-    scan_visa_resources,
-    suggest_resource_id,
-    tcp_resource_address,
+from labcontrol.instruments.manifest import (  # noqa: E402
+    discover_system_instruments,
 )
+from labcontrol.paths import default_config_path  # noqa: E402
 
 
-def _write_system_instrument(
-    root: Path,
-    instrument_id: str,
-    kind: str,
-    main_reading: str,
-    auxiliary_readings: tuple[str, ...] = (),
-) -> None:
-    directory = root / "system_instruments" / instrument_id
-    directory.mkdir(parents=True)
-    (directory / "backend.py").write_text("class Driver: pass\n", encoding="utf-8")
-    readings = (main_reading, *auxiliary_readings)
-    metadata = "".join(
-        f"\n[readings.{key}]\nlabel = \"{key}\"\nunit = \"K\"\n"
-        for key in readings
-    )
-    (directory / "instrument.toml").write_text(
-        (
-            f'id = "{instrument_id}"\n'
-            f'name = "{instrument_id}"\n'
-            'version = "1.0.0"\n'
-            'api_version = "3"\n'
-            'backend = "backend:Driver"\n'
-            f'kinds = ["{kind}"]\n'
-            f'main_reading = "{main_reading}"\n'
-            '[panel]\n'
-            'template = "controller"\n'
-            + metadata
-        ),
+EXTERNAL_MANIFEST = """\
+id = "dual_controller"
+name = "Dual Controller"
+version = "1.0.0"
+api_version = "4"
+backend = "backend:Driver"
+kinds = ["temperature"]
+
+[discovery]
+identity_pattern = "^ACME,DUAL,"
+
+[[config_fields]]
+id = "pid_file"
+label = "PID File"
+type = "pid_file"
+default = "configs/pid/default.toml"
+
+[[controls]]
+id = "loop1"
+label = "Loop 1"
+
+[[panels]]
+id = "control"
+label = "Sample Temperature"
+template = "controller"
+control = "loop1"
+reading_options = ["temperature"]
+default_reading = "temperature"
+min_value = 1.8
+max_value = 400.0
+default_rate_per_minute = 1.0
+max_rate_per_minute = 30.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 1.5
+stability_timeout_seconds = 120.0
+stability_window_seconds = 1.0
+
+[[panels]]
+id = "heater"
+label = "Heater"
+template = "readout"
+readings = ["heater"]
+
+[readings.temperature]
+label = "Temperature"
+unit = "K"
+decimals = 3
+
+[readings.heater]
+label = "Heater"
+unit = "%"
+decimals = 1
+"""
+
+
+EXTERNAL_GENERATED = """\
+id = "dual_controller"
+name = "Dual Controller"
+version = "1.0.0"
+api_version = "4"
+backend = "backend:Driver"
+kinds = ["temperature"]
+
+[discovery]
+identity_pattern = "^ACME,DUAL,"
+
+[[config_fields]]
+id = "pid_file"
+label = "PID File"
+type = "pid_file"
+default = "configs/pid/default.toml"
+
+[[controls]]
+id = "loop1"
+label = "Loop 1"
+
+[readings.temperature]
+label = "Temperature"
+unit = "K"
+decimals = 3
+
+[readings.heater]
+label = "Heater"
+unit = "%"
+decimals = 1
+
+[[instances]]
+id = "sample_controller"
+resource = "GPIB0::1::INSTR"
+identity = "ACME,DUAL,123"
+pid_file = "configs/pid/sample_controller.toml"
+
+[[instances.panels]]
+id = "control"
+enabled = true
+order = 1
+role = "sample_temp"
+reading = "temperature"
+
+[[instances.panels]]
+id = "heater"
+enabled = true
+order = 2
+role = "none"
+"""
+
+
+def _copy_general(root: Path) -> Path:
+    configs = root / "configs"
+    configs.mkdir(parents=True)
+    destination = configs / "general.toml"
+    shutil.copy2(ROOT / "configs" / "general.toml", destination)
+    return destination
+
+
+def _write_external_configuration(root: Path) -> Path:
+    general = _copy_general(root)
+    instrument = root / "system_instruments" / "dual_controller"
+    instrument.mkdir(parents=True)
+    (instrument / "instrument.toml").write_text(
+        EXTERNAL_MANIFEST,
         encoding="utf-8",
     )
+    (instrument / "backend.py").write_text(
+        "class Driver: pass\n",
+        encoding="utf-8",
+    )
+    pid = root / "configs" / "pid" / "sample_controller.toml"
+    pid.parent.mkdir()
+    pid.write_text("zones = []\n", encoding="utf-8")
+    generated = root / "configs" / "instruments"
+    generated.mkdir()
+    (generated / "dual_controller.toml").write_text(
+        EXTERNAL_GENERATED,
+        encoding="utf-8",
+    )
+    return general
+
+
+def _simulation_document(
+    file_id: str,
+    instance_id: str,
+    label: str,
+    kind: str,
+    backend: str,
+    order: int,
+    role: str,
+) -> str:
+    unit = "Oe" if kind == "field" else "K"
+    if kind == "monitor":
+        template = f"""\
+[[panels]]
+id = "main"
+label = "{label}"
+template = "readout"
+readings = ["value"]
+"""
+        configured_panel = f"""\
+[[instances.panels]]
+id = "main"
+enabled = true
+order = {order}
+role = "none"
+"""
+    else:
+        minimum, maximum, default_rate, maximum_rate = (
+            (1.8, 400.0, 10.0, 30.0)
+            if kind == "temperature"
+            else (-90000.0, 90000.0, 5000.0, 10000.0)
+        )
+        template = f"""\
+[[controls]]
+id = "main"
+label = "{label}"
+
+[[panels]]
+id = "main"
+label = "{label}"
+template = "controller"
+control = "main"
+reading_options = ["value"]
+default_reading = "value"
+min_value = {minimum}
+max_value = {maximum}
+default_rate_per_minute = {default_rate}
+max_rate_per_minute = {maximum_rate}
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 1.0
+stability_timeout_seconds = 120.0
+stability_window_seconds = 1.0
+"""
+        configured_panel = f"""\
+[[instances.panels]]
+id = "main"
+enabled = true
+order = {order}
+role = "{role}"
+reading = "value"
+"""
+    initial = (
+        4.2 if kind == "monitor" else 300.0 if kind == "temperature" else 0.0
+    )
+    return f"""\
+id = "{file_id}"
+name = "{label}"
+version = "1.0.0"
+api_version = "4"
+backend = "{backend}"
+kinds = ["{kind}"]
+
+{template}
+[readings.value]
+label = "{label}"
+unit = "{unit}"
+decimals = 3
+
+[[instances]]
+id = "{instance_id}"
+initial_value = {initial}
+noise = 0.0
+
+{configured_panel}"""
 
 
 class InstrumentResourceTests(unittest.TestCase):
-    def test_application_prefers_site_configuration_when_present(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+    def test_default_path_is_only_general_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
             configs = root / "configs"
             configs.mkdir()
-            default = configs / "default.toml"
-            default.write_text("", encoding="utf-8")
+            (configs / "site.local.toml").write_text("", encoding="utf-8")
+            (configs / "default.toml").write_text("", encoding="utf-8")
             with patch("labcontrol.paths.project_root", return_value=root):
-                self.assertEqual(default_config_path(), default)
-                site = configs / "site.local.toml"
-                site.write_text("", encoding="utf-8")
-                self.assertEqual(default_config_path(), site)
+                self.assertEqual(default_config_path(), configs / "general.toml")
 
-    def test_explicit_application_config_overrides_site_default(self) -> None:
-        explicit = Path("chosen.toml")
-        with patch(
-            "labcontrol.app.default_config_path",
-            return_value=Path("configs/site.local.toml"),
-        ):
-            self.assertEqual(
-                application_arguments(["--config", str(explicit)]).config,
-                explicit,
+    def test_clean_general_loads_without_local_or_system_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _copy_general(root)
+
+            config = load_config(general)
+
+            self.assertEqual(config.instrument_instances, ())
+            self.assertEqual(config.instrument_resources, ())
+            self.assertEqual(config.panels, ())
+            self.assertEqual(discover_system_instruments(config), ())
+            self.assertFalse((root / "system_instruments").exists())
+
+    def test_general_rejects_old_inline_instruments(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _copy_general(root)
+            general.write_text(
+                general.read_text(encoding="utf-8")
+                + '\n[[instruments]]\nid = "legacy"\n',
+                encoding="utf-8",
             )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "Unknown general configuration fields: instruments",
+            ):
+                load_config(general)
 
-    def test_round_trip_preserves_system_and_measurement_resources(
-        self,
-    ) -> None:
+    def test_resources_are_a_standalone_measurement_inventory(self) -> None:
         resources = (
-            InstrumentResource(
-                id="cryocon_main",
-                address="USB0::1::INSTR",
-                identity="Cryo-con,24C,SERIAL,1.0",
-                purpose="system",
-                system_instrument="cryocon_22c_24c",
-                auxiliary_readings=("temp_a",),
-            ),
-            InstrumentResource(
-                "keithley_2400",
-                "GPIB0::24::INSTR",
-                "KEITHLEY INSTRUMENTS INC.,MODEL 2400,123,1.0",
-                "measurement",
-            ),
+            InstrumentResource("meter", "TCPIP0::meter::INSTR", "ACME,METER"),
         )
-        with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "site.local.toml"
-            write_instrument_resources(
-                path,
-                resources,
-                template_path=ROOT / "configs" / "default.toml",
-            )
+        rendered = render_instrument_resources(resources)
+        self.assertNotIn("purpose", rendered)
+        self.assertNotIn("system_instrument", rendered)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "visa.resources.toml"
+            write_instrument_resources(path, resources)
+            self.assertEqual(load_instrument_resources(path), resources)
             self.assertEqual(
-                load_instrument_resources(path),
-                resources,
-            )
-            text = path.read_text(encoding="utf-8")
-            self.assertIn("# BEGIN OPENLAB INSTRUMENT RESOURCES", text)
-            self.assertIn('purpose = "system"', text)
-
-    def test_site_update_preserves_safety_settings_and_replaces_only_resources(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            site = Path(temp) / "site.local.toml"
-            source = (ROOT / "configs" / "default.toml").read_text(
-                encoding="utf-8"
-            ).replace("min_value = 1.8", "min_value = 2.0", 1)
-            site.write_text(source, encoding="utf-8")
-            write_instrument_resources(
-                site,
-                (
-                    InstrumentResource(
-                        "meter_old",
-                        "GPIB0::1::INSTR",
-                    ),
-                ),
-            )
-            write_instrument_resources(
-                site,
-                (
-                    InstrumentResource(
-                        "meter_new",
-                        "GPIB0::2::INSTR",
-                    ),
-                ),
-            )
-
-            text = site.read_text(encoding="utf-8")
-            self.assertIn("min_value = 2.0", text)
-            self.assertNotIn("meter_old", text)
-            self.assertIn("meter_new", text)
-            self.assertEqual(
-                text.count("# BEGIN OPENLAB INSTRUMENT RESOURCES"),
-                1,
-            )
-            self.assertEqual(
-                load_config(site).instrument("temperature").min_value,
-                2.0,
-            )
-
-    def test_missing_site_configuration_is_created_from_default_template(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            template = root / "default.toml"
-            destination = root / "site.local.toml"
-            shutil.copy2(ROOT / "configs" / "default.toml", template)
-
-            write_instrument_resources(
-                destination,
-                (InstrumentResource("meter", "GPIB0::24::INSTR"),),
-                template_path=template,
-            )
-
-            text = destination.read_text(encoding="utf-8")
-            self.assertIn('[application]', text)
-            self.assertIn('id = "temperature"', text)
-            self.assertEqual(
-                load_instrument_resources(destination)[0].address,
-                "GPIB0::24::INSTR",
-            )
-
-    def test_removed_resource_file_setting_fails_fast(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            site = root / "configs" / "site.local.toml"
-            source = (ROOT / "configs" / "default.toml").read_text(
-                encoding="utf-8"
-            ).replace(
-                '[system_instruments]\n',
-                '[system_instruments]\nresource_file = "configs/instruments.local.toml"\n',
-                1,
-            )
-            site.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                ConfigurationError,
-                "resource_file is no longer used",
-            ):
-                load_config(site)
-
-    def test_registry_rejects_duplicate_addresses_and_measurement_readings(
-        self,
-    ) -> None:
-        duplicate = (
-            InstrumentResource(
-                "first",
-                "GPIB0::1::INSTR",
-            ),
-            InstrumentResource(
-                "second",
-                "gpib0::1::instr",
-            ),
-        )
-        with self.assertRaisesRegex(
-            InstrumentResourceError,
-            "assigned to both",
-        ):
-            render_instrument_resources(duplicate)
-        with self.assertRaisesRegex(
-            InstrumentResourceError,
-            "cannot declare system readings",
-        ):
-            render_instrument_resources(
-                (
-                    InstrumentResource(
-                        "meter",
-                        "GPIB0::2::INSTR",
-                        purpose="measurement",
-                        auxiliary_readings=("voltage",),
-                    ),
-                )
-            )
-        with self.assertRaisesRegex(
-            InstrumentResourceError,
-            "cannot select a System Instrument",
-        ):
-            render_instrument_resources(
-                (
-                    InstrumentResource(
-                        "meter",
-                        "GPIB0::3::INSTR",
-                        purpose="measurement",
-                        system_instrument="cryocon_22c_24c",
-                    ),
-                )
-            )
-
-    def test_main_config_resolves_resource_and_reading_metadata(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            config_path = root / "configs" / "site.local.toml"
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                config_path,
-            )
-            _write_system_instrument(
-                root,
-                "cryocon_22c_24c",
-                "temperature",
-                "temp_b",
-                ("temp_a",),
-            )
-            write_instrument_resources(
-                config_path,
-                (
-                    InstrumentResource(
-                        "cryocon_main",
-                        "USB0::1::INSTR",
-                        purpose="system",
-                        system_instrument="cryocon_22c_24c",
-                        auxiliary_readings=("temp_a",),
-                    ),
-                ),
-            )
-            source = config_path.read_text(encoding="utf-8")
-            source = source.replace(
-                'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
-                (
-                    'resource = "cryocon_main"'
-                ),
-                1,
-            )
-            source = source.replace('unit = "K"\n', "", 1)
-            config_path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                ConfigurationError,
-                "initial_value is only used by built-in simulators",
-            ):
-                load_config(config_path)
-            source = source.replace('initial_value = 300.0\n', "", 1)
-            config_path.write_text(
-                source.replace(
-                    'resource = "cryocon_main"',
-                    'resource = "cryocon_main"\nmain_reading = "temp_b"',
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(
-                ConfigurationError,
-                "reading metadata comes from",
-            ):
-                load_config(config_path)
-            config_path.write_text(source, encoding="utf-8")
-            config = load_config(config_path)
-            temperature = config.instrument("temperature")
-            self.assertEqual(
-                temperature.address,
-                "USB0::1::INSTR",
-            )
-            self.assertEqual(
-                temperature.main_reading,
-                "temp_b",
-            )
-            self.assertEqual(
-                temperature.auxiliary_readings,
-                ("temp_a",),
-            )
-            logger = DatRunLogger(config, EventManager())
-            paths = logger.open_run(
-                "resource.seq",
-                "T End Sequence\n",
-            )
-            self.assertEqual(
-                load_instrument_resources(
-                    paths.configuration_snapshot
-                ),
-                config.instrument_resources,
-            )
-            self.assertFalse(
-                (paths.directory / "instrument-resources.toml").exists()
-            )
-            logger.close()
-
-    def test_external_system_instruments_require_distinct_resources(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            _write_system_instrument(
-                root,
-                "cryocon_22c_24c",
-                "temperature",
-                "temp_b",
-                ("temp_a",),
-            )
-            _write_system_instrument(
-                root,
-                "magnet_supply_x",
-                "field",
-                "field",
-            )
-            config_path = root / "configs" / "site.local.toml"
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                config_path,
-            )
-            write_instrument_resources(
-                config_path,
-                (
-                    InstrumentResource(
-                        "temperature_controller",
-                        "USB0::1::INSTR",
-                        purpose="system",
-                        system_instrument="cryocon_22c_24c",
-                        auxiliary_readings=("temp_a",),
-                    ),
-                    InstrumentResource(
-                        "magnet_controller",
-                        "GPIB0::7::INSTR",
-                        purpose="system",
-                        system_instrument="magnet_supply_x",
-                    ),
-                ),
-            )
-            source = config_path.read_text(
-                encoding="utf-8"
-            )
-            source = source.replace(
-                'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
-                'resource = "temperature_controller"',
-                1,
-            ).replace(
-                'backend = "labcontrol.instruments.simulated:SimulatedFieldController"',
-                'resource = "magnet_controller"',
-                1,
-            )
-            source = source.replace('unit = "K"\n', "", 1)
-            source = source.replace('unit = "Oe"\n', "", 1)
-            source = source.replace('initial_value = 300.0\n', "", 1)
-            source = source.replace('initial_value = 0.0\n', "", 1)
-            config_path.write_text(source, encoding="utf-8")
-
-            config = load_config(config_path)
-
-            self.assertEqual(
-                config.instrument("temperature").address,
-                "USB0::1::INSTR",
-            )
-            self.assertEqual(
-                config.instrument("field").address,
-                "GPIB0::7::INSTR",
-            )
-            self.assertEqual(
-                set(config.resource_payload("system")),
-                {"temperature_controller", "magnet_controller"},
-            )
-
-    def test_external_system_instrument_rejects_inline_or_missing_address_resource(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            config_path = root / "configs" / "site.local.toml"
-            source = (ROOT / "configs" / "default.toml").read_text(
-                encoding="utf-8"
-            ).replace(
-                'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
-                'backend = "cryocon_22c_24c"',
-                1,
-            )
-            config_path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(ConfigurationError, "selected through resource"):
-                load_config(config_path)
-
-            config_path.write_text(
-                source.replace(
-                    'backend = "cryocon_22c_24c"',
-                    'backend = "cryocon_22c_24c"\naddress = "USB0::1::INSTR"',
-                    1,
-                ),
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ConfigurationError, "site.*resources"):
-                load_config(config_path)
-
-    def test_unknown_resource_fails_before_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "configs").mkdir()
-            config_path = root / "configs" / "site.local.toml"
-            source = (
-                ROOT / "configs" / "default.toml"
-            ).read_text(encoding="utf-8")
-            source = source.replace(
-                'backend = "labcontrol.instruments.simulated:SimulatedTemperatureController"',
-                (
-                    'resource = "missing"'
-                ),
-                1,
-            )
-            source = source.replace('unit = "K"\n', "", 1)
-            source = source.replace('initial_value = 300.0\n', "", 1)
-            config_path.write_text(source, encoding="utf-8")
-            with self.assertRaisesRegex(
-                ConfigurationError,
-                "unknown resource",
-            ):
-                load_config(config_path)
-
-    def test_module_api_returns_filtered_deep_copy(self) -> None:
-        source = {
-            "meter": {
-                "id": "meter",
-                "address": "GPIB0::1::INSTR",
-                "purpose": "measurement",
-            },
-        }
-        api = ModuleAPI(
-            {},
-            lambda _kind, _payload: None,
-            _instrument_resources=source,
-        )
-        resources = api.resources()
-        self.assertEqual(set(resources), {"meter"})
-        resources["meter"]["address"] = "changed"  # type: ignore[index]
-        self.assertEqual(
-            api.resources()["meter"]["address"],
-            "GPIB0::1::INSTR",
-        )
-        self.assertEqual(
-            api.resource_address("meter"),
-            "GPIB0::1::INSTR",
-        )
-        with self.assertRaisesRegex(ModuleError, "unavailable"):
-            api.resource_address("missing")
-        unsafe = ModuleAPI(
-            {},
-            lambda _kind, _payload: None,
-            _instrument_resources={
-                "controller": {
-                    "purpose": "system",
-                    "address": "USB0::1::INSTR",
-                }
-            },
-        )
-        with self.assertRaisesRegex(
-            ModuleError,
-            "non-measurement",
-        ):
-            unsafe.resources()
-
-    def test_module_ui_api_rejects_system_instrument_resources(self) -> None:
-        safe = ModuleUIAPI(
-            resources={
-                "meter": {
-                    "purpose": "measurement",
-                    "address": "GPIB0::1::INSTR",
-                }
-            }
-        )
-        copied = safe.resources()
-        copied["meter"]["address"] = "changed"  # type: ignore[index]
-        self.assertEqual(
-            safe.resources()["meter"]["address"],
-            "GPIB0::1::INSTR",
-        )
-        self.assertEqual(
-            safe.resource("meter")["address"],
-            "GPIB0::1::INSTR",
-        )
-        with self.assertRaisesRegex(
-            ValueError,
-            "cannot expose System Instrument",
-        ):
-            ModuleUIAPI(
-                resources={
-                    "controller": {
-                        "purpose": "system",
-                        "address": "USB0::1::INSTR",
-                    }
-                }
-            )
-
-
-class InstrumentScannerTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.application = QApplication.instance() or QApplication([])
-
-    def test_default_output_is_the_single_site_configuration(self) -> None:
-        self.assertEqual(
-            _arguments([]).output.resolve(),
-            (ROOT / "configs" / "site.local.toml").resolve(),
-        )
-
-    def test_scanner_loads_existing_file_and_marks_incomplete_system_rows(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            output = root / "site.local.toml"
-            instrument = root / "system_instruments" / "controller"
-            instrument.mkdir(parents=True)
-            (instrument / "backend.py").write_text(
-                "class Driver: pass\n",
-                encoding="utf-8",
-            )
-            (instrument / "instrument.toml").write_text(
-                (
-                    'id = "controller"\n'
-                    'name = "Example Controller"\n'
-                    'version = "1.0.0"\n'
-                    'api_version = "3"\n'
-                    'backend = "backend:Driver"\n'
-                    'kinds = ["temperature"]\n'
-                    'main_reading = "temp_b"\n'
-                    '[panel]\n'
-                    'template = "controller"\n'
-                    '[discovery]\n'
-                    'identity_pattern = "Maker,Controller"\n'
-                    '[readings.temp_b]\nlabel = "Sample Temperature (Temp B)"\nunit = "K"\n'
-                    '[readings.temp_a]\nlabel = "Cold Head Temperature (Temp A)"\nunit = "K"\n'
-                    '[readings.heater_output]\nlabel = "Heater Output"\nunit = "%FS"\n'
-                    '[readings.heater_range]\nlabel = "Heater Range"\n'
-                ),
-                encoding="utf-8",
-            )
-            write_instrument_resources(
-                output,
-                (
-                    InstrumentResource(
-                        "meter",
-                        "GPIB0::1::INSTR",
-                        "Maker,Model,Serial,Version with a very long tail",
-                    ),
-                ),
-                template_path=ROOT / "configs" / "default.toml",
-            )
-            with patch(
-                "instrument_scanner.QTimer.singleShot"
-            ) as schedule_scan:
-                window = InstrumentScannerWindow(
-                    output,
-                    root / "system_instruments",
-                )
-            try:
-                schedule_scan.assert_called_once()
-                self.assertEqual(
-                    schedule_scan.call_args.args[0],
-                    0,
-                )
-                self.assertEqual(
-                    schedule_scan.call_args.args[1],
-                    window.start_scan,
-                )
-                self.assertIn(
-                    "System Instruments (1): Example Controller",
-                    window.discovery_label.text(),
-                )
-                self.assertIn(
-                    "Loaded 1 existing resource",
-                    window.existing_label.text(),
-                )
-                self.assertEqual(len(window._rows), 1)
-                self.assertIn(
-                    "Maker,Model,Serial,Version with a very long tail",
-                    window._rows[0]["details_text"].text(),
-                )
-                self.assertEqual(
-                    window.scroll_area.horizontalScrollBarPolicy(),
-                    Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
-                )
-
-                window._show_results(
-                    (
-                        VisaScanResult(
-                            "GPIB0::1::INSTR",
-                            "Maker,Model,Serial,NewVersion",
-                        ),
-                        VisaScanResult(
-                            "USB0::2::INSTR",
-                            "Maker,Controller,2",
-                        ),
-                    )
-                )
-                window.resize(960, 600)
-                window.show()
-                self.application.processEvents()
-                self.assertLessEqual(
-                    window.minimumSizeHint().width(),
-                    window.minimumWidth(),
-                )
-                self.assertFalse(
-                    window.scroll_area.horizontalScrollBar().isVisible()
-                )
-                controls = window._rows[1]
-                self.assertEqual(
-                    controls["purpose"].currentText(),
-                    "System",
-                )
-                self.assertEqual(
-                    controls["system_instrument"].currentData(),
-                    "controller",
-                )
-                self.assertEqual(
-                    controls["main_label"].text(),
-                    "Sample Temperature (Temp B)",
-                )
-                self.assertEqual(
-                    {
-                        key: checkbox.text()
-                        for key, checkbox in controls[
-                            "auxiliary_checks"
-                        ].items()
-                    },
-                    {
-                        "temp_a": "Cold Head Temperature (Temp A)",
-                        "heater_output": "Heater Output",
-                        "heater_range": "Heater Range",
-                    },
-                )
-                self.assertTrue(
-                    all(
-                        checkbox.isChecked()
-                        for checkbox in controls[
-                            "auxiliary_checks"
-                        ].values()
-                    )
-                )
-                controls["auxiliary_checks"][
-                    "heater_range"
-                ].setChecked(False)
-                configured = next(
-                    resource
-                    for resource in window._resources()
-                    if resource.purpose == "system"
-                )
-                self.assertEqual(
-                    configured.auxiliary_readings,
-                    ("temp_a", "heater_output"),
-                )
-                controls["auxiliary_checks"][
-                    "heater_range"
-                ].setChecked(True)
-                controls["id"].clear()
-                with patch("instrument_scanner.QMessageBox.warning") as warning:
-                    window.preview_and_save()
-                warning.assert_called_once()
-                self.assertIn("Complete these selected rows", warning.call_args.args[2])
-
-                controls["purpose"].setCurrentText("Ignore")
-                with patch(
-                    "instrument_scanner.QMessageBox.question",
-                    return_value=QMessageBox.StandardButton.Cancel,
-                ) as question:
-                    window.preview_and_save()
-                self.assertIn(
-                    "Existing entries replaced: meter",
-                    question.call_args.args[2],
-                )
-            finally:
-                window.close()
-
-    def test_frozen_scanner_uses_shared_release_root(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            executable = Path(temp) / "InstrumentScanner.exe"
-            with (
-                patch.object(sys, "frozen", True, create=True),
-                patch.object(sys, "executable", str(executable)),
-            ):
-                self.assertEqual(
-                    application_root(),
-                    Path(temp).resolve(),
-                )
-
-    def test_scan_explains_that_pyvisa_still_needs_a_visa_implementation(
-        self,
-    ) -> None:
-        def unavailable_manager():
-            raise ValueError("Could not locate a VISA implementation")
-
-        with patch.dict(
-            sys.modules,
-            {
-                "pyvisa": SimpleNamespace(
-                    ResourceManager=unavailable_manager
-                )
-            },
-        ):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "includes PyVISA.*NI-VISA",
-            ):
-                scan_visa_resources(0.25)
-
-    def test_tcp_endpoint_is_added_without_probing_and_survives_visa_scan(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            with patch("instrument_scanner.QTimer.singleShot"):
-                window = InstrumentScannerWindow(
-                    root / "site.local.toml",
-                    root / "system_instruments",
-                )
-            try:
-                window.tcp_address_input.setText("192.168.1.20")
-                window.tcp_port_input.setText("4001")
-                window._add_tcp_endpoint()
-                self.assertEqual(len(window._rows), 1)
-                tcp_result = window._rows[0]["result"]
-                self.assertEqual(
-                    tcp_result.address,
-                    "tcp://192.168.1.20:4001",
-                )
-                self.assertEqual(tcp_result.transport, "TCP")
-                self.assertEqual(tcp_result.identity, "")
-                self.assertIn(
-                    "no connection or command was sent",
-                    window._rows[0]["details_text"].text(),
-                )
-
-                window._scan_completed(
-                    (
-                        VisaScanResult(
-                            "GPIB0::1::INSTR",
-                            "Maker,Model,Serial,1",
-                        ),
-                    )
-                )
-                self.assertEqual(
-                    {
-                        controls["result"].address
-                        for controls in window._rows
-                    },
-                    {
-                        "GPIB0::1::INSTR",
-                        "tcp://192.168.1.20:4001",
-                    },
-                )
-                tcp_controls = next(
-                    controls
-                    for controls in window._rows
-                    if controls["result"].transport == "TCP"
-                )
-                tcp_controls["purpose"].setCurrentText("Measurement")
-                resources = window._resources()
-                tcp_resource = next(
-                    resource
-                    for resource in resources
-                    if resource.address.startswith("tcp://")
-                )
-                self.assertEqual(
-                    tcp_resource.address,
-                    "tcp://192.168.1.20:4001",
-                )
-            finally:
-                window.close()
-
-    def test_tcp_endpoint_input_is_validated_before_it_is_listed(self) -> None:
-        self.assertEqual(
-            tcp_resource_address("example.local", "0502"),
-            "tcp://example.local:502",
-        )
-        self.assertEqual(
-            tcp_resource_address("2001:db8::1", "4001"),
-            "tcp://[2001:db8::1]:4001",
-        )
-        for host, port in (
-            ("", "4001"),
-            ("tcp://example.local", "4001"),
-            ("example.local", "0"),
-            ("example.local", "65536"),
-            ("example.local", "not-a-port"),
-        ):
-            with self.subTest(host=host, port=port):
-                with self.assertRaises(ValueError):
-                    tcp_resource_address(host, port)
-
-    def test_scan_failure_dialog_links_official_ni_visa_download(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            dialogs: list[QMessageBox] = []
-
-            def capture_dialog(dialog: QMessageBox) -> int:
-                dialogs.append(dialog)
-                return 0
-
-            with (
-                patch("instrument_scanner.QTimer.singleShot"),
-                patch.object(
-                    QMessageBox,
-                    "exec",
-                    new=capture_dialog,
-                ),
-            ):
-                window = InstrumentScannerWindow(
-                    root / "site.local.toml",
-                    root / "system_instruments",
-                )
-                try:
-                    window._scan_failed("<driver>\nmissing")
-                    self.assertEqual(len(dialogs), 1)
-                    dialog = dialogs[0]
-                    self.assertEqual(
-                        dialog.textFormat(),
-                        Qt.TextFormat.RichText,
-                    )
-                    self.assertEqual(
-                        dialog.textInteractionFlags(),
-                        Qt.TextInteractionFlag.TextBrowserInteraction,
-                    )
-                    self.assertIn(
-                        NI_VISA_DOWNLOAD_URL,
-                        dialog.text(),
-                    )
-                    self.assertIn(
-                        "&lt;driver&gt;<br>missing",
-                        dialog.text(),
-                    )
-                    self.assertEqual(
-                        window.summary_label.text(),
-                        "VISA scan failed",
-                    )
-                finally:
-                    window.close()
-
-    def test_scan_uses_only_idn_query_and_closes_every_session(
-        self,
-    ) -> None:
-        class Handle:
-            def __init__(self, identity: str) -> None:
-                self.identity = identity
-                self.timeout = 0
-                self.commands: list[str] = []
-                self.closed = False
-
-            def query(self, command: str) -> str:
-                self.commands.append(command)
-                return self.identity
-
-            def close(self) -> None:
-                self.closed = True
-
-        first = Handle("Maker,Model,Serial,1")
-        second = Handle("")
-
-        class Manager:
-            def __init__(self) -> None:
-                self.closed = False
-
-            @staticmethod
-            def list_resources():
-                return (
-                    "GPIB0::1::INSTR",
-                    "USB0::2::INSTR",
-                )
-
-            @staticmethod
-            def open_resource(address, **_kwargs):
-                return (
-                    first
-                    if address.startswith("GPIB")
-                    else second
-                )
-
-            def close(self) -> None:
-                self.closed = True
-
-        manager = Manager()
-        fake_pyvisa = SimpleNamespace(
-            ResourceManager=lambda: manager
-        )
-        with patch.dict(
-            sys.modules,
-            {"pyvisa": fake_pyvisa},
-        ):
-            results = scan_visa_resources(0.25)
-        self.assertEqual(first.commands, ["*IDN?"])
-        self.assertEqual(second.commands, ["*IDN?"])
-        self.assertTrue(first.closed)
-        self.assertTrue(second.closed)
-        self.assertTrue(manager.closed)
-        self.assertEqual(results[0].identity, "Maker,Model,Serial,1")
-        self.assertIn("empty", results[1].error)
-
-    def test_scan_rejects_unbounded_or_control_character_identity(
-        self,
-    ) -> None:
-        class Handle:
-            def __init__(self, identity: str) -> None:
-                self.identity = identity
-                self.closed = False
-                self.timeout = 0
-
-            def query(self, command: str) -> str:
-                self.assert_command = command
-                return self.identity
-
-            def close(self) -> None:
-                self.closed = True
-
-        handles = [Handle("x" * 1025), Handle("Maker\x00Model")]
-
-        class Manager:
-            @staticmethod
-            def list_resources():
-                return ("GPIB0::1::INSTR", "GPIB0::2::INSTR")
-
-            @staticmethod
-            def open_resource(address, **_kwargs):
-                return handles[0 if "::1::" in address else 1]
-
-            @staticmethod
-            def close() -> None:
-                return None
-
-        with patch.dict(
-            sys.modules,
-            {"pyvisa": SimpleNamespace(ResourceManager=Manager)},
-        ):
-            results = scan_visa_resources(0.25)
-
-        self.assertTrue(all(handle.closed for handle in handles))
-        self.assertTrue(all(not result.identity for result in results))
-        self.assertTrue(all("printable" in result.error for result in results))
-
-    def test_discovery_profile_suggests_instrument_and_reading_roles(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            instrument = root / "cryocon_22c_24c"
-            instrument.mkdir()
-            (instrument / "backend.py").write_text(
-                "class Driver: pass\n",
-                encoding="utf-8",
-            )
-            (instrument / "instrument.toml").write_text(
-                (
-                    'id = "cryocon_22c_24c"\n'
-                    'name = "Cryo-con"\n'
-                    'version = "1.0.0"\n'
-                    'api_version = "3"\n'
-                    'backend = "backend:Driver"\n'
-                    'kinds = ["temperature"]\n'
-                    'main_reading = "temp_b"\n'
-                    '[panel]\n'
-                    'template = "controller"\n'
-                    '[discovery]\n'
-                    'identity_pattern = "(?i)cryo-?con.*24c"\n'
-                    '[readings.temp_b]\nlabel = "Sample Temperature (Temp B)"\nunit = "K"\n'
-                    '[readings.temp_a]\nlabel = "Cold Head Temperature (Temp A)"\nunit = "K"\n'
-                    '[readings.heater_output]\nlabel = "Heater Output"\nunit = "%FS"\n'
-                    '[readings.heater_range]\nlabel = "Heater Range"\n'
-                ),
-                encoding="utf-8",
-            )
-            descriptors = discover_scan_descriptors(root)
-            self.assertEqual(len(descriptors), 1)
-            matched = match_descriptor(
-                "Cryo-con,24C,123,1.0",
-                descriptors,
-            )
-            self.assertIsNotNone(matched)
-            assert matched is not None
-            self.assertEqual(matched.main_reading, "temp_b")
-            self.assertEqual(
-                matched.auxiliary_readings,
-                ("temp_a", "heater_output", "heater_range"),
-            )
-            self.assertEqual(
-                {reading.key: reading.label for reading in matched.readings},
+                resources[0].public_payload(),
                 {
-                    "temp_b": "Sample Temperature (Temp B)",
-                    "temp_a": "Cold Head Temperature (Temp A)",
-                    "heater_output": "Heater Output",
-                    "heater_range": "Heater Range",
+                    "id": "meter",
+                    "address": "TCPIP0::meter::INSTR",
+                    "identity": "ACME,METER",
+                    "purpose": "measurement",
                 },
             )
-            self.assertEqual(
-                suggest_resource_id(
-                    "Cryo-con,24C,123,1.0",
-                    "USB0::1::INSTR",
-                ),
-                "cryo_con_24c_123",
+
+    def test_resource_inventory_rejects_old_assignment_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "visa.resources.toml"
+            path.write_text(
+                "[[resources]]\n"
+                'id = "legacy"\n'
+                'address = "GPIB0::1::INSTR"\n'
+                'purpose = "system"\n',
+                encoding="utf-8",
             )
+            with self.assertRaisesRegex(
+                InstrumentResourceError,
+                "unknown fields: purpose",
+            ):
+                load_instrument_resources(path)
+
+    def test_measurement_payload_always_carries_purpose_in_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _copy_general(root)
+            write_instrument_resources(
+                root / "configs" / "visa.resources.toml",
+                (InstrumentResource("meter", "GPIB0::8::INSTR", "METER"),),
+            )
+            config = load_config(general)
+            self.assertEqual(
+                config.resource_payload("measurement")["meter"]["purpose"],
+                "measurement",
+            )
+            self.assertEqual(config.resource_payload("system"), {})
+
+    def test_generated_metadata_is_used_and_panels_come_from_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            manifest = root / "system_instruments" / "dual_controller" / "instrument.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    'label = "Temperature"', 'label = "Changed Source Label"'
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(general)
+
+            self.assertEqual(len(config.instrument_instances), 1)
+            instance = config.instrument("sample_controller")
+            self.assertEqual(instance.reading("temperature").display_name, "Temperature")
+            self.assertEqual([panel.id for panel in instance.panels], ["control", "heater"])
+            self.assertEqual(instance.panel("control").control_id, "loop1")
+            self.assertEqual(
+                [(panel.id, panel.order, panel.role) for panel in config.panels],
+                [("control", 1, "sample_temp"), ("heater", 2, "none")],
+            )
+
+    def test_blank_identity_is_allowed_but_wrong_identity_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            original = generated.read_text(encoding="utf-8")
+            generated.write_text(
+                original.replace("ACME,DUAL,123", ""),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                len(load_config(general).instrument_instances),
+                1,
+            )
+
+            generated.write_text(
+                original.replace("ACME,DUAL,123", "OTHER,MODEL,123"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "identity does not match"):
+                load_config(general)
+
+    def test_instance_id_uses_the_scanner_identifier_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            generated.write_text(
+                generated.read_text(encoding="utf-8").replace(
+                    'id = "sample_controller"', 'id = "Sample Controller"'
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, r"must match \[a-z\]"):
+                load_config(general)
+
+    def test_string_config_fields_must_be_filled_in(self) -> None:
+        field = """\
+[[config_fields]]
+id = "host"
+label = "Host"
+type = "string"
+default = ""
+
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            manifest = root / "system_instruments" / "dual_controller" / "instrument.toml"
+            manifest.write_text(
+                manifest.read_text(encoding="utf-8").replace(
+                    "[[controls]]", field + "[[controls]]", 1
+                ),
+                encoding="utf-8",
+            )
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            generated.write_text(
+                generated.read_text(encoding="utf-8").replace(
+                    "[[controls]]", field + "[[controls]]", 1
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "host must not be empty"):
+                load_config(general)
+
+    def test_pid_paths_are_project_relative_confined_and_required(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "project"
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            original = generated.read_text(encoding="utf-8")
+            config = load_config(general)
+            self.assertEqual(
+                config.instrument_instances[0].extras["pid_file"],
+                str((root / "configs" / "pid" / "sample_controller.toml").resolve()),
+            )
+
+            generated.write_text(
+                original.replace(
+                    "configs/pid/sample_controller.toml", "configs/pid/missing.toml"
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "does not exist"):
+                load_config(general)
+
+            outside = base / "outside.toml"
+            outside.write_text("zones = []\n", encoding="utf-8")
+            generated.write_text(
+                original.replace(
+                    "configs/pid/sample_controller.toml",
+                    str(outside).replace("\\", "/"),
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "project root"):
+                load_config(general)
+
+    def test_generated_template_must_be_api_v4_and_match_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            original = generated.read_text(encoding="utf-8")
+            generated.write_text(
+                original.replace('api_version = "4"', 'api_version = "3"'),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "invalid generated"):
+                load_config(general)
+
+            generated.write_text(
+                original.replace('backend = "backend:Driver"', 'backend = "other:Driver"'),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "backend does not match"):
+                load_config(general)
+
+    def test_panel_order_and_roles_are_global_constraints(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            original = generated.read_text(encoding="utf-8")
+            generated.write_text(
+                original.replace("order = 2", "order = 3"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "continuous from 1"):
+                load_config(general)
+
+            generated.write_text(
+                original.replace('role = "none"', 'role = "sample_temp"'),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "non-controller panels require role none",
+            ):
+                load_config(general)
+
+    def test_disabled_panel_cannot_keep_order_or_role(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            generated.write_text(
+                generated.read_text(encoding="utf-8").replace(
+                    'enabled = true\norder = 2\nrole = "none"',
+                    'enabled = false\norder = 2\nrole = "none"',
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigurationError, "must not declare order"):
+                load_config(general)
+
+    def test_disabled_controller_keeps_its_default_physical_main_reading(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            generated.write_text(
+                generated.read_text(encoding="utf-8")
+                .replace(
+                    'enabled = true\norder = 1\nrole = "sample_temp"\n'
+                    'reading = "temperature"',
+                    "enabled = false",
+                )
+                .replace("order = 2", "order = 1"),
+                encoding="utf-8",
+            )
+
+            instance = load_config(general).instrument_instances[0]
+
+            self.assertEqual(instance.main_reading, "temperature")
+            self.assertEqual(instance.panel("control").template, "controller")
+            self.assertFalse(instance.control_enabled)
+
+    def test_three_generated_builtin_simulations_load(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _copy_general(root)
+            generated = root / "configs" / "instruments"
+            generated.mkdir()
+            documents = (
+                (
+                    "simulated_temperature",
+                    "temperature",
+                    "Simulated Temperature",
+                    "temperature",
+                    "labcontrol.instruments.simulated:SimulatedTemperatureController",
+                    1,
+                    "sample_temp",
+                ),
+                (
+                    "simulated_field",
+                    "field",
+                    "Simulated Magnetic Field",
+                    "field",
+                    "labcontrol.instruments.simulated:SimulatedFieldController",
+                    2,
+                    "field",
+                ),
+                (
+                    "simulated_second_stage",
+                    "second_stage",
+                    "Simulated 2nd Stage",
+                    "monitor",
+                    "labcontrol.instruments.simulated:SimulatedReadOnlyMonitor",
+                    3,
+                    "none",
+                ),
+            )
+            for values in documents:
+                (generated / f"{values[0]}.toml").write_text(
+                    _simulation_document(*values),
+                    encoding="utf-8",
+                )
+
+            config = load_config(general)
+
+            self.assertEqual(
+                [instance.id for instance in config.instrument_instances],
+                ["temperature", "field", "second_stage"],
+            )
+            self.assertEqual([panel.order for panel in config.panels], [1, 2, 3])
+
+    def test_system_and_measurement_addresses_cannot_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            write_instrument_resources(
+                root / "configs" / "visa.resources.toml",
+                (InstrumentResource("meter", "GPIB0::1::INSTR", "METER"),),
+            )
+            with self.assertRaisesRegex(
+                ConfigurationError,
+                "assigned to both System Instrument",
+            ):
+                load_config(general)
+
 
 if __name__ == "__main__":
     unittest.main()

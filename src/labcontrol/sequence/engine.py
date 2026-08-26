@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from ..config import AppConfig
+from ..config import AppConfig, InstrumentPanelConfig
 from ..datafile import DatRunLogger
 from ..instruments.base import InstrumentError
 from ..events import EventManager
@@ -445,28 +445,28 @@ class SequenceEngine:
             await self._interruptible_sleep(float(p.get("seconds", 0.0)))
             return
         if command.type is CommandType.SET_TEMPERATURE:
-            instrument_id = self.instruments.resolve_instrument_id(
-                InstrumentKind.TEMPERATURE,
-                p.get("instrument_id"),
+            panel = self.instruments.resolve_control_panel(
+                InstrumentKind.TEMPERATURE
             )
+            instrument_id = panel.instrument_id
             applied = await self.instruments.set_target_by_kind(
                 InstrumentKind.TEMPERATURE,
                 float(p.get("target", 300.0)),
                 float(p.get("rate", 5.0)),
                 str(p.get("mode", "Settle")),
-                instrument_id,
             )
             if not applied:
                 return
             if "settle" in str(p.get("mode", "Settle")).lower():
-                await self._wait_for_stability(instrument_id)
+                await self._wait_for_stability(instrument_id, panel)
             return
         if command.type is CommandType.SET_FIELD:
-            instrument_id = self.instruments.resolve_instrument_id(
-                InstrumentKind.FIELD,
-                p.get("instrument_id"),
+            panel = self.instruments.resolve_control_panel(
+                InstrumentKind.FIELD
             )
-            instrument_unit = self.instruments.instrument_configs[instrument_id].unit
+            instrument_id = panel.instrument_id
+            instrument = self.instruments.instrument_configs[instrument_id]
+            instrument_unit = instrument.reading(panel.reading).unit
             source_unit = str(p.get("unit", instrument_unit))
             target = convert_value(float(p.get("target", 0.0)), source_unit, instrument_unit)
             rate = convert_value(float(p.get("rate", 0.5)), source_unit, instrument_unit)
@@ -475,12 +475,11 @@ class SequenceEngine:
                 target,
                 rate,
                 str(p.get("mode", "Settle")),
-                instrument_id,
             )
             if not applied:
                 return
             if "settle" in str(p.get("mode", "Settle")).lower():
-                await self._wait_for_stability(instrument_id)
+                await self._wait_for_stability(instrument_id, panel)
             return
         if command.type is CommandType.SCAN_TEMPERATURE:
             await self._scan_controlled(command, InstrumentKind.TEMPERATURE, path)
@@ -548,10 +547,12 @@ class SequenceEngine:
         path: list[str],
     ) -> None:
         p = command.params
-        instrument_id = self.instruments.resolve_instrument_id(kind, p.get("instrument_id"))
+        panel = self.instruments.resolve_control_panel(kind)
+        instrument_id = panel.instrument_id
         config = self.instruments.instrument_configs[instrument_id]
-        source_unit = "K" if kind is InstrumentKind.TEMPERATURE else str(p.get("unit", config.unit))
-        rate = convert_value(float(p.get("rate", config.default_rate_per_minute)), source_unit, config.unit)
+        instrument_unit = config.reading(panel.reading).unit
+        source_unit = "K" if kind is InstrumentKind.TEMPERATURE else str(p.get("unit", instrument_unit))
+        rate = convert_value(float(p.get("rate", panel.default_rate_per_minute)), source_unit, instrument_unit)
         mode = str(p.get("mode", "Settle"))
         if kind is InstrumentKind.TEMPERATURE and str(p.get("point_mode", "Linear")).casefold() == "list":
             try:
@@ -562,11 +563,11 @@ class SequenceEngine:
                     "INVALID_TEMPERATURE_LIST",
                     instrument_id,
                 ) from exc
-            points = [convert_value(point, source_unit, config.unit) for point in source_points]
+            points = [convert_value(point, source_unit, instrument_unit) for point in source_points]
             steps = len(points)
         else:
-            start = convert_value(float(p.get("start", 0.0)), source_unit, config.unit)
-            stop = convert_value(float(p.get("stop", 0.0)), source_unit, config.unit)
+            start = convert_value(float(p.get("start", 0.0)), source_unit, instrument_unit)
+            stop = convert_value(float(p.get("stop", 0.0)), source_unit, instrument_unit)
             steps = int(p.get("steps", 1))
             points = self._linspace(start, stop, steps)
 
@@ -580,7 +581,16 @@ class SequenceEngine:
             # 防止自定义 InstrumentManager 或极短竞态把空值带入极性判断。
             await self._checkpoint()
             snapshot = self.instruments.snapshots().get(instrument_id)
-            current = None if snapshot is None else snapshot.current
+            control_state = (
+                None
+                if snapshot is None
+                else snapshot.controls.get(panel.id)
+            )
+            current = (
+                None
+                if control_state is None
+                else control_state.current
+            )
             snapshot_age = (
                 math.inf
                 if snapshot is None
@@ -606,35 +616,46 @@ class SequenceEngine:
                 # 整条扫描路径一起反号，不能只改变起点；显式消除 -0.0，避免日志和
                 # 数据路径出现容易误读的负零。
                 points = [0.0 if point == 0.0 else -point for point in points]
-            decimals = control_decimals(InstrumentKind.FIELD, config.unit)
+            decimals = control_decimals(InstrumentKind.FIELD, instrument_unit)
             chosen = "sign-inverted" if invert else "entered"
             self.events.report(
                 Severity.INFO,
                 "sequence",
                 "FIELD_SCAN_POLARITY_SELECTED",
                 f"{config.display_name} actual field "
-                f"{fixed_number(current, decimals)} {config.unit}; selected "
+                f"{fixed_number(current, decimals)} {instrument_unit}; selected "
                 f"{chosen} path {fixed_number(points[0], decimals)} to "
-                f"{fixed_number(points[-1], decimals)} {config.unit}",
+                f"{fixed_number(points[-1], decimals)} {instrument_unit}",
                 self._current_path,
             )
 
         # 在移动第一个设定点之前验证完整路径。后面的坏点不能让实验停在“已执行一半”
         # 的中间状态。
         for point in points:
-            self.instruments.validate_target(instrument_id, point, rate)
+            self.instruments.validate_target(
+                instrument_id,
+                point,
+                rate,
+                control=panel.control_id,
+            )
         for point_index, point in enumerate(points, start=1):
             await self._checkpoint()
-            applied = await self.instruments.set_target(instrument_id, point, rate, mode)
+            applied = await self.instruments.set_target(
+                instrument_id,
+                point,
+                rate,
+                mode,
+                control=panel.control_id,
+            )
             if not applied:
                 continue
             if "settle" in mode.lower():
-                await self._wait_for_stability(instrument_id)
+                await self._wait_for_stability(instrument_id, panel)
             else:
-                await self._wait_for_target(instrument_id)
-            decimals = control_decimals(kind, config.unit)
+                await self._wait_for_target(instrument_id, panel)
+            decimals = control_decimals(kind, instrument_unit)
             point_path = path + [
-                f"point {point_index}/{steps}={fixed_number(point, decimals)} {config.unit}"
+                f"point {point_index}/{steps}={fixed_number(point, decimals)} {instrument_unit}"
             ]
             await self._execute_commands(command.children, point_path)
 
@@ -879,20 +900,33 @@ class SequenceEngine:
                 return invalid_child
         return None
 
-    async def _wait_for_stability(self, instrument_id: str) -> None:
+    async def _wait_for_stability(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+    ) -> None:
         started = self._active_time()
         while True:
             await self._checkpoint()
             snapshot = self.instruments.latest.get(instrument_id)
             if snapshot is not None:
-                if snapshot.stability is StabilityState.STABLE:
+                control_state = snapshot.controls.get(panel.id)
+                if (
+                    control_state is not None
+                    and control_state.stability is StabilityState.STABLE
+                ):
                     return
-                if snapshot.stability is StabilityState.TIMED_OUT:
+                if (
+                    control_state is not None
+                    and control_state.stability
+                    is StabilityState.TIMED_OUT
+                ):
                     self._check_control()
                     if self.config.alarms.stability_timeout is not Severity.ERROR:
                         return
             if self._control_wait_timed_out(
                 instrument_id,
+                panel,
                 started,
                 "stabilize",
             ):
@@ -901,22 +935,32 @@ class SequenceEngine:
                 self.config.control_poll_interval_seconds
             )
 
-    async def _wait_for_target(self, instrument_id: str) -> None:
-        config = self.instruments.instrument_configs[instrument_id]
-        tolerance = config.stability.tolerance if config.stability else 0.0
+    async def _wait_for_target(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+    ) -> None:
+        tolerance = panel.stability.tolerance if panel.stability else 0.0
         started = self._active_time()
         while True:
             await self._checkpoint()
             snapshot = self.instruments.latest.get(instrument_id)
+            control_state = (
+                None
+                if snapshot is None
+                else snapshot.controls.get(panel.id)
+            )
             if (
-                snapshot is not None
-                and snapshot.current is not None
-                and snapshot.target is not None
-                and abs(snapshot.current - snapshot.target) <= tolerance
+                control_state is not None
+                and control_state.current is not None
+                and control_state.target is not None
+                and abs(control_state.current - control_state.target)
+                <= tolerance
             ):
                 return
             if self._control_wait_timed_out(
                 instrument_id,
+                panel,
                 started,
                 "reach its target",
             ):
@@ -928,14 +972,16 @@ class SequenceEngine:
     def _control_wait_timed_out(
         self,
         instrument_id: str,
+        panel: InstrumentPanelConfig,
         started: float,
         action: str,
     ) -> bool:
-        config = self.instruments.instrument_configs[instrument_id]
         timeout = (
-            config.stability.timeout_seconds
-            if config.stability is not None
-            else config.operation_timeout_seconds
+            panel.stability.timeout_seconds
+            if panel.stability is not None
+            else self.instruments.instrument_configs[
+                instrument_id
+            ].operation_timeout_seconds
         )
         elapsed = self._active_time() - started
         if elapsed < timeout:
@@ -944,7 +990,7 @@ class SequenceEngine:
             self.config.alarms.stability_timeout,
             instrument_id,
             "STABILITY_TIMEOUT",
-            f"{config.display_name} did not {action} within {elapsed:.1f} seconds",
+            f"{panel.display_name} did not {action} within {elapsed:.1f} seconds",
         )
         self._check_control()
         return True

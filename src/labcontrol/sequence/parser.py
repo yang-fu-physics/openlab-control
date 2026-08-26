@@ -90,9 +90,8 @@ _WAIT = re.compile(
     rf"^Wait(?:\s+For)?\s+(?P<seconds>{NUMBER})\s*(?:secs?|seconds?)$",
     re.IGNORECASE,
 )
-_INSTRUMENT_SUFFIX = re.compile(
-    r'^(?P<body>.+?)\s+using\s+instrument\s+'
-    r'(?P<instrument>"(?:\\.|[^"\\])*"|[^\s]+)\s*$',
+_REMOVED_INSTRUMENT_SUFFIX = re.compile(
+    r"\s+using\s+instrument\b",
     re.IGNORECASE,
 )
 _INSTRUMENT_COMMAND_PREFIX = re.compile(
@@ -285,7 +284,6 @@ def _parse_base_command(
         return Command(
             CommandType.SET_TEMPERATURE,
             {
-                "instrument_id": "temperature",
                 "target": float(match.group("target")),
                 "rate": float(match.group("rate")),
                 "mode": match.group("mode").title(),
@@ -304,7 +302,6 @@ def _parse_base_command(
         return Command(
             CommandType.SET_FIELD,
             {
-                "instrument_id": "field",
                 "target": float(match.group("target")),
                 "unit": unit,
                 "rate": float(match.group("rate")),
@@ -328,7 +325,6 @@ def _parse_base_command(
         return Command(
             CommandType.SCAN_TEMPERATURE,
             {
-                "instrument_id": "temperature",
                 "point_mode": "List",
                 "points": points,
                 "rate": float(match.group("rate")),
@@ -343,7 +339,6 @@ def _parse_base_command(
         return Command(
             CommandType.SCAN_TEMPERATURE,
             {
-                "instrument_id": "temperature",
                 "point_mode": "Linear",
                 "start": float(match.group("start")),
                 "stop": float(match.group("stop")),
@@ -378,7 +373,6 @@ def _parse_base_command(
         return Command(
             CommandType.SCAN_FIELD,
             {
-                "instrument_id": "field",
                 "start": float(match.group("start")),
                 "stop": float(match.group("stop")),
                 "unit": unit,
@@ -525,48 +519,25 @@ def _parse_command(
     line_number: int,
     instrument_commands: Mapping[str, SystemInstrumentCommandSpec],
 ) -> tuple[Command, SequenceIssue | None]:
-    """先安全解析可选仪表后缀，再委托基础命令解析器。"""
+    """解析一条命令，并明确拒绝已删除的任意仪表选择后缀。"""
 
     original = text
-    instrument_id: str | None = None
-    if _INSTRUMENT_COMMAND_PREFIX.match(text):
-        suffix = _INSTRUMENT_SUFFIX.match(text)
-        if suffix is not None:
-            text = suffix.group("body").rstrip()
-            raw_instrument = suffix.group("instrument")
-            try:
-                parsed_instrument = (
-                    json.loads(raw_instrument)
-                    if raw_instrument.startswith('"')
-                    else raw_instrument
-                )
-            except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                command = Command(
-                    CommandType.UNKNOWN,
-                    {"text": original},
-                    raw_text=original,
-                    source_line=line_number,
-                )
-                return command, SequenceIssue(
-                    line_number,
-                    "error",
-                    f"Invalid instrument ID suffix: {exc}",
-                    original,
-                )
-            instrument_id = str(parsed_instrument).strip()
-            if not instrument_id:
-                command = Command(
-                    CommandType.UNKNOWN,
-                    {"text": original},
-                    raw_text=original,
-                    source_line=line_number,
-                )
-                return command, SequenceIssue(
-                    line_number,
-                    "error",
-                    "Instrument ID in a control command cannot be empty",
-                    original,
-                )
+    if (
+        _INSTRUMENT_COMMAND_PREFIX.match(text)
+        and _REMOVED_INSTRUMENT_SUFFIX.search(text)
+    ):
+        command = Command(
+            CommandType.UNKNOWN,
+            {"text": original},
+            raw_text=original,
+            source_line=line_number,
+        )
+        return command, SequenceIssue(
+            line_number,
+            "error",
+            "using instrument is not supported; Set/Scan uses the configured sample_temp or field role",
+            original,
+        )
 
     command, issue = _parse_base_command(
         text,
@@ -582,23 +553,9 @@ def _parse_command(
         issue = SequenceIssue(
             line_number,
             "error",
-            "Invalid temperature or field command syntax, mode, or instrument suffix",
+            "Invalid temperature or field command syntax or mode",
             original,
         )
-    if instrument_id is not None:
-        if command.type not in {
-            CommandType.SET_TEMPERATURE,
-            CommandType.SET_FIELD,
-            CommandType.SCAN_TEMPERATURE,
-            CommandType.SCAN_FIELD,
-        }:
-            return command, SequenceIssue(
-                line_number,
-                "error",
-                "The instrument suffix is valid only on temperature or field commands",
-                original,
-            )
-        command.params["instrument_id"] = instrument_id
     return command, issue
 
 
@@ -696,15 +653,6 @@ def _format_number(value: object, decimals: int = 3) -> str:
     return fixed_number(value, decimals)
 
 
-def _instrument_suffix(params: dict[str, object], default_id: str) -> str:
-    """仅为非默认仪表输出 JSON 转义后的 ``using instrument`` 后缀。"""
-
-    instrument_id = str(params.get("instrument_id", "")).strip()
-    if not instrument_id or instrument_id == default_id:
-        return ""
-    return f" using instrument {json.dumps(instrument_id, ensure_ascii=False)}"
-
-
 def format_command(command: Command, *, preserve_raw: bool = True) -> str:
     """把一个命令转为规范文本；未编辑的未知命令保持原文。"""
 
@@ -723,7 +671,6 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
         return (
             f"Set Temperature {_format_number(p.get('target', 300.0))} K at "
             f"{_format_number(p.get('rate', 5.0))} K/min in {p.get('mode', 'Settle')} mode"
-            f"{_instrument_suffix(p, 'temperature')}"
         )
     if command.type is CommandType.SET_FIELD:
         unit = p.get("unit", "Oe")
@@ -731,7 +678,6 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
         return (
             f"Set Field {_format_number(p.get('target', 0.0), decimals)} {unit} at "
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min in {p.get('mode', 'Settle')} mode"
-            f"{_instrument_suffix(p, 'field')}"
         )
     if command.type is CommandType.SCAN_TEMPERATURE:
         if str(p.get("point_mode", "Linear")).casefold() == "list":
@@ -742,13 +688,11 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
             return (
                 f"Scan Temperature List {points} K at "
                 f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
-                f"{_instrument_suffix(p, 'temperature')}"
             )
         return (
             f"Scan Temperature {_format_number(p.get('start', 300.0))} K to "
             f"{_format_number(p.get('stop', 10.0))} K in {int(p.get('steps', 10))} steps at "
             f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
-            f"{_instrument_suffix(p, 'temperature')}"
         )
     if command.type is CommandType.SCAN_FIELD:
         unit = p.get("unit", "Oe")
@@ -763,7 +707,6 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
             f"{_format_number(p.get('stop', 10000.0), decimals)} {unit} in {int(p.get('steps', 11))} steps at "
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min, {p.get('mode', 'Settle')}"
             f"{polarity_suffix}"
-            f"{_instrument_suffix(p, 'field')}"
         )
     if command.type is CommandType.SCAN_TIME:
         return (

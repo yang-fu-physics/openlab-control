@@ -1,6 +1,6 @@
 """应用程序入口以及源码版、打包版共用的启动流程。
 
-本文件负责命令行参数、Qt 外观、内容信任与离线依赖预检，然后才创建
+本文件负责命令行参数、Qt 外观和清单预检，然后才创建
 :class:`~labcontrol.runtime.RuntimeService`。无界面演示和 GUI 共用同一套配置、仪表清单与
 SEQ 解析器，因此发布验证不会绕过正式运行路径。这里不实现仪表控制逻辑；所有 I/O 都交给
 后台运行时，防止 GUI 线程直接接触仪表。
@@ -19,16 +19,8 @@ from .config import ConfigurationError, load_config
 from .instruments.manifest import (
     SystemInstrumentDescriptor,
     configured_system_instruments,
-    instrument_dependency_directory,
     discover_system_instruments,
 )
-from .package_support.dependencies import (
-    DependencyInstallError,
-    dependency_runtime_errors,
-    install_offline_dependencies,
-    missing_dependencies,
-)
-from .package_support.trust import ContentTrustError, ContentTrustStore
 from .models import RunProgress, RunState
 from .measurement.settings import load_settings
 from .paths import default_config_path
@@ -63,28 +55,6 @@ def configure_qt_font(application, point_size: float = 10.0) -> None:
     application.setFont(font)
 
 
-def _instrument_python_executable(config) -> Path | None:
-    """选择离线安装 System Instrument 额外依赖时使用的 Python。
-
-    源码版可以复用当前解释器；冻结后的 EXE 不能把自己当作 Python，因此只接受配置中明确
-    指定的解释器，或随安装包携带的 ``runtime/python/python.exe``。
-    """
-
-    configured = config.system_instruments.python_executable.strip()
-    if configured:
-        candidate = config.resolve_project_path(configured)
-        return candidate if candidate.is_file() else None
-    if not getattr(sys, "frozen", False):
-        return Path(sys.executable)
-    candidate = (
-        config.project_root
-        / "runtime"
-        / "python"
-        / "python.exe"
-    )
-    return candidate if candidate.is_file() else None
-
-
 def configure_qt_appearance(
     application,
     requested_scale: float | None = None,
@@ -92,7 +62,6 @@ def configure_qt_appearance(
 ) -> float:
     """为正式 GUI 和视觉回归工具应用同一套主题、字体与缩放系数。"""
     from PySide6.QtGui import QColor, QPalette
-    from .ui.input_policy import install_wheel_input_policy
     from .ui.scaling import screen_ui_scale
 
     scale = requested_scale if requested_scale is not None else screen_ui_scale(application.primaryScreen())
@@ -110,8 +79,6 @@ def configure_qt_appearance(
         application,
         10.0 * scale * float(font_scale),
     )
-    # 输入策略安装在 QApplication 上，因此核心界面和按需加载的模块窗口自动保持一致。
-    install_wheel_input_policy(application)
     return scale
 
 
@@ -306,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         instrument_descriptors = discover_system_instruments(config)
-        selected_system_instruments = configured_system_instruments(
+        configured_system_instruments(
             config,
             instrument_descriptors,
         )
@@ -314,11 +281,7 @@ def main(argv: list[str] | None = None) -> int:
             config,
             instrument_descriptors,
         )
-        trust_store = ContentTrustStore(
-            config.resolve_project_path(config.system_instruments.state_directory)
-            / "trusted_content.json"
-        )
-    except (OSError, ValueError, ContentTrustError) as exc:
+    except (OSError, ValueError) as exc:
         print(f"System Instrument error: {exc}", file=sys.stderr)
         return 2
     sequence_path = args.sequence or (
@@ -327,47 +290,6 @@ def main(argv: list[str] | None = None) -> int:
         else config.project_root / "examples" / "nested_scan.seq"
     )
     if args.headless_demo:
-        untrusted = [
-            descriptor.id
-            for descriptor in selected_system_instruments
-            if not trust_store.is_trusted("instrument", descriptor)
-        ]
-        if untrusted:
-            print(
-                "System Instrument error: untrusted instruments cannot run headlessly: "
-                + ", ".join(untrusted),
-                file=sys.stderr,
-            )
-            return 2
-        invalid_runtime_by_instrument = {
-            descriptor.id: dependency_runtime_errors(
-                descriptor.dependencies,
-                instrument_dependency_directory(
-                    config,
-                    descriptor,
-                ),
-                descriptor.fingerprint,
-            )
-            for descriptor in selected_system_instruments
-        }
-        invalid_runtime_by_instrument = {
-            instrument_id: errors
-            for instrument_id, errors
-            in invalid_runtime_by_instrument.items()
-            if errors
-        }
-        if invalid_runtime_by_instrument:
-            print(
-                "System Instrument error: isolated dependencies are "
-                "missing; prepare them in the GUI first: "
-                + "; ".join(
-                    f"{instrument_id}: {'; '.join(errors)}"
-                    for instrument_id, errors
-                    in invalid_runtime_by_instrument.items()
-                ),
-                file=sys.stderr,
-            )
-            return 2
         return _headless_demo(
             config,
             sequence_path,
@@ -384,7 +306,6 @@ def main(argv: list[str] | None = None) -> int:
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication, QMessageBox
         from .ui.main_window import MainWindow
-        from .ui.trust_dialogs import confirm_system_instrument_trust
         from .ui.preferences import (
             UiPreferences,
             UiPreferenceStore,
@@ -410,83 +331,6 @@ def main(argv: list[str] | None = None) -> int:
         ui_preferences.ui_scale,
         ui_preferences.font_scale,
     )
-    for descriptor in selected_system_instruments:
-        try:
-            trusted = confirm_system_instrument_trust(None, trust_store, descriptor)
-        except ContentTrustError as exc:
-            QMessageBox.critical(None, "Content Trust Failed", str(exc))
-            return 1
-        if not trusted:
-            QMessageBox.warning(
-                None,
-                "System Instrument Not Trusted",
-                f"OpenLab Control will not load {descriptor.name}.",
-            )
-            return 1
-        runtime_errors = dependency_runtime_errors(
-            descriptor.dependencies,
-            instrument_dependency_directory(config, descriptor),
-            descriptor.fingerprint,
-        )
-        if not runtime_errors:
-            continue
-        missing = missing_dependencies(
-            descriptor.dependencies,
-            instrument_dependency_directory(config, descriptor),
-        )
-        python = _instrument_python_executable(config)
-        if python is None:
-            QMessageBox.critical(
-                None,
-                "System Instrument Dependencies Missing",
-                f"{descriptor.name} requires:\n\n"
-                + "\n".join(
-                    missing or descriptor.dependencies
-                )
-                + "\n\nConfigure system_instruments.python_executable or "
-                "add runtime/python/python.exe.",
-            )
-            return 1
-        answer = QMessageBox.question(
-            None,
-            "Prepare System Instrument Dependencies?",
-            f"{descriptor.name} requires:\n\n"
-            + "\n".join(
-                missing or descriptor.dependencies
-            )
-            + "\n\nCurrent runtime issue:\n"
-            + "\n".join(runtime_errors)
-            + "\n\nInstall from local wheels into this instrument's "
-            "isolated runtime? No network access will be used.",
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return 1
-        try:
-            install_offline_dependencies(
-                python_executable=python,
-                package_directory=descriptor.path,
-                site_packages=instrument_dependency_directory(
-                    config,
-                    descriptor,
-                ),
-                shared_wheels_directory=(
-                    config.resolve_project_path(
-                        config.system_instruments.shared_wheels_directory
-                    )
-                ),
-                dependencies=descriptor.dependencies,
-                fingerprint=descriptor.fingerprint,
-            )
-        except DependencyInstallError as exc:
-            QMessageBox.critical(
-                None,
-                "Offline Dependency Install Failed",
-                str(exc),
-            )
-            return 1
     try:
         window = MainWindow(
             config,

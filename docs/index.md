@@ -6,7 +6,7 @@ hide:
 
 <section class="olc-hero">
   <div>
-    <div class="olc-eyebrow">OpenLab Control 0.18.1 · 中文教程</div>
+    <div class="olc-eyebrow">OpenLab Control 0.19.0 · 中文教程</div>
     <h1>先做出一个能测量的模块，再慢慢增加功能。</h1>
     <p class="olc-hero-copy">
       不需要先读懂整个程序。你可以复制一个不连接仪表的四通道例子，运行成功后，再加入
@@ -83,14 +83,15 @@ Measurement Module 是“完成一次测量”的小程序，例如读取电阻�
 
 温控仪和磁场控制器不属于 Measurement Module。只有需要更换主温度、主磁场或只读监视
 仪表时，才阅读 [System Instrument 教程](development/system-instrument.md)。普通测量模块作者可以
-完全跳过那一章。一个温控器同时给出样品温度、冷头温度、加热输出等值时，0.18.1 可以
+完全跳过那一章。一个温控器同时给出样品温度、冷头温度、加热输出等值时，0.19.0 可以
 让它们共用一个通讯连接；前面板按普通周期刷新，测量模块需要温场时则会即时读取。同一
 仪表不会同时执行两次通讯；当前完整指令完成后，测量读取会先于等待中的后台刷新。
 
-连接仪表前，先打开[扫描与配置仪表](guides/instrument-scanner.md)。工具会自动列出 VISA
-地址，也可只录入 TCP 地址和端口。VISA 身份只匹配到一个 System Instrument 时会自动选择；
-TCP 不发送识别指令，由操作者选择实现。Measurement Module 的具体地址仍在 Enable 后的
-Settings 中选择。
+连接仪表前，先打开[扫描与配置仪表](guides/instrument-scanner.md)。第一页确认 VISA 地址；
+未分配地址保存给 Measurement Module，分配给 System Instrument 的地址只进入对应实例。
+网络仪表的 Host/Port 由自己的 System Instrument 模板声明并显示在该型号页面。最后一页
+统一检查固定面板、角色、全局顺序和完整写入预览。三个内置仿真默认都关闭，没有 System
+面板时程序也能启动。
 
 ## 先记住一条原则
 

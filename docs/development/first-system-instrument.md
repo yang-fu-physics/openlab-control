@@ -1,14 +1,14 @@
 # 写第一个 System Instrument
 
-这一页做一个最小只读温度仪表。先完成连接、读取和断开，再考虑控制。这样第一次接真机时
-不会意外改变输出。
+这一页做一个最小只读温度计。先完成连接、读取和断开，再考虑控制，第一次接真机时就不会
+意外改变输出。
 
 ## 1. 复制骨架
 
 复制：
 
 ```text
-templates/system-instruments-repository/instruments/example_monitor/
+system_instruments/example_monitor/
 ```
 
 得到：
@@ -21,21 +21,22 @@ system_instruments/my_thermometer/
 
 目录名和清单 `id` 使用小写字母、数字与下划线，并以字母开头。
 
-## 2. 写 `instrument.toml`
+## 2. 写 API v4 清单
 
 ```toml
 id = "my_thermometer"
 name = "My Thermometer"
 version = "0.1.0"
-api_version = "3"
-core_requires = ">=0.18,<0.19"
+api_version = "4"
+core_requires = ">=0.19,<0.20"
 backend = "backend:MyThermometer"
 kinds = ["monitor"]
-dependencies = []
-main_reading = "temperature"
 
-[panel]
+[[panels]]
+id = "reading"
+label = "Temperature"
 template = "readout"
+readings = ["temperature"]
 
 [discovery]
 identity_pattern = "(?i)expected maker.*expected model"
@@ -46,30 +47,61 @@ unit = "K"
 decimals = 3
 ```
 
-只需理解这些字段：
+先理解这些字段：
 
 | 字段 | 作用 |
 | --- | --- |
-| `id` | 这份实现的固定名称 |
+| `id` | 这份实现的稳定 ID，也必须与目录名一致 |
 | `backend` | `Python 文件名:类名` |
-| `kinds` | 可用作 `temperature`、`field` 或 `monitor` |
-| `main_reading` | 前面板和标准 DAT 使用的主读数 |
-| `[panel].template` | 底部面板；单个只读值用 `readout`，多个只读值用 `readout_grid`，温度/磁场控制用 `controller`，0/1 状态和简单按钮用 `switch` |
-| `[readings.<键>]` | 每个读数的英文名称、单位和显示小数位 |
-| `identity_pattern` | 扫描器用 `*IDN?` 返回值自动建议这份实现 |
-| `dependencies` | 仅填写框架没有提供的额外包；PyVISA 不用重复写 |
+| `kinds` | 支持 `temperature`、`field` 或 `monitor` |
+| `[[panels]]` | 作者提供的固定面板；每项有稳定 `id` |
+| `[readings.<id>]` | 每个读数的名称、单位和小数位 |
+| `discovery.identity_pattern` | 用 `*IDN?` 文本辅助匹配 VISA 地址 |
 
-`[panel]` 必须明确填写，不会猜测旧清单。`main_reading` 必须对应一个
-`[readings.<键>]`。除主读数外，其余 `[readings]` 会自动成为扫描器
-里的可选辅助读数，不需要再列第二遍。
+`readout` 必须引用一个已声明读数；`readout_grid` 引用一到四个；`switch` 引用一个读数和
+已声明的无参数指令。清单只接受 API v4 定义的字段，拼写错误会直接让模板变为 Invalid。
 
-清单只接受教程列出的字段。字段拼错或继续填写旧的辅助读数列表会直接显示为 Invalid，
-不会被静默忽略。
+## 3. 增加型号专用输入
 
-## 3. 写 `backend.py`
+若通讯超时需要操作者确认，在清单增加：
+
+```toml
+[[config_fields]]
+id = "visa_timeout_ms"
+label = "VISA I/O Timeout (ms)"
+type = "integer"
+default = 1000
+min = 1
+```
+
+可用类型是 `string`、`integer`、`number`、`boolean`、`choice` 和 `pid_file`。扫描器根据声明
+生成表单，后台从 `config.extras["visa_timeout_ms"]` 读取最终值。不要在清单里加入只对某个
+实验室有意义的真实地址或 PID 数字。
+
+若仪表不是 VISA 设备，由对应模板声明自己的连接字段。例如专用网络仪表可以声明：
+
+```toml
+[[config_fields]]
+id = "host"
+label = "Host"
+type = "string"
+default = ""
+
+[[config_fields]]
+id = "port"
+label = "Port"
+type = "integer"
+default = 502
+min = 1
+max = 65535
+```
+
+这类模板不需要 `discovery.identity_pattern`；扫描器会在它自己的步骤显示 Host/Port。
+
+## 4. 写 `backend.py`
 
 后端是普通同步 Python。下面的 `open_transport()` 和 `query_temperature()` 代表按仪表手册写的
-通讯代码，不是可以直接控制任意仪表的通用实现。
+通讯代码，不是通用驱动：
 
 ```python
 from pyvisa.errors import VisaIOError
@@ -85,7 +117,7 @@ class MyThermometer(SystemInstrument):
     def open(self):
         transport = open_transport(
             self.config.address,
-            timeout_seconds=1.0,
+            timeout_ms=self.config.extras["visa_timeout_ms"],
         )
         try:
             identity = transport.query("*IDN?")
@@ -110,10 +142,7 @@ class MyThermometer(SystemInstrument):
     def read_status(self):
         if self._transport is None:
             raise InstrumentError("Instrument is not open", "NOT_OPEN")
-        return {
-            "value": float(query_temperature(self._transport)),
-            "auxiliary": {},
-        }
+        return {"value": float(query_temperature(self._transport))}
 
     def close(self):
         transport, self._transport = self._transport, None
@@ -121,10 +150,10 @@ class MyThermometer(SystemInstrument):
             transport.close()
 ```
 
-核心负责时间戳、显示名称、单位、连接状态和内部快照。后端不要创建这些对象，只返回读数。
-所有底层 I/O 都必须设置有限超时。
+核心负责时间戳、名称、单位、连接状态和快照。后端只返回读数。所有底层 I/O 都必须设置有限
+超时；打开到一半失败时仍要关闭句柄，`close()` 也要允许重复调用。
 
-## 4. 扫描并选择地址
+## 5. 用扫描器建立实例
 
 运行：
 
@@ -132,52 +161,74 @@ class MyThermometer(SystemInstrument):
 .\.venv\Scripts\python.exe .\tools\instrument_scanner.py
 ```
 
-把地址用途设为 `System`，选择 `my_thermometer`，保存资源名，例如
-`sample_thermometer`。扫描器生成的本机文件类似：
+在 VISA 页确认地址，然后进入 **My Thermometer** 步骤：
+
+1. 点击 **Add Instrument**；
+2. 给物理实例一个全局唯一 ID，例如 `sample_thermometer`；
+3. 选择检测到的 VISA 地址；
+4. 确认型号专用字段；
+5. 保持 `reading` 面板开启、角色为 `none`；
+6. 在最后一页检查完整预览并保存。
+
+扫描器生成的实例部分类似：
 
 ```toml
-[[resources]]
+[[instances]]
 id = "sample_thermometer"
-address = "USB0::...::INSTR"
+resource = "USB0::...::INSTR"
 identity = "Expected Maker,Expected Model,..."
-purpose = "system"
-system_instrument = "my_thermometer"
-auxiliary_readings = []
+visa_timeout_ms = 1000
+
+[[instances.panels]]
+id = "reading"
+enabled = true
+order = 1
+role = "none"
 ```
 
-主读数不在这里重复保存；它来自 `instrument.toml`。
+生成文件还会复制清单中的静态元数据，但不复制 `panels` 模板。这个 VISA 地址归该 System
+实例所有，因此不会再出现在 `configs/visa.resources.toml`。
 
-现场主配置只引用资源：
+## 6. 第一次加载
+
+1. 先运行清单和假通讯测试。
+2. 启动 OpenLab Control。
+3. 观察面板读数与 Run Log；清单或实例错误会在连接真机前停止。
+4. 连接安全负载，确认身份、单位、有限超时与重复关闭。
+
+PyVISA、PySide6、QtAwesome、packaging 和 typing_extensions 使用框架锁定版本。新实现需要
+其他 Python 包时，应更新核心锁定依赖、完成测试并重新构建发布包。
+
+## 7. 再增加控制
+
+温度控制器需要声明控制端点和 controller 面板：
 
 ```toml
-[[instruments]]
-id = "sample_monitor"
-display_name = "Sample Monitor"
-kind = "monitor"
-resource = "sample_thermometer"
-control_enabled = false
-operation_timeout_seconds = 10.0
-shutdown_timeout_seconds = 3.0
+[[controls]]
+id = "main"
+label = "Main Temperature"
+
+[[panels]]
+id = "control"
+label = "Sample Temperature"
+template = "controller"
+control = "main"
+reading_options = ["temperature"]
+default_reading = "temperature"
+min_value = 2.0
+max_value = 400.0
+default_rate_per_minute = 1.0
+max_rate_per_minute = 10.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 30.0
+stability_timeout_seconds = 1800.0
+stability_window_seconds = 30.0
 ```
 
-这里不再重复 `backend`、`unit`、`role` 或仿真用的 `initial_value`。协议超时、PID 表和厂商专用选项仍可写在该
-`[[instruments]]` 中，并从 `config.extras` 读取。
+再实现 `set_target(..., control=<id>)` 和 `hold(control=<id>)`。操作者在扫描器中确认限制，并
+在确实作为主温度时把角色设为 `sample_temp`。详细安全要求见[控制与安全](instrument-control-safety.md)。
 
-## 5. 第一次加载
-
-1. 重启 OpenLab Control。
-2. 核对首次信任窗口中的类型、ID、版本、路径和内容指纹。
-3. 确认后观察前面板读数。
-4. 修改任何源文件后，内容指纹会变化，需要再次确认。
-
-额外依赖只从本地 wheel 安装，不会联网下载。PyVISA、PySide6、QtAwesome、packaging 和
-typing_extensions 使用框架锁定版本。
-
-## 6. 再增加控制
-
-温度或磁场控制器再把 `panel.template` 改为 `controller`，实现 `set_target()` 和 `hold()`，并在现场配置中写
-`control_enabled = true`、真实上下限和最大速率。继续阅读[控制与安全](instrument-control-safety.md)。
-
-需要压缩机这类简单开关时，使用 `switch`，在清单加入无参数 `[[sequence_commands]]`，并在
-后端实现 `execute_sequence_command(command_id)`。清单中的指令会同时成为底部按钮和右侧
-System Commands，不要再写第二套界面动作名称。
+压缩机这类开关使用 `switch`，在清单声明 `[[sequence_commands]]`，并实现
+`execute_sequence_command(command_id)`。同一指令 ID 同时用于面板按钮和右侧 System
+Commands。

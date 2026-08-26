@@ -274,7 +274,6 @@ class ModuleWindow(QDialog):
 class ModuleManagerDialog(QDialog):
     enableRequested = Signal(str, bool)
     refreshRequested = Signal()
-    installRequested = Signal(str)
     openRequested = Signal(str)
 
     def __init__(
@@ -321,13 +320,10 @@ class ModuleManagerDialog(QDialog):
         layout.addWidget(self.detail_label)
         buttons = QHBoxLayout()
         self.refresh_button = QPushButton("Refresh")
-        self.install_button = QPushButton("Install Dependencies")
         close_button = QPushButton("Close")
         self.refresh_button.clicked.connect(self.refreshRequested)
-        self.install_button.clicked.connect(self._install_selected)
         close_button.clicked.connect(self.hide)
         buttons.addWidget(self.refresh_button)
-        buttons.addWidget(self.install_button)
         buttons.addStretch(1)
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
@@ -348,10 +344,7 @@ class ModuleManagerDialog(QDialog):
             self.table.insertRow(row)
             self._rows[descriptor.id] = row
             checkbox = QCheckBox()
-            descriptor_detail = (
-                descriptor.error
-                or descriptor.dependency_error
-            )
+            descriptor_detail = descriptor.error
             checkbox.setToolTip(descriptor_detail)
             checkbox.setEnabled(descriptor.can_enable)
             checkbox.toggled.connect(
@@ -410,18 +403,6 @@ class ModuleManagerDialog(QDialog):
     def set_operations_enabled(self, enabled: bool) -> None:
         self.table.setEnabled(enabled)
         self.refresh_button.setEnabled(enabled)
-        selected = next(
-            (item for item in self.descriptors if item.id == self._selected_id()), None
-        )
-        has_extra_dependencies = bool(
-            selected and selected.dependencies
-        )
-        self.install_button.setVisible(
-            has_extra_dependencies
-        )
-        self.install_button.setEnabled(
-            enabled and has_extra_dependencies
-        )
         for descriptor in self.descriptors:
             state = self._states.get(descriptor.id, {}).get("state", "disabled")
             checkbox = self._checkboxes.get(descriptor.id)
@@ -452,32 +433,13 @@ class ModuleManagerDialog(QDialog):
         descriptor = next((item for item in self.descriptors if item.id == module_id), None)
         if descriptor is None:
             self.detail_label.clear()
-            self.install_button.setVisible(False)
-            self.install_button.setEnabled(False)
             return
         state = self._states.get(descriptor.id, {})
         detail = (
             descriptor.error
-            or descriptor.dependency_error
             or str(state.get("message", ""))
         )
         self.detail_label.setText(detail or "Ready to enable")
-        has_extra_dependencies = bool(
-            descriptor.dependencies
-        )
-        # 通用依赖来自主框架，无需让用户看到一个无意义的安装入口；只有 manifest
-        # 中真正的额外依赖才显示离线安装按钮。
-        self.install_button.setVisible(
-            has_extra_dependencies
-        )
-        self.install_button.setEnabled(
-            has_extra_dependencies
-        )
-
-    def _install_selected(self) -> None:
-        module_id = self._selected_id()
-        if module_id:
-            self.installRequested.emit(module_id)
 
     def _double_clicked(self, row: int, column: int) -> None:
         del column

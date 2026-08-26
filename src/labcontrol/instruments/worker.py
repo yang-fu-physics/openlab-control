@@ -12,7 +12,6 @@ import asyncio
 import json
 import math
 import multiprocessing
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -21,9 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import InstrumentConfig
-from ..package_support.dependencies import dependency_runtime_errors
 from ..package_support.loading import load_import_object, load_source_object
-from ..package_support.trust import content_tree_digest
 from .base import (
     EventResponseSpec,
     InstrumentError,
@@ -61,13 +58,10 @@ class InstrumentWorkerSpec:
     instrument_id: str
     backend: str
     instrument_directory: str = ""
-    fingerprint: str = ""
-    dependency_directory: str = ""
-    dependencies: tuple[str, ...] = ()
 
     @property
     def external(self) -> bool:
-        """是否从受信任的 System Instrument 目录加载，而不是内置包。"""
+        """是否从 System Instrument 目录加载，而不是内置包。"""
 
         return bool(self.instrument_directory)
 
@@ -240,44 +234,11 @@ def _event_responses_from_payload(
         ) from exc
 
 
-def _activate_dependency_directory(path: str) -> None:
-    """把已验证 System Instrument 的私有 site-packages 放到 worker 导入路径首位。"""
-
-    if not path:
-        return
-    directory = Path(path)
-    if not directory.is_dir():
-        return
-    value = str(directory.resolve())
-    if value in sys.path:
-        sys.path.remove(value)
-    sys.path.insert(0, value)
-
-
 def _load_backend(spec: InstrumentWorkerSpec) -> type[SystemInstrument]:
-    """在子进程内再次核对指纹、依赖和 API，再返回后端类。"""
+    """在子进程内从清单目录或核心包加载后端类。"""
 
     if spec.external:
         directory = Path(spec.instrument_directory)
-        current = content_tree_digest(directory)
-        if current != spec.fingerprint:
-            raise PermissionError(
-                f"System Instrument {spec.instrument_id} changed after trust verification"
-            )
-        dependency_errors = dependency_runtime_errors(
-            spec.dependencies,
-            Path(spec.dependency_directory),
-            spec.fingerprint,
-        )
-        if dependency_errors:
-            raise PermissionError(
-                f"System Instrument {spec.instrument_id} dependency runtime "
-                "failed verification: "
-                + "; ".join(dependency_errors)
-            )
-        _activate_dependency_directory(
-            spec.dependency_directory
-        )
         backend = load_source_object(
             directory,
             spec.backend,
@@ -362,9 +323,10 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
                     float(payload["value"]),
                     float(payload["rate_per_minute"]),
                     str(payload.get("mode", "Settle")),
+                    control=str(payload["control"]),
                 )
             elif action == "hold":
-                value = backend.hold()
+                value = backend.hold(control=str(payload["control"]))
             elif action == "execute_sequence_command":
                 value = backend.execute_sequence_command(
                     str(payload["command_id"])
@@ -838,6 +800,8 @@ class IsolatedInstrumentClient:
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
+        *,
+        control: str,
     ) -> None:
         await self._request(
             "set_target",
@@ -845,11 +809,12 @@ class IsolatedInstrumentClient:
                 "value": value,
                 "rate_per_minute": rate_per_minute,
                 "mode": mode,
+                "control": control,
             },
         )
 
-    async def hold(self) -> None:
-        await self._request("hold")
+    async def hold(self, *, control: str) -> None:
+        await self._request("hold", {"control": control})
 
     async def execute_sequence_command(self, command_id: str) -> None:
         await self._request(
@@ -910,11 +875,19 @@ class InProcessInstrumentClient:
         value: float,
         rate_per_minute: float,
         mode: str = "Settle",
+        *,
+        control: str,
     ) -> None:
-        await asyncio.to_thread(self.backend.set_target, value, rate_per_minute, mode)
+        await asyncio.to_thread(
+            self.backend.set_target,
+            value,
+            rate_per_minute,
+            mode,
+            control=control,
+        )
 
-    async def hold(self) -> None:
-        await asyncio.to_thread(self.backend.hold)
+    async def hold(self, *, control: str) -> None:
+        await asyncio.to_thread(self.backend.hold, control=control)
 
     async def execute_sequence_command(self, command_id: str) -> None:
         await asyncio.to_thread(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 import tempfile
@@ -14,17 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.config import load_config  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
-from labcontrol.instruments.manifest import (  # noqa: E402
-    instrument_dependency_directory,
-    discover_system_instruments,
-)
+from labcontrol.instruments.manifest import discover_system_instruments  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.package_support.trust import (  # noqa: E402
-    ContentTrustStore,
-    content_tree_digest,
-)
 from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
 
 
@@ -32,28 +24,49 @@ def _external_instrument(
     root: Path,
     source: str,
     kinds: str = '"temperature"',
-    dependencies: str = "",
     sequence_commands: str = "",
 ) -> Path:
     instrument = root / "isolated_test"
     instrument.mkdir(parents=True)
-    panel_template = "readout" if kinds == '"monitor"' else "controller"
+    if kinds == '"monitor"':
+        panel = (
+            '[[panels]]\n'
+            'id = "main"\n'
+            'label = "Isolated Test"\n'
+            'template = "readout"\n'
+            'readings = ["value"]\n'
+        )
+    else:
+        panel = (
+            '[[controls]]\n'
+            'id = "main"\n'
+            'label = "Isolated Test"\n'
+            '[[panels]]\n'
+            'id = "main"\n'
+            'label = "Isolated Test"\n'
+            'template = "controller"\n'
+            'control = "main"\n'
+            'reading_options = ["value"]\n'
+            'default_reading = "value"\n'
+            'min_value = 0.0\n'
+            'max_value = 1000.0\n'
+            'default_rate_per_minute = 1.0\n'
+            'max_rate_per_minute = 100.0\n'
+            'stability_tolerance = 0.1\n'
+            'stability_max_slope_per_minute = 0.1\n'
+            'stability_dwell_seconds = 0.0\n'
+            'stability_timeout_seconds = 10.0\n'
+            'stability_window_seconds = 1.0\n'
+        )
     (instrument / "instrument.toml").write_text(
         (
             'id = "isolated_test"\n'
             'name = "Isolated Test"\n'
             'version = "0.1.0"\n'
-            'api_version = "3"\n'
+            'api_version = "4"\n'
             'backend = "backend:IsolatedTestInstrument"\n'
             f"kinds = [{kinds}]\n"
-            + (
-                f"dependencies = [{dependencies}]\n"
-                if dependencies
-                else ""
-            )
-            + 'main_reading = "value"\n'
-            + '[panel]\n'
-            + f'template = "{panel_template}"\n'
+            + panel
             + '[readings.value]\nlabel = "Value"\nunit = "K"\n'
             + sequence_commands
         ),
@@ -65,7 +78,7 @@ def _external_instrument(
 
 class InstrumentWorkerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.config = load_config(ROOT / "configs" / "default.toml")
+        self.config = load_simulated_config()
 
     def test_builtin_instruments_run_in_distinct_child_processes_and_close(self) -> None:
         async def scenario() -> None:
@@ -75,7 +88,10 @@ class InstrumentWorkerTests(unittest.TestCase):
                 instrument_id: getattr(client, "pid", None)
                 for instrument_id, client in manager.instruments.items()
             }
-            self.assertEqual(len(set(pids.values())), len(self.config.instruments))
+            self.assertEqual(
+                len(set(pids.values())),
+                len(self.config.instrument_instances),
+            )
             self.assertNotIn(None, pids.values())
             self.assertNotIn(os.getpid(), pids.values())
             snapshots = await manager.poll_all()
@@ -111,9 +127,8 @@ class InstrumentWorkerTests(unittest.TestCase):
                     "    def hold(self): pass\n"
                 )
                 _external_instrument(root, source)
-                state = root / "state"
                 instrument = replace(
-                    self.config.instruments[0],
+                    self.config.instrument_instances[0],
                     backend="isolated_test",
                 )
                 config = replace(
@@ -121,15 +136,10 @@ class InstrumentWorkerTests(unittest.TestCase):
                     system_instruments=replace(
                         self.config.system_instruments,
                         directory=str(root),
-                        state_directory=str(state),
                     ),
-                    instruments=(instrument,),
+                    instrument_instances=(instrument,),
                 )
                 descriptors = discover_system_instruments(config)
-                ContentTrustStore(state / "trusted_content.json").trust(
-                    "instrument",
-                    descriptors[0],
-                )
                 manager = InstrumentManager(config, EventManager(), descriptors)
                 self.assertFalse(marker.exists())
                 await manager.connect_all()
@@ -158,7 +168,6 @@ class InstrumentWorkerTests(unittest.TestCase):
                     "        return (EventResponseSpec(code='TEMP_ALARM', action='zero'),)\n"
                 )
                 _external_instrument(root, source)
-                state = root / "state"
                 temperature = replace(
                     self.config.instrument("temperature"),
                     backend="isolated_test",
@@ -168,17 +177,13 @@ class InstrumentWorkerTests(unittest.TestCase):
                     system_instruments=replace(
                         self.config.system_instruments,
                         directory=str(root),
-                        state_directory=str(state),
                     ),
-                    instruments=(
+                    instrument_instances=(
                         temperature,
                         self.config.instrument("field"),
                     ),
                 )
                 descriptors = discover_system_instruments(config)
-                ContentTrustStore(
-                    state / "trusted_content.json"
-                ).trust("instrument", descriptors[0])
                 manager = InstrumentManager(
                     config,
                     EventManager(),
@@ -222,9 +227,8 @@ class InstrumentWorkerTests(unittest.TestCase):
                         'label = "Compressor On"\n'
                     ),
                 )
-                state = root / "state"
                 instrument = replace(
-                    self.config.instruments[0],
+                    self.config.instrument_instances[0],
                     backend="isolated_test",
                 )
                 config = replace(
@@ -232,15 +236,10 @@ class InstrumentWorkerTests(unittest.TestCase):
                     system_instruments=replace(
                         self.config.system_instruments,
                         directory=str(root / "instruments"),
-                        state_directory=str(state),
                     ),
-                    instruments=(instrument,),
+                    instrument_instances=(instrument,),
                 )
                 descriptors = discover_system_instruments(config)
-                ContentTrustStore(state / "trusted_content.json").trust(
-                    "instrument",
-                    descriptors[0],
-                )
                 manager = InstrumentManager(config, EventManager(), descriptors)
                 await manager.connect_all()
                 self.assertTrue(
@@ -282,9 +281,8 @@ class InstrumentWorkerTests(unittest.TestCase):
                     "    def hold(self): pass\n"
                 )
                 _external_instrument(root / "instruments", source)
-                state = root / "state"
                 instrument = replace(
-                    self.config.instruments[0],
+                    self.config.instrument_instances[0],
                     backend="isolated_test",
                 )
                 config = replace(
@@ -292,15 +290,10 @@ class InstrumentWorkerTests(unittest.TestCase):
                     system_instruments=replace(
                         self.config.system_instruments,
                         directory=str(root / "instruments"),
-                        state_directory=str(state),
                     ),
-                    instruments=(instrument,),
+                    instrument_instances=(instrument,),
                 )
                 descriptors = discover_system_instruments(config)
-                ContentTrustStore(state / "trusted_content.json").trust(
-                    "instrument",
-                    descriptors[0],
-                )
                 manager = InstrumentManager(config, EventManager(), descriptors)
                 await manager.connect_all()
                 snapshots = await manager.poll_all()
@@ -312,118 +305,6 @@ class InstrumentWorkerTests(unittest.TestCase):
                 )
                 self.assertNotIn(instrument.id, manager._recovery_tasks)
                 await manager.disconnect_all()
-
-        asyncio.run(scenario())
-
-    def test_external_instrument_dependency_is_visible_only_in_worker(
-        self,
-    ) -> None:
-        async def scenario() -> None:
-            with tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                source = (
-                    "from instrument_only_demo import VALUE\n"
-                    "from labcontrol.instruments.base import SystemInstrument\n"
-                    "class IsolatedTestInstrument(SystemInstrument):\n"
-                    "    def open(self): pass\n"
-                    "    def close(self): pass\n"
-                    "    def read_status(self): return {'value': VALUE}\n"
-                    "    def set_target("
-                    "self, value, rate_per_minute, mode='Settle'"
-                    "): pass\n"
-                    "    def hold(self): pass\n"
-                )
-                instrument = _external_instrument(
-                    root / "instruments",
-                    source,
-                    dependencies='"instrument-only-demo==1.0.0"',
-                )
-                (instrument / "requirements.lock").write_text(
-                    "instrument-only-demo==1.0.0 --hash=sha256:"
-                    + "0" * 64
-                    + "\n",
-                    encoding="utf-8",
-                )
-                state = root / "state"
-                instrument = replace(
-                    self.config.instruments[0],
-                    backend="isolated_test",
-                )
-                config = replace(
-                    self.config,
-                    system_instruments=replace(
-                        self.config.system_instruments,
-                        directory=str(root / "instruments"),
-                        state_directory=str(state),
-                        runtime_directory=str(root / "runtime"),
-                    ),
-                    instruments=(instrument,),
-                )
-                descriptor = discover_system_instruments(config)[0]
-                dependency_root = instrument_dependency_directory(
-                    config,
-                    descriptor,
-                )
-                package = dependency_root / "instrument_only_demo"
-                package.mkdir(parents=True)
-                (package / "__init__.py").write_text(
-                    "VALUE = 17.5\n",
-                    encoding="utf-8",
-                )
-                metadata = (
-                    dependency_root
-                    / "instrument_only_demo-1.0.0.dist-info"
-                )
-                metadata.mkdir()
-                (metadata / "METADATA").write_text(
-                    "Metadata-Version: 2.1\n"
-                    "Name: instrument-only-demo\n"
-                    "Version: 1.0.0\n",
-                    encoding="utf-8",
-                )
-                (dependency_root.parent / "runtime.json").write_text(
-                    json.dumps(
-                        {
-                            "schema_version": 1,
-                            "fingerprint": descriptor.fingerprint,
-                            "requirements": list(
-                                descriptor.dependencies
-                            ),
-                            "runtime_digest": (
-                                content_tree_digest(
-                                    dependency_root
-                                )
-                            ),
-                        }
-                    )
-                    + "\n",
-                    encoding="utf-8",
-                )
-                ContentTrustStore(
-                    state / "trusted_content.json"
-                ).trust("instrument", descriptor)
-                manager = InstrumentManager(
-                    config,
-                    EventManager(),
-                    (descriptor,),
-                )
-                try:
-                    self.assertNotIn(
-                        "instrument_only_demo",
-                        sys.modules,
-                    )
-                    await manager.connect_all()
-                    snapshots = await manager.poll_all()
-                    self.assertEqual(
-                        snapshots["temperature"].current,
-                        17.5,
-                    )
-                    self.assertNotIn(
-                        "instrument_only_demo",
-                        sys.modules,
-                    )
-                finally:
-                    await manager.disconnect_all()
 
         asyncio.run(scenario())
 
@@ -443,8 +324,7 @@ class InstrumentWorkerTests(unittest.TestCase):
                     "        return {'value': 4.2}\n"
                 )
                 _external_instrument(root, source, kinds='"monitor"')
-                state = root / "state"
-                monitor = self.config.instruments[2]
+                monitor = self.config.instrument_instances[2]
                 instruments = (
                     replace(
                         monitor,
@@ -470,16 +350,11 @@ class InstrumentWorkerTests(unittest.TestCase):
                     system_instruments=replace(
                         self.config.system_instruments,
                         directory=str(root),
-                        state_directory=str(state),
                         startup_timeout_seconds=1.0,
                     ),
-                    instruments=instruments,
+                    instrument_instances=instruments,
                 )
                 descriptors = discover_system_instruments(config)
-                ContentTrustStore(state / "trusted_content.json").trust(
-                    "instrument",
-                    descriptors[0],
-                )
                 events = EventManager()
                 manager = InstrumentManager(config, events, descriptors)
                 await manager.connect_all()

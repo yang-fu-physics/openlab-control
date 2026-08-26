@@ -1,474 +1,345 @@
 from __future__ import annotations
 
-import asyncio
-import json
+from dataclasses import replace
+from pathlib import Path
+import shutil
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
-from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from labcontrol.config import load_config  # noqa: E402
+from labcontrol.config import InstrumentConfig, load_config  # noqa: E402
 from labcontrol.instruments.manifest import (  # noqa: E402
+    SYSTEM_INSTRUMENT_API_VERSION,
     configured_system_instruments,
     discover_system_instruments,
     load_instrument_manifest,
 )
-from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.package_support.trust import (  # noqa: E402
-    ContentTrustError,
-    ContentTrustStore,
-    content_tree_digest,
-)
-from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
+from labcontrol.models import InstrumentKind  # noqa: E402
+
+
+MANIFEST = """\
+id = "test_controller"
+name = "Test Controller"
+version = "1.2.3"
+api_version = "4"
+core_requires = ">=0.19,<0.20"
+backend = "backend:Driver"
+kinds = ["temperature"]
+
+[discovery]
+identity_pattern = "^ACME,CTRL,"
+
+[[config_fields]]
+id = "host"
+label = "Host"
+type = "string"
+default = ""
+
+[[config_fields]]
+id = "channel"
+label = "Channel"
+type = "integer"
+default = 1
+min = 1
+max = 4
+
+[[config_fields]]
+id = "mode"
+label = "Mode"
+type = "choice"
+default = "auto"
+options = ["auto", "manual"]
+
+[[controls]]
+id = "loop1"
+label = "Loop 1"
+
+[[panels]]
+id = "control"
+label = "Control"
+template = "controller"
+control = "loop1"
+reading_options = ["temperature"]
+default_reading = "temperature"
+min_value = 1.8
+max_value = 400.0
+default_rate_per_minute = 1.0
+max_rate_per_minute = 30.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 1.5
+stability_timeout_seconds = 120.0
+stability_window_seconds = 1.0
+
+[[panels]]
+id = "heater"
+label = "Heater"
+template = "readout"
+readings = ["heater"]
+
+[[sequence_commands]]
+id = "reset"
+label = "Reset Controller"
+
+[readings.temperature]
+label = "Temperature"
+unit = "K"
+decimals = 3
+
+[readings.heater]
+label = "Heater"
+unit = "%"
+decimals = 1
+"""
 
 
 def _write_instrument(
     root: Path,
     *,
-    instrument_id: str = "example_temperature",
-    dependencies: str = "",
-    backend_source: str | None = None,
-    sequence_commands: str = "",
+    name: str = "test_controller",
+    manifest: str = MANIFEST,
+    backend: str = "class Driver: pass\n",
 ) -> Path:
-    instrument = root / instrument_id
-    instrument.mkdir(parents=True)
-    dependency_block = f"dependencies = [{dependencies}]\n" if dependencies else ""
-    (instrument / "instrument.toml").write_text(
-        (
-            f'id = "{instrument_id}"\n'
-            'name = "Example Temperature"\n'
-            'version = "0.1.0"\n'
-            'api_version = "3"\n'
-            'backend = "backend:ExampleTemperature"\n'
-            'kinds = ["temperature"]\n'
-            f"{dependency_block}"
-            'main_reading = "temperature"\n'
-            '[panel]\n'
-            'template = "controller"\n'
-            '[readings.temperature]\n'
-            'label = "Temperature"\n'
-            'unit = "K"\n'
-            'decimals = 3\n'
-            f"{sequence_commands}"
-        ),
-        encoding="utf-8",
-    )
-    (instrument / "backend.py").write_text(
-        backend_source
-        or (
-            "from labcontrol.instruments.base import SystemInstrument\n"
-            "class ExampleTemperature(SystemInstrument):\n"
-            "    def open(self): pass\n"
-            "    def close(self): pass\n"
-            "    def read_status(self):\n"
-            "        return {'value': self.config.initial_value, "
-            "'target': self.config.initial_value, "
-            "'rate': self.config.default_rate_per_minute}\n"
-            "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
-            "    def hold(self): pass\n"
-        ),
-        encoding="utf-8",
-    )
-    return instrument
+    directory = root / name
+    directory.mkdir(parents=True)
+    (directory / "instrument.toml").write_text(manifest, encoding="utf-8")
+    (directory / "backend.py").write_text(backend, encoding="utf-8")
+    return directory
+
+
+def _copy_general(root: Path):
+    configs = root / "configs"
+    configs.mkdir()
+    general = configs / "general.toml"
+    shutil.copy2(ROOT / "configs" / "general.toml", general)
+    return load_config(general)
 
 
 class SystemInstrumentManifestTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.config = load_config(ROOT / "configs" / "default.toml")
-
-    def test_manifest_discovery_validates_content_and_detects_changes(self) -> None:
+    def test_api_v4_manifest_declares_static_configuration_and_fixed_panels(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            instrument = _write_instrument(root)
-            config = replace(
-                self.config,
-                system_instruments=replace(self.config.system_instruments, directory=str(root)),
+            descriptor = load_instrument_manifest(
+                _write_instrument(Path(temporary))
             )
-            descriptor = discover_system_instruments(config)[0]
-            self.assertTrue(descriptor.can_load, descriptor.error)
-            self.assertEqual(descriptor.id, "example_temperature")
-            self.assertEqual(descriptor.panel_template, "controller")
-            self.assertEqual(descriptor.fingerprint, content_tree_digest(instrument))
 
-            original = descriptor.fingerprint
-            (instrument / "backend.py").write_text(
-                (instrument / "backend.py").read_text(encoding="utf-8") + "\n# changed\n",
-                encoding="utf-8",
-            )
-            changed = discover_system_instruments(config)[0]
-            self.assertNotEqual(changed.fingerprint, original)
-
-    def test_manifest_declares_only_stable_no_parameter_sequence_commands(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            instrument = _write_instrument(
-                Path(temporary),
-                sequence_commands=(
-                    '[[sequence_commands]]\n'
-                    'id = "compressor_on"\n'
-                    'label = "Compressor On"\n'
-                    '[[sequence_commands]]\n'
-                    'id = "compressor_off"\n'
-                    'label = "Compressor Off"\n'
-                ),
-            )
-            descriptor = load_instrument_manifest(instrument)
             self.assertTrue(descriptor.valid, descriptor.error)
+            self.assertEqual(SYSTEM_INSTRUMENT_API_VERSION, "4")
+            self.assertEqual(descriptor.id, "test_controller")
+            self.assertEqual(descriptor.identity_pattern, "^ACME,CTRL,")
+            self.assertEqual(
+                [field.id for field in descriptor.config_fields],
+                ["host", "channel", "mode"],
+            )
+            self.assertEqual([control.id for control in descriptor.controls], ["loop1"])
+            self.assertEqual([panel.id for panel in descriptor.panels], ["control", "heater"])
+            self.assertEqual(descriptor.panel("control").control, "loop1")
+            self.assertEqual(descriptor.panel("heater").readings, ("heater",))
             self.assertEqual(
                 [command.id for command in descriptor.sequence_commands],
-                ["compressor_on", "compressor_off"],
-            )
-            self.assertEqual(
-                [command.label for command in descriptor.sequence_commands],
-                ["Compressor On", "Compressor Off"],
+                ["reset"],
             )
 
-            manifest = instrument / "instrument.toml"
-            manifest.write_text(
-                manifest.read_text(encoding="utf-8")
-                + '[[sequence_commands]]\n'
-                + 'id = "compressor_other"\n'
-                + 'label = "compressor on"\n',
-                encoding="utf-8",
-            )
-            duplicate = load_instrument_manifest(instrument)
-            self.assertFalse(duplicate.valid)
-            self.assertIn(
-                "sequence command labels must be unique",
-                duplicate.error,
-            )
-
-    def test_main_reading_must_have_metadata(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            instrument = _write_instrument(Path(temporary))
-            manifest = instrument / "instrument.toml"
-            manifest.write_text(
-                manifest.read_text(encoding="utf-8").replace(
-                    'main_reading = "temperature"',
-                    'main_reading = "missing"',
-                ),
-                encoding="utf-8",
-            )
-            descriptor = load_instrument_manifest(instrument)
-            self.assertFalse(descriptor.valid)
-            self.assertIn(
-                "readings must define the declared main_reading",
-                descriptor.error,
-            )
-
-    def test_panel_template_is_required_and_validated(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            instrument = _write_instrument(Path(temporary))
-            manifest = instrument / "instrument.toml"
-            source = manifest.read_text(encoding="utf-8")
-            manifest.write_text(
-                source.replace(
-                    '[panel]\ntemplate = "controller"\n',
-                    "",
-                ),
-                encoding="utf-8",
-            )
-            missing = load_instrument_manifest(instrument)
-            self.assertFalse(missing.valid)
-            self.assertIn("panel must be a table", missing.error)
-
-            manifest.write_text(
-                source.replace(
-                    'template = "controller"',
-                    'template = "unknown"',
-                ),
-                encoding="utf-8",
-            )
-            unknown = load_instrument_manifest(instrument)
-            self.assertFalse(unknown.valid)
-            self.assertIn(
-                "panel.template must be controller, readout, readout_grid, or switch",
-                unknown.error,
-            )
-
-            manifest.write_text(
-                source.replace(
-                    'template = "controller"',
-                    'template = "readout_grid"',
-                ),
-                encoding="utf-8",
-            )
-            grid = load_instrument_manifest(instrument)
-            self.assertTrue(grid.valid, grid.error)
-
-    def test_switch_panel_uses_declared_sequence_commands(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            instrument = _write_instrument(
-                Path(temporary),
-                sequence_commands=(
-                    '[[sequence_commands]]\n'
-                    'id = "compressor_on"\n'
-                    'label = "Compressor On"\n'
-                    '[[sequence_commands]]\n'
-                    'id = "compressor_off"\n'
-                    'label = "Compressor Off"\n'
-                ),
-            )
-            manifest = instrument / "instrument.toml"
-            source = manifest.read_text(encoding="utf-8")
-            manifest.write_text(
-                source.replace(
-                    'template = "controller"',
-                    'template = "switch"',
-                ),
-                encoding="utf-8",
-            )
-            descriptor = load_instrument_manifest(instrument)
+    def test_bundled_templates_are_valid_api_v4(self) -> None:
+        for name in ("example_controller", "example_monitor"):
+            descriptor = load_instrument_manifest(ROOT / "system_instruments" / name)
             self.assertTrue(descriptor.valid, descriptor.error)
+            self.assertEqual(descriptor.api_version, "4")
 
-            manifest.write_text(
-                source.replace(
-                    'template = "controller"',
-                    'template = "switch"',
-                ).split("[[sequence_commands]]", 1)[0],
-                encoding="utf-8",
-            )
-            missing_commands = load_instrument_manifest(instrument)
-            self.assertFalse(missing_commands.valid)
-            self.assertIn(
-                "switch panel requires at least one sequence command",
-                missing_commands.error,
-            )
-
-    def test_manifest_rejects_obsolete_or_misspelled_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            instrument = _write_instrument(Path(temporary))
-            manifest = instrument / "instrument.toml"
-            manifest.write_text(
-                manifest.read_text(encoding="utf-8").replace(
-                    'main_reading = "temperature"\n',
-                    'main_reading = "temperature"\nauxiliary_readings = []\n',
-                ),
-                encoding="utf-8",
-            )
-            descriptor = load_instrument_manifest(instrument)
-            self.assertFalse(descriptor.valid)
-            self.assertIn(
-                "unknown instrument.toml fields: auxiliary_readings",
-                descriptor.error,
-            )
-
-    def test_manifest_rejects_url_dependencies_and_duplicate_ids(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _write_instrument(
-                root,
-                dependencies='"driver @ https://example.invalid/driver.whl"',
-            )
-            duplicate = _write_instrument(root, instrument_id="other_instrument")
-            (duplicate / "instrument.toml").write_text(
-                (duplicate / "instrument.toml")
-                .read_text(encoding="utf-8")
-                .replace('id = "other_instrument"', 'id = "example_temperature"'),
-                encoding="utf-8",
-            )
-            config = replace(
-                self.config,
-                system_instruments=replace(self.config.system_instruments, directory=str(root)),
-            )
-            descriptors = discover_system_instruments(config)
-            self.assertEqual(len(descriptors), 2)
-            self.assertTrue(all(not item.valid for item in descriptors))
-            self.assertTrue(
-                any("dependency URLs are not allowed" in item.error for item in descriptors)
-            )
-            self.assertTrue(any("Duplicate system instrument id" in item.error for item in descriptors))
-
-    def test_framework_dependency_needs_no_runtime_packages(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _write_instrument(
-                root,
-                dependencies=(
-                    '"PyVISA>=1.16,<1.17", '
-                    '"typing_extensions>=4.16,<5"'
-                ),
-            )
-            config = replace(
-                self.config,
-                system_instruments=replace(
-                    self.config.system_instruments,
-                    directory=str(root),
-                ),
-            )
-            descriptor = discover_system_instruments(
-                config
-            )[0]
-            self.assertTrue(
-                descriptor.valid,
-                descriptor.error,
-            )
-            self.assertEqual(descriptor.dependencies, ())
-            self.assertEqual(
-                descriptor.framework_dependencies,
-                (
-                    "PyVISA>=1.16,<1.17",
-                    "typing_extensions>=4.16,<5",
-                ),
-            )
-
-            manifest = (
-                root
-                / "example_temperature"
-                / "instrument.toml"
-            )
-            manifest.write_text(
-                manifest.read_text(encoding="utf-8").replace(
-                    "PyVISA>=1.16,<1.17",
-                    "PyVISA>=2",
-                ),
-                encoding="utf-8",
-            )
-            incompatible = discover_system_instruments(
-                config
-            )[0]
-            self.assertFalse(incompatible.valid)
-            self.assertIn(
-                "framework-provided version 1.16.2",
-                incompatible.error,
-            )
-
-    def test_configured_instrument_must_exist_support_kind_and_be_valid(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _write_instrument(root)
-            external_instrument = replace(
-                self.config.instruments[0],
-                backend="example_temperature",
-            )
-            config = replace(
-                self.config,
-                system_instruments=replace(self.config.system_instruments, directory=str(root)),
-                instruments=(external_instrument,),
-            )
-            descriptors = discover_system_instruments(config)
-            self.assertEqual(
-                configured_system_instruments(config, descriptors),
-                descriptors,
-            )
-            with self.assertRaisesRegex(ValueError, "unknown System Instrument"):
-                configured_system_instruments(
-                    replace(
-                        config,
-                        instruments=(replace(external_instrument, backend="missing_instrument"),),
-                    ),
-                    descriptors,
-                )
-
-    def test_external_code_is_not_imported_until_content_is_trusted(self) -> None:
-        async def scenario() -> None:
-            with tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                marker = root / "imported.txt"
-                source = (
-                    "from pathlib import Path\n"
-                    f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
-                    "from labcontrol.instruments.base import SystemInstrument\n"
-                    "class ExampleTemperature(SystemInstrument):\n"
-                    "    def open(self): pass\n"
-                    "    def close(self): pass\n"
-                    "    def read_status(self): return {'value': 3.0}\n"
-                    "    def set_target(self, value, rate_per_minute, mode='Settle'): pass\n"
-                    "    def hold(self): pass\n"
-                )
-                _write_instrument(root, backend_source=source)
-                state = root / "state"
-                external_instrument = replace(
-                    self.config.instruments[0],
-                    backend="example_temperature",
-                )
-                config = replace(
-                    self.config,
-                    system_instruments=replace(
-                        self.config.system_instruments,
-                        directory=str(root),
-                        state_directory=str(state),
-                    ),
-                    instruments=(external_instrument,),
-                )
-                descriptors = discover_system_instruments(config)
-                with self.assertRaisesRegex(PermissionError, "has not been trusted"):
-                    InstrumentManager(
-                        config,
-                        EventManager(),
-                        descriptors,
-                        isolate_processes=False,
-                    )
-                self.assertFalse(marker.exists())
-
-                store = ContentTrustStore(state / "trusted_content.json")
-                store.trust("instrument", descriptors[0])
-                manager = InstrumentManager(
-                    config,
-                    EventManager(),
-                    descriptors,
-                    isolate_processes=False,
-                )
-                self.assertTrue(marker.exists())
-                await manager.connect_all()
-                snapshots = await manager.poll_all()
-                self.assertEqual(snapshots["temperature"].current, 3.0)
-                await manager.disconnect_all()
-
-        asyncio.run(scenario())
-
-    def test_unmanifested_third_party_import_is_rejected(self) -> None:
-        config = replace(
-            self.config,
-            instruments=(
-                replace(
-                    self.config.instruments[0],
-                    backend="third_party.driver:UnsafeDriver",
-                ),
+    def test_obsolete_manifest_shapes_are_rejected(self) -> None:
+        replacements = (
+            ('api_version = "4"', 'api_version = "3"', "incompatible"),
+            (
+                'backend = "backend:Driver"',
+                'backend = "backend:Driver"\nmain_reading = "temperature"',
+                "unknown instrument.toml fields",
+            ),
+            (
+                "[discovery]",
+                "[settings]\nvisa_timeout_ms = 1000\n\n[discovery]",
+                "unknown instrument.toml fields",
+            ),
+            (
+                "[[panels]]",
+                "[panel]\ntemplate = \"controller\"\n\n[[panels]]",
+                "unknown instrument.toml fields",
+            ),
+            (
+                'core_requires = ">=0.19,<0.20"',
+                'core_requires = ">=0.19,<0.20"\ndependencies = ["vendor"]',
+                "unknown instrument.toml fields",
             ),
         )
-        with self.assertRaisesRegex(PermissionError, "Unmanifested third-party"):
-            InstrumentManager(config, EventManager(), isolate_processes=False)
+        for old, new, message in replacements:
+            with self.subTest(new=new), tempfile.TemporaryDirectory() as temporary:
+                descriptor = load_instrument_manifest(
+                    _write_instrument(
+                        Path(temporary),
+                        manifest=MANIFEST.replace(old, new, 1),
+                    )
+                )
+                self.assertFalse(descriptor.valid)
+                self.assertIn(message, descriptor.error)
 
-
-class ContentTrustStoreTests(unittest.TestCase):
-    def test_trust_is_bound_to_type_version_and_content(self) -> None:
+    def test_manifest_rejects_unknown_or_missing_backend_source(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            instrument = _write_instrument(root)
-            config = replace(
-                load_config(ROOT / "configs" / "default.toml"),
-                system_instruments=replace(
-                    load_config(ROOT / "configs" / "default.toml").system_instruments,
-                    directory=str(root),
-                ),
+            unknown = load_instrument_manifest(
+                _write_instrument(
+                    root,
+                    manifest=MANIFEST.replace(
+                        'backend = "backend:Driver"',
+                        'backend = "package.backend:Driver"',
+                    ),
+                )
             )
-            descriptor = discover_system_instruments(config)[0]
-            store_path = root / "state" / "trusted_content.json"
-            store = ContentTrustStore(store_path)
-            self.assertFalse(store.is_trusted("instrument", descriptor))
-            store.trust("instrument", descriptor)
-            self.assertTrue(ContentTrustStore(store_path).is_trusted("instrument", descriptor))
-            self.assertFalse(ContentTrustStore(store_path).is_trusted("module", descriptor))
+            self.assertFalse(unknown.valid)
+            self.assertIn("module:ClassName", unknown.error)
 
-            (instrument / "backend.py").write_text("# replaced\n", encoding="utf-8")
-            changed = discover_system_instruments(config)[0]
-            self.assertFalse(ContentTrustStore(store_path).is_trusted("instrument", changed))
+            missing_path = _write_instrument(root, name="missing")
+            (missing_path / "backend.py").unlink()
+            missing = load_instrument_manifest(missing_path)
+            self.assertFalse(missing.valid)
+            self.assertIn("backend source does not exist", missing.error)
 
-    def test_corrupt_store_fails_closed(self) -> None:
+    def test_config_field_types_defaults_ranges_and_choices_are_validated(self) -> None:
+        replacements = (
+            ('default = 1\nmin = 1', 'default = true\nmin = 1', "does not match"),
+            ('default = 1\nmin = 1', 'default = 8\nmin = 1', "outside min/max"),
+            ('options = ["auto", "manual"]', 'options = ["auto", "auto"]', "non-empty and unique"),
+            ('type = "choice"', 'type = "mystery"', "unknown type"),
+        )
+        for old, new, message in replacements:
+            with self.subTest(new=new), tempfile.TemporaryDirectory() as temporary:
+                descriptor = load_instrument_manifest(
+                    _write_instrument(
+                        Path(temporary),
+                        manifest=MANIFEST.replace(old, new, 1),
+                    )
+                )
+                self.assertFalse(descriptor.valid)
+                self.assertIn(message, descriptor.error)
+
+    def test_panel_references_and_safety_defaults_are_validated(self) -> None:
+        replacements = (
+            ('control = "loop1"', 'control = "missing"', "unknown control"),
+            ('reading_options = ["temperature"]', 'reading_options = ["missing"]', "declared readings"),
+            ('readings = ["heater"]', 'readings = ["missing"]', "declared reading"),
+            ('min_value = 1.8', 'min_value = 500.0', "less than max_value"),
+            ('default_rate_per_minute = 1.0', 'default_rate_per_minute = 40.0', "positive and ordered"),
+            ('stability_timeout_seconds = 120.0', 'stability_timeout_seconds = 0.0', "stability values"),
+        )
+        for old, new, message in replacements:
+            with self.subTest(new=new), tempfile.TemporaryDirectory() as temporary:
+                descriptor = load_instrument_manifest(
+                    _write_instrument(
+                        Path(temporary),
+                        manifest=MANIFEST.replace(old, new, 1),
+                    )
+                )
+                self.assertFalse(descriptor.valid)
+                self.assertIn(message, descriptor.error)
+
+    def test_switch_panel_references_generated_static_commands(self) -> None:
+        switch = """\
+[[panels]]
+id = "switch"
+label = "Output"
+template = "switch"
+reading = "heater"
+commands = ["reset"]
+
+"""
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "trusted_content.json"
-            path.write_text(json.dumps({"schema_version": 99}), encoding="utf-8")
-            with self.assertRaisesRegex(ContentTrustError, "Cannot read"):
-                ContentTrustStore(path)
+            descriptor = load_instrument_manifest(
+                _write_instrument(
+                    Path(temporary),
+                    manifest=MANIFEST.replace(
+                        "[[sequence_commands]]",
+                        switch + "[[sequence_commands]]",
+                    ),
+                )
+            )
+            self.assertTrue(descriptor.valid, descriptor.error)
+            self.assertEqual(descriptor.panel("switch").commands, ("reset",))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            descriptor = load_instrument_manifest(
+                _write_instrument(
+                    Path(temporary),
+                    manifest=MANIFEST.replace(
+                        "[[sequence_commands]]",
+                        switch.replace('commands = ["reset"]', 'commands = ["missing"]')
+                        + "[[sequence_commands]]",
+                    ),
+                )
+            )
+            self.assertFalse(descriptor.valid)
+            self.assertIn("declared commands", descriptor.error)
+
+    def test_discovery_validates_without_importing_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = _copy_general(root)
+            marker = root / "imported.txt"
+            source = (
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('imported', encoding='utf-8')\n"
+                "class Driver: pass\n"
+            )
+            _write_instrument(root / "system_instruments", backend=source)
+
+            descriptors = discover_system_instruments(config)
+
+            self.assertEqual(len(descriptors), 1)
+            self.assertTrue(descriptors[0].valid, descriptors[0].error)
+            self.assertFalse(marker.exists())
+
+    def test_discovery_marks_duplicate_ids_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = _copy_general(root)
+            instruments = root / "system_instruments"
+            _write_instrument(instruments, name="first")
+            _write_instrument(instruments, name="second")
+
+            descriptors = discover_system_instruments(config)
+
+            self.assertEqual(len(descriptors), 2)
+            self.assertTrue(all(not descriptor.valid for descriptor in descriptors))
+            self.assertTrue(all("Duplicate" in descriptor.error for descriptor in descriptors))
+
+    def test_configured_descriptors_are_selected_once_per_template(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = _copy_general(root)
+            descriptor = load_instrument_manifest(_write_instrument(root))
+            first = InstrumentConfig(
+                id="first",
+                display_name="First",
+                kind=InstrumentKind.TEMPERATURE,
+                backend="test_controller",
+            )
+            second = replace(first, id="second", display_name="Second")
+            configured = replace(
+                config,
+                instrument_instances=(first, second),
+            )
+
+            self.assertEqual(
+                configured_system_instruments(configured, (descriptor,)),
+                (descriptor,),
+            )
+
+            unknown = replace(
+                config,
+                instrument_instances=(replace(first, backend="missing"),),
+            )
+            with self.assertRaisesRegex(ValueError, "unknown System Instrument"):
+                configured_system_instruments(unknown, (descriptor,))
 
 
 if __name__ == "__main__":

@@ -13,17 +13,9 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
 from ..config import AppConfig
-from ..package_support.dependencies import (
-    dependency_runtime_errors,
-    missing_dependencies as find_missing_dependencies,
-    partition_package_dependencies,
-    validate_requirements_lock,
-)
-from ..package_support.trust import ContentTrustError, content_tree_digest
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -45,19 +37,16 @@ class ModuleDescriptor:
     name: str
     version: str
     path: Path
-    dependencies: tuple[str, ...] = ()
     columns: tuple[ModuleColumn, ...] = ()
     # ``display_columns`` 只选择主窗口紧凑卡片要显示的既有 DAT 列。它在
     # Enable 后由可信 worker 握手填入；不会触发额外测量，也不改变 DAT Schema。
     display_columns: tuple[str, ...] = ()
-    fingerprint: str = ""
     valid: bool = True
     error: str = ""
-    dependency_error: str = ""
 
     @property
     def can_enable(self) -> bool:
-        return self.valid and bool(self.fingerprint) and not self.dependency_error
+        return self.valid
 
 
 def _invalid(path: Path, message: str) -> ModuleDescriptor:
@@ -81,12 +70,6 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         module_id = path.name.casefold()
         name = str(raw["name"]).strip()
         version = str(raw["version"]).strip()
-        dependency_values = raw.get("dependencies", [])
-        if not isinstance(dependency_values, list):
-            raise TypeError("dependencies must be an array")
-        declared_dependencies = tuple(
-            str(item).strip() for item in dependency_values
-        )
     except (
         OSError,
         KeyError,
@@ -96,20 +79,14 @@ def load_manifest(path: Path) -> ModuleDescriptor:
     ) as exc:
         return _invalid(path, f"Cannot read module.toml: {exc}")
 
-    (
-        framework_dependencies,
-        dependencies,
-        dependency_compatibility_errors,
-    ) = partition_package_dependencies(declared_dependencies)
     descriptor = ModuleDescriptor(
         id=module_id,
         name=name,
         version=version,
         path=path.resolve(),
-        dependencies=dependencies,
     )
     errors: list[str] = []
-    unknown_fields = sorted(set(raw) - {"name", "version", "dependencies"})
+    unknown_fields = sorted(set(raw) - {"name", "version"})
     if unknown_fields:
         errors.append(
             "unknown module.toml fields: " + ", ".join(unknown_fields)
@@ -124,25 +101,6 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         errors.append(f"version {version!r} is invalid")
     if not (path / "backend.py").is_file():
         errors.append("backend.py does not exist")
-    errors.extend(dependency_compatibility_errors)
-    if framework_dependencies:
-        errors.append(
-            "framework dependencies are already supplied and must not be declared: "
-            + ", ".join(framework_dependencies)
-        )
-    for raw_requirement in declared_dependencies:
-        try:
-            requirement = Requirement(raw_requirement)
-        except InvalidRequirement:
-            errors.append(f"invalid dependency: {raw_requirement}")
-            continue
-        if requirement.url is not None:
-            errors.append(f"dependency URLs are not allowed: {raw_requirement}")
-    errors.extend(validate_requirements_lock(path, dependencies))
-    try:
-        descriptor.fingerprint = content_tree_digest(path)
-    except ContentTrustError as exc:
-        errors.append(str(exc))
     if errors:
         descriptor.valid = False
         descriptor.error = "; ".join(dict.fromkeys(errors))
@@ -168,48 +126,9 @@ def discover_modules(config: AppConfig) -> tuple[ModuleDescriptor, ...]:
             item.valid = False
             item.error = "; ".join(part for part in (item.error, message) if part)
     return tuple(descriptors)
-
-
-def module_dependency_directory(
-    config: AppConfig,
-    descriptor: ModuleDescriptor,
-) -> Path:
-    return (
-        config.resolve_project_path(config.modules.runtime_directory)
-        / "module"
-        / descriptor.id
-        / descriptor.fingerprint[:16]
-        / "site-packages"
-    )
-
-
-def missing_dependencies(
-    config: AppConfig,
-    descriptor: ModuleDescriptor,
-) -> tuple[str, ...]:
-    return find_missing_dependencies(
-        descriptor.dependencies,
-        module_dependency_directory(config, descriptor),
-    )
-
-
-def module_dependency_errors(
-    config: AppConfig,
-    descriptor: ModuleDescriptor,
-) -> tuple[str, ...]:
-    return dependency_runtime_errors(
-        descriptor.dependencies,
-        module_dependency_directory(config, descriptor),
-        descriptor.fingerprint,
-    )
-
-
 __all__ = [
     "ModuleColumn",
     "ModuleDescriptor",
     "discover_modules",
     "load_manifest",
-    "missing_dependencies",
-    "module_dependency_errors",
-    "module_dependency_directory",
 ]

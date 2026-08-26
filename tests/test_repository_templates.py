@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import tomllib
 import unittest
 from pathlib import Path
 
@@ -13,35 +12,15 @@ from labcontrol.instruments.manifest import load_instrument_manifest  # noqa: E4
 from labcontrol.measurement.manifest import load_manifest  # noqa: E402
 
 
-TEMPLATES = ROOT / "templates"
-MODULE_REPOSITORY = TEMPLATES / "measurement-modules-repository"
-INSTRUMENT_REPOSITORY = TEMPLATES / "system-instruments-repository"
+class BundledExamplesTests(unittest.TestCase):
+    def test_bundled_measurement_examples_are_valid(self) -> None:
+        paths = sorted(path for path in (ROOT / "modules").iterdir() if path.is_dir())
+        descriptors = [load_manifest(path) for path in paths]
+        self.assertEqual([item.id for item in descriptors], ["simulated_transport", "tutorial_resistance"])
+        self.assertTrue(all(item.valid for item in descriptors), [item.error for item in descriptors])
 
-
-class RepositoryTemplateTests(unittest.TestCase):
-    def test_core_starts_without_an_active_measurement_module(self) -> None:
-        manifests = tuple((ROOT / "modules").glob("*/module.toml"))
-        self.assertEqual(manifests, ())
-
-    def test_measurement_repository_contains_a_valid_reference_module(self) -> None:
-        module_path = (
-            MODULE_REPOSITORY
-            / "modules"
-            / "simulated_transport"
-        )
-        descriptor = load_manifest(module_path)
-        self.assertTrue(descriptor.valid, descriptor.error)
-        self.assertEqual(descriptor.id, "simulated_transport")
-        self.assertEqual(descriptor.columns, ())
-        with (module_path / "module.toml").open("rb") as handle:
-            self.assertEqual(set(tomllib.load(handle)), {"name", "version"})
-
-    def test_instrument_repository_instruments_are_independently_installable(self) -> None:
-        paths = sorted(
-            path
-            for path in (INSTRUMENT_REPOSITORY / "instruments").iterdir()
-            if path.is_dir()
-        )
+    def test_bundled_system_examples_are_valid(self) -> None:
+        paths = sorted(path for path in (ROOT / "system_instruments").iterdir() if path.is_dir())
         self.assertEqual(
             [path.name for path in paths],
             ["example_controller", "example_monitor"],
@@ -56,23 +35,11 @@ class RepositoryTemplateTests(unittest.TestCase):
         )
         self.assertEqual(
             {descriptor.id for descriptor in descriptors},
-            {"example_controller", "example_monitor"},
+            {
+                "example_controller",
+                "example_monitor",
+            },
         )
-
-    def test_templates_contain_no_generated_runtime_or_secret_files(self) -> None:
-        forbidden_names = {
-            "runtime.json",
-            "trusted_content.json",
-            "settings.toml",
-            ".env",
-        }
-        observed = {
-            path.name
-            for repository in (MODULE_REPOSITORY, INSTRUMENT_REPOSITORY)
-            for path in repository.rglob("*")
-            if path.is_file()
-        }
-        self.assertTrue(forbidden_names.isdisjoint(observed))
 
 
 if __name__ == "__main__":

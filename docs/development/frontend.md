@@ -69,10 +69,10 @@ class Frontend(QWidget):
 “加载设置”和“应用设置”故意分开。打开模块或载入 SEQ 时，不会因为旧设置而自动改变
 仪表。
 
-## 从统一资源表选择测量仪表
+## 从未分配 VISA 清单选择测量仪表
 
-设置窗口不要自己扫描 VISA。独立扫描工具已经让用户确认过 Measurement 资源，前端只需
-把稳定 ID 放进下拉框：
+设置窗口不要自己扫描 VISA。Instrument Scanner 已把未分配给 System Instrument 的地址写入
+`configs/visa.resources.toml`，前端只需把稳定 ID 放进下拉框：
 
 ```python
 self.resource_input = QComboBox()
@@ -177,5 +177,5 @@ api.status({"Connection": "Connected", "State": "Ready"})
 ??? example "展开教学模块的完整 frontend.py"
 
     ```python
-    --8<-- "templates/measurement-modules-repository/modules/tutorial_resistance/frontend.py"
+    --8<-- "modules/tutorial_resistance/frontend.py"
     ```

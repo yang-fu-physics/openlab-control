@@ -1,0 +1,32 @@
+id = "example_controller"
+name = "Example Temperature/Field Controller"
+version = "0.4.0"
+api_version = "4"
+core_requires = ">=0.19,<0.20"
+backend = "backend:ExampleController"
+kinds = ["temperature"]
+[[controls]]
+id = "main"
+label = "Main Control"
+
+[[panels]]
+id = "control"
+label = "Control"
+template = "controller"
+control = "main"
+reading_options = ["value"]
+default_reading = "value"
+min_value = 1.8
+max_value = 400.0
+default_rate_per_minute = 1.0
+max_rate_per_minute = 30.0
+stability_tolerance = 0.05
+stability_max_slope_per_minute = 0.03
+stability_dwell_seconds = 1.5
+stability_timeout_seconds = 120.0
+stability_window_seconds = 1.0
+
+[readings.value]
+label = "Temperature"
+unit = "K"
+decimals = 3

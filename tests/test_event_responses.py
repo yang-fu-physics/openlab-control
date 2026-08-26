@@ -28,12 +28,16 @@ from labcontrol.sequence.model import (  # noqa: E402
     CommandType,
     SequenceDocument,
 )
+from tests.configuration_fixtures import (  # noqa: E402
+    load_simulated_config,
+    write_simulated_configuration,
+)
 
 
 class EventResponseTests(unittest.TestCase):
     def test_info_with_registered_code_does_not_trigger_response(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(
                 config,
@@ -52,9 +56,16 @@ class EventResponseTests(unittest.TestCase):
                 value: float,
                 rate_per_minute: float,
                 mode: str = "Settle",
+                *,
+                control: str,
             ) -> None:
                 writes.append(value)
-                original_set_target(value, rate_per_minute, mode)
+                original_set_target(
+                    value,
+                    rate_per_minute,
+                    mode,
+                    control=control,
+                )
 
             field.set_target = record_set_target  # type: ignore[method-assign]
             await manager.connect_all()
@@ -75,7 +86,7 @@ class EventResponseTests(unittest.TestCase):
 
     def test_response_cannot_reset_while_action_is_running(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(
                 config,
@@ -120,7 +131,7 @@ class EventResponseTests(unittest.TestCase):
 
     def test_queued_set_cannot_override_higher_priority_zero(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(
                 config,
@@ -139,9 +150,16 @@ class EventResponseTests(unittest.TestCase):
                 value: float,
                 rate_per_minute: float,
                 mode: str = "Settle",
+                *,
+                control: str,
             ) -> None:
                 writes.append(value)
-                original_set_target(value, rate_per_minute, mode)
+                original_set_target(
+                    value,
+                    rate_per_minute,
+                    mode,
+                    control=control,
+                )
 
             field.set_target = record_set_target  # type: ignore[method-assign]
             await manager.connect_all()
@@ -149,7 +167,12 @@ class EventResponseTests(unittest.TestCase):
                 gate = manager._operation_gates["field"]
                 await gate.acquire(0)
                 queued_set = asyncio.create_task(
-                    manager.set_target("field", 100.0, 10.0)
+                    manager.set_target(
+                        "field",
+                        100.0,
+                        10.0,
+                        control="main",
+                    )
                 )
                 await asyncio.sleep(0)
                 events.report(
@@ -175,12 +198,7 @@ class EventResponseTests(unittest.TestCase):
 
     def test_registered_error_acts_while_paused_and_faults_sequence(self) -> None:
         async def scenario(root: Path) -> None:
-            (root / "configs").mkdir()
-            base = load_config(ROOT / "configs" / "default.toml")
-            config = replace(
-                base,
-                source_path=root / "configs" / "default.toml",
-            )
+            config = load_config(write_simulated_configuration(root))
             events = EventManager()
             manager = InstrumentManager(
                 config,
@@ -210,6 +228,7 @@ class EventResponseTests(unittest.TestCase):
                     "field",
                     100.0,
                     10.0,
+                    control="main",
                 )
                 run_task = asyncio.create_task(
                     engine.run(
@@ -244,7 +263,7 @@ class EventResponseTests(unittest.TestCase):
 
     def test_registered_error_zeros_once_and_locks_until_reset(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(
                 config,
@@ -267,9 +286,16 @@ class EventResponseTests(unittest.TestCase):
                 value: float,
                 rate_per_minute: float,
                 mode: str = "Settle",
+                *,
+                control: str,
             ) -> None:
                 writes.append((value, rate_per_minute, mode))
-                original_set_target(value, rate_per_minute, mode)
+                original_set_target(
+                    value,
+                    rate_per_minute,
+                    mode,
+                    control=control,
+                )
 
             field.set_target = record_set_target  # type: ignore[method-assign]
             await manager.connect_all()
@@ -308,6 +334,7 @@ class EventResponseTests(unittest.TestCase):
                     "field",
                     100.0,
                     10.0,
+                    control="main",
                     origin="manual",
                 )
                 self.assertFalse(applied)
@@ -324,6 +351,7 @@ class EventResponseTests(unittest.TestCase):
                     "field",
                     100.0,
                     10.0,
+                    control="main",
                     origin="manual",
                 )
                 self.assertTrue(applied)
@@ -335,7 +363,7 @@ class EventResponseTests(unittest.TestCase):
 
     def test_each_active_response_keeps_the_shared_target_locked(self) -> None:
         async def scenario() -> None:
-            config = load_config(ROOT / "configs" / "default.toml")
+            config = load_simulated_config()
             events = EventManager()
             manager = InstrumentManager(
                 config,
@@ -371,6 +399,7 @@ class EventResponseTests(unittest.TestCase):
                         "field",
                         100.0,
                         10.0,
+                        control="main",
                         origin="manual",
                     )
                 )
@@ -381,6 +410,7 @@ class EventResponseTests(unittest.TestCase):
                         "field",
                         100.0,
                         10.0,
+                        control="main",
                         origin="manual",
                     )
                 )
@@ -391,10 +421,10 @@ class EventResponseTests(unittest.TestCase):
 
     def test_registration_without_a_controllable_field_fails(self) -> None:
         async def scenario() -> None:
-            base = load_config(ROOT / "configs" / "default.toml")
+            base = load_simulated_config()
             config = replace(
                 base,
-                instruments=(base.instrument("temperature"),),
+                instrument_instances=(base.instrument("temperature"),),
             )
             manager = InstrumentManager(
                 config,

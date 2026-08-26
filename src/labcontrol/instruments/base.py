@@ -115,7 +115,12 @@ class SystemInstrument(ABC):
 
     @abstractmethod
     def read_status(self) -> dict[str, Any]:
-        """返回主值、控制状态和选中的附加读数。"""
+        """返回主值、附加读数以及一个或多个控制回路的状态。
+
+        只有一个控制端点时，目标、速率、运动和 ready 状态可直接放在顶层。存在多个
+        独立控制端点时，必须用 ``controls[control_id]`` 分别返回这四项；各回路的当前值
+        仍由其面板选择的 ``value`` 或 ``auxiliary`` 读数提供。
+        """
 
         raise NotImplementedError
 
@@ -128,12 +133,19 @@ class SystemInstrument(ABC):
 
         return self.read_status()
 
-    def set_target(self, value: float, rate_per_minute: float, mode: str = "Settle") -> None:
+    def set_target(
+        self,
+        value: float,
+        rate_per_minute: float,
+        mode: str = "Settle",
+        *,
+        control: str,
+    ) -> None:
         """设置受控量；默认实现明确拒绝只读仪表。"""
 
         raise InstrumentError(f"Instrument {self.config.id} does not support setting a target", "UNSUPPORTED_SET_TARGET")
 
-    def hold(self) -> None:
+    def hold(self, *, control: str) -> None:
         """停止改变受控量并保持当前状态；默认实现明确拒绝不支持的仪表。"""
         raise InstrumentError(f"Instrument {self.config.id} does not support hold", "UNSUPPORTED_HOLD")
 

@@ -1,6 +1,6 @@
 # 写第一个测量模块
 
-这一章做一个不连接真实仪表的四通道电阻模块。你可以先复制完整版确认流程，也可以从
+这一章做一个不连接真实仪表的四通道电阻模块。你可以先运行随框架提供的完整版，也可以从
 两个文件开始学习。两条路线使用不同的文件夹，不会互相覆盖。
 
 !!! info "开始前"
@@ -12,15 +12,7 @@
 
 ## 路线 A：先运行完整例子
 
-这是最快看到结果的方式。目标目录还不存在时执行：
-
-```powershell
-Copy-Item -Recurse `
-  .\templates\measurement-modules-repository\modules\tutorial_resistance `
-  .\modules\tutorial_resistance
-```
-
-重启程序后：
+这是最快看到结果的方式。`modules/tutorial_resistance/` 已随框架提供，启动程序后：
 
 1. 打开 **Modules**，Enable **Tutorial Resistance**。
 2. 打开 Settings，检查数值后点击 **Apply Settings**。
@@ -34,7 +26,7 @@ Copy-Item -Recurse `
 ??? example "展开完整 backend.py"
 
     ```python
-    --8<-- "templates/measurement-modules-repository/modules/tutorial_resistance/backend.py"
+    --8<-- "modules/tutorial_resistance/backend.py"
     ```
 
 ## 路线 B：从两个文件开始

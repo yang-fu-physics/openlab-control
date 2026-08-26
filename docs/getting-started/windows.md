@@ -6,33 +6,32 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 
 ## 下载与校验
 
-当前稳定版本为 `v0.18.1`：
+当前稳定版本为 `v0.19.0`：
 
-- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.18.1/OpenLabControl-v0.18.1-windows-x64.zip)
-- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.18.1/OpenLabControl-v0.18.1-windows-x64.zip.sha256)
+- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.19.0/OpenLabControl-v0.19.0-windows-x64.zip)
+- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.19.0/OpenLabControl-v0.19.0-windows-x64.zip.sha256)
 
 在 PowerShell 中校验：
 
 ```powershell
-Get-FileHash .\OpenLabControl-v0.18.1-windows-x64.zip -Algorithm SHA256
-Get-Content .\OpenLabControl-v0.18.1-windows-x64.zip.sha256
+Get-FileHash .\OpenLabControl-v0.19.0-windows-x64.zip -Algorithm SHA256
+Get-Content .\OpenLabControl-v0.19.0-windows-x64.zip.sha256
 ```
 
 两处哈希必须完全一致。不要直接从 ZIP 内运行程序；先完整解压到普通可写目录。
 
 ## 第一次启动
 
-1. 双击 `OpenLabControl.exe`。需要确认仪表地址时，双击同目录的
-   `InstrumentScanner.exe`。扫描器会自动读取已有配置并开始一次只读 VISA 扫描；TCP 仪表
-   只填写地址和端口，不发送识别指令。VISA 识别到唯一的 System Instrument 时会自动选择，
-   TCP 由操作者选择实现。System 与 Measurement 地址记录写入同一个
-   `configs/site.local.toml`；若该文件不存在，保存时会从 `default.toml` 创建。OpenLab Control
-   下次启动会自动优先加载该文件。两个程序共享同一个 `_internal`，不要单独移动任一 EXE。
-2. 确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。
-3. 打开 **Modules**。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。
-4. 保持列表为空，打开 `examples/nested_scan.seq`。
-5. 点击 Run，完成后检查 `runs/<时间>_nested_scan/`。无模块 Warning 是预期结果。
-6. 再按下一节安装 `simulated_transport`，练习 Enable/Disable 和模块数据写入。
+1. 双击 `OpenLabControl.exe`。程序读取 `configs/general.toml`；全新安装没有 System 面板也能
+   正常打开。
+2. 需要确认仪表或启用仿真时，关闭主程序，再双击同目录的 `InstrumentScanner.exe`。两个
+  程序共享一个 `_internal`，不要单独移动任一 EXE。
+3. 扫描器第一页只处理 VISA。未分配地址保存到 `configs/visa.resources.toml`，供
+   Measurement Module 使用；分配给 System Instrument 的地址只写入对应实例。
+4. 后续每页配置一种已安装的 System Instrument。专用网络仪表的 Host/Port 由自己的模板
+   字段提供。最后一页可以选择三个仿真，它们默认都不勾选。
+5. 检查完整写入预览和面板顺序后保存，再启动 `OpenLabControl.exe`。
+6. 打开 **Modules**，按下一节使用示例模块练习 Enable/Disable 和数据写入。
 
 ## 调整字号和窗口大小
 
@@ -51,27 +50,19 @@ Get-Content .\OpenLabControl-v0.18.1-windows-x64.zip.sha256
     或安装仪表接口厂商提供的其他 VISA Runtime。安装后重新打开扫描器；不要在模块中重复
     安装另一套 PyVISA。完整选择步骤见[扫描与配置仪表](../guides/instrument-scanner.md)。
 
-## 手动安装示例模块
+## 运行示例模块
 
-把一个完整目录复制到程序旁边的 `modules/`：
-
-```text
-templates/measurement-modules-repository/modules/simulated_transport/
-    ↓
-modules/simulated_transport/
-```
-
-重启后打开 Modules，勾选模块并核对首次信任提示。Enable 会初始化并打开独立窗口；它会
+`simulated_transport` 与 `tutorial_resistance` 已放在程序旁的 `modules/`。打开 Modules
+并勾选需要的模块；Enable 会初始化并打开独立窗口，它会
 读取保存的界面值，但不会自动 Apply。
-
-这里的模板来自刚刚校验过 SHA-256 的发布 ZIP；弹窗指纹用于建立这台电脑上的首次信任
-基线。单独下载第三方模块时，应与作者发布的摘要或签名比较。
 
 `simulated_transport` 用于体验最小 Enable/Measure/Disable 流程，没有自定义设置。开发者
 教程中的 `tutorial_resistance` 是另一个示例，用来学习设置窗口、四行结果和模块附加功能。
 
-需要现场配置时，把 `configs/default.toml` 复制为 `configs/site.local.toml`，然后正常启动
-`OpenLabControl.exe`；程序会自动优先加载现场配置。不要把含真实地址的配置上传到公开仓库。
+现场只需维护 `configs/general.toml`；仪表地址和面板选择由 Instrument Scanner 写入
+`configs/visa.resources.toml` 与 `configs/instruments/`。不要把含真实地址的生成配置上传到
+公开仓库。扫描器每次保存都会完整覆盖最终预览中的生成文件；现有 `configs/pid/` 文件不会
+被覆盖或删除。
 
 !!! danger "改地址不等于可以控制真机"
 

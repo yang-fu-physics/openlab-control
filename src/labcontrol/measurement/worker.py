@@ -16,17 +16,13 @@ import inspect
 import json
 import math
 import multiprocessing
-import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from multiprocessing.connection import Connection
-from pathlib import Path
 from typing import Any
 
-from ..package_support.dependencies import dependency_runtime_errors
 from ..package_support.loading import load_source_object
-from ..package_support.trust import content_tree_digest
 from ..module_api import (
     ModuleAPI,
     ModuleError,
@@ -244,9 +240,8 @@ def _normalize_display_columns(
 def module_worker_main(
     connection: Connection,
     descriptor: ModuleDescriptor,
-    dependency_directory: str,
 ) -> None:
-    """子进程入口：验证 Measurement Module、加载后端并串行执行生命周期请求。"""
+    """子进程入口：加载 Measurement Module 并串行执行生命周期请求。"""
 
     backend: Any = None
     sequence_commands: tuple[ModuleCommandSpec, ...] = ()
@@ -259,41 +254,6 @@ def module_worker_main(
             _send_message(connection, message)
 
     try:
-        # 信任绑定的是发现时的完整目录摘要。必须在 import 第三方源码之前重算一次，
-        # 否则攻击者可在用户确认后、worker 启动前替换文件。
-        if (
-            descriptor.fingerprint
-            and content_tree_digest(descriptor.path)
-            != descriptor.fingerprint
-        ):
-            raise PermissionError(
-                f"Measurement module {descriptor.id} changed after discovery"
-            )
-        if descriptor.dependencies and not dependency_directory:
-            raise PermissionError(
-                f"Measurement module {descriptor.id} has no isolated "
-                "dependency runtime"
-            )
-        if dependency_directory:
-            dependency_path = Path(dependency_directory)
-            dependency_errors = dependency_runtime_errors(
-                descriptor.dependencies,
-                dependency_path,
-                descriptor.fingerprint,
-            )
-            if dependency_errors:
-                raise PermissionError(
-                    f"Measurement module {descriptor.id} dependency "
-                    "runtime failed verification: "
-                    + "; ".join(dependency_errors)
-                )
-            if dependency_path.is_dir():
-                # 隔离依赖只加入当前模块子进程。主进程和其他模块不会看到这个目录，
-                # 因而两个模块可以使用互不兼容的依赖版本。
-                sys.path.insert(
-                    0,
-                    str(dependency_path.resolve()),
-                )
         backend_class = load_source_object(
             descriptor.path,
             "backend:Module",
@@ -612,10 +572,8 @@ class ModuleWorkerClient:
     def __init__(
         self,
         descriptor: ModuleDescriptor,
-        dependency_directory: Path | None = None,
     ) -> None:
         self.descriptor = descriptor
-        self.dependency_directory = dependency_directory
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
         # RLock 是有意选择：close() 获得锁后会调用 request("worker_close")，需要同一线程重入。
@@ -714,15 +672,7 @@ class ModuleWorkerClient:
         parent, child = context.Pipe(duplex=True)
         process = context.Process(
             target=module_worker_main,
-            args=(
-                child,
-                self.descriptor,
-                (
-                    ""
-                    if self.dependency_directory is None
-                    else str(self.dependency_directory)
-                ),
-            ),
+            args=(child, self.descriptor),
             name=f"OpenLabModule-{self.descriptor.id}",
             daemon=True,
         )

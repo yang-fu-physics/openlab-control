@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from labcontrol.config import load_config  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.measurement.manifest import ModuleDescriptor  # noqa: E402
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
@@ -35,6 +34,7 @@ from labcontrol.ui.dialogs import CommandDialog  # noqa: E402
 from labcontrol.ui.main_window import MainWindow  # noqa: E402
 from labcontrol.ui.measurement_modules import ModuleWindow  # noqa: E402
 from labcontrol.ui.sequence_editor import SequenceEditorWidget  # noqa: E402
+from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 
 
 DECLARATIONS = [
@@ -258,7 +258,7 @@ class ModuleCommandEngineTests(unittest.TestCase):
     def test_runtime_preflight_requires_enabled_matching_declaration(self) -> None:
         class Instruments:
             def __init__(self) -> None:
-                self.config = load_config(ROOT / "configs" / "default.toml")
+                self.config = load_simulated_config()
 
         descriptor = ModuleDescriptor(
             id="test_meter",
@@ -329,7 +329,7 @@ class ModuleCommandEngineTests(unittest.TestCase):
         async def scenario() -> list[tuple[str, dict[str, object]]]:
             modules = Modules()
             engine = SequenceEngine(
-                load_config(ROOT / "configs" / "default.toml"),
+                load_simulated_config(),
                 Instruments(),  # type: ignore[arg-type]
                 EventManager(),
                 Logger(),  # type: ignore[arg-type]
@@ -428,7 +428,7 @@ class ModuleCommandUITests(unittest.TestCase):
                 owner.close()
 
     def test_main_window_adds_and_removes_direct_module_group(self) -> None:
-        window = MainWindow(load_config(ROOT / "configs" / "default.toml"))
+        window = MainWindow(load_simulated_config())
         try:
             descriptor = ModuleDescriptor(
                 id="test_meter",

@@ -11,20 +11,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_REPOSITORY = (
-    ROOT
-    / "templates"
-    / "measurement-modules-repository"
-)
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.config import load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
-from labcontrol.package_support.trust import ContentTrustStore  # noqa: E402
 from labcontrol.models import (  # noqa: E402
     InstrumentActivity,
     InstrumentConnectionState,
+    InstrumentControlState,
     InstrumentKind,
     InstrumentSnapshot,
     RunState,
@@ -37,6 +32,10 @@ from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.sequence.engine import SequenceAbort, SequenceEngine  # noqa: E402
 from labcontrol.sequence.model import Command, CommandType, SequenceDocument  # noqa: E402
+from tests.configuration_fixtures import (  # noqa: E402
+    load_simulated_config,
+    write_simulated_configuration,
+)
 
 
 class SequenceEngineTests(unittest.TestCase):
@@ -46,11 +45,9 @@ class SequenceEngineTests(unittest.TestCase):
         *,
         blocking_module: bool = False,
     ):
-        (temp_root / "configs").mkdir()
-        target = temp_root / "configs" / "default.toml"
-        shutil.copy2(ROOT / "configs" / "default.toml", target)
+        target = write_simulated_configuration(temp_root)
         shutil.copytree(
-            MODULE_REPOSITORY / "modules",
+            ROOT / "modules",
             temp_root / "modules",
         )
         if blocking_module:
@@ -73,16 +70,21 @@ class SequenceEngineTests(unittest.TestCase):
                 encoding="utf-8",
             )
         config = load_config(target)
-        trust_store = ContentTrustStore(
-            config.resolve_project_path(
-                config.modules.state_directory
-            )
-            / "trusted_content.json"
-        )
-        for descriptor in discover_modules(config):
-            trust_store.trust("module", descriptor)
         instruments = []
-        for instrument in config.instruments:
+        for instrument in config.instrument_instances:
+            panels = []
+            for panel in instrument.panels:
+                panel_stability = panel.stability
+                if panel_stability is not None:
+                    panel_stability = replace(
+                        panel_stability,
+                        tolerance=max(panel_stability.tolerance, 0.005),
+                        max_slope_per_minute=100.0,
+                        dwell_seconds=0.05,
+                        timeout_seconds=3.0,
+                        window_seconds=0.05,
+                    )
+                panels.append(replace(panel, stability=panel_stability))
             stability = instrument.stability
             if stability is not None:
                 stability = replace(
@@ -95,12 +97,19 @@ class SequenceEngineTests(unittest.TestCase):
                 )
             extras = dict(instrument.extras)
             extras["noise"] = 0.0
-            instruments.append(replace(instrument, stability=stability, extras=extras))
+            instruments.append(
+                replace(
+                    instrument,
+                    panels=tuple(panels),
+                    stability=stability,
+                    extras=extras,
+                )
+            )
         return replace(
             config,
             simulation_speed=1000.0,
             poll_interval_seconds=0.01,
-            instruments=tuple(instruments),
+            instrument_instances=tuple(instruments),
         )
 
     async def _run(self, config, document, notices, progresses=None):
@@ -146,11 +155,11 @@ class SequenceEngineTests(unittest.TestCase):
             config = self._fast_config(Path(temp))
             measure = Command(CommandType.MEASURE)
             field_scan = Command(CommandType.SCAN_FIELD, {
-                "instrument_id": "field", "start": 0.0, "stop": 0.01, "unit": "T",
+                "start": 0.0, "stop": 0.01, "unit": "T",
                 "steps": 2, "rate": 0.5, "mode": "Settle",
             }, [measure])
             temperature_scan = Command(CommandType.SCAN_TEMPERATURE, {
-                "instrument_id": "temperature", "start": 300.0, "stop": 299.9,
+                "start": 300.0, "stop": 299.9,
                 "steps": 2, "rate": 10.0, "mode": "Settle",
             }, [field_scan])
             document = SequenceDocument([temperature_scan], "nested.seq")
@@ -167,7 +176,7 @@ class SequenceEngineTests(unittest.TestCase):
             )
             self.assertGreaterEqual(data.count("Measure"), 16)
             self.assertIn(
-                "temperature.Stability",
+                "temperature.main.Stability",
                 instrument_status,
             )
             self.assertGreaterEqual(
@@ -198,7 +207,6 @@ class SequenceEngineTests(unittest.TestCase):
                     Command(
                         CommandType.SET_FIELD,
                         {
-                            "instrument_id": "field",
                             "target": -6.0,
                             "unit": "T",
                             "rate": 1.0,
@@ -208,7 +216,6 @@ class SequenceEngineTests(unittest.TestCase):
                     Command(
                         CommandType.SCAN_FIELD,
                         {
-                            "instrument_id": "field",
                             "start": 9.0,
                             "stop": 3.0,
                             "unit": "T",
@@ -253,7 +260,6 @@ class SequenceEngineTests(unittest.TestCase):
             scan = Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "instrument_id": "field",
                     "start": 1.0,
                     "stop": 0.5,
                     "unit": "T",
@@ -298,13 +304,12 @@ class SequenceEngineTests(unittest.TestCase):
             )
             await manager.connect_all()
             await manager.poll_all()
-            before = manager.latest["field"].target
-            manager.latest["field"].current = None
+            before = manager.latest["field"].controls["main"].target
+            manager.latest["field"].controls["main"].current = None
             engine.state = RunState.RUNNING
             scan = Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "instrument_id": "field",
                     "start": 9.0,
                     "stop": 3.0,
                     "unit": "T",
@@ -325,7 +330,10 @@ class SequenceEngineTests(unittest.TestCase):
                     raised.exception.code,
                     "FIELD_SCAN_CURRENT_UNAVAILABLE",
                 )
-                self.assertEqual(manager.latest["field"].target, before)
+                self.assertEqual(
+                    manager.latest["field"].controls["main"].target,
+                    before,
+                )
             finally:
                 await manager.disconnect_all()
 
@@ -355,7 +363,7 @@ class SequenceEngineTests(unittest.TestCase):
             config = self._fast_config(Path(temp))
             document = SequenceDocument([
                 Command(CommandType.SET_FIELD, {
-                    "instrument_id": "field", "target": 1.0, "unit": "T", "rate": 0.5, "mode": "Sweep",
+                    "target": 1.0, "unit": "T", "rate": 0.5, "mode": "Sweep",
                 }),
                 Command(CommandType.WAIT, {"seconds": 0.03}),
                 Command(CommandType.INJECT_ERROR, {"code": "FATAL", "message": "fatal"}),
@@ -464,10 +472,7 @@ class SequenceEngineTests(unittest.TestCase):
             )
             await manager.disconnect_all()
 
-        with tempfile.TemporaryDirectory() as temp:
-            asyncio.run(
-                scenario(self._fast_config(Path(temp)))
-            )
+        asyncio.run(scenario(load_simulated_config()))
 
     def test_task_cancellation_does_not_hold_system_instruments(self) -> None:
         async def scenario(config) -> None:
@@ -523,8 +528,21 @@ class SequenceEngineTests(unittest.TestCase):
     def test_control_waits_timeout_without_new_instrument_readings(self) -> None:
         async def scenario(config) -> None:
             temperature = config.instrument("temperature")
+            panels = tuple(
+                replace(
+                    panel,
+                    stability=replace(
+                        panel.stability,
+                        timeout_seconds=0.05,
+                    ),
+                )
+                if panel.role == "sample_temp"
+                else panel
+                for panel in temperature.panels
+            )
             temperature = replace(
                 temperature,
+                panels=panels,
                 stability=replace(
                     temperature.stability,
                     timeout_seconds=0.05,
@@ -533,9 +551,9 @@ class SequenceEngineTests(unittest.TestCase):
             config = replace(
                 config,
                 poll_interval_seconds=0.005,
-                instruments=tuple(
+                instrument_instances=tuple(
                     temperature if instrument.id == temperature.id else instrument
-                    for instrument in config.instruments
+                    for instrument in config.instrument_instances
                 ),
             )
             events = EventManager()
@@ -556,6 +574,15 @@ class SequenceEngineTests(unittest.TestCase):
                 rate_per_minute=1.0,
                 activity=InstrumentActivity.MOVING,
                 stability=StabilityState.MOVING,
+                controls={
+                    "main": InstrumentControlState(
+                        current=300.0,
+                        target=299.0,
+                        rate_per_minute=1.0,
+                        activity=InstrumentActivity.MOVING,
+                        stability=StabilityState.MOVING,
+                    )
+                },
             )
             manager._connection_states["temperature"] = (
                 InstrumentConnectionState.CONNECTED
@@ -567,6 +594,7 @@ class SequenceEngineTests(unittest.TestCase):
                 object(),  # type: ignore[arg-type]
                 object(),  # type: ignore[arg-type]
             )
+            panel = manager.resolve_control_panel(InstrumentKind.TEMPERATURE)
 
             for wait in (engine._wait_for_stability, engine._wait_for_target):
                 engine.state = RunState.RUNNING
@@ -574,7 +602,10 @@ class SequenceEngineTests(unittest.TestCase):
                 engine._fatal_abort = False
                 events.resolve("temperature", "STABILITY_TIMEOUT")
                 with self.assertRaises(SequenceAbort):
-                    await asyncio.wait_for(wait("temperature"), timeout=0.25)
+                    await asyncio.wait_for(
+                        wait("temperature", panel),
+                        timeout=0.25,
+                    )
 
             timeout_notices = [
                 notice
@@ -603,7 +634,6 @@ class SequenceEngineTests(unittest.TestCase):
             Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "instrument_id": "field",
                     "start": 0.0,
                     "stop": 1.0,
                     "unit": "Oe",
@@ -615,7 +645,6 @@ class SequenceEngineTests(unittest.TestCase):
             Command(
                 CommandType.SCAN_FIELD,
                 {
-                    "instrument_id": "field",
                     "start": 0.0,
                     "stop": 1.0,
                     "unit": "Oe",
@@ -825,7 +854,6 @@ class SequenceEngineTests(unittest.TestCase):
             temperature_scan = Command(
                 CommandType.SCAN_TEMPERATURE,
                 {
-                    "instrument_id": "temperature",
                     "point_mode": "List",
                     "points": "300, 299.9, 300",
                     "rate": 10.0,
@@ -851,7 +879,6 @@ class SequenceEngineTests(unittest.TestCase):
             temperature_scan = Command(
                 CommandType.SCAN_TEMPERATURE,
                 {
-                    "instrument_id": "temperature",
                     "point_mode": "List",
                     "points": "299.9, 500",
                     "rate": 10.0,

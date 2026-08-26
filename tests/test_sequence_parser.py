@@ -86,11 +86,10 @@ class SequenceParserTests(unittest.TestCase):
             "Scan Field 0.00 Oe to 10000.00 Oe in 11 steps at 5000.00 Oe/min, Settle",
         )
 
-    def test_field_scan_nearest_polarity_round_trips_with_instrument_suffix(self) -> None:
+    def test_field_scan_nearest_polarity_round_trips(self) -> None:
         source = (
             "T Scan Field 9.000000 T to 3.000000 T in 4 steps at "
-            "1.000000 T/min, Settle, Nearest +/- Polarity "
-            'using instrument "magnet A"\n'
+            "1.000000 T/min, Settle, Nearest +/- Polarity\n"
             "T     Measure\n"
             "T End Scan\n"
             "T End Sequence\n"
@@ -99,15 +98,14 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(result.issues, ())
         command = result.document.commands[0]
         self.assertTrue(command.params["nearest_polarity"])
-        self.assertEqual(command.params["instrument_id"], "magnet A")
+        self.assertNotIn("instrument_id", command.params)
         self.assertEqual(serialize_sequence(result.document), source)
 
         command.update_params(dict(command.params))
         self.assertEqual(
             format_command(command),
             "Scan Field 9.000000 T to 3.000000 T in 4 steps at "
-            "1.000000 T/min, Settle, Nearest +/- Polarity "
-            'using instrument "magnet A"',
+            "1.000000 T/min, Settle, Nearest +/- Polarity",
         )
 
     def test_field_scan_accepts_unicode_plus_minus_alias(self) -> None:
@@ -171,7 +169,6 @@ class SequenceParserTests(unittest.TestCase):
         command = Command(
             CommandType.SCAN_TEMPERATURE,
             {
-                "instrument_id": "temperature",
                 "point_mode": "List",
                 "points": "300, 299.9, 300",
                 "rate": 10.0,
@@ -274,49 +271,30 @@ class SequenceParserTests(unittest.TestCase):
                 self.assertTrue(result.has_errors)
                 self.assertIn(expected, result.issues[0].message)
 
-    def test_explicit_instrument_ids_round_trip_and_remark_text_is_unchanged(self) -> None:
-        result = parse_sequence(
-            'T Set Temperature 20.000 K at 5.000 K/min in Settle mode '
-            'using instrument "cryostat temperature"\n'
+    def test_instrument_suffix_is_rejected_but_remark_text_is_unchanged(self) -> None:
+        for line in (
+            "T Set Temperature 20.000 K at 5.000 K/min in Settle mode "
+            'using instrument "cryostat temperature"',
             "T Scan Field 0.00 Oe to 100.00 Oe in 2 steps at "
-            "50.00 Oe/min, Sweep using instrument magnet_primary\n"
-            "T     Measure\n"
-            "T End Scan\n"
+            "50.00 Oe/min, Sweep using instrument magnet_primary",
+        ):
+            with self.subTest(line=line):
+                result = parse_sequence(line + "\nT End Sequence\n")
+                self.assertTrue(result.has_errors)
+                self.assertEqual(
+                    result.document.commands[0].type,
+                    CommandType.UNKNOWN,
+                )
+                self.assertIn("not supported", result.issues[0].message)
+
+        remark = parse_sequence(
             "T Remark calibrated using instrument field\n"
             "T End Sequence\n"
         )
-        self.assertFalse(result.has_errors)
+        self.assertFalse(remark.has_errors)
         self.assertEqual(
-            result.document.commands[0].params["instrument_id"],
-            "cryostat temperature",
-        )
-        self.assertEqual(
-            result.document.commands[1].params["instrument_id"],
-            "magnet_primary",
-        )
-        self.assertEqual(
-            result.document.commands[2].params["text"],
+            remark.document.commands[0].params["text"],
             "calibrated using instrument field",
-        )
-
-        result.document.commands[0].update_params(
-            dict(result.document.commands[0].params)
-        )
-        result.document.commands[1].update_params(
-            dict(result.document.commands[1].params)
-        )
-        serialized = serialize_sequence(result.document)
-        self.assertIn('using instrument "cryostat temperature"', serialized)
-        self.assertIn('using instrument "magnet_primary"', serialized)
-        reparsed = parse_sequence(serialized)
-        self.assertFalse(reparsed.has_errors)
-        self.assertEqual(
-            reparsed.document.commands[0].params["instrument_id"],
-            "cryostat temperature",
-        )
-        self.assertEqual(
-            reparsed.document.commands[1].params["instrument_id"],
-            "magnet_primary",
         )
 
     def test_invalid_control_mode_is_a_parse_error(self) -> None:

@@ -5,33 +5,46 @@
 
 ## 谁可以控制
 
-要让手动窗口和 SEQ 控制一台仪表，配置必须同时满足：
+要让标准温度或磁场 SEQ 控制一台物理实例，扫描器生成的 controller 面板必须启用，并选择
+对应角色：
 
 ```toml
-kind = "temperature"       # 或 field
-control_enabled = true
+[[instances.panels]]
+id = "control"
+enabled = true
+order = 1
+role = "sample_temp"       # 磁场使用 field
+reading = "temp_b"
 ```
 
-同一种 `kind` 最多一个 `control_enabled = true` 的实例；其他实例和 `monitor` 只读。核心会
-在界面、SEQ 预检和实际执行三处检查控制权，不只依赖按钮是否灰色。
+`sample_temp` 和 `field` 各自全局最多一个。角色为 `none` 的 controller 仍可提供明确的手动
+控制，但标准温场 SEQ 不会选择它；只读和 switch 面板只能使用 `none`。核心会在配置加载、
+界面、SEQ 预检和实际执行时检查角色与控制端点，不只依赖按钮是否灰色。
 
 ## 上下限至少检查两次
 
-主配置是现场安全范围的权威来源：
+扫描器生成的 controller 面板配置是该实例现场安全范围的权威来源：
 
 ```toml
+[[instances.panels]]
+id = "control"
+enabled = true
+order = 1
+role = "sample_temp"
+reading = "temp_b"
 min_value = 2.0
 max_value = 400.0
+default_rate_per_minute = 1.0
 max_rate_per_minute = 10.0
-operation_timeout_seconds = 10.0
-shutdown_timeout_seconds = 3.0
 ```
 
 核心用这些值限制手动窗口、SEQ 参数窗口和运行时写入。后台的 `set_target()` 在发送命令前
 还要再次检查；仪表面板限制和硬件联锁是最后一层。任何一层都不能替代另外两层。
 
 ```python
-def set_target(self, value, rate_per_minute, mode="Settle"):
+def set_target(self, value, rate_per_minute, mode="Settle", *, control):
+    if control != "main":
+        raise InstrumentError("Unknown control", "UNKNOWN_CONTROL", control)
     if not self.config.min_value <= value <= self.config.max_value:
         raise SafetyViolation("Target is outside the site limit", "TARGET_LIMIT")
     if not 0 < rate_per_minute <= self.config.max_rate_per_minute:
@@ -39,7 +52,8 @@ def set_target(self, value, rate_per_minute, mode="Settle"):
     # 之后才允许发送仪表命令，并读取实际设置确认。
 ```
 
-不要在代码中偷偷放一个比主配置更宽的默认范围。缺少必要现场参数时，连接应失败关闭。
+不要在代码中偷偷放一个比生成配置更宽的回退范围。缺少必要现场参数时，配置加载或连接应
+直接失败。
 
 ## `open()` 只确认，不设置
 

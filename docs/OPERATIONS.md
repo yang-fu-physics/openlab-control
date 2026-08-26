@@ -2,11 +2,11 @@
 
 ## 日常运行的最短流程
 
-1. 启动后检查温度、磁场和 Monitor 的实际状态。
+1. 启动后检查已配置的 System 面板和实际状态；全新安装没有面板也是有效状态。
 2. 打开 SEQ；需要测量模块时再 Enable，并核对 Status 和 Settings。
 3. 有未 Apply 的设置时优先选择 **Apply and Run**；真机首跑不要跳过 Apply。
 4. 核对数据文件位置，点击 Run；结束后检查 DAT、`events.dat` 和 `instrument_status.dat`。
-5. 分享运行目录前检查 `configuration.toml`，其中可能含真实仪表地址和本机路径。
+5. 分享运行目录前检查 `configuration/`，其中可能含真实仪表地址、本机路径和现场 PID。
 
 下面各节再解释安装、模块管理、异常和维护操作。
 
@@ -20,8 +20,7 @@
 OpenLabControl.exe
 ```
 
-不要只复制 EXE；`configs/`、`docs/`、`templates/`、`modules/`、
-`system_instruments/`、`runtime_packages/`、`trust_state/`、`module_data/`、`wheels/` 和
+不要只复制 EXE；`configs/`、`docs/`、`modules/`、`system_instruments/`、`module_data/` 和
 `runs/` 等目录应和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，
 不会恢复上次 Enable 状态。
 
@@ -42,14 +41,15 @@ run.bat
 .venv\Scripts\python.exe run.py
 ```
 
-指定配置/SEQ：
+指定 SEQ：
 
 ```text
-.venv\Scripts\python.exe run.py --config configs\site.local.toml --sequence examples\nested_scan.seq
+.venv\Scripts\python.exe run.py --sequence examples\nested_scan.seq
 ```
 
-`default.toml` 保持为可提交的仿真模板；真实地址和现场限制写入 Git 已忽略的
-`site.local.toml`。`run.bat` 也会转发相同参数。
+程序读取唯一通用配置 `configs/general.toml`。System Instrument 实例与现场限制由
+Instrument Scanner 写入 `configs/instruments/`；未分配 VISA 写入
+`configs/visa.resources.toml`。全新安装没有 System 面板也能启动，三个内置仿真默认关闭。
 
 单独打开 DAT Browser：
 
@@ -64,17 +64,16 @@ run.bat
 ```
 
 这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules
-Manager 手动启用。无界面模式不会弹信任确认：模块必须已经手动复制、在 GUI 中确认过
-完全相同的内容指纹；存在额外依赖时，其离线 runtime 也必须已准备好，否则启动会拒绝。
+Manager 手动启用。
 
 ## 报警报告
 
-1. 把 `integrations/nonebot_alarm_receiver/` 复制到 NoneBot2 插件目录。
+1. 在独立 NoneBot 接收服务中提供 `/alarm/report`，校验 `X-Token`，并按报警等级选择收件人。
 2. 在 NoneBot 环境文件配置随机 `alarm_token`、`alarm_admin_qqs` 和
    `alarm_tester_qqs`；管理员与测试员列表可重叠，接收器会去重。
 3. 在运行 OpenLab Control 的账户环境中设置同一 Token，例如
    `OPENLAB_ALARM_TOKEN`；或者创建独立 Token 文件并配置 `token_file`。
-4. 在 `configs/site.local.toml` 的 `[alarms.reporting]` 中核对地址后设置
+4. 在 `configs/general.toml` 的 `[alarms.reporting]` 中核对地址后设置
    `enabled = true`，重启程序。
 5. 先用仿真 `Inject Warning`、`Inject Error` 验证：Warning 只到测试员，
    Error 同时到管理员和测试员，同一活动事件不会反复推送。
@@ -89,10 +88,11 @@ Manager 手动启用。无界面模式不会弹信任确认：模块必须已经
   Run/Pause/Stop。
 - 中央：浮动 SEQ 和 Data Browser 窗口。
 - 右侧 `Sequence Command Bar`：双击命令后设置参数并插入。
-- 底部 `Instrument Status`：Temperature、Magnetic Field、`2nd Stage` 等控制/Monitor；
+- 底部 `Instrument Status`：按扫描器保存的全局顺序显示所有已启用固定面板；没有启用面板
+  时保持为空；
   `controller` 保持当前值、目标、速率和稳定状态样式，`readout` 只显示一个主读数，
-  `readout_grid` 以 2×2 最多显示四个读数，第五个开始放到右侧的下一个面板，`switch`
-  显示 0/1 状态和简单系统指令按钮。面板使用
+  `readout_grid` 以 2×2 最多显示四个读数；需要更多读数时由作者声明另一个固定面板。
+  `switch` 显示 0/1 状态和简单系统指令按钮。面板使用
   固定浅色配色，不跟随 Windows 深色主题变色；
   不再显示测量 Transport 块。
 - 工具栏 `Modules`：测量模块管理。
@@ -117,9 +117,10 @@ DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同�
 中保存后，个人选择优先。点击 `Restore Defaults` 会恢复主配置默认缩放、100% 文字和窗口
 记忆模式，并清除旧窗口位置。
 
-温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，
-不弹控制窗口。每种 temperature/field 最多一个 primary 供 SEQ 使用；其他 secondary
-默认只读显示。即使 secondary 显式允许手动控制，SEQ 也不会自动选择它。
+每个读数的小数位来自对应 System Instrument 清单。`controller` 面板双击打开手动控制；
+`readout` 和 `readout_grid` 不弹控制窗口。`sample_temp` 与 `field` 角色各自全局最多一个，
+供标准温场 SEQ 使用；角色为 `none` 的 controller 仍可手动控制，但不会被标准温场 SEQ
+选择。
 
 ## 测量模块
 
@@ -128,14 +129,12 @@ DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同�
 1. 点击工具栏或菜单 `Modules`。
 2. 管理器只有 `Enabled / Name / Version` 三列。
 3. 勾选所需模块。
-4. 首次加载或内容变化时，核对弹窗中的类型、ID、版本、完整路径和 SHA-256 指纹后确认
-   信任；拒绝时不加载任何源码。
-5. 程序显示 `Initializing <module>...`；初始化成功后才真正勾选并打开模块窗口。
-6. 初始化失败会弹 Error，仍保持 Disabled。
+4. 程序直接加载所选目录中的模块代码，并显示 `Initializing <module>...`；初始化成功后才
+   真正勾选并打开模块窗口。
+5. 初始化失败会弹 Error，仍保持 Disabled。
 
-首次指纹用于建立这台电脑上的信任基线。发布包自带模板的来源由整个 ZIP 的 SHA-256
-校验保证；单独取得的第三方 Measurement Module，应与发布者提供的摘要或签名比较。内容变化后必须重新
-确认，不能只因为名称相同就继续信任。
+程序不维护模块信任状态，也不在 Enable 时弹出代码指纹确认。只把来源已经核对过的模块
+复制到 `modules/`；第三方模块是可执行代码，安装前应由操作者在框架外确认来源和内容。
 
 如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 `Sequence Command Bar` 会新增一个
 直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
@@ -204,25 +203,13 @@ close 失败时程序报告 Error，并在关闭总上限内强制回收模块�
 强制回收只保证本机进程/管道不残留，不代表外部仪表已经安全；此时必须按模块硬件说明
 人工检查输出。
 
-### Refresh 与依赖
+### Refresh
 
 只有 SEQ Idle 且全部模块 Disabled 时可以 `Refresh`。它重新扫描 `modules/`，不做运行中的热替换。
 
-框架共享依赖不需要安装。只有所选模块声明框架尚未提供的额外依赖时，Manager 才显示
-`Install Dependencies`；安装只要求该模块 Disabled，其他模块的隔离 runtime 不会被
-替换。Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。
-
-额外依赖缺失时：
-
-1. Disable 目标模块，再选中它。
-2. 点击 `Install Dependencies`。
-3. 核对并确认该模块的内容指纹。
-4. 程序只读取模块 `requirements.lock`、根 `wheels/` 和模块 `wheels/`，使用精确版本
-   和 SHA-256 离线安装到该模块自己的 runtime。
-5. 完成后 Refresh。
-
-没有在线回退。PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是明确
-由主框架提供的统一版本，不属于“借用”；其他额外包只能来自已验证的隔离 runtime。
+Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。所有模块使用主框架
+锁定的同一组依赖，界面不提供单模块依赖安装；需要新 Python 包时必须更新核心依赖、
+重新测试并构建发布包。
 
 ## 编辑 SEQ
 
@@ -291,7 +278,7 @@ T Measure
 
 运行前建议：
 
-1. 检查 Temperature/Field/2nd Stage 状态。
+1. 检查全部已启用 System 面板；含温场命令时确认 `sample_temp` / `field` 面板已连接。
 2. Enable 所需模块并检查 Status。
 3. 确认需 Apply 的 Settings 已发送。
 4. 保存或核对 SEQ；Run 会另外保存实际执行快照。
@@ -335,9 +322,10 @@ Stop 后：
 - `Set`；
 - `Hold Current`。
 
-弹窗使用配置上下限和最大速率。`2nd Stage` 等 Monitor 没有手动控制。
-`control_enabled = false` 的 secondary 也没有手动控制。运行时仍会再次检查角色、
-连接状态、Target 和 Rate，因此不能通过脚本绕过参数窗口限制。
+弹窗使用对应 controller 面板的配置上下限和最大速率。`2nd Stage` 等只读面板没有手动
+控制。角色为 `none` 的 controller 仍可从自己的面板手动控制，但标准温场 SEQ 不会选择
+它。运行时仍会再次检查控制端点、连接状态、Target 和 Rate，因此不能通过脚本绕过参数
+窗口限制。
 
 ## Warning 与 Error
 
@@ -401,7 +389,7 @@ Quantum Design 文件优先按 `FILEOPENTIME` 校准；OpenLab 文件按
 
 ```text
 sequence.seq
-configuration.toml
+configuration/
 module_settings/*.settings.toml
 module_settings/*.status-at-start.json
 experiment.dat
@@ -410,11 +398,12 @@ events.dat
 ```
 
 建议实验结束后整体复制整个运行目录，而不是只复制 DAT。模块 desired 设置和实际 Status 对复现实验同样重要。
-Load 运行目录中的 `sequence.seq` 会兼容导入这些 desired settings，但不会自动发送到
+Load 运行目录中的 `sequence.seq` 会导入这些 desired settings，但不会自动发送到
 仪表。
 
-运行目录中的 `configuration.toml` 是本次主配置的完整副本，可能含真实仪表地址和本机
-路径。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。
+运行目录中的 `configuration/` 按原结构保存本次使用的 `general.toml`、存在时的
+`visa.resources.toml`、`instruments/*.toml` 和 `pid/*.toml`。它可能含真实仪表地址、本机
+路径和现场 PID。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。
 
 `instrument_status.dat` 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
 稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
@@ -435,17 +424,9 @@ SEQ 运行中关闭主窗口会确认；确认后请求 Stop/End。随后：
 
 ### 模块无法勾选
 
-选中行查看底部说明。常见原因：清单 Invalid、未确认信任、
-框架共享依赖范围不兼容、额外依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。
-Disable 目标模块后重新准备额外依赖；需要重新扫描源码时先 Disable 全部模块再
-Refresh。
-
-### 发布包提示没有 Python Runtime
-
-只有 Measurement Module 或 System Instrument 声明额外依赖时才会显示 Install Dependencies，
-并需要配置 `modules.python_executable` / `system_instruments.python_executable`，或放置
-`runtime/python/python.exe`。框架共享依赖（包括 PyVISA）已经在 EXE 内，不需要便携
-Python；只有离线准备额外依赖需要，且便携 Python 必须自带 pip。
+选中行查看底部说明。常见原因是 `module.toml`/`backend.py` 缺失或清单字段无效。修正后
+先 Disable 全部模块，再 Refresh。缺少 Python 包属于发布包依赖问题，不能在模块管理器中
+临时安装。
 
 ### Enable 后参数没有作用
 
@@ -464,17 +445,18 @@ close 没有确认完成，但框架已为资源释放强制关闭工作进程�
 
 检查 Run 前是否 Enable 模块。没有模块时程序会写一行温场/Monitor 系统状态并 Warning，不会中止。
 
-### SEQ 旧 Measure/Initialize 无法运行
+### Measure 没有参数怎样选择模块
 
-当前版本不兼容旧写法。删除 Initialize；把 Measure 改为无参数 `T Measure`，并在
-Modules Manager Enable 相应测量方案。
+当前 SEQ 使用无参数 `T Measure`。要参与测量的方案在 Modules Manager 中 Enable；Run
+开始时程序冻结模块集合、列和槽位。
 
 ### 更换温控仪或磁体电源
 
 取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
-`system_instruments/`，用 Instrument Scanner 选择新地址和实现，再在现场配置中让对应
-`[[instruments]]` 引用新 `resource`，检查控制许可、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
-会要求确认内容指纹；修改 System Instrument 后必须重新确认。核心自带内容只作为实现示例。
+`system_instruments/`，再打开 Instrument Scanner。在该型号页面添加物理实例、选择 VISA
+地址或填写模板声明的专用连接字段，并确认固定面板、角色、读数、上下限、速率和稳定参数。
+最后一页检查全部面板的顺序和完整写入预览后保存，再重启。分配给 System Instrument 的
+VISA 地址不会保留在 Measurement 资源清单；核心自带内容只作为实现示例。
 
 ### 仪表一直 Reconnecting
 
@@ -488,8 +470,8 @@ Modules Manager Enable 相应测量方案。
 ### 4K 字体不合适
 
 先使用 **View → Appearance**：整体大小保持 `Automatic`，再单独选择 70%–150% 的
-`Text size`。如果个人外观文件尚未建立，也可以在当前启动配置（现场通常是
-`configs/site.local.toml`）用 `ui_scale = "auto"` 或 0.75–2.0 设定现场默认值后重启。
+`Text size`。如果个人外观文件尚未建立，也可以在 `configs/general.toml` 中用
+`ui_scale = "auto"` 或 0.75–2.0 设定现场默认值后重启。
 
 多显示器更换后若窗口落在不可见区域，选择 `Reset Window Positions` 并保存；下次启动会
 使用当前屏幕的默认布局。

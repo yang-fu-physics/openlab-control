@@ -14,7 +14,7 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from urllib.parse import urlsplit
 
 from .instrument_resources import (
@@ -23,9 +23,6 @@ from .instrument_resources import (
     load_instrument_resources,
 )
 from .models import InstrumentKind, Severity
-
-if TYPE_CHECKING:
-    from .instruments.manifest import SystemInstrumentDescriptor
 
 
 class ConfigurationError(ValueError):
@@ -69,26 +66,55 @@ class InstrumentReadingConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class InstrumentConfig:
-    """一个逻辑系统仪表实例的后端选择、读数、限制和超时。
+class InstrumentCommandConfig:
+    """One generated stable command exposed by a physical instance."""
 
-    外部 ``backend`` 从物理资源选择自动得到；只有内置模拟仪表在站点配置中直接声明入口。
-    ``control_enabled`` 是运行时的最终授权边界：只读仪表不能因 UI 操作而绕过它。
-    ``extras`` 原样传递给具体驱动，便于更换仪表时只改 TOML。
-    """
+    id: str
+    display_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class InstrumentPanelConfig:
+    """One fixed panel view bound to a physical instrument instance."""
+
+    id: str
+    instrument_id: str
+    display_name: str
+    template: str
+    enabled: bool
+    order: int | None = None
+    role: str = "none"
+    control_id: str = ""
+    reading: str = ""
+    readings: tuple[str, ...] = ()
+    commands: tuple[str, ...] = ()
+    min_value: float = float("-inf")
+    max_value: float = float("inf")
+    default_rate_per_minute: float = 1.0
+    max_rate_per_minute: float = float("inf")
+    stability: StabilityConfig | None = None
+
+    @property
+    def key(self) -> str:
+        return f"{self.instrument_id}.{self.id}"
+
+
+@dataclass(frozen=True, slots=True)
+class InstrumentConfig:
+    """One physical instance and its single backend/session configuration."""
 
     id: str
     display_name: str
     kind: InstrumentKind
     backend: str
-    panel_template: str
-    resource_id: str = ""
+    panels: tuple[InstrumentPanelConfig, ...] = ()
     address: str = ""
     control_enabled: bool = False
     unit: str = ""
     main_reading: str = "value"
     auxiliary_readings: tuple[str, ...] = ()
     readings: tuple[InstrumentReadingConfig, ...] = ()
+    sequence_commands: tuple[InstrumentCommandConfig, ...] = ()
     initial_value: float = 0.0
     default_rate_per_minute: float = 1.0
     min_value: float = float("-inf")
@@ -105,6 +131,18 @@ class InstrumentConfig:
             if reading.key == key:
                 return reading
         raise KeyError(key)
+
+    def panel(self, panel_id: str) -> InstrumentPanelConfig:
+        for panel in self.panels:
+            if panel.id == panel_id:
+                return panel
+        raise KeyError(panel_id)
+
+    def controller_for_role(self, role: str) -> InstrumentPanelConfig:
+        for panel in self.panels:
+            if panel.enabled and panel.template == "controller" and panel.role == role:
+                return panel
+        raise KeyError(role)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,14 +190,10 @@ class AlarmConfig:
 
 @dataclass(frozen=True, slots=True)
 class ModuleConfig:
-    """Measurement Module 的目录、隔离运行时和操作超时。"""
+    """Measurement Module 的目录和操作超时。"""
 
     directory: str = "modules"
     data_directory: str = "module_data"
-    state_directory: str = "trust_state"
-    shared_wheels_directory: str = "wheels"
-    python_executable: str = ""
-    runtime_directory: str = "runtime_packages"
     startup_timeout_seconds: float = 10.0
     operation_timeout_seconds: float = 120.0
     shutdown_timeout_seconds: float = 3.0
@@ -167,13 +201,9 @@ class ModuleConfig:
 
 @dataclass(frozen=True, slots=True)
 class SystemInstrumentConfig:
-    """System Instrument 的发现目录、信任状态、依赖目录和重连策略。"""
+    """System Instrument 的发现目录和重连策略。"""
 
     directory: str = "system_instruments"
-    state_directory: str = "trust_state"
-    runtime_directory: str = "runtime_packages"
-    shared_wheels_directory: str = "wheels"
-    python_executable: str = ""
     startup_timeout_seconds: float = 10.0
     reconnect_timeout_seconds: float = 60.0
     reconnect_interval_seconds: float = 2.0
@@ -197,7 +227,23 @@ class AppConfig:
     modules: ModuleConfig
     system_instruments: SystemInstrumentConfig
     instrument_resources: tuple[InstrumentResource, ...]
-    instruments: tuple[InstrumentConfig, ...]
+    instrument_instances: tuple[InstrumentConfig, ...]
+
+    @property
+    def panels(self) -> tuple[InstrumentPanelConfig, ...]:
+        """Return enabled fixed panels in their global configured order."""
+
+        return tuple(
+            sorted(
+                (
+                    panel
+                    for instrument in self.instrument_instances
+                    for panel in instrument.panels
+                    if panel.enabled
+                ),
+                key=lambda panel: panel.order if panel.order is not None else -1,
+            )
+        )
 
     @property
     def project_root(self) -> Path:
@@ -216,7 +262,7 @@ class AppConfig:
     def instrument(self, instrument_id: str) -> InstrumentConfig:
         """按 ID 返回仪表配置；不存在时明确抛出 ``KeyError``。"""
 
-        for item in self.instruments:
+        for item in self.instrument_instances:
             if item.id == instrument_id:
                 return item
         raise KeyError(instrument_id)
@@ -240,10 +286,11 @@ class AppConfig:
                 "Instrument resource purpose must be system or measurement"
             )
 
+        if purpose == "system":
+            return {}
         return {
             item.id: item.public_payload()
             for item in self.instrument_resources
-            if purpose is None or item.purpose == purpose
         }
 
 
@@ -344,294 +391,6 @@ def _windows_file_name(value: object, key: str) -> str:
     return result
 
 
-def _instrument_identifier(value: object) -> str:
-    """验证可安全用于映射键和事件上下文的仪表 ID。"""
-
-    result = str(value)
-    if (
-        not result
-        or result != result.strip()
-        or any(not character.isprintable() for character in result)
-    ):
-        raise ConfigurationError(
-            "Instrument id must be non-empty printable text without surrounding whitespace"
-        )
-    return result
-
-
-def _instrument_config(
-    raw: dict[str, Any],
-    resources: dict[str, InstrumentResource],
-    descriptors: dict[str, "SystemInstrumentDescriptor"],
-) -> InstrumentConfig:
-    """把一个 ``[[instruments]]`` 表转换为经过安全限制校验的配置。"""
-
-    required = ("id", "display_name", "kind")
-    missing = [key for key in required if key not in raw]
-    if missing:
-        raise ConfigurationError(f"Instrument configuration is missing fields: {', '.join(missing)}")
-    try:
-        kind = InstrumentKind(str(raw["kind"]).lower())
-    except ValueError as exc:
-        raise ConfigurationError(f"Unknown instrument kind: {raw['kind']}") from exc
-
-    instrument_id = _instrument_identifier(raw["id"])
-    prefix = f"Instrument {instrument_id}"
-    if "role" in raw:
-        raise ConfigurationError(
-            f"{prefix} role is no longer used; control_enabled alone selects the controller"
-        )
-    derived_reading_fields = sorted(
-        set(raw)
-        & {
-            "auxiliary_readings",
-            "main_reading",
-            "monitor_readings",
-            "primary_reading",
-            "reading_labels",
-            "readings",
-        }
-    )
-    if derived_reading_fields:
-        raise ConfigurationError(
-            f"{prefix} reading metadata comes from its System Instrument manifest; "
-            f"remove: {', '.join(derived_reading_fields)}"
-        )
-    control_enabled = _boolean(
-        raw.get("control_enabled", False),
-        f"{prefix} control_enabled",
-    )
-    if kind is InstrumentKind.MONITOR:
-        if control_enabled:
-            raise ConfigurationError(
-                f"{prefix} monitor instruments cannot enable control"
-            )
-    default_rate = _finite_float(
-        raw.get("default_rate_per_minute", 1.0),
-        f"{prefix} default_rate_per_minute",
-    )
-    if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
-        min_value = _finite_float(
-            raw.get("min_value", float("-inf")),
-            f"{prefix} min_value",
-        )
-        max_value = _finite_float(
-            raw.get("max_value", float("inf")),
-            f"{prefix} max_value",
-        )
-        max_rate = _finite_float(
-            raw.get("max_rate_per_minute", float("inf")),
-            f"{prefix} max_rate_per_minute",
-        )
-    else:
-        min_value = float(raw.get("min_value", float("-inf")))
-        max_value = float(raw.get("max_value", float("inf")))
-        max_rate = float(raw.get("max_rate_per_minute", float("inf")))
-    stale_after = _positive_float(
-        raw.get("stale_after_seconds", 3.0),
-        f"{prefix} stale_after_seconds",
-    )
-    operation_timeout = _positive_float(
-        raw.get("operation_timeout_seconds", 10.0),
-        f"{prefix} operation_timeout_seconds",
-    )
-    shutdown_timeout = _positive_float(
-        raw.get("shutdown_timeout_seconds", 3.0),
-        f"{prefix} shutdown_timeout_seconds",
-    )
-
-    stability = None
-    if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
-        tolerance = _finite_float(
-            raw.get("stability_tolerance", 0.01),
-            f"{prefix} stability_tolerance",
-        )
-        maximum_slope = _finite_float(
-            raw.get("stability_max_slope_per_minute", 0.01),
-            f"{prefix} stability_max_slope_per_minute",
-        )
-        dwell = _finite_float(
-            raw.get("stability_dwell_seconds", 5.0),
-            f"{prefix} stability_dwell_seconds",
-        )
-        if tolerance < 0 or maximum_slope < 0 or dwell < 0:
-            raise ConfigurationError(
-                f"{prefix} stability tolerance, slope, and dwell must not be negative"
-            )
-        stability = StabilityConfig(
-            tolerance=tolerance,
-            max_slope_per_minute=maximum_slope,
-            dwell_seconds=dwell,
-            timeout_seconds=_positive_float(
-                raw.get("stability_timeout_seconds", 1800.0),
-                f"{prefix} stability_timeout_seconds",
-            ),
-            window_seconds=_positive_float(
-                raw.get("stability_window_seconds", 5.0),
-                f"{prefix} stability_window_seconds",
-            ),
-            stale_after_seconds=stale_after,
-        )
-
-    if "address" in raw:
-        raise ConfigurationError(
-            f"{prefix} must store its physical address in site [[resources]] "
-            "and select it with resource"
-        )
-    resource_id = str(raw.get("resource", "")).strip()
-    if resource_id:
-        if "backend" in raw:
-            raise ConfigurationError(
-                f"{prefix} backend is selected by its resource and must not be repeated"
-            )
-        if "unit" in raw:
-            raise ConfigurationError(
-                f"{prefix} unit is declared by its System Instrument manifest"
-            )
-        if "initial_value" in raw:
-            raise ConfigurationError(
-                f"{prefix} initial_value is only used by built-in simulators"
-            )
-        resource = resources.get(resource_id)
-        if resource is None:
-            raise ConfigurationError(
-                f"{prefix} selects unknown resource {resource_id!r}"
-            )
-        if resource.purpose != "system":
-            raise ConfigurationError(
-                f"{prefix} resource {resource_id!r} is reserved for a Measurement Module"
-            )
-        backend = resource.system_instrument
-        descriptor = descriptors.get(backend)
-        if descriptor is None:
-            raise ConfigurationError(
-                f"{prefix} selects missing System Instrument {backend!r}"
-            )
-        if not descriptor.can_load:
-            raise ConfigurationError(
-                f"{prefix} selects invalid System Instrument {backend!r}: {descriptor.error}"
-            )
-        if kind not in descriptor.kinds:
-            raise ConfigurationError(
-                f"{prefix} System Instrument {backend!r} does not support {kind.value}"
-            )
-        unsupported_auxiliary = set(resource.auxiliary_readings) - set(
-            descriptor.auxiliary_readings
-        )
-        if unsupported_auxiliary:
-            raise ConfigurationError(
-                f"{prefix} resource selects unsupported auxiliary readings: "
-                + ", ".join(sorted(unsupported_auxiliary))
-            )
-        selected_keys = (descriptor.main_reading, *resource.auxiliary_readings)
-        readings = tuple(
-            InstrumentReadingConfig(
-                key=metadata.key,
-                display_name=metadata.label,
-                unit=metadata.unit,
-                decimals=metadata.decimals,
-            )
-            for metadata in (descriptor.reading(key) for key in selected_keys)
-        )
-        main_reading = descriptor.main_reading
-        auxiliary_readings = resource.auxiliary_readings
-        panel_template = descriptor.panel_template
-        unit = readings[0].unit
-        address = resource.address
-        initial_value = 0.0
-    else:
-        if "backend" not in raw:
-            raise ConfigurationError(
-                f"{prefix} requires resource for a real instrument or backend for a built-in simulator"
-            )
-        backend = str(raw["backend"]).strip()
-        if ":" not in backend:
-            raise ConfigurationError(
-                f"{prefix} external System Instruments must be selected through resource"
-            )
-        unit = str(raw.get("unit", ""))
-        main_reading = "value"
-        auxiliary_readings = ()
-        panel_template = (
-            "controller"
-            if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
-            else "readout"
-        )
-        readings = (
-            InstrumentReadingConfig(
-                key=main_reading,
-                display_name=str(raw["display_name"]),
-                unit=unit,
-            ),
-        )
-        address = ""
-        initial_value = _finite_float(
-            raw.get("initial_value", 0.0),
-            f"{prefix} initial_value",
-        )
-
-    known = {
-        "id", "display_name", "kind", "backend", "control_enabled",
-        "resource",
-        "unit", "initial_value",
-        "default_rate_per_minute", "min_value", "max_value",
-        "max_rate_per_minute", "stability_tolerance",
-        "stability_max_slope_per_minute", "stability_dwell_seconds",
-        "stability_timeout_seconds", "stability_window_seconds",
-        "stale_after_seconds", "operation_timeout_seconds",
-        "shutdown_timeout_seconds",
-    }
-    instrument = InstrumentConfig(
-        id=instrument_id,
-        display_name=str(raw["display_name"]),
-        kind=kind,
-        backend=backend,
-        panel_template=panel_template,
-        resource_id=resource_id,
-        address=address,
-        control_enabled=control_enabled,
-        unit=unit,
-        main_reading=main_reading,
-        auxiliary_readings=auxiliary_readings,
-        readings=readings,
-        initial_value=initial_value,
-        default_rate_per_minute=default_rate,
-        min_value=min_value,
-        max_value=max_value,
-        max_rate_per_minute=max_rate,
-        stale_after_seconds=stale_after,
-        operation_timeout_seconds=operation_timeout,
-        shutdown_timeout_seconds=shutdown_timeout,
-        stability=stability,
-        extras={key: value for key, value in raw.items() if key not in known},
-    )
-    if kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
-        if instrument.control_enabled and instrument.panel_template != "controller":
-            raise ConfigurationError(
-                f"Instrument {instrument.id}: control_enabled requires the controller panel template"
-            )
-        if instrument.min_value >= instrument.max_value:
-            raise ConfigurationError(f"Instrument {instrument.id}: min_value must be less than max_value")
-        if instrument.default_rate_per_minute <= 0 or instrument.max_rate_per_minute <= 0:
-            raise ConfigurationError(f"Instrument {instrument.id}: rates must be greater than zero")
-        if instrument.default_rate_per_minute > instrument.max_rate_per_minute:
-            raise ConfigurationError(
-                f"Instrument {instrument.id}: default rate must not exceed max_rate_per_minute"
-            )
-        if (
-            not resource_id
-            and not (
-                instrument.min_value
-                <= instrument.initial_value
-                <= instrument.max_value
-            )
-        ):
-            raise ConfigurationError(
-                f"Instrument {instrument.id}: initial_value must be within min_value and max_value"
-            )
-    return instrument
-
-
 def load_config(path: str | Path) -> AppConfig:
     """加载 TOML 并返回完整 :class:`AppConfig`。
 
@@ -644,9 +403,18 @@ def load_config(path: str | Path) -> AppConfig:
     with source.open("rb") as handle:
         raw = tomllib.load(handle)
 
-    if "abort" in raw:
+    allowed_top_level = {
+        "application",
+        "logging",
+        "alarms",
+        "modules",
+        "system_instruments",
+    }
+    unknown_top_level = sorted(set(raw) - allowed_top_level)
+    if unknown_top_level:
         raise ConfigurationError(
-            "[abort] is not supported; SEQ exit does not control System Instruments"
+            "Unknown general configuration fields: "
+            + ", ".join(unknown_top_level)
         )
 
     application = raw.get("application", {})
@@ -655,75 +423,67 @@ def load_config(path: str | Path) -> AppConfig:
     reporting_raw = alarm_raw.get("reporting", {})
     module_raw = raw.get("modules", {})
     system_instrument_raw = raw.get("system_instruments", {})
-    if "resource_file" in system_instrument_raw:
+    for value, label in (
+        (application, "application"),
+        (logging_raw, "logging"),
+        (alarm_raw, "alarms"),
+        (module_raw, "modules"),
+        (system_instrument_raw, "system_instruments"),
+    ):
+        if not isinstance(value, dict):
+            raise ConfigurationError(f"{label} must be a TOML table")
+
+    unknown_module_fields = sorted(
+        set(module_raw)
+        - {
+            "directory",
+            "data_directory",
+            "startup_timeout_seconds",
+            "operation_timeout_seconds",
+            "shutdown_timeout_seconds",
+        }
+    )
+    if unknown_module_fields:
         raise ConfigurationError(
-            "system_instruments.resource_file is no longer used; keep "
-            "[[resources]] in the same site configuration"
+            "Unknown [modules] fields: " + ", ".join(unknown_module_fields)
         )
+    unknown_system_instrument_fields = sorted(
+        set(system_instrument_raw)
+        - {
+            "directory",
+            "startup_timeout_seconds",
+            "reconnect_timeout_seconds",
+            "reconnect_interval_seconds",
+        }
+    )
+    if unknown_system_instrument_fields:
+        raise ConfigurationError(
+            "Unknown [system_instruments] fields: "
+            + ", ".join(unknown_system_instrument_fields)
+        )
+
+    configs_directory = source.parent
+    project_root = configs_directory.parent
     try:
-        instrument_resources = load_instrument_resources(source)
+        instrument_resources = load_instrument_resources(
+            configs_directory / "visa.resources.toml"
+        )
     except InstrumentResourceError as exc:
         raise ConfigurationError(str(exc)) from exc
-    resources_by_id = {
-        item.id: item
-        for item in instrument_resources
-    }
-    from .instruments.manifest import load_instrument_manifest
 
-    instrument_directory_value = str(
-        system_instrument_raw.get("directory", "system_instruments")
+    instrument_directory = Path(
+        str(system_instrument_raw.get("directory", "system_instruments"))
     )
-    instrument_directory = Path(instrument_directory_value)
     if not instrument_directory.is_absolute():
-        instrument_directory = source.parent.parent / instrument_directory
-    descriptors: dict[str, SystemInstrumentDescriptor] = {}
-    if instrument_directory.is_dir():
-        for instrument_path in sorted(
-            instrument_directory.iterdir(),
-            key=lambda item: item.name.casefold(),
-        ):
-            if not instrument_path.is_dir() or not (
-                instrument_path / "instrument.toml"
-            ).is_file():
-                continue
-            descriptor = load_instrument_manifest(instrument_path)
-            if descriptor.id in descriptors:
-                raise ConfigurationError(
-                    f"Duplicate System Instrument id: {descriptor.id}"
-                )
-            descriptors[descriptor.id] = descriptor
-    raw_instruments = list(raw.get("instruments", []))
-    parsed_instruments = [
-        _instrument_config(item, resources_by_id, descriptors)
-        for item in raw_instruments
-    ]
-    instruments = tuple(parsed_instruments)
-    if not instruments:
-        raise ConfigurationError("Configuration must contain at least one [[instruments]] entry")
-    ids = [instrument.id for instrument in instruments]
-    if len(ids) != len(set(ids)):
-        raise ConfigurationError("Instrument IDs must be unique")
-    selected_resources = [
-        instrument.resource_id
-        for instrument in instruments
-        if instrument.resource_id
-    ]
-    if len(selected_resources) != len(set(selected_resources)):
-        raise ConfigurationError(
-            "A physical instrument resource can be selected by only one "
-            "[[instruments]] entry; return its additional readings as auxiliary values"
-        )
-    for kind in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD):
-        controllers = [
-            instrument.id
-            for instrument in instruments
-            if instrument.kind is kind and instrument.control_enabled
-        ]
-        if len(controllers) > 1:
-            raise ConfigurationError(
-                f"Only one controllable {kind.value} instrument is allowed: "
-                + ", ".join(controllers)
-            )
+        instrument_directory = (project_root / instrument_directory).resolve()
+    from .instrument_configuration import load_instrument_instances
+
+    instruments = load_instrument_instances(
+        configs_directory,
+        instrument_directory,
+        project_root,
+        instrument_resources,
+    )
 
     ui_refresh_ms = _positive_int(
         application.get("ui_refresh_ms", 200),
@@ -922,12 +682,6 @@ def load_config(path: str | Path) -> AppConfig:
         modules=ModuleConfig(
             directory=str(module_raw.get("directory", "modules")),
             data_directory=str(module_raw.get("data_directory", "module_data")),
-            state_directory=str(module_raw.get("state_directory", "trust_state")),
-            shared_wheels_directory=str(module_raw.get("shared_wheels_directory", "wheels")),
-            python_executable=str(module_raw.get("python_executable", "")),
-            runtime_directory=str(
-                module_raw.get("runtime_directory", "runtime_packages")
-            ),
             startup_timeout_seconds=_positive_float(
                 module_raw.get("startup_timeout_seconds", 10.0),
                 "modules.startup_timeout_seconds",
@@ -945,16 +699,6 @@ def load_config(path: str | Path) -> AppConfig:
             directory=str(
                 system_instrument_raw.get("directory", "system_instruments")
             ),
-            state_directory=str(
-                system_instrument_raw.get("state_directory", "trust_state")
-            ),
-            runtime_directory=str(
-                system_instrument_raw.get("runtime_directory", "runtime_packages")
-            ),
-            shared_wheels_directory=str(
-                system_instrument_raw.get("shared_wheels_directory", "wheels")
-            ),
-            python_executable=str(system_instrument_raw.get("python_executable", "")),
             startup_timeout_seconds=_positive_float(
                 system_instrument_raw.get("startup_timeout_seconds", 10.0),
                 "system_instruments.startup_timeout_seconds",
@@ -969,5 +713,5 @@ def load_config(path: str | Path) -> AppConfig:
             ),
         ),
         instrument_resources=instrument_resources,
-        instruments=instruments,
+        instrument_instances=instruments,
     )

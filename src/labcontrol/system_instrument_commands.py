@@ -19,7 +19,7 @@ def configured_system_instrument_commands(
         for spec in COMMAND_SPECS
     }
     commands: list[SystemInstrumentCommandSpec] = []
-    for instrument in config.instruments:
+    for instrument in config.instrument_instances:
         if ":" in instrument.backend:
             continue
         descriptor = descriptors_by_id.get(instrument.backend)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import sys
 import tempfile
 import time
@@ -20,6 +19,10 @@ from labcontrol.sequence.model import (  # noqa: E402
     CommandType,
     SequenceDocument,
 )
+from tests.configuration_fixtures import (  # noqa: E402
+    load_simulated_config,
+    write_simulated_configuration,
+)
 
 
 class RuntimeShutdownTests(unittest.TestCase):
@@ -27,7 +30,7 @@ class RuntimeShutdownTests(unittest.TestCase):
         self,
     ) -> None:
         runtime = RuntimeService(
-            load_config(ROOT / "configs" / "default.toml"),
+            load_simulated_config(),
             module_descriptors=(),
         )
         self.assertEqual(runtime._instrument_poll_interval(), 1.0)
@@ -49,12 +52,7 @@ class RuntimeShutdownTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "configs").mkdir()
-            config_path = root / "configs" / "default.toml"
-            shutil.copy2(
-                ROOT / "configs" / "default.toml",
-                config_path,
-            )
+            config_path = write_simulated_configuration(root)
             config_path.write_text(
                 config_path.read_text(encoding="utf-8")
                 .replace(

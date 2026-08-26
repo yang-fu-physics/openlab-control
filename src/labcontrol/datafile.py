@@ -1,6 +1,6 @@
 """一次 SEQ 运行的目录、快照、DAT 数据、仪表状态和事件日志写入。
 
-运行开始即复制规范化 SEQ、主配置、各模块期望设置和启动状态。DAT 列由全部仪表与已启用
+运行开始即复制规范化 SEQ、完整现场配置、各模块期望设置和启动状态。DAT 列由全部仪表与已启用
 模块清单一次构造；一次 ``T Measure`` 按逻辑通道槽位写多行，同一槽位中各模块的结果
 合并到该槽位对应的一行，未参与该槽位的模块列留空。
 仪表状态按独立节流周期写入固定宽表，不受 Measure 数量影响。追加已有 DAT 前必须验证完整
@@ -112,16 +112,29 @@ class DatRunLogger:
             / self.config.logging.instrument_status_file_name
         )
         sequence_snapshot = directory / "sequence.seq"
-        config_snapshot = directory / "configuration.toml"
+        config_snapshot = directory / "configuration"
+        config_snapshot.mkdir()
         module_settings_directory = directory / "module_settings"
         module_settings_directory.mkdir()
         raw_data_directory = directory / "rawdata"
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
-        shutil.copy2(self.config.source_path, config_snapshot)
+        shutil.copy2(self.config.source_path, config_snapshot / "general.toml")
+        source_configs = self.config.source_path.parent
+        visa_resources = source_configs / "visa.resources.toml"
+        if visa_resources.is_file():
+            shutil.copy2(visa_resources, config_snapshot / visa_resources.name)
+        for name in ("instruments", "pid"):
+            source_directory = source_configs / name
+            if not source_directory.is_dir():
+                continue
+            destination_directory = config_snapshot / name
+            destination_directory.mkdir()
+            for source_file in sorted(source_directory.glob("*.toml")):
+                shutil.copy2(source_file, destination_directory / source_file.name)
         self._module_descriptors = tuple(module_descriptors)
         initial_snapshots = instrument_snapshots or {}
         self._instrument_metric_schemas = {}
-        for instrument in self.config.instruments:
+        for instrument in self.config.instrument_instances:
             snapshot = initial_snapshots.get(instrument.id)
             self._instrument_metric_schemas[instrument.id] = tuple(
                 (
@@ -216,17 +229,19 @@ class DatRunLogger:
             self.paths.module_settings_directory.resolve()
         )
         raw_data_resolved = self.paths.raw_data_directory.resolve()
+        configuration_resolved = self.paths.configuration_snapshot.resolve()
         reserved_paths = {
             self.paths.directory.resolve(),
             self.paths.event_file.resolve(),
             self.paths.instrument_status_file.resolve(),
             self.paths.sequence_snapshot.resolve(),
-            self.paths.configuration_snapshot.resolve(),
+            configuration_resolved,
             module_settings_resolved,
             raw_data_resolved,
         }
         if (
             destination_resolved in reserved_paths
+            or configuration_resolved in destination_resolved.parents
             or module_settings_resolved
             in destination_resolved.parents
             or raw_data_resolved in destination_resolved.parents
@@ -313,7 +328,7 @@ class DatRunLogger:
             )
             self._data_writer.writerow(["INFO", "System Instrument and Measurement Module framework"])
             self._data_writer.writerow(["INFO", f"Started: {datetime.now().astimezone().isoformat()}"])
-            for instrument in self.config.instruments:
+            for instrument in self.config.instrument_instances:
                 self._data_writer.writerow([
                     "INFO",
                     f"Instrument {instrument.id}: {instrument.display_name}; "
@@ -405,10 +420,14 @@ class DatRunLogger:
 
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]
         temperature_count = sum(
-            item.kind is InstrumentKind.TEMPERATURE for item in self.config.instruments
+            item.kind is InstrumentKind.TEMPERATURE
+            for item in self.config.instrument_instances
         )
-        field_count = sum(item.kind is InstrumentKind.FIELD for item in self.config.instruments)
-        for instrument in self.config.instruments:
+        field_count = sum(
+            item.kind is InstrumentKind.FIELD
+            for item in self.config.instrument_instances
+        )
+        for instrument in self.config.instrument_instances:
             if instrument.kind is InstrumentKind.TEMPERATURE:
                 prefix = "Temp" if temperature_count == 1 else f"{instrument.id}.Temp"
                 columns.extend([f"{prefix}({instrument.unit})", f"{prefix}Target({instrument.unit})"])
@@ -463,7 +482,7 @@ class DatRunLogger:
                 ),
             ]
         )
-        for instrument in self.config.instruments:
+        for instrument in self.config.instrument_instances:
             self._instrument_status_writer.writerow(
                 [
                     "INFO",
@@ -485,32 +504,41 @@ class DatRunLogger:
         """按配置顺序构造稳定且可直接导入表格软件的状态列。"""
 
         columns = ["Timestamp(s)", "Time(s)"]
-        for instrument in self.config.instruments:
-            prefix = instrument.id
-            unit_suffix = (
-                f"({instrument.unit})"
-                if instrument.unit
-                else ""
+        for instrument in self.config.instrument_instances:
+            controller_panels = tuple(
+                panel
+                for panel in instrument.panels
+                if panel.enabled and panel.template == "controller"
             )
-            rate_suffix = (
-                f"({instrument.unit}/min)"
-                if instrument.unit
-                else ""
-            )
+            for panel in controller_panels:
+                prefix = panel.key
+                unit = instrument.reading(panel.reading).unit
+                unit_suffix = f"({unit})" if unit else ""
+                rate_suffix = f"({unit}/min)" if unit else ""
+                columns.extend(
+                    [
+                        f"{prefix}.Current{unit_suffix}",
+                        f"{prefix}.Target{unit_suffix}",
+                        f"{prefix}.Rate{rate_suffix}",
+                        f"{prefix}.Activity",
+                        f"{prefix}.Stability",
+                        f"{prefix}.Ready",
+                    ]
+                )
+            if (
+                not controller_panels
+                and instrument.kind is InstrumentKind.MONITOR
+            ):
+                unit_suffix = f"({instrument.unit})" if instrument.unit else ""
+                columns.append(f"{instrument.id}.Current{unit_suffix}")
             columns.extend(
                 [
-                    f"{prefix}.Current{unit_suffix}",
-                    f"{prefix}.Target{unit_suffix}",
-                    f"{prefix}.Rate{rate_suffix}",
-                    f"{prefix}.Activity",
-                    f"{prefix}.Stability",
-                    f"{prefix}.Ready",
-                    f"{prefix}.Connection",
-                    f"{prefix}.ReadingAge(s)",
-                    f"{prefix}.Message",
+                    f"{instrument.id}.Connection",
+                    f"{instrument.id}.ReadingAge(s)",
+                    f"{instrument.id}.Message",
                 ]
             )
-            columns.extend(self._metric_columns(prefix))
+            columns.extend(self._metric_columns(instrument.id))
         return columns
 
     def _metric_columns(self, instrument_id: str) -> list[str]:
@@ -598,64 +626,66 @@ class DatRunLogger:
             f"{absolute:.2f}",
             f"{now - self._started_monotonic:.2f}",
         ]
-        for instrument in self.config.instruments:
+        for instrument in self.config.instrument_instances:
+            controller_panels = tuple(
+                panel
+                for panel in instrument.panels
+                if panel.enabled and panel.template == "controller"
+            )
             snapshot = snapshots.get(instrument.id)
             if snapshot is None:
-                row.extend(
-                    [
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "false",
-                        "",
-                        "No snapshot",
-                    ]
-                )
+                row.extend("" for _ in range(6 * len(controller_panels)))
+                if (
+                    not controller_panels
+                    and instrument.kind is InstrumentKind.MONITOR
+                ):
+                    row.append("")
+                row.extend(["", "", "No snapshot"])
                 row.extend(self._metric_values(instrument.id, None))
                 continue
-            decimals = (
-                control_decimals(instrument.kind, instrument.unit)
-                if instrument.kind
-                in (InstrumentKind.TEMPERATURE, InstrumentKind.FIELD)
-                else 3
-            )
+            for panel in controller_panels:
+                state = snapshot.controls[panel.id]
+                reading = instrument.reading(panel.reading)
+                decimals = (
+                    reading.decimals
+                    if reading.decimals is not None
+                    else control_decimals(instrument.kind, reading.unit)
+                )
+                row.extend(
+                    [
+                        (
+                            ""
+                            if state.current is None
+                            else fixed_number(state.current, decimals)
+                        ),
+                        (
+                            ""
+                            if state.target is None
+                            else fixed_number(state.target, decimals)
+                        ),
+                        (
+                            ""
+                            if state.rate_per_minute is None
+                            else fixed_number(state.rate_per_minute, decimals)
+                        ),
+                        state.activity.value,
+                        state.stability.value,
+                        "" if state.ready is None else str(state.ready).lower(),
+                    ]
+                )
+            if (
+                not controller_panels
+                and instrument.kind is InstrumentKind.MONITOR
+            ):
+                reading = instrument.reading(instrument.main_reading)
+                decimals = reading.decimals if reading.decimals is not None else 3
+                row.append(
+                    ""
+                    if snapshot.current is None
+                    else fixed_number(snapshot.current, decimals)
+                )
             row.extend(
                 [
-                    (
-                        ""
-                        if snapshot.current is None
-                        else fixed_number(
-                            snapshot.current,
-                            decimals,
-                        )
-                    ),
-                    (
-                        ""
-                        if snapshot.target is None
-                        else fixed_number(
-                            snapshot.target,
-                            decimals,
-                        )
-                    ),
-                    (
-                        ""
-                        if snapshot.rate_per_minute is None
-                        else fixed_number(
-                            snapshot.rate_per_minute,
-                            decimals,
-                        )
-                    ),
-                    snapshot.activity.value,
-                    snapshot.stability.value,
-                    (
-                        ""
-                        if snapshot.ready is None
-                        else str(snapshot.ready).lower()
-                    ),
                     snapshot.connection_state.value,
                     f"{max(0.0, now - snapshot.timestamp):.3f}",
                     snapshot.message,
@@ -847,7 +877,7 @@ class DatRunLogger:
             f"{time.monotonic() - self._started_monotonic:.2f}",
             sequence_step,
         ]
-        for instrument in self.config.instruments:
+        for instrument in self.config.instrument_instances:
             snapshot = snapshots.get(instrument.id)
             usable_snapshot = (
                 snapshot

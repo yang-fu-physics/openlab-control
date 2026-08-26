@@ -1,0 +1,50 @@
+[application]
+title = "OpenLab Control"
+ui_scale = "auto"
+ui_refresh_ms = 200
+poll_interval_seconds = 1.0
+control_poll_interval_seconds = 0.20
+simulation_speed = 120.0
+default_sequence = "examples/nested_scan.seq"
+language = "en_US"
+
+[logging]
+directory = "runs"
+data_file_name = "experiment.dat"
+event_file_name = "events.dat"
+instrument_status_file_name = "instrument_status.dat"
+instrument_status_interval_seconds = 1.0
+timestamp_epoch = "labview_1904"
+flush_every_row = true
+allow_external_paths = false
+
+[alarms]
+stability_timeout = "error"
+stale_reading = "warning"
+popup_warnings = true
+popup_errors = true
+
+[alarms.reporting]
+enabled = false
+endpoint = "http://127.0.0.1:3889/alarm/report"
+token_env = "OPENLAB_ALARM_TOKEN"
+token_file = ""
+timeout_seconds = 3.0
+retry_attempts = 3
+retry_delay_seconds = 1.0
+queue_size = 100
+shutdown_timeout_seconds = 2.0
+allow_insecure_http = false
+
+[modules]
+directory = "modules"
+data_directory = "module_data"
+startup_timeout_seconds = 10.0
+operation_timeout_seconds = 120.0
+shutdown_timeout_seconds = 3.0
+
+[system_instruments]
+directory = "system_instruments"
+startup_timeout_seconds = 10.0
+reconnect_timeout_seconds = 60.0
+reconnect_interval_seconds = 2.0
