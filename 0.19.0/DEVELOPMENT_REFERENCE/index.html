@@ -2325,10 +2325,10 @@ Warning；Run 预检拒绝执行，绝不会自动 Enable、Apply、安装或静
 只有明确注册的响应才会联动 System Instrument。</p>
 <h2 id="_7">依赖与离线安装<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
 <p>PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 使用框架锁定版本，两类内容
-不得重复声明。只有额外库才写入 <code>dependencies</code>，并携带精确带 SHA-256 的
-<code>requirements.lock</code> 和全部本地 wheel。安装固定使用 <code>--no-index --require-hashes</code>。</p>
-<p>安装时复制完整模块目录到 <code>modules/</code>，重启并核对来源、版本和内容指纹。不要提交仪表
-地址密码、令牌、私钥、实验 DAT、<code>runtime_packages</code>、<code>trust_state</code> 或 <code>module_data</code>。</p>
+不得重复声明，也不建立独立运行环境。需要新包时更新核心 <code>pyproject.toml</code> 和
+<code>requirements-lock.txt</code>，完成全部测试后重新构建完整发布包。</p>
+<p>安装时复制完整模块目录到 <code>modules/</code> 后重启。不要提交仪表地址、密码、令牌、私钥、
+实验 DAT 或 <code>module_data</code>。</p>
 
 
 

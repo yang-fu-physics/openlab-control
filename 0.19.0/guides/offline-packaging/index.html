@@ -1441,18 +1441,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        不要重复声明框架依赖
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#wheels" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        只有额外依赖才需要 wheels
+        所有扩展共用核心依赖
       
     </span>
   </a>
@@ -1835,18 +1824,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        不要重复声明框架依赖
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#wheels" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        只有额外依赖才需要 wheels
+        所有扩展共用核心依赖
       
     </span>
   </a>
@@ -1897,7 +1875,7 @@
 
 <h1 id="_1">离线安装与发布<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
 <p>第一阶段不提供在线商店。Measurement Module 和 System Instrument 都以一个完整目录为安装
-单元，可以通过 U 盘或内部文件服务完全离线复制；两者仍保持各自的名称和目录。</p>
+单元，可以通过 U 盘或内部文件服务复制；两者仍保持各自的名称和目录。</p>
 <h2 id="_2">手动安装<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <p>Measurement Module：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>repository/modules/&lt;module-id&gt;/
@@ -1909,59 +1887,40 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    ↓
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>OpenLabControl/system_instruments/&lt;instrument-id&gt;/
 </span></code></pre></div>
-<p>重启后，框架显示类型、ID、版本、绝对路径和内容指纹。用户必须显式确认首次信任；任何
-源码或 wheel 变化都会使原确认失效。</p>
-<p>System Instrument 还必须先由扫描资源选择，再被现场配置的 <code>[[instruments]].resource</code> 引用才会启动。单纯复制
-目录不会连接或改变真实仪表。Measurement Module 则在 Modules Manager 中由用户 Enable。</p>
-<h2 id="_3">不要重复声明框架依赖<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>主框架统一提供并锁定：</p>
-<ul>
-<li>PySide6</li>
-<li>QtAwesome</li>
-<li>packaging</li>
-<li>PyVISA</li>
-<li>typing_extensions</li>
-</ul>
-<p>所有 System Instrument 和 Measurement Module 使用相同版本。不要携带自己的 PySide6 或
-PyVISA 副本。</p>
-<h2 id="wheels">只有额外依赖才需要 wheels<a class="headerlink" href="#wheels" title="Permanent link">&para;</a></h2>
-<p>确实需要框架没有的第三方库时，才在对应清单声明，并携带：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>my_module/
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├─ module.toml
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>├─ backend.py
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├─ requirements.lock
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>└─ wheels/
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>   └─ extra_package-1.2.3-py3-none-any.whl
-</span></code></pre></div>
-<p><code>requirements.lock</code> 必须使用精确 <code>==</code> 版本和 SHA-256：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>extra-package==1.2.3 \
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    --hash=sha256:&lt;完整哈希&gt;
-</span></code></pre></div>
-<p>安装固定使用 <code>--no-index --only-binary=:all: --require-hashes</code>，不存在联网回退。额外依赖
-进入按“类型 + ID + 内容指纹”隔离的 <code>runtime_packages/</code>，不会覆盖框架包。</p>
+<p>重启后，Measurement Module 会出现在 Modules Manager 中并保持 Disabled。System Instrument
+只有在扫描资源选中对应实现、且现场 <code>[[instruments]]</code> 能唯一绑定该资源后才会连接；单纯
+复制目录不会访问真实仪表。</p>
+<h2 id="_3">所有扩展共用核心依赖<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>主框架统一提供并锁定 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions。
+System Instrument 与 Measurement Module 不声明、不安装第二套依赖，也不建立自己的 Python
+runtime。</p>
+<p>新实现确实需要其他第三方包时：</p>
+<ol>
+<li>把精确版本加入核心 <code>pyproject.toml</code> 和 <code>requirements-lock.txt</code>；</li>
+<li>在全新环境运行核心、System Instrument 和 Measurement Module 测试；</li>
+<li>由 GitHub Actions 重新构建完整 Windows 发布包。</li>
+</ol>
+<p>这样发布 ZIP 本身就是完整离线环境，现场电脑不需要 Python 或联网安装。</p>
 <h2 id="_4">发布前清单<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核心稳定版使用与项目版本一致的 <code>v&lt;版本&gt;</code> 标签，由 GitHub Actions 的 Windows
-      Runner 重新测试、打包和上传；不把开发电脑生成的 ZIP 手工上传为正式资产。</li>
+      Runner 重新测试、打包和上传。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 发布 ZIP 根目录有 <code>OpenLabControl.exe</code>、<code>InstrumentScanner.exe</code> 和唯一的
       <code>_internal/</code>，没有发布用 <code>tools/</code> 目录。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 目录名、清单 ID 和文档一致。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 版本号已更新，变化写入 README/CHANGELOG。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 没有仪表地址、令牌、私钥、真实 DAT 或本机状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 所有额外 wheel 与目标 Windows/Python ABI 匹配。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>requirements.lock</code> 能在断网环境重建 runtime。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 最小生命周期、异常状态、Pause/Stop、重复关闭测试通过。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 真实仪表代码明确标注真机验证状态。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 从一个全新的 OpenLab Control 文件夹完成手动复制安装测试。</li>
 </ul>
 <h2 id="measurement-module">第三方 Measurement Module<a class="headerlink" href="#measurement-module" title="Permanent link">&para;</a></h2>
-<p>未来可以让第三方自行发布 Measurement Module。现阶段建议每个模块目录说明：</p>
+<p>第三方目录应说明：</p>
 <ul>
 <li>仪表组合、接线与固件要求；</li>
 <li>数字状态码表；</li>
 <li>默认设置和安全边界；</li>
 <li>已验证与未验证的硬件；</li>
-<li>完整离线依赖；</li>
 <li>自动测试和真机测试摘要。</li>
 </ul>
 <p>System Instrument 通常随实验系统固定并由系统维护者部署。当前两类内容都只支持手动复制，

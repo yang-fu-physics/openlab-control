@@ -2054,12 +2054,10 @@
 <p>测试不仅比较最后结果，还要比较 <code>commands</code> 的完整顺序。这样能发现漏读响应、设定顺序反了、
 失败后又重发等问题。</p>
 <h2 id="_8">仓库中的参考测试<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
-<p>核心模板位于：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>templates/system-instruments-repository/
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ instruments/
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│  ├─ example_controller/
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│  └─ example_monitor/
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>└─ tests/test_repository_layout.py
+<p>核心示例位于：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>system_instruments/
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ example_controller/
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>└─ example_monitor/
 </span></code></pre></div>
 <p>模板后台故意不能控制真实仪表。复制后请为具体型号新增协议测试，不要把“能 import”当成
 真机验证。</p>
@@ -2069,9 +2067,8 @@
 </span></code></pre></div>
 <p>再把一个副本手动复制到核心的 <code>system_instruments/</code>，使用仿真或假的通讯后端检查：</p>
 <ul>
-<li>首次信任和源码变化后重新信任；</li>
 <li>源码版与 Windows 打包版发现结果一致；</li>
-<li>额外依赖只能从本地 wheel 安装；</li>
+<li>所需 Python 包已包含在核心锁定依赖中；</li>
 <li>前面板、Live Trend、实验 DAT 和 <code>instrument_status.dat</code> 字段一致；</li>
 <li>Stop、Error、退出和重建窗口不会增加通讯会话。</li>
 </ul>

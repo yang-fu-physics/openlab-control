@@ -1922,10 +1922,10 @@
 低风险真机检查。</p>
 <h2 id="_2">先运行教学模块测试<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <div class="language-powershell highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="p">`</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  <span class="n">-s</span> <span class="n">templates</span><span class="p">\</span><span class="n">measurement-modules-repository</span><span class="p">\</span><span class="n">tests</span> <span class="n">-v</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  <span class="n">-s</span> <span class="n">tests</span> <span class="n">-p</span> <span class="s2">"test_bundled_*.py"</span> <span class="n">-v</span>
 </span></code></pre></div>
 <p>这些测试会检查教学模块能否启动、应用设置、逐通道测量、报告超量程并安全关闭。完整例子在
-<code>templates/measurement-modules-repository/tests/test_tutorial_resistance.py</code>。</p>
+<code>tests/test_bundled_tutorial_resistance.py</code>。</p>
 <h2 id="_3">每个模块至少检查这些情况<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <ul>
 <li>正常 Enable 和 Disable；</li>
@@ -1956,7 +1956,6 @@
 <li>Load SEQ 不会自动连接仪表或应用设置；</li>
 <li>状态更新只改变显示；</li>
 <li>初始宽度不出现横向滚动条；</li>
-<li>下拉列表没有展开时，滚轮不会误改数值。</li>
 </ul>
 <h2 id="_6">修改主程序后运行完整测试<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
 <p>普通模块通常不需要修改主程序。如果确实修改了主程序，再运行：</p>

@@ -1904,7 +1904,8 @@
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="p">.\</span><span class="n">setup</span><span class="p">.</span><span class="n">bat</span>
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">.\</span><span class="n">run</span><span class="p">.</span><span class="n">bat</span>
 </span></code></pre></div>
-<p><code>setup.bat</code> 创建 <code>.venv</code>，并安装 <code>requirements-lock.txt</code> 中经过验证的应用依赖。
+<p><code>requirements.txt</code> 与 <code>pyproject.toml</code> 声明核心直接依赖；<code>requirements-lock.txt</code> 锁定源码
+运行和发布验证使用的完整精确版本。<code>setup.bat</code> 创建 <code>.venv</code> 并安装这份锁定文件。
 <code>run.bat</code> 始终启动当前源码，不会误用 <code>dist/</code> 里的旧程序。</p>
 <p>上面固定到与本网站一致的稳定版。准备参与核心开发时，才改为克隆或切换到 <code>main</code>。</p>
 <h2 id="_3">使用本机配置<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
@@ -1938,7 +1939,7 @@
 </ol>
 <div class="admonition danger">
 <p class="admonition-title">不要提交实验室秘密</p>
-<p>仪表地址、令牌、私钥、真实实验 DAT、<code>module_data/</code>、<code>trust_state/</code> 和本机 runtime
+<p>仪表地址、令牌、私钥、真实实验 DAT 和 <code>module_data/</code>
 都不应进入 Git。每次 Run 保存的 <code>runs/**/configuration.toml</code> 是本机配置的完整快照，
 也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。</p>
 </div>

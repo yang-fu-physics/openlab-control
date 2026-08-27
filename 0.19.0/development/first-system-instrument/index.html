@@ -1922,7 +1922,7 @@
 不会意外改变输出。</p>
 <h2 id="1">1. 复制骨架<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
 <p>复制：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>templates/system-instruments-repository/instruments/example_monitor/
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>system_instruments/example_monitor/
 </span></code></pre></div>
 <p>得到：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>system_instruments/my_thermometer/
@@ -1935,22 +1935,21 @@
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"My Thermometer"</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0.1.0"</span>
 </span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">api_version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"3"</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">core_requires</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"&gt;=0.18,&lt;0.19"</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">core_requires</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"&gt;=0.19,&lt;0.20"</span>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"backend:MyThermometer"</span>
 </span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">kinds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"monitor"</span><span class="p">]</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">dependencies</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">main_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temperature"</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">[panel]</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"readout"</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="k">[discovery]</span>
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="n">identity_pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"(?i)expected maker.*expected model"</span>
-</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
-</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="k">[readings.temperature]</span>
-</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Temperature"</span>
-</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
-</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">main_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temperature"</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="k">[panel]</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"readout"</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="k">[discovery]</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">identity_pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"(?i)expected maker.*expected model"</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="k">[readings.temperature]</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Temperature"</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
 </span></code></pre></div>
 <p>只需理解这些字段：</p>
 <table>
@@ -1996,10 +1995,6 @@
 <tr>
 <td><code>identity_pattern</code></td>
 <td>扫描器用 <code>*IDN?</code> 返回值自动建议这份实现</td>
-</tr>
-<tr>
-<td><code>dependencies</code></td>
-<td>仅填写框架没有提供的额外包；PyVISA 不用重复写</td>
 </tr>
 </tbody>
 </table>
@@ -2075,8 +2070,10 @@
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">system_instrument</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my_thermometer"</span>
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">auxiliary_readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]</span>
 </span></code></pre></div>
-<p>主读数不在这里重复保存；它来自 <code>instrument.toml</code>。</p>
-<p>现场主配置只引用资源：</p>
+<p>主读数默认来自 <code>instrument.toml</code>。如果清单声明多个 <code>main_readings</code>，操作者可在现场配置中
+用 <code>main_reading</code> 选择其中一个。</p>
+<p>同一 kind 只有一个已确认的 System 资源时，主配置无需填写后端路径或资源 ID，程序会自动
+绑定。只有存在多个候选资源时，才在现场主配置中明确选择：</p>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[[instruments]]</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sample_monitor"</span>
 </span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">display_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Sample Monitor"</span>
@@ -2086,17 +2083,15 @@
 </span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">operation_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span>
 </span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">shutdown_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">3.0</span>
 </span></code></pre></div>
-<p>这里不再重复 <code>backend</code>、<code>unit</code>、<code>role</code> 或仿真用的 <code>initial_value</code>。协议超时、PID 表和厂商专用选项仍可写在该
+<p>这里不写 <code>backend</code>、<code>unit</code>、<code>role</code> 或仿真用的 <code>initial_value</code>。协议超时、PID 表和厂商专用选项仍可写在该
 <code>[[instruments]]</code> 中，并从 <code>config.extras</code> 读取。</p>
 <h2 id="5">5. 第一次加载<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
 <ol>
 <li>重启 OpenLab Control。</li>
-<li>核对首次信任窗口中的类型、ID、版本、路径和内容指纹。</li>
-<li>确认后观察前面板读数。</li>
-<li>修改任何源文件后，内容指纹会变化，需要再次确认。</li>
+<li>观察前面板读数与 Run Log；清单或配置错误会直接停止加载并给出具体字段。</li>
 </ol>
-<p>额外依赖只从本地 wheel 安装，不会联网下载。PyVISA、PySide6、QtAwesome、packaging 和
-typing_extensions 使用框架锁定版本。</p>
+<p>PyVISA、PySide6、QtAwesome、packaging 和 typing_extensions 使用框架锁定版本。新实现需要
+其他 Python 包时，应更新核心锁定依赖、完成测试并重新构建发布包。</p>
 <h2 id="6">6. 再增加控制<a class="headerlink" href="#6" title="Permanent link">&para;</a></h2>
 <p>温度或磁场控制器再把 <code>panel.template</code> 改为 <code>controller</code>，实现 <code>set_target()</code> 和 <code>hold()</code>，并在现场配置中写
 <code>control_enabled = true</code>、真实上下限和最大速率。继续阅读<a href="../instrument-control-safety/">控制与安全</a>。</p>

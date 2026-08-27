@@ -1939,8 +1939,8 @@
 </span></code></pre></div>
 <p>GUI 不直接操作仪表。每个模块内部请求串行，不同模块可并行。IPC 不使用 pickle；单条
 消息限制为 1 MiB，并拒绝 NaN、Infinity、复杂对象和未知 DAT 列。</p>
-<p>进程隔离限制阻塞、崩溃和依赖影响，但不是恶意代码沙箱。模块 Frontend 仍在 GUI
-进程，因此首次加载必须核对来源、版本、路径和内容指纹。</p>
+<p>进程隔离限制阻塞和崩溃影响，但不是恶意代码沙箱。模块 Frontend 仍在 GUI 进程，
+因此只应把已审查的本地代码放进 <code>modules/</code> 或 <code>system_instruments/</code>。</p>
 <h2 id="_3">两套接入边界<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <p>System Instrument 与 Measurement Module 分开：</p>
 <ul>
@@ -1949,12 +1949,10 @@
 <li>Measurement Module 拥有完成一次测量所需的仪表、切换器、时序、状态码和安全动作；
   它只能读取温场快照，不能控制温度或磁场。</li>
 </ul>
-<p>模块目录最小为 <code>module.toml + backend.py</code>。清单只含名称、版本和可选额外依赖；DAT 列
-来自 <code>Module.columns</code>。发现阶段不导入模块源码，Enable 前再次验证完整目录指纹和依赖。</p>
-<p>PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享依赖。只有额外
-依赖进入 <code>runtime_packages/&lt;type&gt;/&lt;id&gt;/&lt;fingerprint&gt;/site-packages</code>；离线安装固定使用
-<code>--no-index --only-binary=:all: --require-hashes</code>，并验证 <code>requirements.lock</code>、wheel、
-runtime marker 和依赖树摘要。</p>
+<p>模块目录最小为 <code>module.toml + backend.py</code>。清单只含名称和版本；DAT 列来自
+<code>Module.columns</code>。发现阶段不导入模块源码，Enable 后才在独立工作进程中加载后台。</p>
+<p>PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是框架共享依赖。仪表或模块
+需要新包时更新核心依赖并重新构建发布包，不在运行中的程序里建立第二套 Python 环境。</p>
 <p>System Instrument 的作者接口是同步的
 <code>open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close</code>。
 驱动只返回包含 <code>value</code> 和可选 <code>target/rate/moving/ready/auxiliary</code> 的普通字典；核心统一生成

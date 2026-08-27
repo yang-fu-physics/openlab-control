@@ -940,7 +940,7 @@
   <a href="#refresh" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Refresh 与依赖
+        Refresh
       
     </span>
   </a>
@@ -1163,17 +1163,6 @@
     <span class="md-ellipsis">
       
         模块无法勾选
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#python-runtime" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        发布包提示没有 Python Runtime
       
     </span>
   </a>
@@ -2440,7 +2429,7 @@
   <a href="#refresh" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Refresh 与依赖
+        Refresh
       
     </span>
   </a>
@@ -2670,17 +2659,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#python-runtime" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        发布包提示没有 Python Runtime
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#enable_1" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2830,8 +2808,7 @@
 <p>解压整个 <code>OpenLabControl</code> 文件夹后运行：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>OpenLabControl.exe
 </span></code></pre></div>
-<p>不要只复制 EXE；<code>configs/</code>、<code>docs/</code>、<code>templates/</code>、<code>modules/</code>、
-<code>system_instruments/</code>、<code>runtime_packages/</code>、<code>trust_state/</code>、<code>module_data/</code>、<code>wheels/</code> 和
+<p>不要只复制 EXE；<code>configs/</code>、<code>docs/</code>、<code>modules/</code>、<code>system_instruments/</code>、<code>module_data/</code> 和
 <code>runs/</code> 等目录应和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，
 不会恢复上次 Enable 状态。</p>
 <h3 id="_4">源码运行<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
@@ -2856,11 +2833,10 @@
 <div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>.venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
 </span></code></pre></div>
 <p>这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules
-Manager 手动启用。无界面模式不会弹信任确认：模块必须已经手动复制、在 GUI 中确认过
-完全相同的内容指纹；存在额外依赖时，其离线 runtime 也必须已准备好，否则启动会拒绝。</p>
+Manager 手动启用。</p>
 <h2 id="_5">报警报告<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
 <ol>
-<li>把 <code>integrations/nonebot_alarm_receiver/</code> 复制到 NoneBot2 插件目录。</li>
+<li>在独立 NoneBot 接收服务中提供 <code>/alarm/report</code>，校验 <code>X-Token</code>，并按报警等级选择收件人。</li>
 <li>在 NoneBot 环境文件配置随机 <code>alarm_token</code>、<code>alarm_admin_qqs</code> 和
    <code>alarm_tester_qqs</code>；管理员与测试员列表可重叠，接收器会去重。</li>
 <li>在运行 OpenLab Control 的账户环境中设置同一 Token，例如
@@ -2976,22 +2952,11 @@ desired settings 可能与实际状态不同时才使用。真机首跑或状态
 <p>close 失败时程序报告 Error，并在关闭总上限内强制回收模块工作进程、最终显示 Disabled。
 强制回收只保证本机进程/管道不残留，不代表外部仪表已经安全；此时必须按模块硬件说明
 人工检查输出。</p>
-<h3 id="refresh">Refresh 与依赖<a class="headerlink" href="#refresh" title="Permanent link">&para;</a></h3>
+<h3 id="refresh">Refresh<a class="headerlink" href="#refresh" title="Permanent link">&para;</a></h3>
 <p>只有 SEQ Idle 且全部模块 Disabled 时可以 <code>Refresh</code>。它重新扫描 <code>modules/</code>，不做运行中的热替换。</p>
-<p>框架共享依赖不需要安装。只有所选模块声明框架尚未提供的额外依赖时，Manager 才显示
-<code>Install Dependencies</code>；安装只要求该模块 Disabled，其他模块的隔离 runtime 不会被
-替换。Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。</p>
-<p>额外依赖缺失时：</p>
-<ol>
-<li>Disable 目标模块，再选中它。</li>
-<li>点击 <code>Install Dependencies</code>。</li>
-<li>核对并确认该模块的内容指纹。</li>
-<li>程序只读取模块 <code>requirements.lock</code>、根 <code>wheels/</code> 和模块 <code>wheels/</code>，使用精确版本
-   和 SHA-256 离线安装到该模块自己的 runtime。</li>
-<li>完成后 Refresh。</li>
-</ol>
-<p>没有在线回退。PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 是明确
-由主框架提供的统一版本，不属于“借用”；其他额外包只能来自已验证的隔离 runtime。</p>
+<p>Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。所有模块使用主框架
+锁定的同一组依赖，界面不提供单模块依赖安装；需要新 Python 包时必须更新核心依赖、
+重新测试并构建发布包。</p>
 <h2 id="seq_1">编辑 SEQ<a class="headerlink" href="#seq_1" title="Permanent link">&para;</a></h2>
 <h3 id="_9">新建/打开/保存<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3164,15 +3129,9 @@ Load 运行目录中的 <code>sequence.seq</code> 会兼容导入这些 desired 
 <p>下次启动所有模块仍是 Disabled，但 Settings 值会在下次 Enable 时自动载入且不自动 Apply。</p>
 <h2 id="_17">常见问题<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h2>
 <h3 id="_18">模块无法勾选<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h3>
-<p>选中行查看底部说明。常见原因：清单 Invalid、未确认信任、
-框架共享依赖范围不兼容、额外依赖缺失、lock/wheel 哈希错误或隔离 runtime 被修改。
-Disable 目标模块后重新准备额外依赖；需要重新扫描源码时先 Disable 全部模块再
-Refresh。</p>
-<h3 id="python-runtime">发布包提示没有 Python Runtime<a class="headerlink" href="#python-runtime" title="Permanent link">&para;</a></h3>
-<p>只有 Measurement Module 或 System Instrument 声明额外依赖时才会显示 Install Dependencies，
-并需要配置 <code>modules.python_executable</code> / <code>system_instruments.python_executable</code>，或放置
-<code>runtime/python/python.exe</code>。框架共享依赖（包括 PyVISA）已经在 EXE 内，不需要便携
-Python；只有离线准备额外依赖需要，且便携 Python 必须自带 pip。</p>
+<p>选中行查看底部说明。常见原因是 <code>module.toml</code>/<code>backend.py</code> 缺失或清单字段无效。修正后
+先 Disable 全部模块，再 Refresh。缺少 Python 包属于发布包依赖问题，不能在模块管理器中
+临时安装。</p>
 <h3 id="enable_1">Enable 后参数没有作用<a class="headerlink" href="#enable_1" title="Permanent link">&para;</a></h3>
 <p>这是设计行为。Enable 只初始化并加载保存值，必须点击 <code>Apply Settings</code> 并确认才发送。</p>
 <h3 id="_19">模块窗口关不掉<a class="headerlink" href="#_19" title="Permanent link">&para;</a></h3>
@@ -3188,8 +3147,9 @@ Modules Manager Enable 相应测量方案。</p>
 <h3 id="_20">更换温控仪或磁体电源<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h3>
 <p>取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
 <code>system_instruments/</code>，用 Instrument Scanner 选择新地址和实现，再在现场配置中让对应
-<code>[[instruments]]</code> 引用新 <code>resource</code>，检查控制许可、上下限、速率和超时，然后重启。不要为不同仪表维护核心代码分支。首次启动
-会要求确认内容指纹；修改 System Instrument 后必须重新确认。核心自带内容只作为实现示例。</p>
+<code>[[instruments]]</code> 检查控制许可、上下限、速率和超时，然后重启。唯一候选资源会自动绑定；
+同一实现存在多个候选时才明确填写 <code>resource</code>。不要填写后端 Python 路径，也不要为不同仪表
+维护核心代码分支。核心自带内容只作为实现示例。</p>
 <h3 id="reconnecting">仪表一直 Reconnecting<a class="headerlink" href="#reconnecting" title="Permanent link">&para;</a></h3>
 <p>不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立仪表
 进程并读取实际状态。1 分钟仍失败时会 Fault，不会无限重试或猜测安全状态。</p>

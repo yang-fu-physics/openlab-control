@@ -1960,7 +1960,7 @@
 <h2 id="_2">运行流程<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>configs/site.local.toml
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │ [[resources]]：地址 + System Instrument ID + 选中的辅助读数
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        │ [[instruments]]：resource + 控制许可 + 安全范围
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        │ [[instruments]]：可选主读数 + 控制许可 + 安全范围
 </span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ▼
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>system_instruments/&lt;id&gt;/instrument.toml
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        │ backend + 面板模板 + 主读数 + 所有读数的名称/单位/精度
@@ -1983,9 +1983,7 @@
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>system_instruments/my_temperature_controller/
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ instrument.toml
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ backend.py
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├─ instrument.py          # 可选：底层命令与响应解析
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├─ requirements.lock      # 仅有框架外依赖时需要
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>└─ wheels/                # 可选：额外依赖的离线 wheel
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>└─ instrument.py          # 可选：底层命令与响应解析
 </span></code></pre></div>
 <p>不要按 TempA、TempB 或“主/副温度”拆目录。同一地址只创建一个实例和一个通讯会话；一台仪表
 返回的其他值放在 <code>auxiliary</code> 字典中。不同物理地址各有独立子进程，可以并发轮询。</p>
@@ -2027,6 +2025,12 @@
 </span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="n">max_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">400.0</span>
 </span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">max_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span>
 </span></code></pre></div>
+<p>同一 kind 只有一个 System 资源时可省略 <code>resource</code>，程序会自动绑定；多个候选资源才需要
+明确写出资源 ID。<code>backend</code> 只写在 <code>instrument.toml</code>，现场配置不填写 Python 路径。</p>
+<p>只有型号本身允许选择主输入时才在清单声明多个候选。例如 Lake Shore 340 清单使用
+<code>main_readings = ["temp_a", "temp_b"]</code>，现场 <code>[[instruments]]</code> 再写
+<code>main_reading = "temp_a"</code> 或 <code>main_reading = "temp_b"</code>。Cryocon 22C/24C 的 Temp B 固定为
+主温度，不使用这个选择。</p>
 <p>同一个信息只写一次：地址和实现选择在同一现场配置的资源区块；面板模板、主读数、单位和
 精度在清单；控制许可和安全范围在同一现场配置的 <code>[[instruments]]</code>。扫描器不会改写安全
 范围。外部 System Instrument 的 <code>[[instruments]]</code> 不再接受重复的 <code>backend</code>、
