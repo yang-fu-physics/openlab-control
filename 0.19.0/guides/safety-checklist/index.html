@@ -1994,7 +1994,8 @@
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>hold()</code> 使用新鲜读回，绝不代入缓存零或猜测值。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 读链路重连后读取真实 target/rate，不自动重放旧写命令。</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 恢复窗结束后进入 Faulted，并阻止后续控制。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 同类仪表只有一个 <code>control_enabled = true</code>，其余保持只读。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>sample_temp</code> 和 <code>field</code> 角色各自全局最多一个，角色为 <code>none</code> 的 controller 不被标准
+  温场 SEQ 选择。</li>
 </ul>
 <h2 id="_5">真机放行<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
 <ul class="task-list">

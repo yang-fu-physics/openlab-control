@@ -1912,17 +1912,16 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 <p>两处哈希必须完全一致。不要直接从 ZIP 内运行程序；先完整解压到普通可写目录。</p>
 <h2 id="_2">第一次启动<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <ol>
-<li>双击 <code>OpenLabControl.exe</code>。需要确认仪表地址时，双击同目录的
-   <code>InstrumentScanner.exe</code>。扫描器会自动读取已有配置并开始一次只读 VISA 扫描；TCP 仪表
-   只填写地址和端口，不发送识别指令。VISA 识别到唯一的 System Instrument 时会自动选择，
-   TCP 由操作者选择实现。System 与 Measurement 地址记录写入同一个
-   <code>configs/site.local.toml</code>；若该文件不存在，保存时会从 <code>default.toml</code> 创建。OpenLab Control
-   下次启动会自动优先加载该文件。两个程序共享同一个 <code>_internal</code>，不要单独移动任一 EXE。</li>
-<li>确认底部显示仿真 Temperature、Magnetic Field 和 2nd Stage。</li>
-<li>打开 <strong>Modules</strong>。刚解压时列表为空是正常现象，因为发布包不会预装测量模块。</li>
-<li>保持列表为空，打开 <code>examples/nested_scan.seq</code>。</li>
-<li>点击 Run，完成后检查 <code>runs/&lt;时间&gt;_nested_scan/</code>。无模块 Warning 是预期结果。</li>
-<li>再按下一节安装 <code>simulated_transport</code>，练习 Enable/Disable 和模块数据写入。</li>
+<li>双击 <code>OpenLabControl.exe</code>。程序读取 <code>configs/general.toml</code>；全新安装没有 System 面板也能
+   正常打开。</li>
+<li>需要确认仪表或启用仿真时，关闭主程序，再双击同目录的 <code>InstrumentScanner.exe</code>。两个
+  程序共享一个 <code>_internal</code>，不要单独移动任一 EXE。</li>
+<li>扫描器第一页只处理 VISA。未分配地址保存到 <code>configs/visa.resources.toml</code>，供
+   Measurement Module 使用；分配给 System Instrument 的地址只写入对应实例。</li>
+<li>后续每页配置一种已安装的 System Instrument。专用网络仪表的 Host/Port 由自己的模板
+   字段提供。最后一页可以选择三个仿真，它们默认都不勾选。</li>
+<li>检查完整写入预览和面板顺序后保存，再启动 <code>OpenLabControl.exe</code>。</li>
+<li>打开 <strong>Modules</strong>，按下一节使用示例模块练习 Enable/Disable 和数据写入。</li>
 </ol>
 <h2 id="_3">调整字号和窗口大小<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <p>打开 <strong>View → Appearance</strong>。整体界面可选自动或 75%–200%，文字还可独立选择
@@ -1944,8 +1943,10 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 读取保存的界面值，但不会自动 Apply。</p>
 <p><code>simulated_transport</code> 用于体验最小 Enable/Measure/Disable 流程，没有自定义设置。开发者
 教程中的 <code>tutorial_resistance</code> 是另一个示例，用来学习设置窗口、四行结果和模块附加功能。</p>
-<p>需要现场配置时，把 <code>configs/default.toml</code> 复制为 <code>configs/site.local.toml</code>，然后正常启动
-<code>OpenLabControl.exe</code>；程序会自动优先加载现场配置。不要把含真实地址的配置上传到公开仓库。</p>
+<p>现场只需维护 <code>configs/general.toml</code>；仪表地址和面板选择由 Instrument Scanner 写入
+<code>configs/visa.resources.toml</code> 与 <code>configs/instruments/</code>。不要把含真实地址的生成配置上传到
+公开仓库。扫描器每次保存都会完整覆盖最终预览中的生成文件；现有 <code>configs/pid/</code> 文件不会
+被覆盖或删除。</p>
 <div class="admonition danger">
 <p class="admonition-title">改地址不等于可以控制真机</p>
 <p>先取得与实际型号、固件和接线匹配的 <a href="../../development/system-instrument/">System Instrument</a>，

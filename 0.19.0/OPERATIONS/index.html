@@ -1214,10 +1214,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#seq-measureinitialize" class="md-nav__link">
+  <a href="#measure_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SEQ 旧 Measure/Initialize 无法运行
+        Measure 没有参数怎样选择模块
       
     </span>
   </a>
@@ -2703,10 +2703,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#seq-measureinitialize" class="md-nav__link">
+  <a href="#measure_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        SEQ 旧 Measure/Initialize 无法运行
+        Measure 没有参数怎样选择模块
       
     </span>
   </a>
@@ -2796,11 +2796,11 @@
 <h1 id="_1">操作手册<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
 <h2 id="_2">日常运行的最短流程<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <ol>
-<li>启动后检查温度、磁场和 Monitor 的实际状态。</li>
+<li>启动后检查已配置的 System 面板和实际状态；全新安装没有面板也是有效状态。</li>
 <li>打开 SEQ；需要测量模块时再 Enable，并核对 Status 和 Settings。</li>
 <li>有未 Apply 的设置时优先选择 <strong>Apply and Run</strong>；真机首跑不要跳过 Apply。</li>
 <li>核对数据文件位置，点击 Run；结束后检查 DAT、<code>events.dat</code> 和 <code>instrument_status.dat</code>。</li>
-<li>分享运行目录前检查 <code>configuration.toml</code>，其中可能含真实仪表地址和本机路径。</li>
+<li>分享运行目录前检查 <code>configuration/</code>，其中可能含真实仪表地址、本机路径和现场 PID。</li>
 </ol>
 <p>下面各节再解释安装、模块管理、异常和维护操作。</p>
 <h2 id="_3">安装与启动<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
@@ -2821,11 +2821,12 @@
 <p>或：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>.venv\Scripts\python.exe run.py
 </span></code></pre></div>
-<p>指定配置/SEQ：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>.venv\Scripts\python.exe run.py --config configs\site.local.toml --sequence examples\nested_scan.seq
+<p>指定 SEQ：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>.venv\Scripts\python.exe run.py --sequence examples\nested_scan.seq
 </span></code></pre></div>
-<p><code>default.toml</code> 保持为可提交的仿真模板；真实地址和现场限制写入 Git 已忽略的
-<code>site.local.toml</code>。<code>run.bat</code> 也会转发相同参数。</p>
+<p>程序读取唯一通用配置 <code>configs/general.toml</code>。System Instrument 实例与现场限制由
+Instrument Scanner 写入 <code>configs/instruments/</code>；未分配 VISA 写入
+<code>configs/visa.resources.toml</code>。全新安装没有 System 面板也能启动，三个内置仿真默认关闭。</p>
 <p>单独打开 DAT Browser：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>.venv\Scripts\python.exe run.py --data-file C:\Data\sample.dat
 </span></code></pre></div>
@@ -2841,7 +2842,7 @@ Manager 手动启用。</p>
    <code>alarm_tester_qqs</code>；管理员与测试员列表可重叠，接收器会去重。</li>
 <li>在运行 OpenLab Control 的账户环境中设置同一 Token，例如
    <code>OPENLAB_ALARM_TOKEN</code>；或者创建独立 Token 文件并配置 <code>token_file</code>。</li>
-<li>在 <code>configs/site.local.toml</code> 的 <code>[alarms.reporting]</code> 中核对地址后设置
+<li>在 <code>configs/general.toml</code> 的 <code>[alarms.reporting]</code> 中核对地址后设置
    <code>enabled = true</code>，重启程序。</li>
 <li>先用仿真 <code>Inject Warning</code>、<code>Inject Error</code> 验证：Warning 只到测试员，
    Error 同时到管理员和测试员，同一活动事件不会反复推送。</li>
@@ -2855,10 +2856,11 @@ Manager 手动启用。</p>
   Run/Pause/Stop。</li>
 <li>中央：浮动 SEQ 和 Data Browser 窗口。</li>
 <li>右侧 <code>Sequence Command Bar</code>：双击命令后设置参数并插入。</li>
-<li>底部 <code>Instrument Status</code>：Temperature、Magnetic Field、<code>2nd Stage</code> 等控制/Monitor；
+<li>底部 <code>Instrument Status</code>：按扫描器保存的全局顺序显示所有已启用固定面板；没有启用面板
+  时保持为空；
   <code>controller</code> 保持当前值、目标、速率和稳定状态样式，<code>readout</code> 只显示一个主读数，
-  <code>readout_grid</code> 以 2×2 最多显示四个读数，第五个开始放到右侧的下一个面板，<code>switch</code>
-  显示 0/1 状态和简单系统指令按钮。面板使用
+  <code>readout_grid</code> 以 2×2 最多显示四个读数；需要更多读数时由作者声明另一个固定面板。
+  <code>switch</code> 显示 0/1 状态和简单系统指令按钮。面板使用
   固定浅色配色，不跟随 Windows 深色主题变色；
   不再显示测量 Transport 块。</li>
 <li>工具栏 <code>Modules</code>：测量模块管理。</li>
@@ -2880,23 +2882,22 @@ DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同�
 <p>若尚未保存过 Appearance，主配置的 <code>application.ui_scale</code> 仍是整体缩放默认值；在对话框
 中保存后，个人选择优先。点击 <code>Restore Defaults</code> 会恢复主配置默认缩放、100% 文字和窗口
 记忆模式，并清除旧窗口位置。</p>
-<p>温度显示三位小数；Oe 显示两位。温度/磁场状态块双击打开手动控制，Monitor 只显示，
-不弹控制窗口。每种 temperature/field 最多一个 primary 供 SEQ 使用；其他 secondary
-默认只读显示。即使 secondary 显式允许手动控制，SEQ 也不会自动选择它。</p>
+<p>每个读数的小数位来自对应 System Instrument 清单。<code>controller</code> 面板双击打开手动控制；
+<code>readout</code> 和 <code>readout_grid</code> 不弹控制窗口。<code>sample_temp</code> 与 <code>field</code> 角色各自全局最多一个，
+供标准温场 SEQ 使用；角色为 <code>none</code> 的 controller 仍可手动控制，但不会被标准温场 SEQ
+选择。</p>
 <h2 id="_8">测量模块<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
 <h3 id="enable">Enable<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h3>
 <ol>
 <li>点击工具栏或菜单 <code>Modules</code>。</li>
 <li>管理器只有 <code>Enabled / Name / Version</code> 三列。</li>
 <li>勾选所需模块。</li>
-<li>首次加载或内容变化时，核对弹窗中的类型、ID、版本、完整路径和 SHA-256 指纹后确认
-   信任；拒绝时不加载任何源码。</li>
-<li>程序显示 <code>Initializing &lt;module&gt;...</code>；初始化成功后才真正勾选并打开模块窗口。</li>
+<li>程序直接加载所选目录中的模块代码，并显示 <code>Initializing &lt;module&gt;...</code>；初始化成功后才
+   真正勾选并打开模块窗口。</li>
 <li>初始化失败会弹 Error，仍保持 Disabled。</li>
 </ol>
-<p>首次指纹用于建立这台电脑上的信任基线。发布包自带模板的来源由整个 ZIP 的 SHA-256
-校验保证；单独取得的第三方 Measurement Module，应与发布者提供的摘要或签名比较。内容变化后必须重新
-确认，不能只因为名称相同就继续信任。</p>
+<p>程序不维护模块信任状态，也不在 Enable 时弹出代码指纹确认。只把来源已经核对过的模块
+复制到 <code>modules/</code>；第三方模块是可执行代码，安装前应由操作者在框架外确认来源和内容。</p>
 <p>如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 <code>Sequence Command Bar</code> 会新增一个
 直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
 worker 通信失效后立即移除，不会留下一个无法执行的菜单项。</p>
@@ -3011,7 +3012,7 @@ desired settings 可能与实际状态不同时才使用。真机首跑或状态
 <h2 id="_13">运行<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h2>
 <p>运行前建议：</p>
 <ol>
-<li>检查 Temperature/Field/2nd Stage 状态。</li>
+<li>检查全部已启用 System 面板；含温场命令时确认 <code>sample_temp</code> / <code>field</code> 面板已连接。</li>
 <li>Enable 所需模块并检查 Status。</li>
 <li>确认需 Apply 的 Settings 已发送。</li>
 <li>保存或核对 SEQ；Run 会另外保存实际执行快照。</li>
@@ -3050,9 +3051,10 @@ desired settings 可能与实际状态不同时才使用。真机首跑或状态
 <li><code>Set</code>；</li>
 <li><code>Hold Current</code>。</li>
 </ul>
-<p>弹窗使用配置上下限和最大速率。<code>2nd Stage</code> 等 Monitor 没有手动控制。
-<code>control_enabled = false</code> 的 secondary 也没有手动控制。运行时仍会再次检查角色、
-连接状态、Target 和 Rate，因此不能通过脚本绕过参数窗口限制。</p>
+<p>弹窗使用对应 controller 面板的配置上下限和最大速率。<code>2nd Stage</code> 等只读面板没有手动
+控制。角色为 <code>none</code> 的 controller 仍可从自己的面板手动控制，但标准温场 SEQ 不会选择
+它。运行时仍会再次检查控制端点、连接状态、Target 和 Rate，因此不能通过脚本绕过参数
+窗口限制。</p>
 <h2 id="warning-error">Warning 与 Error<a class="headerlink" href="#warning-error" title="Permanent link">&para;</a></h2>
 <h3 id="warning">Warning<a class="headerlink" href="#warning" title="Permanent link">&para;</a></h3>
 <ul>
@@ -3103,7 +3105,7 @@ Quantum Design 文件优先按 <code>FILEOPENTIME</code> 校准；OpenLab 文件
 <h2 id="_15">输出与备份<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h2>
 <p>一次 Run 至少保留：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>sequence.seq
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>configuration.toml
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>configuration/
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>module_settings/*.settings.toml
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>module_settings/*.status-at-start.json
 </span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>experiment.dat
@@ -3111,10 +3113,11 @@ Quantum Design 文件优先按 <code>FILEOPENTIME</code> 校准；OpenLab 文件
 </span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>events.dat
 </span></code></pre></div>
 <p>建议实验结束后整体复制整个运行目录，而不是只复制 DAT。模块 desired 设置和实际 Status 对复现实验同样重要。
-Load 运行目录中的 <code>sequence.seq</code> 会兼容导入这些 desired settings，但不会自动发送到
+Load 运行目录中的 <code>sequence.seq</code> 会导入这些 desired settings，但不会自动发送到
 仪表。</p>
-<p>运行目录中的 <code>configuration.toml</code> 是本次主配置的完整副本，可能含真实仪表地址和本机
-路径。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。</p>
+<p>运行目录中的 <code>configuration/</code> 按原结构保存本次使用的 <code>general.toml</code>、存在时的
+<code>visa.resources.toml</code>、<code>instruments/*.toml</code> 和 <code>pid/*.toml</code>。它可能含真实仪表地址、本机
+路径和现场 PID。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。</p>
 <p><code>instrument_status.dat</code> 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
 稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
 记录频率或增加仪表查询。</p>
@@ -3141,15 +3144,15 @@ Load 运行目录中的 <code>sequence.seq</code> 会兼容导入这些 desired 
 关闭；查看 Error，并按该模块硬件操作说明人工退出输出、检查仪表状态后再重新 Enable。</p>
 <h3 id="measure_1">Measure 没有模块数据<a class="headerlink" href="#measure_1" title="Permanent link">&para;</a></h3>
 <p>检查 Run 前是否 Enable 模块。没有模块时程序会写一行温场/Monitor 系统状态并 Warning，不会中止。</p>
-<h3 id="seq-measureinitialize">SEQ 旧 Measure/Initialize 无法运行<a class="headerlink" href="#seq-measureinitialize" title="Permanent link">&para;</a></h3>
-<p>当前版本不兼容旧写法。删除 Initialize；把 Measure 改为无参数 <code>T Measure</code>，并在
-Modules Manager Enable 相应测量方案。</p>
+<h3 id="measure_2">Measure 没有参数怎样选择模块<a class="headerlink" href="#measure_2" title="Permanent link">&para;</a></h3>
+<p>当前 SEQ 使用无参数 <code>T Measure</code>。要参与测量的方案在 Modules Manager 中 Enable；Run
+开始时程序冻结模块集合、列和槽位。</p>
 <h3 id="_20">更换温控仪或磁体电源<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h3>
 <p>取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
-<code>system_instruments/</code>，用 Instrument Scanner 选择新地址和实现，再在现场配置中让对应
-<code>[[instruments]]</code> 检查控制许可、上下限、速率和超时，然后重启。唯一候选资源会自动绑定；
-同一实现存在多个候选时才明确填写 <code>resource</code>。不要填写后端 Python 路径，也不要为不同仪表
-维护核心代码分支。核心自带内容只作为实现示例。</p>
+<code>system_instruments/</code>，再打开 Instrument Scanner。在该型号页面添加物理实例、选择 VISA
+地址或填写模板声明的专用连接字段，并确认固定面板、角色、读数、上下限、速率和稳定参数。
+最后一页检查全部面板的顺序和完整写入预览后保存，再重启。分配给 System Instrument 的
+VISA 地址不会保留在 Measurement 资源清单；核心自带内容只作为实现示例。</p>
 <h3 id="reconnecting">仪表一直 Reconnecting<a class="headerlink" href="#reconnecting" title="Permanent link">&para;</a></h3>
 <p>不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立仪表
 进程并读取实际状态。1 分钟仍失败时会 Fault，不会无限重试或猜测安全状态。</p>
@@ -3157,8 +3160,8 @@ Modules Manager Enable 相应测量方案。</p>
 <p>文件名标签会中间省略并在悬停时显示完整路径，不应再改变左栏最小宽度。若仍异常，请记录分辨率、UI Scale 和截图。</p>
 <h3 id="4k">4K 字体不合适<a class="headerlink" href="#4k" title="Permanent link">&para;</a></h3>
 <p>先使用 <strong>View → Appearance</strong>：整体大小保持 <code>Automatic</code>，再单独选择 70%–150% 的
-<code>Text size</code>。如果个人外观文件尚未建立，也可以在当前启动配置（现场通常是
-<code>configs/site.local.toml</code>）用 <code>ui_scale = "auto"</code> 或 0.75–2.0 设定现场默认值后重启。</p>
+<code>Text size</code>。如果个人外观文件尚未建立，也可以在 <code>configs/general.toml</code> 中用
+<code>ui_scale = "auto"</code> 或 0.75–2.0 设定现场默认值后重启。</p>
 <p>多显示器更换后若窗口落在不可见区域，选择 <code>Reset Window Positions</code> 并保存；下次启动会
 使用当前屏幕的默认布局。</p>
 <h3 id="dat">DAT 图不刷新<a class="headerlink" href="#dat" title="Permanent link">&para;</a></h3>

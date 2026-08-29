@@ -1955,31 +1955,53 @@
 需要新包时更新核心依赖并重新构建发布包，不在运行中的程序里建立第二套 Python 环境。</p>
 <p>System Instrument 的作者接口是同步的
 <code>open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close</code>。
-驱动只返回包含 <code>value</code> 和可选 <code>target/rate/moving/ready/auxiliary</code> 的普通字典；核心统一生成
-时间戳、连接状态和内部快照。<code>instrument.toml</code> 是主读数及显示元数据的唯一来源；同一份
-<code>site.local.toml</code> 的资源区块保存物理地址、实现选择和操作者勾选的辅助读数，
-<code>[[instruments]]</code> 保存控制许可与安全参数。</p>
+驱动只返回包含 <code>value</code>、可选 <code>auxiliary</code> 和控制状态的普通字典。单控制端点可在顶层返回
+<code>target/rate/moving/ready</code>；多个不同控制端点必须返回按 control ID 分组的 <code>controls</code>。
+核心统一生成时间戳、连接状态和内部快照，并按 Controller 面板独立判稳。</p>
+<p>配置边界也分层：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>configs/general.toml
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>        通用应用、日志、报警和进程参数
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>system_instruments/&lt;id&gt;/instrument.toml
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>        API v4 作者模板：config_fields / controls / panels / readings / sequence_commands
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>                    │ Instrument Scanner
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>                    ▼
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>configs/instruments/&lt;id&gt;.toml
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>        一个或多个物理实例，只引用固定 panel ID 并保存现场选择与限制
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>configs/visa.resources.toml
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        未分配给 System Instrument 的 VISA，只提供给 Measurement Module
+</span></code></pre></div>
+<p>扫描器把作者清单中除 <code>panels</code> 模板外的静态元数据复制到生成文件，并写入
+<code>[[instances]]</code>。每个物理实例只创建一个 worker 和通讯会话；多个面板与控制端点复用它。
+System 实例选中的 VISA 地址不会进入 Measurement 资源清单。专用网络仪表由自己的
+<code>config_fields</code> 提供 <code>host</code>、<code>port</code> 等连接值。</p>
+<p>实例面板的 <code>role</code> 只有 <code>none</code>、<code>sample_temp</code> 和 <code>field</code>。后两者各自全局最多一个，只能
+用于支持对应 kind 的 controller；<code>none</code> 可重复。没有任何生成 System 面板时配置仍有效，
+主程序可以启动。三个内置仿真也必须由操作者明确启用。</p>
+<p>扫描器保存的是生成配置全集：选中的文件原子覆盖，不在最终预览中的生成文件删除。PID
+文件是例外；第一次从作者示例或操作者选择的来源复制后，扫描器不再覆盖或删除。</p>
 <h2 id="measurement-module">Measurement Module 协议<a class="headerlink" href="#measurement-module" title="Permanent link">&para;</a></h2>
 <p>作者只需实现：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>open(api)
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>measure(slot, api) -&gt; row | (row, raw_values)
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>close(api)
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>open(api)
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>measure(slot, api) -&gt; row | (row, raw_values)
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>close(api)
 </span></code></pre></div>
 <p>可选：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>configure(settings, api)
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>on_event(event, data, api)
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>slots = N | sequence[int] | property
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>sequence_commands = sequence[dict]
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>execute_sequence_command(command_id, parameters, api)
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>frontend.py: Frontend(QWidget) with load()/dump()
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>configure(settings, api)
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>on_event(event, data, api)
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>slots = N | sequence[int] | property
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sequence_commands = sequence[dict]
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>execute_sequence_command(command_id, parameters, api)
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>frontend.py: Frontend(QWidget) with load()/dump()
 </span></code></pre></div>
 <p>核心调用顺序：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Enable:  spawn worker → 验证可选指令声明 → open → 向 UI 注册指令
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>Apply:   configure
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>Run:     on_event("status") → on_event("run_start") → read slots
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>Measure: 对每个逻辑槽位并行调用参与模块的 measure
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>Finish:  on_event("run_end", reason)
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>Disable: close → shutdown worker
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Enable:  spawn worker → 验证可选指令声明 → open → 向 UI 注册指令
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Apply:   configure
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>Run:     on_event("status") → on_event("run_start") → read slots
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>Measure: 对每个逻辑槽位并行调用参与模块的 measure
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>Finish:  on_event("run_end", reason)
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>Disable: close → shutdown worker
 </span></code></pre></div>
 <p>模块指令元数据只由隔离 worker 读取并转换为受限 JSON；主进程不会为发现菜单而提前导入
 <code>backend.py</code>。只有 <code>open</code> 完成后的 Enabled 消息携带注册表，Frontend 创建成功后才加入
@@ -2013,15 +2035,19 @@ Stop、Error 和任务取消都不向 System Instrument 发送 Set 或 Hold。Sy
 状态，立即 Faulted，不自动重试。</p>
 <h2 id="_4">数据与事件<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <p>一次 Run 固定保存：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>runs/&lt;timestamp&gt;_&lt;sequence&gt;/
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├─ sequence.seq
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>├─ configuration.toml
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>├─ module_settings/*.settings.toml
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>├─ module_settings/*.status-at-start.json
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>├─ rawdata/*.rawdata
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>├─ experiment.dat
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>├─ instrument_status.dat
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>└─ events.dat
+<div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>runs/&lt;timestamp&gt;_&lt;sequence&gt;/
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├─ sequence.seq
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├─ configuration/
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│  ├─ general.toml
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>│  ├─ visa.resources.toml       # 原文件存在时
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>│  ├─ instruments/*.toml
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>│  └─ pid/*.toml
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>├─ module_settings/*.settings.toml
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>├─ module_settings/*.status-at-start.json
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>├─ rawdata/*.rawdata
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>├─ experiment.dat
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>├─ instrument_status.dat
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>└─ events.dat
 </span></code></pre></div>
 <p><code>DatRunLogger</code> 是唯一写入者。每条测量行写入前由核心取得测量专用即时温场快照；若模块刚在
 0.1 秒内读取则复用该样本。常规仪表轮询

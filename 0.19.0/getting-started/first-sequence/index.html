@@ -728,7 +728,7 @@
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        在界面中建立命令
+        先启用仿真面板
       
     </span>
   </a>
@@ -737,6 +737,17 @@
       
         <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在界面中建立命令
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         运行并检查结果
@@ -1802,7 +1813,7 @@
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        在界面中建立命令
+        先启用仿真面板
       
     </span>
   </a>
@@ -1811,6 +1822,17 @@
       
         <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        在界面中建立命令
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         运行并检查结果
@@ -1854,7 +1876,11 @@
 <h1 id="seq">运行第一条 SEQ<a class="headerlink" href="#seq" title="Permanent link">&para;</a></h1>
 <p>这一页只使用仿真温度和磁场，不需要连接仪表。SEQ 是一棵可以缩进的命令树；扫描命令下面
 可以继续放扫描或 <code>Measure</code>。</p>
-<h2 id="_1">在界面中建立命令<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<h2 id="_1">先启用仿真面板<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>全新安装不会自动启用 System Instrument。先关闭主程序并打开 Instrument Scanner，在最后
+一页勾选 <strong>Simulated Temperature</strong>、<strong>Simulated Magnetic Field</strong> 和 <strong>Simulated 2nd Stage</strong>，
+检查面板顺序后保存。然后再启动 OpenLab Control。这个操作只生成仿真配置，不连接真实仪表。</p>
+<h2 id="_2">在界面中建立命令<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <ol>
 <li>启动程序，确认底部 Temperature、Magnetic Field 和 2nd Stage 都有仿真读数。</li>
 <li>点击 <strong>File → New</strong>。编辑器中会保留最后一行 <code>End Sequence</code>。</li>
@@ -1881,18 +1907,21 @@
 <p><code>T</code> 表示该命令启用；切换为 <code>F</code> 后该命令不会执行。<code>Settle</code> 表示到达目标并满足稳定条件后
 再继续。这里使用明确的 <code>create</code>，不是需要替换的占位文字；默认的 <code>open|create</code> 表示文件
 存在时追加、不存在时创建。</p>
-<h2 id="_2">运行并检查结果<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h2 id="_3">运行并检查结果<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <ol>
 <li>点击主窗口左侧或工具栏的 <strong>Run</strong>。</li>
 <li>等待状态变为 <strong>Completed</strong>。</li>
 <li>打开 <code>runs/&lt;时间&gt;_first-run/</code>，应看到：</li>
 </ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sequence.seq
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>configuration.toml
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>module_settings/
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>experiment.dat
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>instrument_status.dat
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>events.dat
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>runs/&lt;时间&gt;_first-run/
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ sequence.seq
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ configuration/
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│  ├─ general.toml
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│  └─ instruments/
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>├─ module_settings/
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>├─ experiment.dat
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>├─ instrument_status.dat
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>└─ events.dat
 </span></code></pre></div>
 <p>如果没有 Enable 任何 Measurement Module，<code>Measure</code> 仍会写系统温场快照，并产生一条
 “没有模块”的 Warning。这是正常的练习结果。若已 Enable 四通道教学模块，每个场点会按

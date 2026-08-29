@@ -1978,6 +1978,9 @@
 </tr>
 </tbody>
 </table>
+<p>上表是单控制端点的简写。若同一实例启用了多个不同的 control，顶层仍返回 <code>value</code> 和
+<code>auxiliary</code>，但每个回路的 <code>target/rate/moving/ready</code> 必须放进
+<code>controls[control_id]</code>。完整示例见 <a href="../system-instrument/#multiple-controls">System Instrument 从这里开始</a>。</p>
 <p>核心从 <code>instrument.toml</code> 取得名称、单位和小数位，并负责时间戳、连接状态和内部快照。后端
 不要重复返回这些元数据。数值必须有限；附加值可以是有限数值、短文字、布尔值或 <code>None</code>。</p>
 <p>完整状态读取仍要检查所有安全状态，即使操作者没有勾选某个辅助读数。例如 TempA 未显示时，
@@ -2002,40 +2005,58 @@ TempA 过温仍必须报错。</p>
 <p>“优先”不会中断已经发出的命令，所以底层 I/O 仍必须有有限超时。后端不要另开线程访问同一
 VISA Session。</p>
 <h2 id="_3">一台仪表返回多个值<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>在清单中声明一次：</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">main_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temp_b"</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="k">[panel]</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"controller"</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">[readings.temp_b]</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Sample Temperature (Temp B)"</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">[readings.temp_a]</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Cold Head Temperature (Temp A)"</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
-</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="k">[readings.heater_output]</span>
-</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Heater Output"</span>
-</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%FS"</span>
-</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
+<p>在 API v4 清单中分别声明固定面板和读数：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[[controls]]</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"loop_1"</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Loop 1"</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="k">[[panels]]</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"control"</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Sample Temperature"</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"controller"</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">control</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"loop_1"</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">reading_options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"temp_b"</span><span class="p">]</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">default_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temp_b"</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">min_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2.0</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">max_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">400.0</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">default_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.0</span>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="n">max_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="n">stability_tolerance</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">stability_max_slope_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="n">stability_dwell_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30.0</span>
+</span><span id="__span-2-19"><a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="n">stability_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1800.0</span>
+</span><span id="__span-2-20"><a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="n">stability_window_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30.0</span>
+</span><span id="__span-2-21"><a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>
+</span><span id="__span-2-22"><a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="k">[[panels]]</span>
+</span><span id="__span-2-23"><a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"monitor"</span>
+</span><span id="__span-2-24"><a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Temperature and Heater"</span>
+</span><span id="__span-2-25"><a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"readout_grid"</span>
+</span><span id="__span-2-26"><a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="n">readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"temp_a"</span><span class="p">,</span><span class="w"> </span><span class="s2">"heater_output"</span><span class="p">]</span>
+</span><span id="__span-2-27"><a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>
+</span><span id="__span-2-28"><a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="k">[readings.temp_b]</span>
+</span><span id="__span-2-29"><a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Sample Temperature (Temp B)"</span>
+</span><span id="__span-2-30"><a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
+</span><span id="__span-2-31"><a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+</span><span id="__span-2-32"><a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>
+</span><span id="__span-2-33"><a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="k">[readings.temp_a]</span>
+</span><span id="__span-2-34"><a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Cold Head Temperature (Temp A)"</span>
+</span><span id="__span-2-35"><a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
+</span><span id="__span-2-36"><a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+</span><span id="__span-2-37"><a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>
+</span><span id="__span-2-38"><a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a><span class="k">[readings.heater_output]</span>
+</span><span id="__span-2-39"><a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Heater Output"</span>
+</span><span id="__span-2-40"><a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%FS"</span>
+</span><span id="__span-2-41"><a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
 </span></code></pre></div>
-<p>除 <code>main_reading</code> 外的条目自动显示为扫描器复选项。操作者勾选的键在
-<code>config.auxiliary_readings</code> 中；<code>read_status()</code> 的 <code>auxiliary</code> 必须完整返回这些键。键和顺序
-在运行中不能变化。</p>
-<p>前面板主读数使用清单选择的模板；<code>readout</code> 只显示主读数，<code>readout_grid</code> 以 2×2 最多
-放四个读数，第五个开始放到右侧下一个网格面板；<code>switch</code> 把 0/1 主读数显示为 Off/On，
-并显示清单指令按钮。控制面板和开关面板的辅助读数也按网格规则排列。即使 <code>readout</code>
-不显示辅助读数，已选择的辅助读数仍会进入状态日志。结构化字典保留数值类型、单位和
-精度；不要把多个
-值拼成一段字符串。</p>
-<p>控制器需要把辅助温度单独显示、再把不同回路状态分组时，在清单中使用
-<code>[[panel.sections]]</code>。段模板仍是 <code>readout</code> 或 <code>readout_grid</code>；网格标题以及按现场布尔键隐藏
-段的写法见<a href="../system-instrument/">System Instrument 从这里开始</a>。布局只改变显示，不改变
-所选辅助读数进入状态日志和即时测量的规则。</p>
+<p>扫描器为实例列出这两个固定面板。操作者可以分别开启、关闭和排序它们，并给 controller
+选择 <code>temp_b</code> 与角色；不能临时创建作者未声明的面板。运行时会收集所有已开启面板引用的
+读数。<code>read_status()</code> 的 <code>auxiliary</code> 应返回这些附加键，键集合在运行中不能变化。</p>
+<p><code>readout</code> 显示一个读数，<code>readout_grid</code> 显示一到四个，<code>switch</code> 把 0/1 状态显示为 Off/On
+并提供清单引用的指令按钮。多个面板仍共用同一物理实例和通讯会话。结构化字典保留数值
+类型、单位和精度；不要把多个值拼成一段字符串。</p>
+<p>一个实例有多个 Controller 时，各面板分别保存目标、速率、动作、ready 和核心判定的
+稳定状态。标准温度或磁场角色对应的回路仍作为实验 DAT 的主控制值；所有已启用 Controller
+的完整独立状态都写入 <code>instrument_status.dat</code>。</p>
 <h2 id="_4">两类数据文件<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2054,7 +2075,7 @@ VISA Session。</p>
 <tr>
 <td><code>instrument_status.dat</code></td>
 <td>Run 期间按独立周期</td>
-<td>完整值、目标、速率、稳定性、连接和辅助读数</td>
+<td>每个 Controller 的独立状态，以及每台物理仪表一次连接信息和辅助读数</td>
 </tr>
 </tbody>
 </table>

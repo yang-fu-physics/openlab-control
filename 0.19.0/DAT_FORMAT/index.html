@@ -2111,19 +2111,24 @@
 <p>默认结构：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>runs/20260723_120000_nested_scan/
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├─ sequence.seq
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─ configuration.toml
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├─ module_settings/
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  ├─ simulated_transport.settings.toml
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  └─ simulated_transport.status-at-start.json
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├─ rawdata/
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  └─ experiment__&lt;path-digest&gt;__&lt;module-id&gt;.rawdata
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├─ experiment.dat
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├─ instrument_status.dat
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>└─ events.dat
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─ configuration/
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  ├─ general.toml
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  ├─ visa.resources.toml
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  ├─ instruments/
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  └─ pid/
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>├─ module_settings/
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  ├─ simulated_transport.settings.toml
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│  └─ simulated_transport.status-at-start.json
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├─ rawdata/
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│  └─ experiment__&lt;path-digest&gt;__&lt;module-id&gt;.rawdata
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>├─ experiment.dat
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├─ instrument_status.dat
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>└─ events.dat
 </span></code></pre></div>
 <ul>
 <li><code>sequence.seq</code>：实际执行文档快照，包括 T/F 状态。</li>
-<li><code>configuration.toml</code>：主配置完整副本。</li>
+<li><code>configuration/</code>：本次实际使用的通用配置、未分配 VISA、System Instrument 实例和 PID
+  文件快照；可选文件或目录只在源配置存在时出现。</li>
 <li><code>*.settings.toml</code>：本次 Run 时模块 Settings 页的期望值。</li>
 <li><code>*.status-at-start.json</code>：Run 开始前从模块后台读取的实际状态。</li>
 <li>只为 Enabled 模块生成设置/状态快照。</li>
@@ -2285,20 +2290,25 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。</p>
 </span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>; OpenLab Control Instrument Status Log
 </span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>...
 </span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>[Data]
-</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Timestamp(s),Time(s),temperature.Current(K),temperature.Target(K),temperature.Rate(K/min),temperature.Activity,temperature.Stability,temperature.Ready,temperature.Connection,temperature.ReadingAge(s),temperature.Message,...
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>Timestamp(s),Time(s),temperature.main.Current(K),temperature.main.Target(K),temperature.main.Rate(K/min),temperature.main.Activity,temperature.main.Stability,temperature.main.Ready,temperature.Connection,temperature.ReadingAge(s),temperature.Message,...
 </span></code></pre></div>
-<p>每个配置仪表拥有同一组固定列：</p>
+<p>每个已启用 <code>controller</code> 面板使用 <code>&lt;仪表ID&gt;.&lt;面板ID&gt;</code> 前缀，分别拥有：</p>
 <ul>
 <li><code>Current</code>、<code>Target</code>、<code>Rate</code>：读回值、当前目标和每分钟速率；Monitor 的后两项为空；</li>
 <li><code>Activity</code>：<code>idle</code>、<code>moving</code>、<code>holding</code>、<code>fault</code> 等仪表动作；</li>
 <li><code>Stability</code>：<code>moving</code>、<code>settling</code>、<code>stable</code>、<code>timed_out</code>、<code>stale</code> 或
   <code>not_applicable</code>；</li>
 <li><code>Ready</code>：仪表提供该状态时为 <code>true/false</code>；空值表示该 System Instrument 没有独立状态位；</li>
+</ul>
+<p>同一物理实例即使有多个 Controller，也只写一次以下物理状态，前缀仅为 <code>&lt;仪表ID&gt;</code>：</p>
+<ul>
 <li><code>Connection</code>：连接生命周期，例如 <code>connected</code>、<code>reconnecting</code>、<code>faulted</code>；</li>
 <li><code>ReadingAge(s)</code>：写入时刻与仪表单调采样时间的差，用于定位排队或旧读数；</li>
-<li>System Instrument 声明的附加读数紧随该仪表固定列，例如辅助温度、加热输出和量程；</li>
-<li><code>Message</code>：驱动、恢复或状态说明。</li>
+<li><code>Message</code>：驱动、恢复或状态说明；</li>
+<li>System Instrument 声明的附加读数，例如辅助温度、加热输出和量程。</li>
 </ul>
+<p>没有 Controller 的 Monitor 只写 <code>&lt;仪表ID&gt;.Current</code>，不会生成空的 Target、Rate 或稳定性
+列。关闭的 Controller 不进入本次 Run 的固定 Schema。</p>
 <p>文件使用和实验 DAT 相同的绝对时间 epoch、数值精度与逐行 Flush 策略。它只记录 Run
 期间状态；Idle 监视仍显示在状态块和 Live Trend，但不会为尚未开始的实验创建运行目录。</p>
 <h2 id="_8">写入保证<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>

@@ -1046,10 +1046,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#visa" class="md-nav__link">
     <span class="md-ellipsis">
       
-        从统一资源表选择测量仪表
+        从未分配 VISA 清单选择测量仪表
       
     </span>
   </a>
@@ -1079,7 +1079,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         主程序已经准备好的功能
@@ -1090,7 +1090,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         窗口代码不要做这些事
@@ -1843,10 +1843,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#visa" class="md-nav__link">
     <span class="md-ellipsis">
       
-        从统一资源表选择测量仪表
+        从未分配 VISA 清单选择测量仪表
       
     </span>
   </a>
@@ -1876,7 +1876,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         主程序已经准备好的功能
@@ -1887,7 +1887,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         窗口代码不要做这些事
@@ -1980,9 +1980,9 @@
 </ul>
 <p>“加载设置”和“应用设置”故意分开。打开模块或载入 SEQ 时，不会因为旧设置而自动改变
 仪表。</p>
-<h2 id="_2">从统一资源表选择测量仪表<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>设置窗口不要自己扫描 VISA。独立扫描工具已经让用户确认过 Measurement 资源，前端只需
-把稳定 ID 放进下拉框：</p>
+<h2 id="visa">从未分配 VISA 清单选择测量仪表<a class="headerlink" href="#visa" title="Permanent link">&para;</a></h2>
+<p>设置窗口不要自己扫描 VISA。Instrument Scanner 已把未分配给 System Instrument 的地址写入
+<code>configs/visa.resources.toml</code>，前端只需把稳定 ID 放进下拉框：</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="bp">self</span><span class="o">.</span><span class="n">resource_input</span> <span class="o">=</span> <span class="n">QComboBox</span><span class="p">()</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">for</span> <span class="n">resource_id</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">api</span><span class="o">.</span><span class="n">resources</span><span class="p">()</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">identity</span> <span class="o">=</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"identity"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">info</span><span class="p">[</span><span class="s2">"address"</span><span class="p">]</span>
@@ -2040,7 +2040,7 @@
 <div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">api</span><span class="o">.</span><span class="n">status</span><span class="p">({</span><span class="s2">"Connection"</span><span class="p">:</span> <span class="s2">"Connected"</span><span class="p">,</span> <span class="s2">"State"</span><span class="p">:</span> <span class="s2">"Ready"</span><span class="p">})</span>
 </span></code></pre></div>
 <p>状态文字只用于显示。不能因为标签写着 “Connected” 就跳过真正的仪表读回。</p>
-<h2 id="_3">主程序已经准备好的功能<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h2 id="_2">主程序已经准备好的功能<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <p>不需要自己重复制作：</p>
 <ul>
 <li>Settings 和 Status 两个页面；</li>
@@ -2056,7 +2056,7 @@
 <p>用户可能把整体大小设为 75%–200%，并把文字额外设为 70%–150%。请使用 Qt layout、
 <code>sizeHint</code> 和可滚动设置页，不要使用绝对坐标、固定字号或仅在一种 DPI 下刚好放得下的
 固定高度。核心会处理默认窗口宽度和已保存几何，模块不需要读取个人外观配置。</p>
-<h2 id="_4">窗口代码不要做这些事<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<h2 id="_3">窗口代码不要做这些事<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <ul>
 <li>不要打开 VISA、串口或厂商软件连接；</li>
 <li>不要自行枚举全部 VISA 地址；只显示 <code>api.resources()</code>；</li>

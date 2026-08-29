@@ -1204,7 +1204,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        运行流程
+        作者模板与现场实例
       
     </span>
   </a>
@@ -1215,7 +1215,18 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        一个目录对应一种物理型号/协议
+        一个目录对应一种物理型号或协议
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-v4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API v4 清单
       
     </span>
   </a>
@@ -1226,18 +1237,35 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        两份文件各管一件事
+        固定面板与角色
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="固定面板与角色">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        多个独立控制回路
       
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#kind" class="md-nav__link">
+  <a href="#system" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kind 与控制许可
+        简单 System 指令
       
     </span>
   </a>
@@ -1246,6 +1274,28 @@
       
         <li class="md-nav__item">
   <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        后台方法
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PID 文件
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         阅读顺序
@@ -1846,7 +1896,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        运行流程
+        作者模板与现场实例
       
     </span>
   </a>
@@ -1857,7 +1907,18 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        一个目录对应一种物理型号/协议
+        一个目录对应一种物理型号或协议
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-v4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API v4 清单
       
     </span>
   </a>
@@ -1868,18 +1929,35 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        两份文件各管一件事
+        固定面板与角色
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="固定面板与角色">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#multiple-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        多个独立控制回路
       
     </span>
   </a>
   
 </li>
+        
+      </ul>
+    </nav>
+  
+</li>
       
         <li class="md-nav__item">
-  <a href="#kind" class="md-nav__link">
+  <a href="#system" class="md-nav__link">
     <span class="md-ellipsis">
       
-        kind 与控制许可
+        简单 System 指令
       
     </span>
   </a>
@@ -1888,6 +1966,28 @@
       
         <li class="md-nav__item">
   <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        后台方法
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PID 文件
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
       
         阅读顺序
@@ -1919,7 +2019,7 @@
 
 <h1 id="system-instrument">System Instrument 从这里开始<a class="headerlink" href="#system-instrument" title="Permanent link">&para;</a></h1>
 <p>System Instrument 负责实验期间一直存在的仪表，例如主温控仪、主磁场控制器、压缩机开关，
-以及一直显示的冷头温度、压力或液位监视仪表。</p>
+以及持续显示的冷头温度、压力或液位监视仪表。</p>
 <p>电阻表、电压表、换向器和只在 <code>Measure</code> 时工作的测量组合属于 Measurement Module。</p>
 <h2 id="_1">先判断写哪一种<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
 <table>
@@ -1943,7 +2043,7 @@
 <td>System Instrument（<code>monitor</code>）</td>
 </tr>
 <tr>
-<td>程序一直显示，并提供简单的 On/Off 系统指令</td>
+<td>程序一直显示，并提供简单 On/Off 指令</td>
 <td>System Instrument（<code>monitor</code> + <code>switch</code>）</td>
 </tr>
 <tr>
@@ -1957,156 +2057,199 @@
 </tbody>
 </table>
 <p>System Instrument 通常随实验系统固定；Measurement Module 会按实验频繁 Enable 或 Disable。</p>
-<h2 id="_2">运行流程<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>configs/site.local.toml
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │ [[resources]]：地址 + System Instrument ID + 选中的辅助读数
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        │ [[instruments]]：可选主读数 + 控制许可 + 安全范围
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ▼
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>system_instruments/&lt;id&gt;/instrument.toml
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        │ backend + 面板模板 + 主读数 + 所有读数的名称/单位/精度
+<h2 id="_2">作者模板与现场实例<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>两份文件承担不同职责：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>system_instruments/&lt;id&gt;/instrument.toml
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        │ API v4 作者模板：字段、控制端点、固定面板、读数、指令
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>        │
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ▼ Instrument Scanner
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>configs/instruments/&lt;id&gt;.toml
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        │ 一个或多个物理实例：连接值、面板启用、角色、顺序和限制
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        ▼
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>独立子进程 ── 串行访问 ── VISA / TCP / 串口 / 厂商库 ── 真实仪表
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>每个物理实例一个独立子进程和通讯会话
 </span></code></pre></div>
-<p>后端只有几个容易理解的方法：</p>
-<ul>
-<li><code>open()</code>：连接并确认身份和初始状态；</li>
-<li><code>read_status()</code>：完整状态，供前面板、安全检查、判稳和状态日志使用；</li>
-<li><code>read_measurement()</code>：可选的快速主读数；不写时自动调用 <code>read_status()</code>；</li>
-<li><code>set_target()</code>：可控温度或磁场仪表设置目标；</li>
-<li><code>hold()</code>：用新鲜读数保持当前状态；</li>
-<li><code>execute_sequence_command()</code>：可选，执行清单声明的简单无参数指令；</li>
-<li><code>event_responses()</code>：可选，为该仪表产生的稳定事件代码注册核心响应；</li>
-<li><code>close()</code>：释放通讯，不擅自改变输出。</li>
-</ul>
-<p>这些方法都是普通同步函数。核心负责子进程、超时、调用顺序、时间戳和内部状态对象。</p>
-<h2 id="_3">一个目录对应一种物理型号/协议<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p><code>configs/general.toml</code> 只管应用、日志、报警、模块目录和 System 进程恢复参数，不保存实例。
+未分配给 System Instrument 的 VISA 地址单独保存在 <code>configs/visa.resources.toml</code>，供
+Measurement Module 使用。</p>
+<p>扫描器从作者模板复制除 <code>panels</code> 外的静态元数据，再加入 <code>[[instances]]</code>。运行时仍以安装
+目录中的 <code>panels</code> 作为固定模板；实例面板只引用稳定的 panel ID，不复制显示实现。</p>
+<h2 id="_3">一个目录对应一种物理型号或协议<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>system_instruments/my_temperature_controller/
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ instrument.toml
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ backend.py
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>└─ instrument.py          # 可选：底层命令与响应解析
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├─ instrument.py          # 可选：底层命令与响应解析
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>└─ *.example.toml         # 可选：首次配置时复制的现场数据
 </span></code></pre></div>
-<p>不要按 TempA、TempB 或“主/副温度”拆目录。同一地址只创建一个实例和一个通讯会话；一台仪表
-返回的其他值放在 <code>auxiliary</code> 字典中。不同物理地址各有独立子进程，可以并发轮询。</p>
-<h2 id="_4">两份文件各管一件事<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<p><code>instrument.toml</code> 由作者提供，描述实现和读数：</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_22c_24c"</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"backend:Cryocon22C24CController"</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">kinds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"temperature"</span><span class="p">]</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">main_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temp_b"</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">[panel]</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"controller"</span>
+<p>不要按 TempA、TempB 或“主/副温度”拆目录。一台物理仪表可以返回多个读数、拥有多个面板和
+控制端点，但它们共用一个实例、一个 worker 和一个连接。两台同型号物理仪表则在同一个
+生成文件里建立两个实例，各自独立运行。</p>
+<h2 id="api-v4">API v4 清单<a class="headerlink" href="#api-v4" title="Permanent link">&para;</a></h2>
+<p>最小只读模板：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my_monitor"</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"My Monitor"</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"0.1.0"</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">api_version</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"4"</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">core_requires</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"&gt;=0.19,&lt;0.20"</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"backend:MyMonitor"</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">kinds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"monitor"</span><span class="p">]</span>
 </span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="k">[readings.temp_b]</span>
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Sample Temperature (Temp B)"</span>
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
-</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
-</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
-</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="k">[readings.temp_a]</span>
-</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Cold Head Temperature (Temp A)"</span>
-</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
-</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="k">[[panels]]</span>
+</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"reading"</span>
+</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Reading"</span>
+</span><span id="__span-2-12"><a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"readout"</span>
+</span><span id="__span-2-13"><a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"value"</span><span class="p">]</span>
+</span><span id="__span-2-14"><a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>
+</span><span id="__span-2-15"><a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="k">[readings.value]</span>
+</span><span id="__span-2-16"><a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Reading"</span>
+</span><span id="__span-2-17"><a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"K"</span>
+</span><span id="__span-2-18"><a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
 </span></code></pre></div>
-<p><code>configs/site.local.toml</code> 由操作者保存在本机。扫描器只更新其中的资源区块：</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[[resources]]</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_main"</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"USB0::...::INSTR"</span>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">purpose</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"system"</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">system_instrument</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_22c_24c"</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">auxiliary_readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"temp_a"</span><span class="p">]</span>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="k">[[instruments]]</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temperature"</span>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">display_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Temperature"</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temperature"</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="n">resource</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"cryocon_main"</span>
-</span><span id="__span-3-13"><a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="n">control_enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-</span><span id="__span-3-14"><a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="n">min_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2.0</span>
-</span><span id="__span-3-15"><a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="n">max_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">400.0</span>
-</span><span id="__span-3-16"><a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">max_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">10.0</span>
-</span></code></pre></div>
-<p>同一 kind 只有一个 System 资源时可省略 <code>resource</code>，程序会自动绑定；多个候选资源才需要
-明确写出资源 ID。<code>backend</code> 只写在 <code>instrument.toml</code>，现场配置不填写 Python 路径。</p>
-<p>只有型号本身允许选择主输入时才在清单声明多个候选。例如 Lake Shore 340 清单使用
-<code>main_readings = ["temp_a", "temp_b"]</code>，现场 <code>[[instruments]]</code> 再写
-<code>main_reading = "temp_a"</code> 或 <code>main_reading = "temp_b"</code>。Cryocon 22C/24C 的 Temp B 固定为
-主温度，不使用这个选择。</p>
-<p>同一个信息只写一次：地址和实现选择在同一现场配置的资源区块；面板模板、主读数、单位和
-精度在清单；控制许可和安全范围在同一现场配置的 <code>[[instruments]]</code>。扫描器不会改写安全
-范围。外部 System Instrument 的 <code>[[instruments]]</code> 不再接受重复的 <code>backend</code>、
-<code>unit</code>、旧 <code>role</code> 或仿真的 <code>initial_value</code>。清单中的未知字段也会直接标记为 Invalid。</p>
-<h2 id="kind"><code>kind</code> 与控制许可<a class="headerlink" href="#kind" title="Permanent link">&para;</a></h2>
+<p>完整清单可由五组信息组成：</p>
 <ul>
-<li><code>temperature</code>：进入标准温度列，可控也可只读；</li>
-<li><code>field</code>：进入标准磁场列，可控也可只读；</li>
-<li><code>monitor</code>：只显示和记录，不能控制。</li>
+<li><code>[[config_fields]]</code>：这一型号需要操作者填写的值；</li>
+<li><code>[[controls]]</code>：后台可接受目标的控制端点；</li>
+<li><code>[[panels]]</code>：固定面板模板；</li>
+<li><code>[readings.&lt;id&gt;]</code>：读数名称、单位和小数位；</li>
+<li><code>[[sequence_commands]]</code>：无参数 System 指令。</li>
 </ul>
-<p>每种 temperature/field 最多一个 <code>control_enabled = true</code> 的实例。SEQ 自动选择它。没有启用
-控制的 temperature/field 仍可显示和记录；monitor 永远不能启用控制。</p>
-<p><code>instrument.toml</code> 必须在 <code>[panel]</code> 中选择一个模板：<code>controller</code> 显示当前值、目标、速率和
-稳定状态，并在获准控制时允许双击；<code>readout</code> 只显示一个主读数；<code>readout_grid</code> 以 2×2
-最多显示四个读数；<code>switch</code> 把主读数 0/1 显示为 Off/On，并把该清单的全部
-<code>sequence_commands</code> 显示为按钮。按钮和 SEQ 使用同一指令 ID，不需要再写第二份面板 action
-列表。<code>controller</code> 和 <code>switch</code> 的辅助读数也进入网格，第五个读数开始使用右侧的下一个
-网格。可控温度/磁场实例必须使用 <code>controller</code>。</p>
-<p><code>readout_grid</code> 可在 <code>[panel]</code> 中增加 <code>title</code>。控制器若需要固定的辅助布局，可声明
-<code>[[panel.sections]]</code>；每段继续使用已有的 <code>readout</code> 或 <code>readout_grid</code> 模板，并且每个辅助
-读数必须恰好出现一次。标题中的简单 <code>{site_config_key}</code> 会从该实例的现场配置替换；
-<code>enabled_when</code> 指向一个现场布尔键，为 <code>false</code> 时不创建该段。例如：</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[panel]</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"controller"</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">[[panel.sections]]</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"readout"</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">title</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Auxiliary Temperature"</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"auxiliary_temperature"</span><span class="p">]</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="k">[[panel.sections]]</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"readout_grid"</span>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">title</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Loop 2 - Temp {loop2_input}"</span>
-</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">enabled_when</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"loop2_enabled"</span>
-</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">readings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"loop_2_output"</span><span class="p">,</span><span class="w"> </span><span class="s2">"loop_2_setpoint"</span><span class="p">,</span><span class="w"> </span><span class="s2">"loop_2_ramping"</span><span class="p">]</span>
+<p>有 VISA 身份识别时再增加：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[discovery]</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">identity_pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"(?i)expected maker.*expected model"</span>
 </span></code></pre></div>
-<p>未声明 <code>panel.sections</code> 的清单仍按原规则把辅助读数每四项自动分组。</p>
-<p>简单系统指令在清单中这样声明：</p>
-<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[panel]</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"switch"</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">[[sequence_commands]]</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"compressor_on"</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Compressor On"</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="k">[[sequence_commands]]</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"compressor_off"</span>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Compressor Off"</span>
+<p>扫描器用它标出匹配地址，正式 <code>open()</code> 仍须重新核对型号。专用网络仪表可以不声明发现
+规则，而是在 <code>config_fields</code> 中提供自己的连接字段：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[[config_fields]]</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"host"</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Host"</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"string"</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">""</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="k">[[config_fields]]</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"port"</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Port"</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"integer"</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">502</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">min</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">max</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">65535</span>
 </span></code></pre></div>
-<p>只有现场配置实际选择这份 System Instrument 时，<code>Compressor On</code> 和 <code>Compressor Off</code> 才会
-直接出现在右侧 <strong>System Commands</strong>。它们没有参数、不会生成 DAT 测量行；Warning 继续 SEQ，
-Error 中止。<code>switch</code> 面板的按钮只在 SEQ 空闲时可用，核心仍会在运行时阻止抢占 SEQ 控制权。</p>
-<p>设备相关的事件响应也写在 System Instrument 代码中，而不是写进核心。最小声明如下：</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">labcontrol.instruments.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">EventResponseSpec</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">event_responses</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="k">return</span> <span class="p">(</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>        <span class="n">EventResponseSpec</span><span class="p">(</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>            <span class="n">code</span><span class="o">=</span><span class="s2">"COLD_HEAD_ALARM"</span><span class="p">,</span>
-</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>            <span class="n">context</span><span class="o">=</span><span class="s2">"A"</span><span class="p">,</span>
-</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>            <span class="n">action</span><span class="o">=</span><span class="s2">"zero"</span><span class="p">,</span>
-</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="p">),</span>
-</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    <span class="p">)</span>
+<p>后台通过 <code>config.extras["host"]</code>、<code>config.extras["port"]</code> 读取这些值。VISA 实例的地址则
+读取 <code>config.address</code>。</p>
+<h2 id="_4">固定面板与角色<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>API v4 有四种面板模板：</p>
+<ul>
+<li><code>controller</code>：控制端点、可选主读数、目标/速率限制与稳定参数；</li>
+<li><code>readout</code>：一个只读值；</li>
+<li><code>readout_grid</code>：一到四个只读值；</li>
+<li><code>switch</code>：一个状态值和一个或多个已声明指令按钮。</li>
+</ul>
+<p>温度控制面板示例：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[[controls]]</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"main"</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Main Temperature"</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="k">[[panels]]</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"control"</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Sample Temperature"</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"controller"</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">control</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"main"</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">reading_options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"temp_a"</span><span class="p">,</span><span class="w"> </span><span class="s2">"temp_b"</span><span class="p">]</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">default_reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"temp_a"</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="n">min_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.8</span>
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">max_value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">400.0</span>
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">default_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.0</span>
+</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="n">max_rate_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">30.0</span>
+</span><span id="__span-5-16"><a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="n">stability_tolerance</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.01</span>
+</span><span id="__span-5-17"><a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="n">stability_max_slope_per_minute</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.01</span>
+</span><span id="__span-5-18"><a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="n">stability_dwell_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">5.0</span>
+</span><span id="__span-5-19"><a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="n">stability_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1800.0</span>
+</span><span id="__span-5-20"><a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="n">stability_window_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">5.0</span>
 </span></code></pre></div>
-<p><code>source</code> 自动使用当前逻辑仪表 ID。省略 <code>target_instrument</code> 时选择唯一可控磁场仪表；明确
-填写时必须是一个可控 <code>field</code> ID。<code>zero</code> 使用目标磁场配置中的
-<code>default_rate_per_minute</code>，仍经过核心上下限、超时和串行队列。后端不能取得另一台仪表
-对象，也不能传入 Python 回调。当前正式 System Instrument 暂未注册任何响应，所以默认
-运行行为不变。完整安全语义见<a href="../instrument-control-safety/">控制与安全</a>。</p>
-<h2 id="_5">阅读顺序<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>操作者可在扫描器中开启/关闭固定面板、选择 controller 读数、确认限制并调整全局顺序。
+实例保存的 <code>role</code> 决定标准 SEQ 使用谁：</p>
+<ul>
+<li><code>none</code>：仅显示、记录或提供指令；</li>
+<li><code>sample_temp</code>：Temperature 与 Scan Temperature；</li>
+<li><code>field</code>：Field 与 Scan Field。</li>
+</ul>
+<p><code>sample_temp</code> 和 <code>field</code> 各自全局最多一个，而且只能给支持对应 kind 的 <code>controller</code>。
+只读与开关面板必须使用 <code>none</code>。没有任何 System 面板是有效状态，主程序可以正常启动。</p>
+<p>一个物理实例的多个面板不会增加连接数。后端完整状态中的主值放在 <code>value</code>，其他读数放在
+<code>auxiliary</code>；核心按照开启面板引用的读数生成显示和日志列。</p>
+<h3 id="multiple-controls">多个独立控制回路<a class="headerlink" href="#multiple-controls" title="Permanent link">&para;</a></h3>
+<p>同一台物理仪表可以声明多个 <code>[[controls]]</code>，并让不同 <code>controller</code> 面板分别引用它们。
+<code>set_target(..., control=&lt;id&gt;)</code> 与 <code>hold(control=&lt;id&gt;)</code> 中的 <code>control</code> 就是这里的稳定 ID；
+后台据此选择真实 Loop，不能从面板标题猜测。</p>
+<p>只有一个不同的已启用控制端点时，<code>read_status()</code> 可以继续在顶层返回
+<code>target/rate/moving/ready</code>。启用了多个不同控制端点时，必须分别返回状态：</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">return</span> <span class="p">{</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="s2">"value"</span><span class="p">:</span> <span class="n">sample_temperature</span><span class="p">,</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="s2">"auxiliary"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"shield_temperature"</span><span class="p">:</span> <span class="n">shield_temperature</span><span class="p">},</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="s2">"controls"</span><span class="p">:</span> <span class="p">{</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>        <span class="s2">"loop_1"</span><span class="p">:</span> <span class="p">{</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>            <span class="s2">"target"</span><span class="p">:</span> <span class="n">sample_target</span><span class="p">,</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>            <span class="s2">"rate"</span><span class="p">:</span> <span class="n">sample_rate</span><span class="p">,</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>            <span class="s2">"moving"</span><span class="p">:</span> <span class="n">sample_ramping</span><span class="p">,</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>            <span class="s2">"ready"</span><span class="p">:</span> <span class="n">sample_ready</span><span class="p">,</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        <span class="p">},</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>        <span class="s2">"loop_2"</span><span class="p">:</span> <span class="p">{</span>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>            <span class="s2">"target"</span><span class="p">:</span> <span class="n">shield_target</span><span class="p">,</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>            <span class="s2">"rate"</span><span class="p">:</span> <span class="n">shield_rate</span><span class="p">,</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>            <span class="s2">"moving"</span><span class="p">:</span> <span class="n">shield_ramping</span><span class="p">,</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>            <span class="s2">"ready"</span><span class="p">:</span> <span class="n">shield_ready</span><span class="p">,</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>        <span class="p">},</span>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>    <span class="p">},</span>
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>每个回路的当前值仍取自对应面板选择的 <code>value</code> 或 <code>auxiliary</code> 读数，不在 <code>controls</code> 中
+重复。核心按面板分别判稳、等待和记录；多个面板仍只打开一次物理连接。承担
+<code>sample_temp</code> 或 <code>field</code> 角色的面板继续作为实验 DAT 中相应标准当前值和目标值的来源。</p>
+<h2 id="system">简单 System 指令<a class="headerlink" href="#system" title="Permanent link">&para;</a></h2>
+<p>开关模板同时引用稳定的读数 ID 与指令 ID：</p>
+<div class="language-toml highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[[panels]]</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"compressor"</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Compressor"</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">template</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"switch"</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">reading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"compressor_state"</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">commands</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compressor_on"</span><span class="p">,</span><span class="w"> </span><span class="s2">"compressor_off"</span><span class="p">]</span>
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">[readings.compressor_state]</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Compressor State"</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="k">[[sequence_commands]]</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"compressor_on"</span>
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Compressor On"</span>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="k">[[sequence_commands]]</span>
+</span><span id="__span-7-16"><a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"compressor_off"</span>
+</span><span id="__span-7-17"><a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Compressor Off"</span>
+</span></code></pre></div>
+<p>后台实现 <code>execute_sequence_command(command_id)</code>。同一指令会出现在面板按钮和右侧
+<strong>System Commands</strong>，没有参数，也不生成 DAT 测量行。Warning 继续 SEQ，Error 中止。</p>
+<h2 id="_5">后台方法<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>System Instrument 后台是普通同步类，常用方法是：</p>
+<ul>
+<li><code>open()</code>：连接并确认身份和初始状态，不自动改变输出；</li>
+<li><code>read_status()</code>：完整状态，供面板、安全检查、判稳和状态日志使用；</li>
+<li><code>read_measurement()</code>：可选的快速即时读取；省略时调用 <code>read_status()</code>；</li>
+<li><code>set_target(..., control=&lt;id&gt;)</code>：给某个控制端点设置目标；</li>
+<li><code>hold(control=&lt;id&gt;)</code>：用新鲜读数保持当前状态；</li>
+<li><code>execute_sequence_command()</code>：可选的无参数指令；</li>
+<li><code>event_responses()</code>：可选的稳定事件响应声明；</li>
+<li><code>close()</code>：可重复释放通讯，不擅自改变输出。</li>
+</ul>
+<p>核心负责子进程、调用顺序、总超时、重连、时间戳和快照。后端仍须为每次底层 I/O 设置
+有限超时，并在发送前复查目标和速率边界。写入超时后不能自动重发；重连后先读取实际状态。</p>
+<h2 id="pid">PID 文件<a class="headerlink" href="#pid" title="Permanent link">&para;</a></h2>
+<p>需要每台物理实例独立 PID 数据时，在 <code>config_fields</code> 使用 <code>type = "pid_file"</code> 并指定一个
+示例文件。扫描器第一次保存时复制到 <code>configs/pid/&lt;instance-id&gt;.toml</code>，以后不会覆盖或删除。
+作者可以让示例故意缺少现场值；例如空 <code>zones</code> 应由后台在连接前明确拒绝。</p>
+<h2 id="_6">阅读顺序<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
 <ol>
 <li><a href="../first-system-instrument/">写第一个 System Instrument</a></li>
 <li><a href="../instrument-reading/">读取、前面板与日志</a></li>
 <li><a href="../instrument-control-safety/">控制与安全</a></li>
 <li><a href="../instrument-testing/">测试与现场接入</a></li>
+<li><a href="../../guides/instrument-scanner/">扫描并配置仪表</a></li>
 </ol>
 <div class="admonition warning">
 <p class="admonition-title">示例不是通用真实驱动</p>

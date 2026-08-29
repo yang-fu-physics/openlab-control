@@ -1887,9 +1887,14 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    ↓
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>OpenLabControl/system_instruments/&lt;instrument-id&gt;/
 </span></code></pre></div>
-<p>重启后，Measurement Module 会出现在 Modules Manager 中并保持 Disabled。System Instrument
-只有在扫描资源选中对应实现、且现场 <code>[[instruments]]</code> 能唯一绑定该资源后才会连接；单纯
-复制目录不会访问真实仪表。</p>
+<p>重启后，Measurement Module 会出现在 Modules Manager 中并保持 Disabled。复制 System
+Instrument 目录后还要运行 Instrument Scanner：为它添加物理实例，确认固定面板、角色、
+顺序和限制，再检查完整保存预览。单纯复制目录不会访问真实仪表。</p>
+<p>扫描器把未分配 VISA 写入 <code>configs/visa.resources.toml</code>，把 System 实例写入
+<code>configs/instruments/&lt;instrument-id&gt;.toml</code>。每种型号可有多个 <code>[[instances]]</code>；一个实例的
+多个面板共用同一进程和连接。专用网络仪表的 Host/Port 由自己的模板字段提供。生成配置
+保存时按预览全量覆盖；<code>configs/pid/&lt;instance-id&gt;.toml</code> 第一次建立后不会被扫描器覆盖或删除。</p>
+<p>一个完全干净的发布目录可以没有 System 面板并正常启动，三个内置仿真也默认关闭。</p>
 <h2 id="_3">所有扩展共用核心依赖<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <p>主框架统一提供并锁定 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions。
 System Instrument 与 Measurement Module 不声明、不安装第二套依赖，也不建立自己的 Python

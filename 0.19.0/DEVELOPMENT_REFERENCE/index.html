@@ -2302,14 +2302,20 @@ Warning；Run 预检拒绝执行，绝不会自动 Enable、Apply、安装或静
 </span><span id="__span-8-12"><a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="c1"># 可选；完整状态很慢时只读取写测量行需要的主值</span>
 </span><span id="__span-8-13"><a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">read_measurement</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 </span><span id="__span-8-14"><a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>        <span class="k">return</span> <span class="p">{</span><span class="s2">"value"</span><span class="p">:</span> <span class="mf">4.2</span><span class="p">}</span>
-</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">set_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">rate_per_minute</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"Settle"</span><span class="p">):</span> <span class="o">...</span>
-</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-8-15"><a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">set_target</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">,</span> <span class="n">rate_per_minute</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="s2">"Settle"</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">control</span><span class="p">):</span> <span class="o">...</span>
+</span><span id="__span-8-16"><a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">hold</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">control</span><span class="p">):</span> <span class="o">...</span>
 </span><span id="__span-8-17"><a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">execute_sequence_command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command_id</span><span class="p">):</span> <span class="o">...</span>
 </span><span id="__span-8-18"><a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">event_responses</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="k">return</span> <span class="p">()</span>
 </span><span id="__span-8-19"><a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">close</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span> <span class="o">...</span>
 </span></code></pre></div>
-<p>GUI 不直接操作仪表。主配置限制手动控制、SEQ 参数窗口和运行时执行；具体后端还应再次检查
-仪表自身边界。写命令超时视为结果不确定，不自动重发。</p>
+<p>GUI 不直接操作仪表。扫描器生成的 controller 面板限制手动控制、SEQ 参数窗口和运行时
+执行；具体后端还应再次检查仪表自身边界。<code>control</code> 是作者清单中稳定的 control ID。写命令
+超时视为结果不确定，不自动重发。</p>
+<p>一个实例启用多个不同 control 时，<code>read_status()</code> 必须增加
+<code>"controls": {"loop_1": {...}, "loop_2": {...}}</code>，每项分别返回
+<code>target/rate/moving/ready</code>。各回路当前值仍来自其面板所选的 <code>value</code> 或 <code>auxiliary</code>；核心
+按面板独立判稳并在 <code>instrument_status.dat</code> 中分别记录。只有一个 control 时可继续使用
+示例中的顶层简写。</p>
 <p>同一物理仪表的辅助温度、加热功率或量程使用 <code>auxiliary</code> 返回，不能为了多显示一个值而对
 同一地址创建第二个通讯会话。<code>ready</code> 可作为核心独立误差、斜率和 dwell 判定的附加必要
 条件，但不能替代这些条件。读数的名称、单位和精度只在 <code>instrument.toml</code> 声明。</p>

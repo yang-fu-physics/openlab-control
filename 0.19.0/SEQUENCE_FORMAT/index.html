@@ -1671,7 +1671,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        仪表选择
+        标准温场仪表
       
     </span>
   </a>
@@ -2051,7 +2051,7 @@
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        仪表选择
+        标准温场仪表
       
     </span>
   </a>
@@ -2304,18 +2304,15 @@
 </span></code></pre></div>
 <p>Pause 会冻结等待进度；Stop/Error 可在最多约一个运行时检查周期内打断。
 等待时间必须在 0 到 31536000 秒之间；手写 SEQ 与运行时使用同一限制。</p>
-<h3 id="_4">仪表选择<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
-<p>温度/磁场 Set 和 Scan 都可在末尾显式选择配置中的仪表：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>T Set Temperature 20.000 K at 5.000 K/min in Settle mode using instrument "cryostat_primary"
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>T Scan Field 0.00 Oe to 1000.00 Oe in 11 steps at 500.00 Oe/min, Settle using instrument "magnet A"
-</span></code></pre></div>
-<p>参数窗口按仪表类型列出允许控制的配置 ID，并随选择项切换上下限和最大速率。省略
-<code>using instrument</code> 时选择该类型唯一的 primary；旧文件中的 <code>temperature</code>/<code>field</code> 角色名也
-按此规则兼容。显式 ID 会随保存和重新打开保持，ID 不得指向错误类型、只读仪表或未连接
-仪表。</p>
+<h3 id="_4">标准温场仪表<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>Temperature 和 Scan Temperature 固定使用全局唯一的 <code>sample_temp</code> 面板；Field 和 Scan
+Field 固定使用全局唯一的 <code>field</code> 面板。角色由 Instrument Scanner 写入 System Instrument
+实例，SEQ 文本不保存物理实例 ID，也不接受 <code>using instrument</code> 后缀。</p>
+<p>参数窗口直接使用相应 controller 面板的上下限与最大速率。缺少对应角色、角色重复或面板
+不是可控制 controller 时，程序会在连接真实仪表或执行命令前明确拒绝配置。</p>
 <h3 id="set-temperature">Set Temperature<a class="headerlink" href="#set-temperature" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>T Set Temperature 20.000 K at 5.000 K/min in Settle mode
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>T Set Temperature 300.000 K at 10.000 K/min in Sweep mode
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>T Set Temperature 20.000 K at 5.000 K/min in Settle mode
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>T Set Temperature 300.000 K at 10.000 K/min in Sweep mode
 </span></code></pre></div>
 <ul>
 <li><code>Settle</code>：发送目标后等待中央数值判稳。</li>
@@ -2323,14 +2320,14 @@
 </ul>
 <p>Target 与 Rate 在弹窗和执行前都使用配置文件的 <code>min/max/max_rate</code> 检查。温度显示三位小数。</p>
 <h3 id="set-field">Set Field<a class="headerlink" href="#set-field" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 </span></code></pre></div>
 <p>仪表默认原生单位为 Oe；SEQ 可选 Oe 或 T，但 Target 与 Rate 必须同单位。中央换算到仪表单位后再做限制检查。Oe 显示两位，T 显示六位。</p>
 <h3 id="scan-temperature-linear">Scan Temperature — Linear<a class="headerlink" href="#scan-temperature-linear" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>T     Measure
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>T     Measure
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>T End Scan
 </span></code></pre></div>
 <p><code>steps</code> 是包含起点和终点的点数。每个点到达后执行全部子命令。
 Linear Temperature/Field Scan 的 <code>steps</code> 范围为 1 到 100000，Rate 必须大于零。</p>
@@ -2339,9 +2336,9 @@ Linear Temperature/Field Scan 的 <code>steps</code> 范围为 1 到 100000，Ra
 <li><code>Sweep</code>：每点等待进入目标容差，不要求斜率/驻留判稳，再执行子命令。</li>
 </ul>
 <h3 id="scan-temperature-list">Scan Temperature — List<a class="headerlink" href="#scan-temperature-list" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>T Scan Temperature List [300, 100, 20, 20, 4.2] K at 5.000 K/min, Settle
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>T     Measure
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>T Scan Temperature List [300, 100, 20, 20, 4.2] K at 5.000 K/min, Settle
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>T     Measure
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>T End Scan
 </span></code></pre></div>
 <ul>
 <li>保留原顺序和重复点，不排序、不去重。</li>
@@ -2352,24 +2349,24 @@ Linear Temperature/Field Scan 的 <code>steps</code> 范围为 1 到 100000，Ra
 <li>仍可嵌套 Field/Time/Temperature Scan 和 Measure。</li>
 </ul>
 <h3 id="scan-field">Scan Field<a class="headerlink" href="#scan-field" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>T Scan Field -90000.00 Oe to 90000.00 Oe in 181 steps at 5000.00 Oe/min, Settle
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>T     Measure
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>T Scan Field -90000.00 Oe to 90000.00 Oe in 181 steps at 5000.00 Oe/min, Settle
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>T     Measure
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>T End Scan
 </span></code></pre></div>
 <p>起点、终点和速率必须使用同一单位。所有点在移动前整体验证。</p>
 <p>参数窗口中的 <code>Choose nearer start or its negative</code> 默认关闭。开启后保存为：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>T Scan Field 9.000000 T to 3.000000 T in 7 steps at 1.000000 T/min, Settle, Nearest +/- Polarity
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>T     Measure
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>T Scan Field 9.000000 T to 3.000000 T in 7 steps at 1.000000 T/min, Settle, Nearest +/- Polarity
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>T     Measure
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>T End Scan
 </span></code></pre></div>
 <p>运行到该 Scan 时，框架会取得所选磁场仪表已通过新鲜度检查的当前实际场读回，并比较它
 到输入起点和输入起点负值的距离。更靠近负值时，整条路径同时反号；例如实际场为 <code>-6 T</code>，上例执行
 <code>-9 T</code> 到 <code>-3 T</code>。距离相同时保留输入路径。无法取得有限的实际场会 Error，且不会移动
 到第一个点；反号后的全部点仍会在首次写入前经过配置上下限和速率检查。</p>
 <h3 id="scan-time">Scan Time<a class="headerlink" href="#scan-time" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>T Scan Time 60.0 secs in 61 steps
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>T     Measure
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>T Scan Time 60.0 secs in 61 steps
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>T     Measure
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>T End Scan
 </span></code></pre></div>
 <p>第一个点位于 <code>t=0</code>，最后一个点位于指定 duration。调度使用单调时钟，避免系统日期变化影响间隔。
 duration 范围为 0 到 31536000 秒，<code>steps</code> 范围为 1 到 1000000。
@@ -2377,11 +2374,11 @@ duration 范围为 0 到 31536000 秒，<code>steps</code> 范围为 1 到 10000
 <h3 id="system-instrument">System Instrument 简单指令<a class="headerlink" href="#system-instrument" title="Permanent link">&para;</a></h3>
 <p>配置中的 System Instrument 可以声明无参数指令。它们会直接出现在右侧 <strong>System Commands</strong>，
 SEQ 文本就是显示名称：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>T Compressor On
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>T Compressor Off
+<div class="language-text highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>T Compressor On
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>T Compressor Off
 </span></code></pre></div>
 <ul>
-<li>只有对应 System Instrument 已安装且被现场配置引用时才会注册；</li>
+<li>只有对应 System Instrument 已安装，并且扫描器生成了该物理实例时才会注册；</li>
 <li>双击后直接插入，不弹参数窗口；</li>
 <li>指令本身不写 DAT；</li>
 <li>Warning 报警后继续，Error 中止 SEQ；</li>
@@ -2391,10 +2388,10 @@ SEQ 文本就是显示名称：</p>
 <h3 id="measurement-module">Measurement Module 自定义指令<a class="headerlink" href="#measurement-module" title="Permanent link">&para;</a></h3>
 <p>模块完成 Enable 后，可以在右侧以自己的名称注册普通指令和扫描指令。SEQ 使用固定的
 通用信封，而不是把每家仪表语法写入核心解析器：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>T Module Command "keithley_2400" "set_current" {"current":0.001,"output":true}
-</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>T Module Scan "keithley_2400" "scan_current" {"points":["1 mA","2 mA"],"settle_seconds":0}
-</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>T     Measure
-</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>T Module Command "keithley_2400" "set_current" {"current":0.001,"output":true}
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>T Module Scan "keithley_2400" "scan_current" {"points":["1 mA","2 mA"],"settle_seconds":0}
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>T     Measure
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>T End Scan
 </span></code></pre></div>
 <ul>
 <li>第一个 JSON 字符串是模块目录 ID，第二个是模块声明的稳定指令 ID，最后必须是标准
@@ -2416,10 +2413,10 @@ SEQ 文本就是显示名称：</p>
 框架不提供任意 SCPI 直通命令。</p>
 <h3 id="measure">Measure<a class="headerlink" href="#measure" title="Permanent link">&para;</a></h3>
 <p>唯一有效格式：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>T Measure
+<div class="language-text highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>T Measure
 </span></code></pre></div>
 <p>Measure 无参数。旧格式例如：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>T Measure instruments=transport repeats=3 interval=1s
+<div class="language-text highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>T Measure instruments=transport repeats=3 interval=1s
 </span></code></pre></div>
 <p>会产生 Error 并阻止 Run，不做兼容转换。重复测量用 Scan Time 或重复插入 Measure；选择测量方案则在运行前通过 Modules Manager Enable/Disable。</p>
 <p>执行语义：</p>
@@ -2435,21 +2432,21 @@ SEQ 文本就是显示名称：</p>
    <code>run_end</code>；<code>close</code> 只在 Disable 或应用退出执行。</li>
 </ol>
 <h3 id="remark">Remark<a class="headerlink" href="#remark" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>T Remark Cooldown complete; begin transport scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>T Remark Cooldown complete; begin transport scan
 </span></code></pre></div>
 <p>写入事件日志，不改变仪表。</p>
 <h3 id="call-sequence">Call Sequence<a class="headerlink" href="#call-sequence" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>T Call Sequence subsequences\field_loop.seq
+<div class="language-text highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>T Call Sequence subsequences\field_loop.seq
 </span></code></pre></div>
 <p>相对路径以调用者 SEQ 所在目录解析。循环调用、文件不存在或子 SEQ 解析 Error 都会使主运行 Faulted。子 SEQ 中的 Measure 使用主运行锁定的同一模块集合和 DAT Schema。</p>
 <h3 id="_5">仿真故障指令<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>T Inject Warning SIM_WARNING simulated warning
-</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>T Inject Error SIM_ERROR simulated fatal error
+<div class="language-text highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>T Inject Warning SIM_WARNING simulated warning
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>T Inject Error SIM_ERROR simulated fatal error
 </span></code></pre></div>
 <p>仅用于验证事件与 Stop 路径；真实实验 SEQ 通常不需要。</p>
 <h2 id="initialize">已删除的 Initialize<a class="headerlink" href="#initialize" title="Permanent link">&para;</a></h2>
 <p>0.10.0 不再接受：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>T Initialize Lakeshore372AC model ...
+<div class="language-text highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>T Initialize Lakeshore372AC model ...
 </span></code></pre></div>
 <p>模块初始化由 Modules Manager 的 Enable 自动调用。仓库保留 <code>examples/template_original.seq</code> 作为用户提供原文件和解析回归材料，但它是明确的旧格式示例，不能直接 Run。新示例是 <code>examples/module_measurement.seq</code>。</p>
 <h2 id="_6">编辑操作<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
@@ -2462,9 +2459,9 @@ SEQ 文本就是显示名称：</p>
 <li>SEQ Running/Paused/Stopping 时所有修改操作禁用，Copy 仍可使用。</li>
 </ul>
 <p>Disable 的序列化示例：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
-</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>T     Measure
-</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a>T End Scan
+<div class="language-text highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>T     Measure
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>T End Scan
 </span></code></pre></div>
 <p>此时 Scan 及 Measure 都不执行；重新 Enable Scan 后，Measure 原有 <code>T</code> 状态恢复生效。</p>
 

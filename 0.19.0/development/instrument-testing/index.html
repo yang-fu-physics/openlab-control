@@ -2001,6 +2001,8 @@
 <h2 id="_2">最少要测什么<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <h3 id="_3">连接<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
 <ul>
+<li><code>instrument.toml</code> 使用 API v4，<code>config_fields</code>、<code>controls</code>、<code>panels</code>、<code>readings</code> 和
+  <code>sequence_commands</code> 的 ID 与引用全部有效。</li>
 <li>正确型号可以连接并读到第一份有效状态。</li>
 <li>错误型号立即拒绝，且不发送任何设置命令。</li>
 <li>打开通讯后任一步失败，句柄仍会关闭。</li>
@@ -2015,6 +2017,7 @@
 </ul>
 <h3 id="_5">控制<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
 <ul>
+<li>每个 <code>controller</code> 都引用已声明的 control 和 reading；扫描器生成的现场限制能传到后台。</li>
 <li>最小值、最大值、最大速率边界恰好可用。</li>
 <li>边界外、零速率、负速率、<code>NaN</code> 和无穷在发送前被拒绝。</li>
 <li>设置 PID、速率和目标的顺序与仪表手册一致。</li>
@@ -2024,6 +2027,9 @@
 </ul>
 <h3 id="_6">故障<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
 <ul>
+<li>同一 VISA 地址重复分配、面板顺序不连续、两个 <code>sample_temp</code> 或两个 <code>field</code> 会在连接前
+  被拒绝。</li>
+<li><code>pid_file</code> 缺失、损坏或含空 <code>zones</code> 时，依赖这些区间的实现会在连接前明确失败。</li>
 <li>普通读失败进入重连，恢复后核对实际状态。</li>
 <li>超过恢复时间转为故障。</li>
 <li>安全报警不会被当成普通通讯错误重试。</li>
@@ -2067,6 +2073,12 @@
 </span></code></pre></div>
 <p>再把一个副本手动复制到核心的 <code>system_instruments/</code>，使用仿真或假的通讯后端检查：</p>
 <ul>
+<li>Instrument Scanner 能从作者清单生成表单，并把除面板模板外的静态元数据写入
+  <code>configs/instruments/&lt;id&gt;.toml</code>；</li>
+<li>同一种型号可以保存多个 <code>[[instances]]</code>，每个实例仍只有一个进程和通讯会话；</li>
+<li>分配给 System Instrument 的 VISA 地址不会留在 <code>configs/visa.resources.toml</code>；</li>
+<li>三个仿真默认关闭，没有 System 面板时主程序仍可启动；</li>
+<li>再次保存会按最终预览完整覆盖生成配置，但不覆盖或删除现有 PID 文件；</li>
 <li>源码版与 Windows 打包版发现结果一致；</li>
 <li>所需 Python 包已包含在核心锁定依赖中；</li>
 <li>前面板、Live Trend、实验 DAT 和 <code>instrument_status.dat</code> 字段一致；</li>

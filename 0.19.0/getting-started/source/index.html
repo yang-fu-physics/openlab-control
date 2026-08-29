@@ -640,7 +640,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        使用本机配置
+        配置仪表
       
     </span>
   </a>
@@ -1835,7 +1835,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        使用本机配置
+        配置仪表
       
     </span>
   </a>
@@ -1908,26 +1908,35 @@
 运行和发布验证使用的完整精确版本。<code>setup.bat</code> 创建 <code>.venv</code> 并安装这份锁定文件。
 <code>run.bat</code> 始终启动当前源码，不会误用 <code>dist/</code> 里的旧程序。</p>
 <p>上面固定到与本网站一致的稳定版。准备参与核心开发时，才改为克隆或切换到 <code>main</code>。</p>
-<h2 id="_3">使用本机配置<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>默认配置只用于仿真。接入真实仪表时先创建不会进入 Git 的本机副本：</p>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">Copy-Item</span> <span class="p">.\</span><span class="n">configs</span><span class="p">\</span><span class="k">default</span><span class="p">.</span><span class="n">toml</span> <span class="p">.\</span><span class="n">configs</span><span class="p">\</span><span class="n">site</span><span class="p">.</span><span class="n">local</span><span class="p">.</span><span class="n">toml</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="p">.\</span><span class="n">run</span><span class="p">.</span><span class="n">bat</span>
+<h2 id="_3">配置仪表<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p><code>configs/general.toml</code> 是唯一通用配置，安装后可直接运行：</p>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">.\</span><span class="n">run</span><span class="p">.</span><span class="n">bat</span>
 </span></code></pre></div>
-<p>运行 Instrument Scanner 后，System 与 Measurement 地址记录会写入这同一份
-<code>site.local.toml</code>；控制许可和现场安全范围也只在这里填写。主程序会自动优先加载该文件；
-需要给团队一个起点时，提交删去真实地址和秘密的 <code>site.example.toml</code>，不要提交本机文件。</p>
+<p>全新目录没有 System Instrument 面板也能启动，三个内置仿真默认关闭。需要面板或真实仪表
+时，再运行：</p>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="p">.\</span><span class="n">tools</span><span class="p">\</span><span class="n">instrument_scanner</span><span class="p">.</span><span class="n">py</span>
+</span></code></pre></div>
+<p>扫描器分别写入：</p>
+<ul>
+<li><code>configs/visa.resources.toml</code>：未分配的 VISA，供 Measurement Module 选择；</li>
+<li><code>configs/instruments/&lt;instrument-id&gt;.toml</code>：System 实例、面板角色、顺序与限制；</li>
+<li><code>configs/pid/&lt;instance-id&gt;.toml</code>：只在第一次需要时从示例或选定文件复制。</li>
+</ul>
+<p>这些现场文件已被 Git 忽略。扫描器保存会按最后一页的完整预览覆盖生成配置；现有 PID 文件
+不会被覆盖或删除。详细步骤见<a href="../../guides/instrument-scanner/">扫描并配置仪表</a>。</p>
 <h2 id="_4">运行完整测试<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">compileall</span> <span class="n">-q</span> <span class="n">src</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="n">-s</span> <span class="n">tests</span> <span class="n">-v</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">run</span><span class="p">.</span><span class="n">py</span> <span class="p">-</span><span class="n">-headless-demo</span> <span class="p">-</span><span class="n">-sequence</span> <span class="n">examples</span><span class="p">\</span><span class="n">nested_scan</span><span class="p">.</span><span class="n">seq</span>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">compileall</span> <span class="n">-q</span> <span class="n">src</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="n">-s</span> <span class="n">tests</span> <span class="n">-v</span>
 </span></code></pre></div>
+<p>要无界面运行包含温场命令的示例，先在 Instrument Scanner 中明确启用所需仿真，再运行
+<code>run.py --headless-demo ...</code>。三个仿真不会随源码环境自动开启。</p>
 <h2 id="_5">本地预览开发者网站<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
 <p>网站依赖与应用运行依赖分开保存，不会进入 Windows 发布包：</p>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">pip</span> <span class="n">install</span> <span class="n">-r</span> <span class="n">requirements-docs</span><span class="p">.</span><span class="n">txt</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">mkdocs</span><span class="p">.</span><span class="n">exe</span> <span class="n">serve</span>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">pip</span> <span class="n">install</span> <span class="n">-r</span> <span class="n">requirements-docs</span><span class="p">.</span><span class="n">txt</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">mkdocs</span><span class="p">.</span><span class="n">exe</span> <span class="n">serve</span>
 </span></code></pre></div>
 <p>打开终端给出的本地地址即可预览。提交前必须运行严格构建：</p>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">mkdocs</span><span class="p">.</span><span class="n">exe</span> <span class="n">build</span> <span class="p">-</span><span class="n">-strict</span>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">mkdocs</span><span class="p">.</span><span class="n">exe</span> <span class="n">build</span> <span class="p">-</span><span class="n">-strict</span>
 </span></code></pre></div>
 <h2 id="_6">推荐开发循环<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
 <ol>
@@ -1939,9 +1948,9 @@
 </ol>
 <div class="admonition danger">
 <p class="admonition-title">不要提交实验室秘密</p>
-<p>仪表地址、令牌、私钥、真实实验 DAT 和 <code>module_data/</code>
-都不应进入 Git。每次 Run 保存的 <code>runs/**/configuration.toml</code> 是本机配置的完整快照，
-也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。</p>
+<p>仪表地址、生成的现场仪表配置、令牌、私钥、真实实验 DAT 和 <code>module_data/</code>
+都不应进入 Git。每次 Run 保存的 <code>runs/**/configuration/</code> 是本机通用配置、仪表实例、
+未分配 VISA 和 PID 的快照，也可能包含真实地址；分享或提交运行目录前必须检查并脱敏。</p>
 </div>
 
 
