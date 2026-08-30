@@ -79,7 +79,7 @@ class ModuleWindow(QDialog):
         resources: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.descriptor = descriptor
         self._allow_close = False
         self._dirty = False
