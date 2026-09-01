@@ -28,7 +28,7 @@ from ..models import (
     StabilityState,
 )
 from ..sequence.model import SystemInstrumentCommandSpec
-from .scaling import scaled
+from .scaling import scaled, scaled_text
 
 
 class ControllerPanel(QFrame):
@@ -47,9 +47,8 @@ class ControllerPanel(QFrame):
         self.panel = panel
         self.reading = config.reading(panel.reading)
         self.setObjectName("instrumentPanel")
-        self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
-        self.setMaximumHeight(scaled(105))
+        self.setMaximumHeight(scaled(135))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -61,9 +60,10 @@ class ControllerPanel(QFrame):
             layout,
             panel.display_name,
         )
-        self.value_label = _value_label(layout)
+        body = _panel_body(layout)
+        self.value_label = _value_label(body)
         self.detail_label = _detail_label(
-            layout,
+            body,
             "Double-click to control",
         )
         self._set_state_style("disconnected")
@@ -134,7 +134,9 @@ class ControllerPanel(QFrame):
         super().mouseDoubleClickEvent(event)
 
     def _set_state_style(self, state: str) -> None:
-        self.setStyleSheet(_instrument_panel_style(state))
+        self.setStyleSheet(
+            _instrument_panel_style(state, show_badge=True)
+        )
 
 
 class ReadoutPanel(QFrame):
@@ -151,9 +153,8 @@ class ReadoutPanel(QFrame):
         self.reading = reading
         self.main_reading = main_reading or reading.key
         self.setObjectName("instrumentPanel")
-        self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(205))
-        self.setMaximumHeight(scaled(105))
+        self.setMaximumHeight(scaled(135))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -161,16 +162,20 @@ class ReadoutPanel(QFrame):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
         layout = _panel_layout(self)
-        layout.addStretch(1)
-        self.name_label = QLabel(title or reading.display_name)
-        self.name_label.setObjectName("panelTitle")
-        self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label = _panel_title(
+            layout,
+            title or reading.display_name,
+        )
+        body = _panel_body(layout)
+        body.addStretch(1)
         self.value_label = QLabel("—")
         self.value_label.setObjectName("panelValue")
-        self.value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.name_label)
-        layout.addWidget(self.value_label)
-        layout.addStretch(1)
+        self.value_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft
+            | Qt.AlignmentFlag.AlignVCenter
+        )
+        body.addWidget(self.value_label)
+        body.addStretch(1)
         self._set_state_style("disconnected")
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
@@ -226,13 +231,11 @@ class ReadoutGridPanel(QFrame):
             )
         self.readings = readings
         self.main_reading = main_reading
-        self.title = title
         self.name_labels: dict[str, QLabel] = {}
         self.value_labels: dict[str, QLabel] = {}
         self.setObjectName("instrumentPanel")
-        self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(300))
-        self.setMaximumHeight(scaled(105))
+        self.setMaximumHeight(scaled(135))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -240,12 +243,8 @@ class ReadoutGridPanel(QFrame):
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
         layout = _panel_layout(self)
-        self.title_label: QLabel | None = None
-        if title:
-            self.title_label = QLabel(title)
-            self.title_label.setObjectName("panelTitle")
-            self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(self.title_label)
+        self.title_label = _panel_title(layout, title)
+        body = _panel_body(layout)
         readings_layout = QGridLayout()
         readings_layout.setContentsMargins(0, 0, 0, 0)
         readings_layout.setHorizontalSpacing(scaled(8))
@@ -262,10 +261,10 @@ class ReadoutGridPanel(QFrame):
             cell_layout.setSpacing(0)
             name_label = QLabel(reading.display_name)
             name_label.setObjectName("readoutName")
-            name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            name_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             value_label = QLabel("—")
             value_label.setObjectName("readoutValue")
-            value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             cell_layout.addWidget(name_label)
             cell_layout.addWidget(value_label)
             readings_layout.addWidget(cell, index // 2, index % 2)
@@ -275,7 +274,7 @@ class ReadoutGridPanel(QFrame):
         readings_layout.setColumnStretch(1, 1)
         readings_layout.setRowStretch(0, 1)
         readings_layout.setRowStretch(1, 1)
-        layout.addLayout(readings_layout)
+        body.addLayout(readings_layout)
         self._set_state_style("disconnected")
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
@@ -331,9 +330,8 @@ class SwitchPanel(QFrame):
         self._actions_enabled = True
         self._connected = False
         self.setObjectName("instrumentPanel")
-        self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setMinimumWidth(scaled(260))
-        self.setMaximumHeight(scaled(105))
+        self.setMaximumHeight(scaled(135))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -344,7 +342,8 @@ class SwitchPanel(QFrame):
             layout,
             panel.display_name,
         )
-        self.value_label = _value_label(layout)
+        body = _panel_body(layout)
+        self.value_label = _value_label(body)
         button_row = QHBoxLayout()
         button_row.setSpacing(scaled(5))
         for command in commands:
@@ -357,7 +356,7 @@ class SwitchPanel(QFrame):
             button.setEnabled(False)
             button_row.addWidget(button)
             self.buttons[command.command_id] = button
-        layout.addLayout(button_row)
+        body.addLayout(button_row)
         self._set_state_style("disconnected")
 
     def set_actions_enabled(self, enabled: bool) -> None:
@@ -399,7 +398,9 @@ class SwitchPanel(QFrame):
         self._set_state_style("stable")
 
     def _set_state_style(self, state: str) -> None:
-        self.setStyleSheet(_instrument_panel_style(state))
+        self.setStyleSheet(
+            _instrument_panel_style(state, show_badge=True)
+        )
 
 
 class InstrumentPanelHost(QWidget):
@@ -439,6 +440,11 @@ class InstrumentPanelHost(QWidget):
             ],
         ] = {}
         self._row = QHBoxLayout(self)
+        self.setObjectName("instrumentPanelHost")
+        self.setStyleSheet(
+            "QWidget#instrumentPanelHost { "
+            "background-color: #f3f5f7; border: none; }"
+        )
         self._row.setContentsMargins(
             scaled(5),
             scaled(5),
@@ -517,36 +523,74 @@ class InstrumentPanelHost(QWidget):
 
 def _panel_layout(panel: QFrame) -> QVBoxLayout:
     layout = QVBoxLayout(panel)
-    layout.setContentsMargins(
-        scaled(10),
-        scaled(6),
-        scaled(10),
-        scaled(6),
-    )
-    layout.setSpacing(scaled(2))
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
     return layout
+
+
+def _panel_header_layout(layout: QVBoxLayout) -> QHBoxLayout:
+    header = QFrame()
+    header.setObjectName("panelHeader")
+    header.setMinimumHeight(scaled(30))
+    header_layout = QHBoxLayout(header)
+    header_layout.setContentsMargins(
+        scaled(10),
+        scaled(4),
+        scaled(10),
+        scaled(4),
+    )
+    header_layout.setSpacing(scaled(6))
+    layout.addWidget(header)
+    return header_layout
 
 
 def _panel_header(
     layout: QVBoxLayout,
     title: str,
 ) -> tuple[QLabel, QLabel]:
-    header = QHBoxLayout()
+    header = _panel_header_layout(layout)
     title_label = QLabel(title)
     title_label.setObjectName("panelTitle")
     state_label = QLabel("Disconnected")
+    state_label.setObjectName("stateBadge")
     state_label.setAlignment(Qt.AlignmentFlag.AlignRight)
     header.addWidget(title_label)
     header.addStretch(1)
     header.addWidget(state_label)
-    layout.addLayout(header)
     return title_label, state_label
+
+
+def _panel_title(layout: QVBoxLayout, title: str) -> QLabel:
+    header = _panel_header_layout(layout)
+    label = QLabel(title)
+    label.setObjectName("panelTitle")
+    header.addWidget(label)
+    header.addStretch(1)
+    return label
+
+
+def _panel_body(layout: QVBoxLayout) -> QVBoxLayout:
+    body = QFrame()
+    body.setObjectName("panelBody")
+    body_layout = QVBoxLayout(body)
+    body_layout.setContentsMargins(
+        scaled(10),
+        scaled(6),
+        scaled(10),
+        scaled(6),
+    )
+    body_layout.setSpacing(scaled(2))
+    layout.addWidget(body, 1)
+    return body_layout
 
 
 def _value_label(layout: QVBoxLayout) -> QLabel:
     label = QLabel("—")
     label.setObjectName("panelValue")
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setAlignment(
+        Qt.AlignmentFlag.AlignLeft
+        | Qt.AlignmentFlag.AlignVCenter
+    )
     layout.addWidget(label)
     return label
 
@@ -554,7 +598,7 @@ def _value_label(layout: QVBoxLayout) -> QLabel:
 def _detail_label(layout: QVBoxLayout, text: str) -> QLabel:
     label = QLabel(text)
     label.setObjectName("panelDetail")
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft)
     label.setWordWrap(True)
     layout.addWidget(label)
     return label
@@ -602,32 +646,64 @@ def _snapshot_reading(
     return None if metric is None else metric.value
 
 
-def _instrument_panel_style(state: str) -> str:
-    """返回不受 Windows 深浅主题影响的固定浅色面板样式。"""
+def _instrument_panel_style(
+    state: str,
+    *,
+    show_badge: bool = False,
+) -> str:
+    """返回与主界面一致、并带清晰遥测层级的固定浅色样式。"""
 
-    color = {
-        "stable": "#2e9d55",
-        "settling": "#d08a00",
-        "moving": "#2e73c5",
-        "timed_out": "#c53b3b",
-        "stale": "#a55a00",
-        "starting": "#777777",
-        "reconnecting": "#d08a00",
-        "faulted": "#c53b3b",
-        "disconnected": "#777777",
-    }.get(state, "#777777")
+    color, badge_background = {
+        "stable": ("#238636", "#eaf7ef"),
+        "settling": ("#9a6700", "#fff6df"),
+        "moving": ("#2f6fbb", "#eaf2fb"),
+        "timed_out": ("#cf222e", "#fdecec"),
+        "stale": ("#9a6700", "#fff6df"),
+        "starting": ("#6e7781", "#f0f2f4"),
+        "reconnecting": ("#9a6700", "#fff6df"),
+        "faulted": ("#cf222e", "#fdecec"),
+        "disconnected": ("#6e7781", "#f0f2f4"),
+    }.get(state, ("#6e7781", "#f0f2f4"))
+    title_size = scaled_text(14, font_scale=1.0)
+    value_size = scaled_text(26, font_scale=1.0)
+    detail_size = scaled_text(12, font_scale=1.0)
+    readout_size = scaled_text(17, font_scale=1.0)
+    badge_size = scaled_text(12, font_scale=1.0)
+    radius = scaled(6)
+    badge_radius = scaled(3)
+    badge_horizontal_padding = scaled(6)
+    bottom_color = "#d5dbe2" if show_badge else color
     return (
-        "QFrame#instrumentPanel { background: #ffffff; "
-        "border: 1px solid #c0c0c0; "
-        f"border-bottom: 4px solid {color}; "
-        "border-radius: 4px; }"
-        "QFrame#instrumentPanel QLabel { background: transparent; color: #202124; }"
-        "QFrame#instrumentPanel QLabel#panelDetail { color: #6f6f6f; }"
-        "QFrame#instrumentPanel QLabel#readoutName { color: #6f6f6f; }"
-        "QFrame#instrumentPanel QLabel#readoutValue { color: #202124; }"
-        "QFrame#instrumentPanel QPushButton { background: #f7f8fa; "
+        "QFrame#instrumentPanel { background-color: #ffffff; "
+        "border: 1px solid #d5dbe2; "
+        f"border-bottom: 3px solid {bottom_color}; "
+        f"border-radius: {radius}px; }}"
+        "QFrame#instrumentPanel QFrame#panelHeader { "
+        "background-color: #f7f9fb; border: none; "
+        "border-bottom: 1px solid #e1e6eb; }"
+        "QFrame#instrumentPanel QFrame#panelBody { "
+        "background: transparent; border: none; }"
+        "QFrame#instrumentPanel QLabel { background: transparent; "
+        "border: none; color: #1f2328; }"
+        f"QFrame#instrumentPanel QLabel#panelTitle {{ color: #626b75; "
+        f"font-size: {title_size}px; font-weight: bold; }}"
+        f"QFrame#instrumentPanel QLabel#stateBadge {{ color: {color}; "
+        f"background-color: {badge_background}; border: 1px solid {color}; "
+        f"border-radius: {badge_radius}px; padding: 1px {badge_horizontal_padding}px; "
+        f"font-size: {badge_size}px; font-weight: bold; }}"
+        f"QFrame#instrumentPanel QLabel#panelValue {{ color: #1f2328; "
+        f"font-size: {value_size}px; font-weight: bold; "
+        "font-family: Consolas; }"
+        f"QFrame#instrumentPanel QLabel#panelDetail {{ color: #6e7781; "
+        f"font-size: {detail_size}px; }}"
+        f"QFrame#instrumentPanel QLabel#readoutName {{ color: #6e7781; "
+        f"font-size: {detail_size}px; }}"
+        f"QFrame#instrumentPanel QLabel#readoutValue {{ color: #1f2328; "
+        f"font-size: {readout_size}px; font-weight: bold; "
+        "font-family: Consolas; }"
+        f"QFrame#instrumentPanel QPushButton {{ background: #f6f8fa; "
         "color: #202124; border: 1px solid #b8bec6; border-radius: 3px; "
-        "padding: 2px 8px; }"
+        f"font-size: {detail_size}px; padding: 2px 8px; }}"
         "QFrame#instrumentPanel QPushButton:hover { background: #eef2f7; }"
         "QFrame#instrumentPanel QPushButton:pressed { background: #e2e8f0; }"
         "QFrame#instrumentPanel QPushButton:disabled { color: #8a8a8a; "

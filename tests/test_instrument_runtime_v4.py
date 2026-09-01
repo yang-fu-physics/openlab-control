@@ -448,6 +448,7 @@ class InstrumentRuntimeV4Tests(unittest.TestCase):
         )
         sets: list[tuple[object, ...]] = []
         holds: list[tuple[str, str]] = []
+        self.assertFalse(hasattr(dialog, "mode_input"))
         dialog.setRequested.connect(lambda *values: sets.append(values))
         dialog.holdRequested.connect(
             lambda instrument_id, control: holds.append(
@@ -457,6 +458,10 @@ class InstrumentRuntimeV4Tests(unittest.TestCase):
         dialog.apply_button.click()
         dialog.hold_button.click()
         self.assertEqual(sets[0][0:2], ("temperature", "loop_1"))
+        self.assertEqual(
+            sets[0][2:],
+            (dialog.target_input.value(), dialog.rate_input.value()),
+        )
         self.assertEqual(holds, [("temperature", "loop_1")])
         dialog.close()
 

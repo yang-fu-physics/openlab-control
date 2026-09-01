@@ -164,7 +164,9 @@ class MainWindow(QMainWindow):
         ] = []
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
+        self.current_data_file: Path | None = None
         self.current_snapshots: dict[str, InstrumentSnapshot] = {}
+        self._runtime_connection_summary: tuple[int, int] | None = None
         self.current_run_state = RunState.IDLE
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
         self.module_windows: dict[str, ModuleWindow] = {}
@@ -231,15 +233,10 @@ class MainWindow(QMainWindow):
         self.sequence_window.resize(scaled(780), scaled(560))
         self.sequence_window.show()
 
-        self.data_browser = DatBrowserWidget(self.config.project_root)
-        self.data_browser.fileChanged.connect(self._data_browser_file_changed)
-        self.data_window = QMdiSubWindow()
-        self.data_window.setWidget(self.data_browser)
-        self.data_window.setWindowTitle("Data Browser")
-        self.data_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self.mdi.addSubWindow(self.data_window)
-        self.data_window.resize(scaled(900), scaled(620))
-        self.data_window.hide()
+        self.data_browser_windows: dict[
+            QMdiSubWindow,
+            DatBrowserWidget,
+        ] = {}
 
         self._build_left_dock()
         self._build_command_dock()
@@ -247,7 +244,7 @@ class MainWindow(QMainWindow):
         self._build_log_dock()
         self._build_actions()
         self.statusBar().showMessage(
-            f"Starting simulation framework · UI scale {self.ui_scale:.2f}x "
+            f"Starting instrument runtime · UI scale {self.ui_scale:.2f}x "
             f"({self.ui_scale_mode}) · text {self.font_scale:.0%}"
         )
         QTimer.singleShot(0, self._fit_mdi_windows)
@@ -267,7 +264,7 @@ class MainWindow(QMainWindow):
 
         project_group = QGroupBox("Experiment")
         project_layout = QVBoxLayout(project_group)
-        project_layout.addWidget(QLabel("External Instrument Simulation"))
+        project_layout.addWidget(QLabel("System Instruments"))
         self.measure_status_label = QLabel(
             f"0 of {len(self.module_descriptors)} measurement modules enabled"
         )
@@ -496,6 +493,9 @@ class MainWindow(QMainWindow):
         dock.setObjectName("statusDock")
         dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea)
         dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        hidden_title_bar = QWidget(dock)
+        hidden_title_bar.setFixedHeight(0)
+        dock.setTitleBarWidget(hidden_title_bar)
         panel = InstrumentPanelHost(
             self.config.instrument_instances,
             self.config.panels,
@@ -670,7 +670,6 @@ class MainWindow(QMainWindow):
             self.restoreState(main_state)
         for key, window in (
             ("sequence", self.sequence_window),
-            ("data_browser", self.data_window),
         ):
             rect = store.rect(key)
             if rect is not None:
@@ -704,10 +703,14 @@ class MainWindow(QMainWindow):
             "sequence",
             self.sequence_window.geometry(),
         )
-        store.set_rect(
-            "data_browser",
-            self.data_window.geometry(),
-        )
+        if self.data_browser_windows:
+            data_window = next(
+                reversed(self.data_browser_windows)
+            )
+            store.set_rect(
+                "data_browser",
+                data_window.geometry(),
+            )
         store.set_geometry(
             "live_trend",
             self.trend_dialog.saveGeometry(),
@@ -1397,9 +1400,12 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
 
     def _view_data(self) -> None:
-        # The browser deliberately does not follow the active measurement file.
-        # It displays only the DAT file explicitly opened or dropped by the user.
-        self._show_data_browser()
+        path = self.current_data_file
+        if path is None:
+            displayed = Path(self.data_file_label.fullText())
+            if displayed.is_file():
+                path = displayed
+        self._show_data_browser(path)
 
     def _focus_sequence(self) -> None:
         self.sequence_window.showNormal()
@@ -1547,6 +1553,9 @@ class MainWindow(QMainWindow):
                     str(message.payload.get("module_id", ""))
                 )
             elif message.kind == "startup_error":
+                self.statusBar().showMessage(
+                    f"Runtime startup failed: {message.payload}"
+                )
                 QMessageBox.critical(self, "Runtime Startup Failed", str(message.payload))
         self._sync_module_monitor_window_states()
         self._check_pending_run()
@@ -1654,6 +1663,31 @@ class MainWindow(QMainWindow):
 
     def _handle_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         self.current_snapshots = snapshots
+        configured_ids = {
+            instrument.id
+            for instrument in self.config.instrument_instances
+        }
+        connected_count = sum(
+            snapshot.connected
+            for instrument_id, snapshot in snapshots.items()
+            if instrument_id in configured_ids
+        )
+        connection_summary = (
+            connected_count,
+            len(configured_ids),
+        )
+        if connection_summary != self._runtime_connection_summary:
+            self._runtime_connection_summary = connection_summary
+            runtime_state = (
+                "Ready"
+                if connected_count == len(configured_ids)
+                else "Ready with instrument warnings"
+            )
+            self.statusBar().showMessage(
+                f"{runtime_state} · {connected_count}/{len(configured_ids)} "
+                f"instruments connected · UI scale {self.ui_scale:.2f}x "
+                f"({self.ui_scale_mode}) · text {self.font_scale:.0%}"
+            )
         for instrument_id, snapshot in snapshots.items():
             self.status_panel.update_snapshot(snapshot)
             for dialog in self.manual_dialogs.values():
@@ -1707,9 +1741,17 @@ class MainWindow(QMainWindow):
         self._handle_module_alert(notice)
         if event.code == "RUN_DIRECTORY" and not notice.is_resolution:
             self.run_directory = Path(event.message)
-            self.data_file_label.setFullText(str(event.context or event.message))
+            self.current_data_file = Path(
+                event.context or event.message
+            )
+            self.data_file_label.setFullText(
+                str(self.current_data_file)
+            )
         elif event.code == "DATAFILE_SELECTED" and not notice.is_resolution:
-            self.data_file_label.setFullText(event.message)
+            self.current_data_file = Path(event.message)
+            self.data_file_label.setFullText(
+                str(self.current_data_file)
+            )
         state = "RESOLVED" if notice.is_resolution else event.severity.value.upper()
         self._append_log(state, event.source, event.code, event.message)
         if notice.is_resolution:
@@ -2127,13 +2169,11 @@ class MainWindow(QMainWindow):
         control: str,
         value: float,
         rate: float,
-        mode: str,
     ) -> None:
         future = self.runtime.set_target(
             instrument_id,
             value,
             rate,
-            mode,
             control=control,
         )
         snapshot = self.current_snapshots.get(instrument_id)
@@ -2192,14 +2232,56 @@ class MainWindow(QMainWindow):
         self.trend_dialog.raise_()
         self.trend_dialog.activateWindow()
 
-    def _show_data_browser(self, path: str | Path | None = None) -> None:
-        self.data_window.showNormal()
-        self.data_window.show()
-        self.mdi.setActiveSubWindow(self.data_window)
-        self.data_window.raise_()
+    def _show_data_browser(
+        self,
+        path: str | Path | None = None,
+    ) -> QMdiSubWindow:
+        browser = DatBrowserWidget(self.config.project_root)
+        data_window = QMdiSubWindow()
+        data_window.setWidget(browser)
+        data_window.setWindowTitle("Data Browser")
+        data_window.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose,
+            True,
+        )
+        self.mdi.addSubWindow(data_window)
+        data_window.resize(scaled(900), scaled(620))
+        store = self.ui_preference_store
+        if (
+            store is not None
+            and self.ui_preferences.window_mode == "remember"
+        ):
+            rect = store.rect("data_browser")
+            if rect is not None:
+                data_window.setGeometry(rect)
+        offset = scaled(24) * (
+            len(self.data_browser_windows) % 8
+        )
+        self.data_browser_windows[data_window] = browser
+        data_window.destroyed.connect(
+            lambda _object=None, window=data_window: (
+                self.data_browser_windows.pop(window)
+            )
+        )
+        browser.fileChanged.connect(
+            lambda changed_path, window=data_window: (
+                self._data_browser_file_changed(
+                    window,
+                    changed_path,
+                )
+            )
+        )
+        data_window.show()
+        data_window.move(
+            data_window.x() + offset,
+            data_window.y() + offset,
+        )
+        self.mdi.setActiveSubWindow(data_window)
+        data_window.raise_()
         QTimer.singleShot(0, self._fit_mdi_windows)
         if path is not None:
-            self.data_browser.load_path(path, show_errors=True)
+            browser.load_path(path, show_errors=True)
+        return data_window
 
     def _fit_mdi_windows(self) -> None:
         """Keep floating document windows inside the current MDI viewport."""
@@ -2208,7 +2290,10 @@ class MainWindow(QMainWindow):
             return
         max_width = max(320, viewport.width() - 4)
         max_height = max(240, viewport.height() - 4)
-        for subwindow in (self.sequence_window, self.data_window):
+        for subwindow in (
+            self.sequence_window,
+            *self.data_browser_windows,
+        ):
             if subwindow.isMaximized():
                 continue
             subwindow.resize(
@@ -2245,17 +2330,23 @@ class MainWindow(QMainWindow):
                     window.showNormal()
             self._minimized_module_windows.clear()
 
-    def _data_browser_file_changed(self, path: str) -> None:
-        self.data_window.setWindowTitle(f"{Path(path).name} - Data Browser")
+    def _data_browser_file_changed(
+        self,
+        window: QMdiSubWindow,
+        path: str,
+    ) -> None:
+        window.setWindowTitle(
+            f"{Path(path).name} - Data Browser"
+        )
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
-        if self.data_browser._first_dat_path(event) is not None:
+        if DatBrowserWidget._first_dat_path(event) is not None:
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
-        path = self.data_browser._first_dat_path(event)
+        path = DatBrowserWidget._first_dat_path(event)
         if path is not None:
             self._show_data_browser(path)
             event.acceptProposedAction()

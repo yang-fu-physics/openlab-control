@@ -27,7 +27,15 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.config import load_config  # noqa: E402
-from labcontrol.models import RunState  # noqa: E402
+from labcontrol.models import (  # noqa: E402
+    EventNotice,
+    InstrumentConnectionState,
+    InstrumentControlState,
+    InstrumentSnapshot,
+    LabEvent,
+    RunState,
+    Severity,
+)
 from labcontrol.sequence.model import CommandType  # noqa: E402
 from labcontrol.sequence.module_settings import (  # noqa: E402
     SequenceModuleSettings,
@@ -62,13 +70,13 @@ class MainWindowLayoutTests(unittest.TestCase):
         try:
             window.resize(1180, 720)
             window.show()
-            window._show_data_browser()
+            data_window = window._show_data_browser()
             self.application.processEvents()
             window._fit_mdi_windows()
             self.application.processEvents()
 
             viewport = window.mdi.viewport().rect()
-            for subwindow in (window.sequence_window, window.data_window):
+            for subwindow in (window.sequence_window, data_window):
                 geometry = subwindow.geometry()
                 self.assertGreaterEqual(geometry.left(), viewport.left())
                 self.assertGreaterEqual(geometry.top(), viewport.top())
@@ -218,6 +226,8 @@ class MainWindowLayoutTests(unittest.TestCase):
                 window.command_dock.features(),
                 QDockWidget.DockWidgetFeature.NoDockWidgetFeatures,
             )
+            self.assertIsNotNone(window.status_dock.titleBarWidget())
+            self.assertEqual(window.status_dock.titleBarWidget().height(), 0)
             compact_width = window.command_dock.minimumWidth()
             window.resizeDocks(
                 [window.command_dock],
@@ -253,6 +263,215 @@ class MainWindowLayoutTests(unittest.TestCase):
                 window.module_monitor_scroll
                 .horizontalScrollBar()
                 .isVisible()
+            )
+        finally:
+            window.close()
+
+    def test_multiple_data_browsers_keep_independent_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first_path = Path(directory) / "first.dat"
+            second_path = Path(directory) / "second.dat"
+            first_path.write_text(
+                "[Data]\nX,Y\n0,1\n",
+                encoding="utf-8",
+            )
+            second_path.write_text(
+                "[Data]\nX,Y\n0,2\n",
+                encoding="utf-8",
+            )
+            window = MainWindow(self.config)
+            try:
+                window.show()
+                first_window = window._show_data_browser(
+                    first_path
+                )
+                second_window = window._show_data_browser(
+                    second_path
+                )
+                self.application.processEvents()
+                first_browser = window.data_browser_windows[
+                    first_window
+                ]
+                second_browser = window.data_browser_windows[
+                    second_window
+                ]
+
+                self.assertIsNot(first_window, second_window)
+                self.assertIsNot(first_browser, second_browser)
+                self.assertEqual(
+                    first_browser.current_path,
+                    first_path.resolve(),
+                )
+                self.assertEqual(
+                    second_browser.current_path,
+                    second_path.resolve(),
+                )
+                self.assertEqual(
+                    first_window.windowTitle(),
+                    "first.dat - Data Browser",
+                )
+                self.assertEqual(
+                    second_window.windowTitle(),
+                    "second.dat - Data Browser",
+                )
+                first_window.close()
+                QCoreApplication.sendPostedEvents(
+                    None,
+                    QEvent.Type.DeferredDelete,
+                )
+                self.application.processEvents()
+
+                self.assertNotIn(
+                    first_window,
+                    window.data_browser_windows,
+                )
+                self.assertIn(
+                    second_window,
+                    window.data_browser_windows,
+                )
+                self.assertTrue(second_window.isVisible())
+                self.assertEqual(
+                    second_browser.current_path,
+                    second_path.resolve(),
+                )
+            finally:
+                window.close()
+
+    def test_view_data_loads_active_file_after_close_and_reopen(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "active.dat"
+            path.write_text(
+                "[Data]\nX,Y\n0,1\n",
+                encoding="utf-8",
+            )
+            window = MainWindow(self.config)
+            try:
+                window.show()
+                window._handle_event(
+                    EventNotice(
+                        LabEvent(
+                            key="logging:DATAFILE_SELECTED",
+                            severity=Severity.INFO,
+                            source="logging",
+                            code="DATAFILE_SELECTED",
+                            message=str(path),
+                        ),
+                        show_popup=False,
+                    )
+                )
+
+                window._view_data()
+                self.application.processEvents()
+                first_window = next(
+                    reversed(window.data_browser_windows)
+                )
+                first_browser = window.data_browser_windows[
+                    first_window
+                ]
+                self.assertEqual(
+                    first_browser.current_path,
+                    path.resolve(),
+                )
+
+                first_window.close()
+                QCoreApplication.sendPostedEvents(
+                    None,
+                    QEvent.Type.DeferredDelete,
+                )
+                self.application.processEvents()
+                self.assertNotIn(
+                    first_window,
+                    window.data_browser_windows,
+                )
+
+                window._view_data()
+                self.application.processEvents()
+                second_window = next(
+                    reversed(window.data_browser_windows)
+                )
+                self.assertIsNot(second_window, first_window)
+                self.assertEqual(
+                    window.data_browser_windows[
+                        second_window
+                    ].current_path,
+                    path.resolve(),
+                )
+            finally:
+                window.close()
+
+    def test_runtime_status_moves_from_starting_to_ready(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            self.assertIn(
+                "Starting instrument runtime",
+                window.statusBar().currentMessage(),
+            )
+            snapshots = {
+                instrument.id: InstrumentSnapshot(
+                    instrument_id=instrument.id,
+                    display_name=instrument.display_name,
+                    kind=instrument.kind,
+                    timestamp=time.monotonic(),
+                    current=0.0,
+                    controls={
+                        panel.id: InstrumentControlState(
+                            current=0.0,
+                            target=0.0,
+                        )
+                        for panel in instrument.panels
+                        if panel.template == "controller"
+                    },
+                )
+                for instrument in self.config.instrument_instances
+            }
+
+            window._handle_snapshots(snapshots)
+
+            self.assertTrue(
+                window.statusBar().currentMessage().startswith(
+                    f"Ready · {len(snapshots)}/{len(snapshots)} "
+                    "instruments connected"
+                )
+            )
+        finally:
+            window.close()
+
+    def test_runtime_status_reports_connection_warnings(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            snapshots = {
+                instrument.id: InstrumentSnapshot(
+                    instrument_id=instrument.id,
+                    display_name=instrument.display_name,
+                    kind=instrument.kind,
+                    timestamp=time.monotonic(),
+                    current=0.0,
+                    controls={
+                        panel.id: InstrumentControlState(
+                            current=0.0,
+                            target=0.0,
+                        )
+                        for panel in instrument.panels
+                        if panel.template == "controller"
+                    },
+                )
+                for instrument in self.config.instrument_instances
+            }
+            window._handle_snapshots(snapshots)
+            disconnected_id = self.config.instrument_instances[0].id
+            snapshots[disconnected_id].connection_state = (
+                InstrumentConnectionState.DISCONNECTED
+            )
+
+            window._handle_snapshots(snapshots)
+
+            self.assertTrue(
+                window.statusBar().currentMessage().startswith(
+                    f"Ready with instrument warnings · {len(snapshots) - 1}/"
+                    f"{len(snapshots)} instruments connected"
+                )
             )
         finally:
             window.close()

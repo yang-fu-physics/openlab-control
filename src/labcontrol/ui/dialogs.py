@@ -472,7 +472,7 @@ class ManualControlDialog(QDialog):
     主窗口通过 ``set_runtime_editable`` 与快照共同禁用按钮。
     """
 
-    setRequested = Signal(str, str, float, float, str)
+    setRequested = Signal(str, str, float, float)
     holdRequested = Signal(str, str)
 
     def __init__(
@@ -519,11 +519,8 @@ class ManualControlDialog(QDialog):
         self.rate_input.setRange(10 ** -self._precision, panel.max_rate_per_minute)
         self.rate_input.setSuffix(f" {self.reading.unit}/min")
         self.rate_input.setValue(panel.default_rate_per_minute)
-        self.mode_input = QComboBox()
-        self.mode_input.addItems(["Settle", "Sweep"])
         form.addRow("Target", self.target_input)
         form.addRow("Rate", self.rate_input)
-        form.addRow("Mode", self.mode_input)
         layout.addLayout(form)
         buttons = QHBoxLayout()
         self.apply_button = QPushButton("Set")
@@ -553,7 +550,6 @@ class ManualControlDialog(QDialog):
             self.panel.control_id,
             self.target_input.value(),
             self.rate_input.value(),
-            self.mode_input.currentText(),
         )
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:

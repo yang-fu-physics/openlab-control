@@ -138,7 +138,8 @@ decimals = 2
 | 实验 DAT | 每个 `Measure` 结果行 | 与模块测量同步的主值和本次即时辅助值 |
 | `instrument_status.dat` | Run 期间按独立周期 | 每个 Controller 的独立状态，以及每台物理仪表一次连接信息和辅助读数 |
 
-Data Browser 可打开任意 DAT，不绑定当前 Run。Live Trend 使用已有快照，不会额外读取仪表。
+Data Browser 可打开多个独立窗口；数据区的 View 载入当前 Run DAT，其他窗口可打开任意
+DAT。Live Trend 使用已有快照，不会额外读取仪表。
 
 ## `ready` 不能绕过核心判稳
 

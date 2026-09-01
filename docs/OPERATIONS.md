@@ -86,9 +86,9 @@ Manager 手动启用。
 
 - 左侧 `Sequence Control`：数据文件、当前 SEQ、运行状态、Enabled 模块监视卡和
   Run/Pause/Stop。
-- 中央：浮动 SEQ 和 Data Browser 窗口。
+- 中央：浮动 SEQ 和可同时打开多个文件的 Data Browser 窗口。
 - 右侧 `Sequence Command Bar`：双击命令后设置参数并插入。
-- 底部 `Instrument Status`：按扫描器保存的全局顺序显示所有已启用固定面板；没有启用面板
+- 底部无外层标题的仪表面板条：按扫描器保存的全局顺序显示所有已启用固定面板；没有启用面板
   时保持为空；
   `controller` 保持当前值、目标、速率和稳定状态样式，`readout` 只显示一个主读数，
   `readout_grid` 以 2×2 最多显示四个读数；需要更多读数时由作者声明另一个固定面板。
@@ -358,11 +358,12 @@ System Instrument 可以为自己的稳定事件代码注册响应。命中后�
 
 ## Data Browser
 
-Data Browser 与当前实验 DAT 解耦：
+每个 Data Browser 窗口独立保存自己的 DAT：
 
-1. Graph → Data Browser，或把 `.dat` 拖入主窗口。
-2. 它只跟踪明确打开的文件。
-3. 文件追加后自动刷新图。
+1. 左侧数据区的 View 会新建窗口并直接载入当前 Run DAT。
+2. Graph → Data Browser 新建空白窗口，随后可打开任意 DAT；把 `.dat` 拖入主窗口也会
+   新建窗口。
+3. 多个窗口可以同时显示不同数据；文件追加后各自自动刷新图。
 
 右键图区域可：
 
@@ -478,5 +479,5 @@ VISA 地址不会保留在 Measurement 资源清单；核心自带内容只作�
 
 ### DAT 图不刷新
 
-确认 Data Browser 打开的正是目标文件。它不会自动切换到当前 Run DAT；请使用
-**Graph → Data Browser → Open DAT**，或把 DAT 拖入主窗口一次。
+确认 Data Browser 窗口标题对应目标文件。查看当前 Run 时点击左侧数据区的 **View**；
+查看其他文件时使用 **Graph → Data Browser → Open DAT**，或把 DAT 拖入主窗口。

@@ -82,16 +82,17 @@ class InstrumentPanelTests(unittest.TestCase):
         self.assertEqual(emitted, [])
         self.assertEqual(panel.value_label.text(), "4.234 K")
         self.assertEqual(
-            panel.name_label.text(),
+            panel.title_label.text(),
             instrument.panel("main").display_name,
         )
+        self.assertIsInstance(panel, QFrame)
         self.assertEqual(panel.minimumWidth(), 205)
-        self.assertEqual(panel.maximumHeight(), 105)
+        self.assertEqual(panel.maximumHeight(), 135)
         self.assertEqual(
             panel.value_label.objectName(),
             "panelValue",
         )
-        self.assertFalse(hasattr(panel, "title_label"))
+        self.assertEqual(panel.title_label.objectName(), "panelTitle")
         self.assertFalse(hasattr(panel, "state_label"))
         self.assertFalse(hasattr(panel, "detail_label"))
         self.assertEqual(
@@ -184,7 +185,7 @@ class InstrumentPanelTests(unittest.TestCase):
             readout.value_labels["heater_range"].text(),
             "LOW",
         )
-        self.assertEqual(panel.maximumHeight(), 105)
+        self.assertEqual(panel.maximumHeight(), 135)
 
         host.update_snapshot(
             InstrumentSnapshot(
@@ -324,7 +325,7 @@ class InstrumentPanelTests(unittest.TestCase):
         )
         temperature_panel = host.panels["temperature.temperature_b"]
         self.assertIsInstance(temperature_panel, ReadoutPanel)
-        self.assertEqual(temperature_panel.name_label.text(), "Temp B")
+        self.assertEqual(temperature_panel.title_label.text(), "Temp B")
         self.assertEqual(temperature_panel.value_label.text(), "20.125 K")
         loop_1_panel = host.panels["temperature.loop_1"]
         self.assertIsInstance(loop_1_panel, ReadoutGridPanel)
@@ -376,6 +377,10 @@ class InstrumentPanelTests(unittest.TestCase):
         )
         self.assertEqual(list(second.value_labels), ["d"])
         self.assertLess(host._row.indexOf(first), host._row.indexOf(second))
+        self.assertEqual(host._row.count(), len(host.panels) + 1)
+        self.assertIsNotNone(
+            host._row.itemAt(host._row.count() - 1).spacerItem()
+        )
         host.close()
 
     def test_single_readout_does_not_display_auxiliary_readings(self) -> None:
@@ -393,7 +398,7 @@ class InstrumentPanelTests(unittest.TestCase):
         panel = host.panels["second_stage.main"]
         self.assertIsInstance(panel, ReadoutPanel)
         self.assertEqual(
-            panel.name_label.text(),
+            panel.title_label.text(),
             instrument.panel("main").display_name,
         )
         self.assertEqual(list(host.panels), ["second_stage.main"])
@@ -465,18 +470,51 @@ class InstrumentPanelTests(unittest.TestCase):
         self.assertFalse(panel.buttons["compressor_on"].isEnabled())
         host.close()
 
-    def test_status_cards_keep_fixed_light_colors(self) -> None:
+    def test_status_cards_use_flat_telemetry_hierarchy(self) -> None:
         config = load_simulated_config()
         instrument = config.instrument("temperature")
         panel = ControllerPanel(instrument, instrument.panel("main"))
-        self.assertEqual(panel.title_label.objectName(), "panelTitle")
+        self.assertEqual(
+            panel.title_label.text(),
+            instrument.panel("main").display_name,
+        )
+        self.assertEqual(panel.state_label.objectName(), "stateBadge")
         self.assertEqual(panel.value_label.objectName(), "panelValue")
         self.assertEqual(panel.detail_label.objectName(), "panelDetail")
+        self.assertIsNotNone(panel.findChild(QFrame, "panelHeader"))
+        self.assertIsNotNone(panel.findChild(QFrame, "panelBody"))
         style = panel.styleSheet()
-        self.assertIn("background: #ffffff", style)
-        self.assertIn("color: #202124", style)
-        self.assertIn("color: #6f6f6f", style)
+        self.assertIn("background-color: #ffffff", style)
+        self.assertIn("font-family", style)
+        self.assertIn("background-color: #f0f2f4", style)
+        self.assertIn("border-bottom: 3px solid #d5dbe2", style)
         panel.close()
+
+    def test_status_card_type_ignores_global_font_scale(self) -> None:
+        config = load_simulated_config()
+        instrument = config.instrument("temperature")
+        previous_ui_scale = self.app.property("openlabUiScale")
+        previous_font_scale = self.app.property("openlabFontScale")
+        try:
+            self.app.setProperty("openlabUiScale", 1.2)
+            self.app.setProperty("openlabFontScale", 0.8)
+            small = ControllerPanel(instrument, instrument.panel("main"))
+            small_style = small.styleSheet()
+            small_geometry = (small.minimumWidth(), small.maximumHeight())
+            small.close()
+
+            self.app.setProperty("openlabFontScale", 1.5)
+            large = ControllerPanel(instrument, instrument.panel("main"))
+
+            self.assertEqual(large.styleSheet(), small_style)
+            self.assertEqual(
+                (large.minimumWidth(), large.maximumHeight()),
+                small_geometry,
+            )
+            large.close()
+        finally:
+            self.app.setProperty("openlabUiScale", previous_ui_scale)
+            self.app.setProperty("openlabFontScale", previous_font_scale)
 
     def test_live_trend_coalesces_visible_redraws_and_stops_them_when_hidden(
         self,
