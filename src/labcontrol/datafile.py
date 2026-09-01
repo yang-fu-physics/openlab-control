@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from string import ascii_uppercase
 from typing import Any, Mapping, TextIO
 
 from . import __version__
@@ -315,8 +316,13 @@ class DatRunLogger:
         if not should_append:
             self._data_handle.write("[Header]\n")
             self._data_handle.write("; OpenLab Control Data File (default extension .dat)\n")
+            timestamp_column = (
+                "Timestamp"
+                if self.config.logging.compact_measurement_data
+                else "Timestamp(s)"
+            )
             self._data_handle.write(
-                "; Timestamp(s) uses "
+                f"; {timestamp_column} uses "
                 f"{self.config.logging.timestamp_epoch}.\n"
             )
             self._data_writer.writerow(["BYAPP", "OpenLab Control", __version__])
@@ -417,6 +423,61 @@ class DatRunLogger:
 
     def _build_columns(self) -> list[str]:
         """按仪表配置和模块清单确定本次运行固定的 DAT 列顺序。"""
+
+        if self.config.logging.compact_measurement_data:
+            columns = ["Timestamp"]
+            columns.extend(
+                "Temp"
+                for instrument in self.config.instrument_instances
+                for panel in instrument.panels
+                if panel.enabled and panel.role == "sample_temp"
+            )
+            module_columns = [
+                (module.id, column)
+                for module in self._module_descriptors
+                for column in module.columns
+            ]
+            owners: dict[str, list[str]] = {}
+            for module_id, column in module_columns:
+                owners.setdefault(column.label, []).append(
+                    module_id
+                )
+            colliding_prefixes: dict[str, list[str]] = {}
+            for module_id, column in module_columns:
+                if len(owners[column.label]) < 2:
+                    continue
+                prefix = column.name.partition("_")[0]
+                modules = colliding_prefixes.setdefault(
+                    prefix,
+                    [],
+                )
+                if module_id not in modules:
+                    modules.append(module_id)
+            instance_suffixes = {
+                (module_id, prefix): ascii_uppercase[index]
+                for prefix, module_ids in colliding_prefixes.items()
+                for index, module_id in enumerate(module_ids)
+            }
+            for module in self._module_descriptors:
+                for column in module.columns:
+                    prefix, separator, remainder = (
+                        column.name.partition("_")
+                    )
+                    suffix = instance_suffixes.get(
+                        (module.id, prefix)
+                    )
+                    if suffix is None:
+                        columns.append(column.label)
+                        continue
+                    name = (
+                        f"{prefix}{suffix}{separator}{remainder}"
+                    )
+                    columns.append(
+                        f"{name}({column.unit})"
+                        if column.unit
+                        else name
+                    )
+            return columns
 
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]
         temperature_count = sum(
@@ -872,7 +933,42 @@ class DatRunLogger:
             if self.config.logging.timestamp_epoch == "labview_1904"
             else unix_now
         )
-        row: list[object] = [
+        if self.config.logging.compact_measurement_data:
+            row: list[object] = [f"{absolute:.2f}"]
+            for instrument in self.config.instrument_instances:
+                for panel in instrument.panels:
+                    if not panel.enabled or panel.role != "sample_temp":
+                        continue
+                    snapshot = snapshots.get(instrument.id)
+                    value = (
+                        None
+                        if snapshot is None or not snapshot.connected
+                        else snapshot.current
+                    )
+                    reading = instrument.reading(panel.reading)
+                    decimals = (
+                        reading.decimals
+                        if reading.decimals is not None
+                        else control_decimals(instrument.kind, reading.unit)
+                    )
+                    row.append(
+                        ""
+                        if value is None
+                        else fixed_number(value, decimals)
+                    )
+            for module in self._module_descriptors:
+                values = module_values.get(module.id, {})
+                for column in module.columns:
+                    value = values.get(column.name)
+                    if value is None:
+                        row.append("")
+                    elif isinstance(value, float):
+                        row.append(f"{value:.9g}")
+                    else:
+                        row.append(str(value))
+            return row
+
+        row = [
             f"{absolute:.2f}",
             f"{time.monotonic() - self._started_monotonic:.2f}",
             sequence_step,

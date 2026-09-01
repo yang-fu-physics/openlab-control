@@ -157,6 +157,7 @@ class LoggingConfig:
     timestamp_epoch: str = "labview_1904"
     flush_every_row: bool = True
     allow_external_paths: bool = False
+    compact_measurement_data: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -633,6 +634,10 @@ def load_config(path: str | Path) -> AppConfig:
             timestamp_epoch=timestamp_epoch,
             flush_every_row=bool(logging_raw.get("flush_every_row", True)),
             allow_external_paths=bool(logging_raw.get("allow_external_paths", False)),
+            compact_measurement_data=_boolean(
+                logging_raw.get("compact_measurement_data", False),
+                "logging.compact_measurement_data",
+            ),
         ),
         alarms=AlarmConfig(
             stability_timeout=_severity(str(alarm_raw.get("stability_timeout", "error")), "stability_timeout"),

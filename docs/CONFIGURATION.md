@@ -55,9 +55,12 @@ Measurement Module 调用 `api.instruments()` 时会请求一次即时仪表采�
 | `timestamp_epoch` | `labview_1904` | `labview_1904` 或 `unix` |
 | `flush_every_row` | `true` | 每行立即刷新，降低断电损失 |
 | `allow_external_paths` | `false` | 是否允许数据文件写到项目目录外 |
+| `compact_measurement_data` | `false` | 只写 `Timestamp`、主控温度和模块列；发行配置设为 `true` |
 
 三个日志文件名必须互不相同，并且是普通 Windows 文件名，不能包含目录或盘符。推荐保持
 `allow_external_paths = false`，仅在单条 `Set Datafile` 中明确授权外部目录。
+`compact_measurement_data = true` 时不写目标、输出和其他 System Instrument 状态；这些信息
+仍保存在 `instrument_status.dat`。紧凑格式详见 [DAT 与事件格式](DAT_FORMAT.md)。
 
 ### `[alarms]`
 

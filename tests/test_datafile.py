@@ -39,6 +39,214 @@ from tests.configuration_fixtures import write_simulated_configuration  # noqa: 
 
 
 class DatafileTests(unittest.TestCase):
+    def test_compact_measurement_data_has_control_temperature_and_sparse_module_columns(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = load_config(write_simulated_configuration(temp_root))
+            self.assertTrue(config.logging.compact_measurement_data)
+            logger = DatRunLogger(config, EventManager())
+            module = load_manifest(SIMULATED_MODULE)
+            module.columns = (
+                ModuleColumn("Delta_R1", "ohm"),
+                ModuleColumn("Delta_R1_StdDev", "ohm"),
+                ModuleColumn("Delta_R2", "ohm"),
+                ModuleColumn("Delta_R2_StdDev", "ohm"),
+                ModuleColumn("Delta_R3", "ohm"),
+                ModuleColumn("Delta_R3_StdDev", "ohm"),
+                ModuleColumn("Delta_R4", "ohm"),
+                ModuleColumn("Delta_R4_StdDev", "ohm"),
+                ModuleColumn("Delta_Current"),
+                ModuleColumn("Delta_StatusCode"),
+            )
+            auxiliary = load_manifest(SIMULATED_MODULE)
+            auxiliary.id = "simulated_auxiliary"
+            auxiliary.columns = (
+                ModuleColumn("Simu_StatusCode"),
+            )
+            paths = logger.open_run(
+                "compact.seq",
+                "T Measure\nT End Sequence\n",
+                (module, auxiliary),
+            )
+            snapshots = {
+                "temperature": InstrumentSnapshot(
+                    "temperature",
+                    "Temperature",
+                    InstrumentKind.TEMPERATURE,
+                    time.monotonic(),
+                    "K",
+                    305.1234,
+                )
+            }
+            logger.write_measurement_row(
+                snapshots,
+                {
+                    module.id: {
+                        "Delta_R1": 1.2,
+                        "Delta_R1_StdDev": 0.1,
+                        "Delta_Current": 0.001,
+                        "Delta_StatusCode": 0,
+                    },
+                    auxiliary.id: {"Simu_StatusCode": 7},
+                },
+                "Measure",
+            )
+            logger.write_measurement_row(
+                snapshots,
+                {
+                    module.id: {
+                        "Delta_R2": 2.3,
+                        "Delta_R2_StdDev": 0.2,
+                        "Delta_Current": -0.001,
+                        "Delta_StatusCode": 1,
+                    },
+                    auxiliary.id: {"Simu_StatusCode": 8},
+                },
+                "Measure",
+            )
+            logger.close()
+
+            data_section = paths.data_file.read_text(
+                encoding="utf-8"
+            ).split("[Data]\n", 1)[1]
+            records = list(csv.DictReader(data_section.splitlines()))
+            self.assertEqual(
+                next(csv.reader(data_section.splitlines())),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "Delta_R1(ohm)",
+                    "Delta_R1_StdDev(ohm)",
+                    "Delta_R2(ohm)",
+                    "Delta_R2_StdDev(ohm)",
+                    "Delta_R3(ohm)",
+                    "Delta_R3_StdDev(ohm)",
+                    "Delta_R4(ohm)",
+                    "Delta_R4_StdDev(ohm)",
+                    "Delta_Current",
+                    "Delta_StatusCode",
+                    "Simu_StatusCode",
+                ],
+            )
+            self.assertEqual(records[0]["Temp"], "305.123")
+            self.assertEqual(records[0]["Delta_R1(ohm)"], "1.2")
+            self.assertEqual(
+                records[0]["Delta_R1_StdDev(ohm)"],
+                "0.1",
+            )
+            self.assertEqual(records[0]["Delta_R2(ohm)"], "")
+            self.assertEqual(
+                records[0]["Delta_R2_StdDev(ohm)"],
+                "",
+            )
+            self.assertEqual(records[0]["Delta_Current"], "0.001")
+            self.assertEqual(
+                records[0]["Delta_StatusCode"],
+                "0",
+            )
+            self.assertEqual(
+                records[0]["Simu_StatusCode"],
+                "7",
+            )
+            self.assertEqual(records[1]["Delta_R1(ohm)"], "")
+            self.assertEqual(
+                records[1]["Delta_R1_StdDev(ohm)"],
+                "",
+            )
+            self.assertEqual(records[1]["Delta_R2(ohm)"], "2.3")
+            self.assertEqual(
+                records[1]["Delta_R2_StdDev(ohm)"],
+                "0.2",
+            )
+            self.assertEqual(
+                records[1]["Delta_Current"],
+                "-0.001",
+            )
+            self.assertEqual(
+                records[1]["Delta_StatusCode"],
+                "1",
+            )
+            self.assertEqual(
+                records[1]["Simu_StatusCode"],
+                "8",
+            )
+
+    def test_compact_duplicate_module_columns_use_instance_letters(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = load_config(
+                write_simulated_configuration(temp_root)
+            )
+            config = replace(
+                config,
+                logging=replace(
+                    config.logging,
+                    compact_measurement_data=True,
+                ),
+            )
+            columns = (
+                ModuleColumn("Delta_R1", "ohm"),
+                ModuleColumn("Delta_Current"),
+                ModuleColumn("Delta_StatusCode"),
+            )
+            first = load_manifest(SIMULATED_MODULE)
+            first.id = "delta_first"
+            first.columns = columns
+            second = load_manifest(SIMULATED_MODULE)
+            second.id = "delta_second"
+            second.columns = columns
+            logger = DatRunLogger(config, EventManager())
+            paths = logger.open_run(
+                "two-delta.seq",
+                "T Measure\nT End Sequence\n",
+                (first, second),
+            )
+            logger.write_measurement_row(
+                {},
+                {
+                    first.id: {
+                        "Delta_R1": 1.1,
+                        "Delta_Current": 0.001,
+                        "Delta_StatusCode": 0,
+                    },
+                    second.id: {
+                        "Delta_R1": 2.2,
+                        "Delta_Current": -0.001,
+                        "Delta_StatusCode": 1,
+                    },
+                },
+                "Measure",
+            )
+            logger.close()
+
+            data_section = paths.data_file.read_text(
+                encoding="utf-8"
+            ).split("[Data]\n", 1)[1]
+            rows = list(
+                csv.DictReader(data_section.splitlines())
+            )
+            self.assertEqual(
+                next(csv.reader(data_section.splitlines())),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "DeltaA_R1(ohm)",
+                    "DeltaA_Current",
+                    "DeltaA_StatusCode",
+                    "DeltaB_R1(ohm)",
+                    "DeltaB_Current",
+                    "DeltaB_StatusCode",
+                ],
+            )
+            self.assertEqual(rows[0]["DeltaA_R1(ohm)"], "1.1")
+            self.assertEqual(rows[0]["DeltaA_StatusCode"], "0")
+            self.assertEqual(rows[0]["DeltaB_R1(ohm)"], "2.2")
+            self.assertEqual(rows[0]["DeltaB_StatusCode"], "1")
+
     def test_run_snapshot_copies_complete_site_configuration_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
@@ -127,6 +335,13 @@ role = "none"
             temp_root = Path(temp)
             config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
+            config = replace(
+                config,
+                logging=replace(
+                    config.logging,
+                    compact_measurement_data=False,
+                ),
+            )
             logger = DatRunLogger(config, EventManager())
             now = time.monotonic()
             snapshots = {
@@ -394,6 +609,13 @@ role = "none"
             temp_root = Path(temp)
             config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
+            config = replace(
+                config,
+                logging=replace(
+                    config.logging,
+                    compact_measurement_data=False,
+                ),
+            )
             events = EventManager()
             logger = DatRunLogger(config, events)
             module = load_manifest(SIMULATED_MODULE)
@@ -740,6 +962,13 @@ role = "none"
             temp_root = Path(temp)
             config_path = write_simulated_configuration(temp_root)
             config = load_config(config_path)
+            config = replace(
+                config,
+                logging=replace(
+                    config.logging,
+                    compact_measurement_data=False,
+                ),
+            )
             target = temp_root / "shared.dat"
 
             first = DatRunLogger(config, EventManager())

@@ -40,21 +40,39 @@ runs/20260723_120000_nested_scan/
 ```text
 [Header]
 ; OpenLab Control Data File (default extension .dat)
-BYAPP,OpenLab Control,0.19.0
+BYAPP,OpenLab Control,0.20.0
 INFO,...
 
 [Data]
-Timestamp(s),Time(s),SequenceStep,Temp(K),TempTarget(K),Field(Oe),FieldTarget(Oe),second_stage(K),simulated_transport.R1(Ohm),...,simulated_transport.StatusCode
+Timestamp,Temp,Delta_R1(ohm),Delta_R1_StdDev(ohm),...,Delta_Current,Delta_StatusCode
 ...
 ```
 
-### 时间列
+### 紧凑测量表
+
+发行配置使用 `compact_measurement_data = true`。正式实验 DAT 只包含：
+
+- `Timestamp`：按 `[logging].timestamp_epoch` 保存的绝对时间；
+- `Temp`：角色为 `sample_temp` 的 Controller 当前温度；
+- 每个 Enabled Measurement Module 声明的列。
+
+目标值、输出、量程、Ramp 状态、其他温度和 Monitor 不进入紧凑实验 DAT；它们仍按固定周期
+保存在 `instrument_status.dat`。若没有 `sample_temp`，紧凑表不创建 `Temp` 列。
+
+多通道模块的 Schema 在 Run 开始时一次冻结，但每行只填写当前逻辑通道实际返回的字段。
+例如 Delta 四通道依次写四行，共用 `Delta_Current`，而 `Delta_R1`–`Delta_R4` 与各自的
+`_StdDev` 只出现在对应行；其他通道单元格为空。
+
+把 `compact_measurement_data` 设为 `false` 可使用下面的兼容宽表。该配置默认值为 `false`，
+发行版 `configs/general.toml` 明确将其设为 `true`。
+
+### 兼容宽表时间列
 
 - `Timestamp(s)`：默认是从 1904-01-01 UTC 起的秒数，与用户模板/LabVIEW 习惯兼容；`timestamp_epoch = "unix"` 时改为 Unix 秒。
 - `Time(s)`：从本次 Run 创建开始的单调经过时间，不受系统时钟校准影响。
 - `SequenceStep`：完整嵌套路径，例如 `1:Scan Temperature ... / point 2/3=... / 1:Measure`。
 
-### 系统状态列
+### 兼容宽表系统状态列
 
 默认单温控/单磁体时：
 
@@ -82,14 +100,16 @@ class Module:
     columns = {"R1": "Ohm", "StatusCode": ""}
 ```
 
-运行时自动生成：
+兼容宽表会自动加入模块 ID 前缀：
 
 ```text
 simulated_transport.R1(Ohm)
 simulated_transport.StatusCode
 ```
 
-前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `StatusCode` 也不会冲突。Run 开始后 Schema 固定，直到该 Run 结束。
+前缀是模块 ID，不是显示名；这样多个模块都声明 `Voltage` 或 `StatusCode` 也不会冲突。
+紧凑表则直接使用模块声明名，并按下文规则只在实际冲突时加入实例字母。Run 开始后 Schema
+固定，直到该 Run 结束。
 Header 的模块 INFO 保存模块 ID、显示名和版本。
 
 模块每次 `measure(slot, api)` 必须返回一行 Mapping；需要保存原始序列时返回
@@ -108,13 +128,18 @@ Header 的模块 INFO 保存模块 ID、显示名和版本。
 分别重新测量。没有任何模块声明 `slots` 时，一次 `T Measure` 只有槽位 1，因此
 只有一行。
 
-`StatusCode`、`StatusCode1` 等是模块可以选择使用的状态列。公开模块契约要求它们写有限
-整数：通常 `0` 正常，非零含义和故障优先级由模块 README 与测试定义；DAT 中不要写
+状态列由模块自行命名。紧凑 DAT 不增加模块 ID 前缀，因此建议用 4–5 个字母的模块简称
+区分同类列，例如 `Delta_StatusCode`；这只是命名建议，不由核心强制。公开模块契约要求
+状态列写有限整数：通常 `0` 正常，非零含义和故障优先级由模块 README 与测试定义；DAT 中不要写
 `"Normal"`、`"Error"` 等文字。核心把它们当普通结果字段传输，不解释数值语义，也不会
 替模块强制转换。人类可读 Warning/Error 应写入 `events.dat`、运行日志和界面。
 
+若同时启用多个声明了同一前缀和列名的模块，紧凑 DAT 会在前缀后加入实例字母；例如
+两个 Delta 模块分别写 `DeltaA_R1(ohm)` 和 `DeltaB_R1(ohm)`。同一模块实例的其他
+Delta 列使用相同字母。只有实际发生列名冲突时才增加该字母。
+
 若模块自身规定某状态码表示结果无效，应按该模块文档将对应测量值留空；核心不会自动
-替模块清空或保留字段。同一宽表行中的其他通道、温场、设定值、样本数和 rawdata 的
+替模块清空或保留字段。同一测量行中的其他通道、温场、设定值、样本数和 rawdata 的
 处理同样由模块契约决定。
 
 ### 模块原始序列
@@ -152,7 +177,7 @@ rawdata 只保存模块明确提交的仪表读数，不改变正式 DAT Schema�
 ### 值格式
 
 - 温度固定三位；Oe 固定两位；T 固定六位。
-- System Instrument 附加读数使用 `仪表ID.metric_key(单位)` 列，例如
+- 兼容宽表中的 System Instrument 附加读数使用 `仪表ID.metric_key(单位)` 列，例如
   `temperature.second_stage(K)`、`temperature.heater_output(%FS)` 和
   `temperature.heater_range`。这些列在 Run 开始时冻结，缺失读数留空。
 - 模块 float 使用最多 9 位有效数字。
