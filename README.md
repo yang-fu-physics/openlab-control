@@ -9,7 +9,7 @@ OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Pyt
 两者有不同目录、清单和生命周期。System Instrument 一般随实验系统固定；Measurement
 Module 每次启动默认 Disabled，由用户按需 Enable。
 
-当前稳定版本：`0.19.0`。全新安装不启用任何 System Instrument 面板；三个内置仿真也都
+当前稳定版本：`0.20.0`。全新安装不启用任何 System Instrument 面板；三个内置仿真也都
 默认关闭，需要时在 Instrument Scanner 中明确选择。当前版本尚未完成真机验证。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站包含面向初学者的中文
@@ -33,8 +33,9 @@ Module 每次启动默认 Disabled，由用户按需 Enable。
 - 保存 SEQ 时同时保存模块设置伴随文件；Load SEQ 会导入设置，但不自动 Enable 或 Apply。
 - Enabled 模块可在命令栏注册自己的 SEQ 指令；Disable 后立即移除。
 - 模块监视卡显示在 `Sequence Status` 下，可查看最近值并恢复最小化的模块窗口。
-- 独立 Data Browser 可打开任意 DAT 并自动追踪追加；绝对时间戳显示为实际日期时间，数值轴
-  使用 `1/2/5 × 10ⁿ` 主刻度。
+- 每次打开 Data Browser 都会创建独立窗口，可同时比较多个 DAT；数据区的 View 会直接载入
+  当前 Run 文件，文件追加后自动刷新。
+- 默认实验 DAT 只保存时间戳、主控温度和模块声明列；多通道模块每行只填写当前通道结果。
 - Live Trend 使用已有快照缓存，不会为绘图增加仪表读取。
 - 每次 Run 保存实验 DAT、事件、SEQ/配置快照和独立 `instrument_status.dat`。
 - 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员。

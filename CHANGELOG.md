@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.20.0 - 2026-09-01
+
+- 发行配置默认启用紧凑实验 DAT：每行只保存绝对 `Timestamp`、唯一 `sample_temp` 控制温度
+  `Temp` 和 Measurement Module 声明列；目标、输出、量程、Ramp 与其他 System 状态继续写入
+  独立 `instrument_status.dat`。多通道模块只填写当前通道字段，其他通道保持空单元格。
+- 模块自行选择短列名前缀和数值状态列。单个 Delta 使用 `Delta_R1(ohm)`、
+  `Delta_R1_StdDev(ohm)` 至 R4、共用 `Delta_Current` 和 `Delta_StatusCode`；同一次 Run 启用
+  两个同名 Delta 时，核心只在实际冲突后生成 `DeltaA_*`、`DeltaB_*`。
+- Data Browser 改为可重复创建的独立 MDI 窗口，每个窗口保持自己的 DAT 和绘图状态；关闭后
+  再打开不再出现灰色空白。左侧数据区的 View 会把当前 Run 文件直接载入新窗口，菜单和拖放
+  仍可打开任意其他 DAT。
+- 底部 System Instrument 区删除外层标题，固定面板改为“标题栏 + 数据区”层级并适度增高；
+  Controller/Switch 的状态使用独立 Badge。个人文字缩放不再单独放大固定高度面板中的文字，
+  整体 UI 缩放仍同时改变面板尺寸和字体。
+- 手动温控窗口删除对通用 Controller 无实际区别的 Settle/Sweep 选择，只发送目标与速率。
+  关闭或隐藏模块窗口后仍可重新打开，窗口对象和后台模块生命周期保持有效。
+- Keithley 6221/2182A Delta `0.2.0b5` 使用 GPIB EOI 而非换行结束符；读取 2182A 串口桥前
+  等待 0.15 秒（现场最低值 0.12 秒），且只移除 Abort 产生的精确 `DCL\x11` 控制帧，不重发
+  查询。Lake Shore 340 `0.2.1` 将未使用的无效输入视为不可用，并保留手册定义的 old reading
+  数值；两个扩展均继续要求现场安全确认。
+
 ## 0.19.0 - 2026-08-29
 
 - System Instrument API 升级为不兼容的 v4。作者清单只声明型号固定的字段、控制端点、读数和

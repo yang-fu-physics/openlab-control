@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.19.0 的当前边界。
+本文描述 OpenLab Control 0.20.0 的当前边界。
 
 ## 运行模型
 
@@ -173,7 +173,8 @@ runs/<timestamp>_<sequence>/
 `DatRunLogger` 是唯一写入者。每条测量行写入前由核心取得测量专用即时温场快照；若模块刚在
 0.1 秒内读取则复用该样本。常规仪表轮询
 另行节流写入 `instrument_status.dat`。同一物理仪表的辅助读数随主快照使用一个连接，并在
-Run 开始时冻结为固定列。Data Browser 只跟踪用户打开的 DAT，不与当前 Run 绑定。
+Run 开始时冻结为固定列。每个 Data Browser 窗口独立跟踪自己的 DAT；数据区的 View 会把
+当前 Run 文件传给新窗口，Graph 菜单则可继续打开任意文件。
 
 空闲时仪表与前面板按 `poll_interval_seconds` 采样；SEQ 控制期间用较短的
 `control_poll_interval_seconds` 做判稳，但发给前面板和 Live Trend 的快照仍按前者节流。
@@ -190,6 +191,6 @@ Measurement Module 的即时读取独立于这两个周期。
 
 ## 真实仪表边界
 
-OpenLab Control 0.19.0 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
+OpenLab Control 0.20.0 尚未完成真实仪表验证。软件进程隔离不能替代仪表限流、限压、
 限温、磁体保护、硬件互锁或人工急停。接入真机前必须保留并通过模块自己的命令顺序、
 读回、量程、timeout、异常清理与协议解析测试，再进行低风险现场验证。

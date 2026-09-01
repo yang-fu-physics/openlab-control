@@ -6,16 +6,16 @@ Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时�
 
 ## 下载与校验
 
-当前稳定版本为 `v0.19.0`：
+当前稳定版本为 `v0.20.0`：
 
-- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.19.0/OpenLabControl-v0.19.0-windows-x64.zip)
-- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.19.0/OpenLabControl-v0.19.0-windows-x64.zip.sha256)
+- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.0/OpenLabControl-v0.20.0-windows-x64.zip)
+- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.0/OpenLabControl-v0.20.0-windows-x64.zip.sha256)
 
 在 PowerShell 中校验：
 
 ```powershell
-Get-FileHash .\OpenLabControl-v0.19.0-windows-x64.zip -Algorithm SHA256
-Get-Content .\OpenLabControl-v0.19.0-windows-x64.zip.sha256
+Get-FileHash .\OpenLabControl-v0.20.0-windows-x64.zip -Algorithm SHA256
+Get-Content .\OpenLabControl-v0.20.0-windows-x64.zip.sha256
 ```
 
 两处哈希必须完全一致。不要直接从 ZIP 内运行程序；先完整解压到普通可写目录。
@@ -75,5 +75,6 @@ Get-Content .\OpenLabControl-v0.19.0-windows-x64.zip.sha256
 - 模块和仪表实例仍各自在独立子进程运行。
 - Warning 继续 SEQ，Error 中止 SEQ。
 - Load SEQ 只导入模块界面值，不自动 Enable、连接或 Apply。
-- Data Browser 可打开任意 DAT，不强制绑定当前 Run。
+- Data Browser 可同时打开多个独立窗口；数据区的 View 自动载入当前 Run DAT，Graph 菜单
+  仍可打开任意文件。
 - 打包版与源码版使用同一解析器、安全限制和测试语义。
