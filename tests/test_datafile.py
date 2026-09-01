@@ -45,7 +45,13 @@ class DatafileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
             config = load_config(write_simulated_configuration(temp_root))
-            self.assertTrue(config.logging.compact_measurement_data)
+            config = replace(
+                config,
+                logging=replace(
+                    config.logging,
+                    compact_measurement_data=True,
+                ),
+            )
             logger = DatRunLogger(config, EventManager())
             module = load_manifest(SIMULATED_MODULE)
             module.columns = (

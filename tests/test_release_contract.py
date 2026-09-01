@@ -14,6 +14,14 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol import __version__  # noqa: E402
 class ReleaseContractTests(unittest.TestCase):
+    def test_release_enables_compact_measurement_data(self) -> None:
+        with (ROOT / "configs" / "general.toml").open("rb") as handle:
+            general = tomllib.load(handle)
+        self.assertIs(
+            general["logging"]["compact_measurement_data"],
+            True,
+        )
+
     def test_source_and_project_versions_match(self) -> None:
         with (ROOT / "pyproject.toml").open("rb") as handle:
             project = tomllib.load(handle)

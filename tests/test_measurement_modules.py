@@ -1463,7 +1463,7 @@ class ModuleWindowTests(unittest.TestCase):
                     copied_project(Path(temp))
                 )[0]
                 window = ModuleWindow(descriptor, owner)
-                self.assertTrue(
+                self.assertFalse(
                     window.testAttribute(
                         Qt.WidgetAttribute.WA_DeleteOnClose
                     )

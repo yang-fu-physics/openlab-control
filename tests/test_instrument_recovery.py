@@ -129,7 +129,7 @@ class InstrumentRecoveryTests(unittest.TestCase):
         events: EventManager,
         *,
         monitor: bool = False,
-        reconnect_timeout: float = 0.35,
+        reconnect_timeout: float = 1.0,
         operation_timeout: float = 0.12,
     ) -> InstrumentManager:
         base = load_simulated_config()

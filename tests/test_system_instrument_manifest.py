@@ -26,7 +26,7 @@ id = "test_controller"
 name = "Test Controller"
 version = "1.2.3"
 api_version = "4"
-core_requires = ">=0.19,<0.20"
+core_requires = ">=0.19,<0.21"
 backend = "backend:Driver"
 kinds = ["temperature"]
 
@@ -168,8 +168,8 @@ class SystemInstrumentManifestTests(unittest.TestCase):
                 "unknown instrument.toml fields",
             ),
             (
-                'core_requires = ">=0.19,<0.20"',
-                'core_requires = ">=0.19,<0.20"\ndependencies = ["vendor"]',
+                'core_requires = ">=0.19,<0.21"',
+                'core_requires = ">=0.19,<0.21"\ndependencies = ["vendor"]',
                 "unknown instrument.toml fields",
             ),
         )

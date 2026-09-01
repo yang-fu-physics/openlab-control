@@ -2,7 +2,7 @@ id = "example_controller"
 name = "Example Temperature/Field Controller"
 version = "0.4.0"
 api_version = "4"
-core_requires = ">=0.19,<0.20"
+core_requires = ">=0.19,<0.21"
 backend = "backend:ExampleController"
 kinds = ["temperature"]
 [[controls]]
