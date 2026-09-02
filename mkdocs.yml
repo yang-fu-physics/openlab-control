@@ -115,11 +115,13 @@ nav:
       - 多台相同仪表: development/reuse-identical-instruments.md
       - 多通道数据: development/results-and-slots.md
       - 设置与状态窗口: development/frontend.md
+      - 优先复用 LabVIEW DLL: development/labview-dll.md
       - 模块自己的 SEQ 指令: development/sequence-commands.md
       - 一台仪表一个文件: development/instrument-drivers.md
   - System Instrument:
       - 从这里开始: development/system-instrument.md
       - 写第一个仪表: development/first-system-instrument.md
+      - 复用 LabVIEW DLL: development/labview-dll.md
       - 读取、前面板与日志: development/instrument-reading.md
       - 控制与安全: development/instrument-control-safety.md
       - 测试与现场接入: development/instrument-testing.md

@@ -18,6 +18,12 @@ System Instrument 负责实验期间一直存在的仪表，例如主温控仪�
 
 System Instrument 通常随实验系统固定；Measurement Module 会按实验频繁 Enable 或 Disable。
 
+!!! tip "已有 LabVIEW 驱动时优先复用"
+
+    如果仪表已有经过实际使用的 LabVIEW 驱动或控制 VI，优先使用
+    [LabVIEW DLL 模板](labview-dll.md)接入。这样不必重新翻译底层命令和状态字；OpenLab
+    仍负责进程、上下限、超时和错误处理。没有可复用实现时，再编写 Python/VISA 驱动。
+
 ## 作者模板与现场实例
 
 两份文件承担不同职责：

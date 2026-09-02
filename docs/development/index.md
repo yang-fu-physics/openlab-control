@@ -18,6 +18,10 @@
 一个测量需要多台仪表时，把它们放进同一个模块。例如 6221、2182A 和 7001 一起完成
 Delta 测量，就应该是一个模块，而不是三个模块。
 
+如果这些仪表已经有经过实际使用的 LabVIEW 驱动或测量 VI，优先按照
+[复用 LabVIEW DLL](labview-dll.md)接入，不要重新翻译整套底层指令。Python 后台只负责把
+模块生命周期、安全检查和错误类型转给 DLL。没有可复用实现时，再直接编写 VISA 底层。
+
 ## 模块不负责什么
 
 - 不改变主程序管理的其他仪表；
@@ -73,10 +77,11 @@ close：再次确认输出关闭并释放连接
 ## 推荐阅读顺序
 
 1. [第一个测量模块](first-module.md)
-2. [多台相同测量仪表复用一个模块](reuse-identical-instruments.md)（现场有同型号仪表时再看）
-3. [多通道数据](results-and-slots.md)
-4. [设置与状态窗口](frontend.md)（需要设置时再看）
-5. [一台仪表一个文件](instrument-drivers.md)（连接真实仪表前再看）
-6. [模块自己的 SEQ 指令](sequence-commands.md)（确实需要时再看）
+2. [复用 LabVIEW DLL](labview-dll.md)（已经有 LabVIEW 实现时优先）
+3. [多台相同测量仪表复用一个模块](reuse-identical-instruments.md)（现场有同型号仪表时再看）
+4. [多通道数据](results-and-slots.md)
+5. [设置与状态窗口](frontend.md)（需要设置时再看）
+6. [一台仪表一个文件](instrument-drivers.md)（没有可复用 DLL 时再看）
+7. [模块自己的 SEQ 指令](sequence-commands.md)（确实需要时再看）
 
 更完整、也更偏技术的内容放在 [完整开发规范](../DEVELOPMENT_REFERENCE.md) 中。初学者不需要先读。

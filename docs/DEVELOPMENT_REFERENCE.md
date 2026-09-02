@@ -3,6 +3,11 @@
 OpenLab Control 有两套分开的接入方式：System Instrument 负责温度、磁场和只读监视仪表；
 Measurement Module 负责一次完整测量。两者都是本地可执行代码，进程隔离不是安全沙箱。
 
+已有经过实际使用的 LabVIEW 驱动或测量 VI 时，优先使用统一 DLL ABI 复用原实现，不重新
+翻译整套底层仪表协议；具体步骤见[优先复用 LabVIEW DLL](development/labview-dll.md)。
+Python/VISA 直接实现用于没有可复用 DLL 的仪表。两种方式都必须保留相同的安全限制、有限
+I/O 超时、写后回读和真机测试。
+
 ## Measurement Module：最小目录
 
 ```text

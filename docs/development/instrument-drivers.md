@@ -1,5 +1,11 @@
 # 一台仪表一个文件
 
+!!! tip "先检查是否已有 LabVIEW 实现"
+
+    如果仪表已经有经过实际使用的 LabVIEW 驱动或测量 VI，优先按照
+    [复用 LabVIEW DLL](labview-dll.md)接入，不要为了改用 Python 而重新翻译整套仪表协议。
+    本章适用于没有可复用 DLL、必须直接编写 Python/VISA 底层的情况。
+
 真实测量可能同时使用电流源、电压表和切换器。把所有仪表命令都塞进 `backend.py` 会很快
 变得难读。简单的做法是：每台仪表一个 Python 文件，`backend.py` 只写测量顺序。
 
