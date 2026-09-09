@@ -23,6 +23,12 @@ from multiprocessing.connection import Connection
 from typing import Any
 
 from ..package_support.loading import load_source_object
+from ..dll_functions import (
+    DLLFunctionSpec,
+    normalize_dll_functions,
+    validate_dll_parameters,
+    validate_dll_result,
+)
 from ..module_api import (
     ModuleAPI,
     ModuleError,
@@ -245,6 +251,7 @@ def module_worker_main(
 
     backend: Any = None
     sequence_commands: tuple[ModuleCommandSpec, ...] = ()
+    dll_functions: tuple[DLLFunctionSpec, ...] = ()
     # 后端方法和 context 回调可能从不同线程发送消息；Pipe 的多次写必须保持 frame
     # 边界，不能让两个 JSON 字节串互相穿插。
     send_lock = threading.Lock()
@@ -288,6 +295,16 @@ def module_worker_main(
                 "Module declares sequence_commands but does not implement "
                 "execute_sequence_command(command_id, parameters, api)"
             )
+        dll_functions = normalize_dll_functions(
+            getattr(backend, "dll_functions", ())
+        )
+        if dll_functions and not callable(
+            getattr(backend, "execute_dll_function", None)
+        ):
+            raise TypeError(
+                "Module exposes dll_functions but does not implement "
+                "execute_dll_function(function_id, parameters, api)"
+            )
         # 只有源码、API 和隔离依赖全部验证并成功实例化后才发送 ready。主进程在收到
         # ready 之前不会把模块标记为 Enabled。
         send({
@@ -300,6 +317,10 @@ def module_worker_main(
             "sequence_commands": [
                 command.to_payload()
                 for command in sequence_commands
+            ],
+            "dll_functions": [
+                function.to_payload()
+                for function in dll_functions
             ],
         })
     except Exception as exc:
@@ -511,6 +532,41 @@ def module_worker_main(
                     dict(parameters),
                     api,
                 )
+            elif action == "dll_function":
+                function_id = str(payload.get("function_id", ""))
+                parameters = payload.get("parameters", {})
+                by_id = {
+                    function.function_id: function
+                    for function in dll_functions
+                }
+                spec = by_id.get(function_id)
+                if spec is None:
+                    raise ModuleError(
+                        f"Unknown DLL function: {function_id}",
+                        "DLL_FUNCTION_UNKNOWN",
+                        function_id,
+                    )
+                issues = validate_dll_parameters(spec, parameters)
+                if issues:
+                    raise ModuleError(
+                        "; ".join(issues),
+                        "DLL_FUNCTION_PARAMETERS_INVALID",
+                        function_id,
+                    )
+                result = _invoke(
+                    backend.execute_dll_function,
+                    function_id,
+                    dict(parameters),
+                    api,
+                )
+                try:
+                    result = validate_dll_result(spec, result)
+                except TypeError as exc:
+                    raise ModuleError(
+                        str(exc),
+                        "DLL_FUNCTION_RESULT_INVALID",
+                        function_id,
+                    ) from exc
             elif action == "module_close":
                 result = _invoke(backend.close, api)
             else:
@@ -582,6 +638,7 @@ class ModuleWorkerClient:
         self._request_number = 0
         self.sequence_commands: tuple[ModuleCommandSpec, ...] = ()
         self.display_columns: tuple[str, ...] = ()
+        self.dll_functions: tuple[DLLFunctionSpec, ...] = ()
 
     @staticmethod
     def _timeout(value: float, operation: str) -> float:
@@ -797,8 +854,20 @@ class ModuleWorkerClient:
                 "MODULE_WORKER_START_FAILED",
                 self.descriptor.id,
             ) from exc
+        try:
+            dll_functions = normalize_dll_functions(
+                hello.get("dll_functions", [])
+            )
+        except (TypeError, ValueError) as exc:
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise WorkerRequestError(
+                f"Module worker returned invalid DLL function metadata: {exc}",
+                "MODULE_WORKER_START_FAILED",
+                self.descriptor.id,
+            ) from exc
         self.sequence_commands = sequence_commands
         self.display_columns = tuple(display_columns)
+        self.dll_functions = dll_functions
         return tuple(columns)
 
     def request(

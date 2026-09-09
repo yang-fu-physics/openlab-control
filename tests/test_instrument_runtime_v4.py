@@ -65,6 +65,9 @@ class _RecordingClient:
     async def event_responses(self):
         return ()
 
+    async def describe_dll_functions(self):
+        return ()
+
     async def open(self) -> None:
         self.open_count += 1
 

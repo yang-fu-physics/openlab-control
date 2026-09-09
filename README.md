@@ -9,7 +9,7 @@ OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Pyt
 两者有不同目录、清单和生命周期。System Instrument 一般随实验系统固定；Measurement
 Module 每次启动默认 Disabled，由用户按需 Enable。
 
-当前稳定版本：`0.20.0`。全新安装不启用任何 System Instrument 面板；三个内置仿真也都
+当前稳定版本：`0.20.1`。全新安装不启用任何 System Instrument 面板；三个内置仿真也都
 默认关闭，需要时在 Instrument Scanner 中明确选择。当前版本尚未完成真机验证。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站包含面向初学者的中文
@@ -105,6 +105,8 @@ class Module:
 完整教程见[第一个 Measurement Module](docs/development/first-module.md)。
 已有经过实际使用的 LabVIEW 驱动或测量 VI 时，优先使用
 [LabVIEW DLL 接入模板](docs/development/labview-dll.md)，避免重新翻译整套底层仪表协议。
+DLL 自描述的额外调试函数会在主菜单中自动生成输入/输出窗口，支持同时打开多个窗口；
+仅限 SEQ 空闲时执行，复用原有 worker 和仪表连接。
 
 ## System Instrument
 

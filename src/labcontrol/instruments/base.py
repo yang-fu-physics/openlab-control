@@ -96,6 +96,9 @@ class SystemInstrument(ABC):
     封装在本接口之后，不能创建 GUI 对象或把可变底层句柄暴露给主程序。
     """
 
+    # LabVIEW DLL 后端可用纯 JSON 字段表覆盖它；普通仪表保持空元组，不改变菜单。
+    dll_functions: object = ()
+
     def __init__(self, config: InstrumentConfig) -> None:
         """保存已验证配置；真实连接应推迟到 :meth:`open`。"""
 
@@ -157,6 +160,20 @@ class SystemInstrument(ABC):
             f"{command_id!r}",
             "UNSUPPORTED_SEQUENCE_COMMAND",
             command_id,
+        )
+
+    def execute_dll_function(
+        self,
+        function_id: str,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """执行一个 DLL 自描述的 Idle-only 手动函数；普通仪表默认拒绝。"""
+
+        raise InstrumentError(
+            f"Instrument {self.config.id} does not expose DLL function "
+            f"{function_id!r}",
+            "DLL_FUNCTION_UNKNOWN",
+            function_id,
         )
 
     def event_responses(self) -> tuple[EventResponseSpec, ...]:

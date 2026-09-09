@@ -18,7 +18,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..datafile import DatRunLogger
-from ..instruments.base import InstrumentError
+from ..dll_functions import (
+    DLLFunctionSpec,
+    validate_dll_parameters,
+)
+from ..instruments.base import InstrumentError, InstrumentWarning
 from ..events import EventManager
 from ..models import InstrumentSnapshot, Severity
 from ..module_commands import (
@@ -48,6 +52,7 @@ class ModuleRuntimeRecord:
     status: dict[str, Any] = field(default_factory=dict)
     client: ModuleWorkerClient | None = None
     sequence_commands: tuple[ModuleCommandSpec, ...] = ()
+    dll_functions: tuple[DLLFunctionSpec, ...] = ()
 
 
 @dataclass(slots=True)
@@ -152,6 +157,11 @@ class MeasurementModuleService:
             # 发送空列表，避免 open 尚未成功时出现一个实际不可执行的菜单项。
             "sequence_commands": (
                 [command.to_payload() for command in record.sequence_commands]
+                if record.enabled
+                else []
+            ),
+            "dll_functions": (
+                [function.to_payload() for function in record.dll_functions]
                 if record.enabled
                 else []
             ),
@@ -419,6 +429,7 @@ class MeasurementModuleService:
             record.enabled = False
             record.state = "faulted"
             record.sequence_commands = ()
+            record.dll_functions = ()
             self._publish(record, str(error))
         if warning_allowed and severity is Severity.WARNING:
             return None
@@ -462,6 +473,7 @@ class MeasurementModuleService:
         record.enabled = False
         record.state = "disabled"
         record.sequence_commands = ()
+        record.dll_functions = ()
         self._publish(record, message)
 
     async def enable(self, module_id: str) -> None:
@@ -491,6 +503,7 @@ class MeasurementModuleService:
                 client.display_columns
             )
             record.sequence_commands = client.sequence_commands
+            record.dll_functions = client.dll_functions
             result = await self._request(record, "open")
         except WorkerRequestError as exc:
             await self._reset_failed_enable(
@@ -588,6 +601,7 @@ class MeasurementModuleService:
         record.enabled = False
         record.state = "disabled"
         record.sequence_commands = ()
+        record.dll_functions = ()
         if failure is None:
             self.events.resolve_source(f"module:{module_id}")
             self._publish(record, f"{record.descriptor.name} disabled")
@@ -664,6 +678,62 @@ class MeasurementModuleService:
             name,
         )
         self._publish(record, f"Manual action completed: {name}")
+        return result
+
+    async def execute_dll_function(
+        self,
+        module_id: str,
+        function_id: str,
+        parameters: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """在 Enabled 模块现有 worker 中执行一次自描述 DLL 函数。"""
+
+        self._ensure_sequence_idle()
+        record = self.records[module_id]
+        if not record.enabled:
+            raise InstrumentError("Module is disabled", "MODULE_DISABLED", module_id)
+        spec = next(
+            (
+                item
+                for item in record.dll_functions
+                if item.function_id == function_id
+            ),
+            None,
+        )
+        if spec is None:
+            raise InstrumentError(
+                f"DLL function is unavailable: {module_id}.{function_id}",
+                "DLL_FUNCTION_UNKNOWN",
+                f"{module_id}.{function_id}",
+            )
+        issues = validate_dll_parameters(spec, parameters)
+        if issues:
+            raise InstrumentError(
+                "; ".join(issues),
+                "DLL_FUNCTION_PARAMETERS_INVALID",
+                f"{module_id}.{function_id}",
+            )
+        try:
+            result = await self._request(
+                record,
+                "dll_function",
+                {
+                    "function_id": function_id,
+                    "parameters": dict(parameters),
+                },
+            )
+        except WorkerRequestError as exc:
+            error = self._operation_error(record, exc, warning_allowed=True)
+            if error is not None:
+                raise error from exc
+            raise InstrumentWarning(str(exc), exc.code, exc.context) from exc
+        self.events.report(
+            Severity.INFO,
+            f"module:{module_id}",
+            "DLL_FUNCTION_COMPLETED",
+            f"{spec.label} completed: {result}",
+            function_id,
+        )
         return result
 
     def enabled_descriptors(self) -> tuple[ModuleDescriptor, ...]:
@@ -1333,6 +1403,7 @@ class MeasurementModuleService:
             record.enabled = False
             record.state = "disabled"
             record.sequence_commands = ()
+            record.dll_functions = ()
             self._publish(record, "Application closing")
 
         await asyncio.gather(*(stop(record) for record in self.records.values()))

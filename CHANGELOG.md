@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.20.1 - 2026-09-10
+
+- System Instrument 与 Measurement Module 仓库新增 LabVIEW DLL 开发模板及 C 调用接口。
+  已有经过验证的 LabVIEW 驱动或测量 VI 时，优先复用原实现，避免重新翻译底层仪表协议；
+  Measurement 模板同时附带一个普通 SEQ 指令和一个 Scan 指令。
+- DLL 可通过 `OLC_Describe.manual_functions` 自描述额外调试函数。主菜单按已加载的 System
+  Instrument 或 Enabled Measurement Module 自动生成输入/输出窗口，不需要另写 TOML 登记；
+  同一函数可以打开多个独立窗口，枚举显示为下拉列表，数值输入保留科学计数法和精度。
+- 手动函数复用原有 worker、DLL 和仪表连接，与同一后端的其他操作串行执行。仅允许 SEQ
+  空闲时运行；函数尚未结束时阻止启动 SEQ。关闭窗口不会中断已发送的操作，返回值与
+  Warning/Error 会显示并进入现有事件日志，不生成 DAT 测量行。
+- 保持原有生命周期：SEQ 完成或停止不改变 System Instrument 控制状态；Measurement Module
+  继续在 `run_end` 按各自约定处理输出。更新 README、教程网页和两类模板手册，说明 Runtime、
+  位数、超时以及输出保持/关闭策略。
+- 本轮测试覆盖 Python 包装、子进程串行调用、错误传播、启停边界和自动窗口；未替代真实
+  LabVIEW DLL、匹配版本的 LabVIEW Runtime 与仪表联合验证。发布包不捆绑 LabVIEW Runtime。
+
 ## 0.20.0 - 2026-09-01
 
 - 发行配置默认启用紧凑实验 DAT：每行只保存绝对 `Timestamp`、唯一 `sample_temp` 控制温度

@@ -20,6 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from ..config import InstrumentConfig
+from ..dll_functions import (
+    DLLFunctionSpec,
+    normalize_dll_functions,
+    validate_dll_parameters,
+    validate_dll_result,
+)
 from ..package_support.loading import load_import_object, load_source_object
 from .base import (
     EventResponseSpec,
@@ -271,7 +277,28 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
             if not spec.external
             else backend_class(spec.instrument_config)
         )
-        _send_message(connection, {"type": "ready"})
+        dll_functions = normalize_dll_functions(
+            getattr(backend, "dll_functions", ())
+        )
+        if (
+            dll_functions
+            and backend.__class__.execute_dll_function
+            is SystemInstrument.execute_dll_function
+        ):
+            raise TypeError(
+                "System Instrument exposes dll_functions but does not implement "
+                "execute_dll_function(function_id, parameters)"
+            )
+        _send_message(
+            connection,
+            {
+                "type": "ready",
+                "dll_functions": [
+                    function.to_payload()
+                    for function in dll_functions
+                ],
+            },
+        )
     except Exception as exc:
         try:
             _send_message(
@@ -331,6 +358,42 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
                 value = backend.execute_sequence_command(
                     str(payload["command_id"])
                 )
+            elif action == "dll_function":
+                function_id = str(payload.get("function_id", ""))
+                parameters = payload.get("parameters", {})
+                function = next(
+                    (
+                        item
+                        for item in dll_functions
+                        if item.function_id == function_id
+                    ),
+                    None,
+                )
+                if function is None:
+                    raise InstrumentError(
+                        f"Unknown DLL function: {function_id}",
+                        "DLL_FUNCTION_UNKNOWN",
+                        function_id,
+                    )
+                issues = validate_dll_parameters(function, parameters)
+                if issues:
+                    raise InstrumentError(
+                        "; ".join(issues),
+                        "DLL_FUNCTION_PARAMETERS_INVALID",
+                        function_id,
+                    )
+                value = backend.execute_dll_function(
+                    function_id,
+                    dict(parameters),
+                )
+                try:
+                    value = validate_dll_result(function, value)
+                except TypeError as exc:
+                    raise InstrumentError(
+                        str(exc),
+                        "DLL_FUNCTION_RESULT_INVALID",
+                        function_id,
+                    ) from exc
             elif action == "event_responses":
                 try:
                     value = _event_response_payload(
@@ -427,6 +490,7 @@ class InstrumentWorkerClient:
         self._lock = threading.RLock()
         self._state_lock = threading.Lock()
         self._request_number = 0
+        self.dll_functions: tuple[DLLFunctionSpec, ...] = ()
 
     @property
     def pid(self) -> int | None:
@@ -555,6 +619,17 @@ class InstrumentWorkerClient:
                 "INSTRUMENT_WORKER_START_FAILED",
                 self.spec.instrument_config.id,
             )
+        try:
+            self.dll_functions = normalize_dll_functions(
+                hello.get("dll_functions", [])
+            )
+        except (TypeError, ValueError) as exc:
+            self._invalidate(parent, process, min(timeout, 1.0))
+            raise InstrumentWorkerError(
+                f"Instrument worker returned invalid DLL function metadata: {exc}",
+                "INSTRUMENT_WORKER_START_FAILED",
+                self.spec.instrument_config.id,
+            ) from exc
 
     def request(
         self,
@@ -786,6 +861,18 @@ class IsolatedInstrumentClient:
             await self._request("event_responses")
         )
 
+    async def describe_dll_functions(self) -> tuple[DLLFunctionSpec, ...]:
+        """启动 worker 并返回构造期间已验证的静态 DLL 函数表。"""
+
+        try:
+            await asyncio.to_thread(
+                self.worker.start,
+                self.startup_timeout_seconds,
+            )
+        except InstrumentWorkerError as exc:
+            raise self._translate(exc) from exc
+        return self.worker.dll_functions
+
     async def close(self) -> None:
         await self._request("close_instrument", shutdown=True)
 
@@ -820,6 +907,19 @@ class IsolatedInstrumentClient:
         await self._request(
             "execute_sequence_command",
             {"command_id": command_id},
+        )
+
+    async def execute_dll_function(
+        self,
+        function_id: str,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self._request(
+            "dll_function",
+            {
+                "function_id": function_id,
+                "parameters": parameters,
+            },
         )
 
     async def shutdown(self) -> None:
@@ -861,6 +961,11 @@ class InProcessInstrumentClient:
                 "INVALID_EVENT_RESPONSES",
             ) from exc
 
+    async def describe_dll_functions(self) -> tuple[DLLFunctionSpec, ...]:
+        return normalize_dll_functions(
+            getattr(self.backend, "dll_functions", ())
+        )
+
     async def close(self) -> None:
         await asyncio.to_thread(self.backend.close)
 
@@ -894,6 +999,23 @@ class InProcessInstrumentClient:
             self.backend.execute_sequence_command,
             command_id,
         )
+
+    async def execute_dll_function(
+        self,
+        function_id: str,
+        parameters: dict[str, Any],
+    ) -> dict[str, Any]:
+        value = await asyncio.to_thread(
+            self.backend.execute_dll_function,
+            function_id,
+            parameters,
+        )
+        spec = next(
+            item
+            for item in await self.describe_dll_functions()
+            if item.function_id == function_id
+        )
+        return validate_dll_result(spec, value)
 
     async def shutdown(self) -> None:
         return None

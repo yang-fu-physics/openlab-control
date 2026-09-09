@@ -24,6 +24,7 @@ from .measurement.manifest import ModuleDescriptor, discover_modules
 from .measurement.service import MeasurementModuleService
 from .instruments.manifest import SystemInstrumentDescriptor, discover_system_instruments
 from .instrument_manager import InstrumentManager
+from .instruments.base import InstrumentWarning
 from .sequence.engine import SequenceEngine
 from .sequence.model import SequenceDocument
 from .system_instrument_commands import (
@@ -46,6 +47,7 @@ class RuntimeService:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ready = threading.Event()
         self._sequence_task: asyncio.Task[Any] | None = None
+        self._active_dll_calls = 0
         self._poll_task: asyncio.Task[Any] | None = None
         self.events: EventManager | None = None
         self.instruments: InstrumentManager | None = None
@@ -124,6 +126,12 @@ class RuntimeService:
                 ),
             )
             loop.run_until_complete(self.instruments.connect_all())
+            self.messages.put(
+                RuntimeMessage(
+                    "instrument_dll_functions",
+                    self.instruments.dll_function_payload(),
+                )
+            )
             initial_snapshots = loop.run_until_complete(
                 self.instruments.poll_all()
             )
@@ -197,6 +205,11 @@ class RuntimeService:
 
     def _on_event(self, notice: EventNotice) -> None:
         self.messages.put(RuntimeMessage("event", notice))
+        if notice.event.code == "INSTRUMENT_RECONNECTED" and not notice.is_resolution:
+            assert self.instruments is not None
+            self.messages.put(RuntimeMessage(
+                "instrument_dll_functions", self.instruments.dll_function_payload()
+            ))
 
     def _on_progress(self, progress: RunProgress) -> None:
         self.messages.put(RuntimeMessage("progress", progress))
@@ -281,6 +294,11 @@ class RuntimeService:
 
         if self._sequence_task is not None and not self._sequence_task.done():
             raise RuntimeError("A sequence is already running")
+        if self._active_dll_calls:
+            raise InstrumentWarning(
+                "Wait for manual DLL functions to finish before starting a SEQ",
+                "DLL_FUNCTION_BUSY",
+            )
         assert self.engine is not None
         assert self.instruments is not None
         # lease 让手动 Set/Hold 在 SEQ 期间被运行时拒绝，不能只依赖 UI 按钮变灰。
@@ -356,6 +374,21 @@ class RuntimeService:
             )
         )
 
+    def instrument_dll_function(
+        self,
+        instrument_id: str,
+        function_id: str,
+        parameters: dict[str, object],
+    ) -> Future[Any]:
+        return self._submit(
+            self._execute_dll_function(
+                "instrument",
+                instrument_id,
+                function_id,
+                parameters,
+            )
+        )
+
     def enable_module(self, module_id: str) -> Future[Any]:
         assert self.modules is not None
         return self._submit(self.modules.enable(module_id))
@@ -379,6 +412,50 @@ class RuntimeService:
     ) -> Future[Any]:
         assert self.modules is not None
         return self._submit(self.modules.action(module_id, name, payload))
+
+    def module_dll_function(
+        self,
+        module_id: str,
+        function_id: str,
+        parameters: dict[str, object],
+    ) -> Future[Any]:
+        return self._submit(
+            self._execute_dll_function(
+                "module",
+                module_id,
+                function_id,
+                parameters,
+            )
+        )
+
+    async def _execute_dll_function(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        function_id: str,
+        parameters: dict[str, object],
+    ) -> dict[str, Any]:
+        # 检查和计数都在唯一 runtime loop 中、第一次 await 之前完成。
+        # 因此手动函数与 SEQ 启动不能同时通过 Idle 检查。
+        if self._sequence_task is not None:
+            raise InstrumentWarning(
+                "DLL functions are available only while the SEQ is idle",
+                "DLL_FUNCTION_DURING_SEQUENCE",
+                owner_id,
+            )
+        self._active_dll_calls += 1
+        try:
+            if owner_kind == "instrument":
+                assert self.instruments is not None
+                return await self.instruments.execute_dll_function(
+                    owner_id, function_id, parameters, origin="manual"
+                )
+            assert self.modules is not None
+            return await self.modules.execute_dll_function(
+                owner_id, function_id, parameters
+            )
+        finally:
+            self._active_dll_calls -= 1
 
     def replace_module_descriptors(
         self, descriptors: tuple[ModuleDescriptor, ...]

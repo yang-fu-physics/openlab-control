@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import qtawesome as qta
+from shiboken6 import isValid
 from PySide6.QtCore import QEvent, QSize, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMdiArea,
     QMdiSubWindow,
     QMessageBox,
@@ -40,6 +42,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..config import AppConfig
+from ..dll_functions import DLLFunctionSpec, normalize_dll_functions
 from ..instruments.manifest import SystemInstrumentDescriptor
 from ..formatting import control_decimals, fixed_number
 from ..models import (
@@ -83,6 +86,7 @@ from ..sequence.parser import load_sequence, parse_sequence, save_sequence, seri
 from .appearance import AppearanceDialog
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
+from .dll_functions import DLLFunctionDialog
 from .measurement_modules import (
     ModuleManagerDialog,
     ModuleWindow,
@@ -191,6 +195,20 @@ class MainWindow(QMainWindow):
         ] = {}
         self._minimized_module_windows: set[str] = set()
         self._pending_manual_operations: list[tuple[object, str]] = []
+        self._instrument_dll_functions: dict[
+            str,
+            tuple[DLLFunctionSpec, ...],
+        ] = {}
+        self._module_dll_functions: dict[
+            str,
+            tuple[DLLFunctionSpec, ...],
+        ] = {}
+        self._instrument_dll_menus: dict[str, QMenu] = {}
+        self._module_dll_menus: dict[str, QMenu] = {}
+        self._dll_function_dialogs: dict[int, DLLFunctionDialog] = {}
+        self._pending_dll_operations: list[
+            tuple[object, DLLFunctionDialog]
+        ] = []
         self.alert_dialogs: dict[str, AlertDialog] = {}
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
@@ -594,12 +612,12 @@ class MainWindow(QMainWindow):
         sequence_menu.addActions([self.run_action, self.pause_action, self.stop_action])
         graph_menu = menu.addMenu("Graph")
         graph_menu.addActions([self.graph_action, self.data_browser_action])
-        instrument_menu = menu.addMenu("Instrument")
+        self.instrument_menu = menu.addMenu("Instrument")
         for panel in self.config.panels:
             if panel.template != "controller":
                 continue
             instrument = self.config.instrument(panel.instrument_id)
-            action = instrument_menu.addAction(
+            action = self.instrument_menu.addAction(
                 f"{instrument.display_name} — {panel.display_name}"
             )
             action.triggered.connect(
@@ -607,8 +625,12 @@ class MainWindow(QMainWindow):
                     self._open_manual_control(instrument_id, panel_id)
                 )
             )
-        modules_menu = menu.addMenu("Modules")
-        modules_menu.addAction(self.modules_action)
+        self._instrument_dll_separator = self.instrument_menu.addSeparator()
+        self._instrument_dll_separator.setVisible(False)
+        self.modules_menu = menu.addMenu("Modules")
+        self.modules_menu.addAction(self.modules_action)
+        self._module_dll_separator = self.modules_menu.addSeparator()
+        self._module_dll_separator.setVisible(False)
         simulation_menu = menu.addMenu("Simulation")
         warning_action = simulation_menu.addAction("Inject Warning")
         error_action = simulation_menu.addAction("Inject Error")
@@ -1421,6 +1443,11 @@ class MainWindow(QMainWindow):
     def _run_sequence(self) -> None:
         if self.current_run_state not in self.TERMINAL_STATES:
             return
+        if self._pending_dll_operations:
+            self.statusBar().showMessage(
+                "Wait for manual DLL functions to finish before starting a SEQ", 5000
+            )
+            return
         module_command_issues = self._module_command_document_issues(
             self.document,
             runnable_only=True,
@@ -1532,6 +1559,9 @@ class MainWindow(QMainWindow):
             window.set_sequence_running(not editable)
         for dialog in self.manual_dialogs.values():
             dialog.set_runtime_editable(editable)
+        for dialog in self._dll_function_dialogs.values():
+            if isValid(dialog):
+                dialog.set_runtime_editable(editable)
         self.status_panel.set_actions_enabled(editable)
 
     def _drain_runtime_messages(self) -> None:
@@ -1552,6 +1582,8 @@ class MainWindow(QMainWindow):
                 self.module_monitor_group.reset_results(
                     str(message.payload.get("module_id", ""))
                 )
+            elif message.kind == "instrument_dll_functions":
+                self._set_instrument_dll_functions(message.payload)
             elif message.kind == "startup_error":
                 self.statusBar().showMessage(
                     f"Runtime startup failed: {message.payload}"
@@ -1561,6 +1593,7 @@ class MainWindow(QMainWindow):
         self._check_pending_run()
         self._check_pending_module_operations()
         self._check_pending_manual_operations()
+        self._check_pending_dll_operations()
 
     def _check_pending_module_operations(self) -> None:
         """收取 Enable/Disable Future，并为异常路径恢复可操作的终止状态。"""
@@ -1641,6 +1674,36 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(success_message, 3000)
         self._pending_manual_operations = remaining
 
+    def _check_pending_dll_operations(self) -> None:
+        remaining: list[tuple[object, DLLFunctionDialog]] = []
+        for future, dialog in self._pending_dll_operations:
+            if not future.done():
+                remaining.append((future, dialog))
+                continue
+            exception = future.exception()
+            if exception is not None:
+                if isValid(dialog):
+                    detail = str(exception)
+                    if hasattr(exception, "code"):
+                        detail += f"\nCode: {exception.code}"
+                    if getattr(exception, "context", ""):
+                        detail += f"\nContext: {exception.context}"
+                    dialog.show_error(detail)
+                self.statusBar().showMessage(
+                    f"DLL function failed: {exception}",
+                    8000,
+                )
+                continue
+            result = future.result()
+            if isValid(dialog):
+                dialog.show_result(result)
+            self.statusBar().showMessage(
+                f"{dialog.spec.label} completed",
+                3000,
+            )
+        self._pending_dll_operations = remaining
+        self._update_run_availability()
+
     def _check_pending_run(self) -> None:
         if self._pending_run is None:
             return
@@ -1700,6 +1763,7 @@ class MainWindow(QMainWindow):
         if (
             self.current_run_state not in self.TERMINAL_STATES
             or self._pending_run is not None
+            or self._pending_dll_operations
         ):
             self.run_button.setEnabled(False)
             return
@@ -1984,6 +2048,157 @@ class MainWindow(QMainWindow):
         self.module_windows[module_id] = window
         return window
 
+    def _set_instrument_dll_functions(self, payload: object) -> None:
+        """用运行时已验证的函数表重建 System Instrument 菜单。"""
+
+        for submenu in self._instrument_dll_menus.values():
+            self.instrument_menu.removeAction(submenu.menuAction())
+            submenu.deleteLater()
+        self._instrument_dll_menus.clear()
+        self._instrument_dll_functions.clear()
+
+        for entry in payload:
+            instrument_id = str(entry["instrument_id"])
+            display_name = str(entry["display_name"])
+            functions = normalize_dll_functions(entry["functions"])
+            if not functions:
+                continue
+            self._instrument_dll_functions[instrument_id] = functions
+            submenu = self.instrument_menu.addMenu(
+                f"{display_name} — {instrument_id}"
+            )
+            for spec in functions:
+                action = submenu.addAction(spec.label)
+                action.triggered.connect(
+                    lambda checked=False,
+                    owner_id=instrument_id,
+                    owner_name=display_name,
+                    function=spec: self._open_dll_function(
+                        "instrument",
+                        owner_id,
+                        owner_name,
+                        function,
+                    )
+                )
+            self._instrument_dll_menus[instrument_id] = submenu
+        self._instrument_dll_separator.setVisible(
+            bool(self._instrument_dll_menus)
+        )
+
+    def _set_module_dll_functions(
+        self,
+        module_id: str,
+        enabled: bool,
+        payload: object,
+    ) -> None:
+        """Enabled 时注册模块函数，Disable 时立即移除菜单和窗口。"""
+
+        functions = normalize_dll_functions(payload) if enabled else ()
+        if self._module_dll_functions.get(module_id, ()) == functions:
+            return
+        previous = self._module_dll_menus.pop(module_id, None)
+        if previous is not None:
+            self.modules_menu.removeAction(previous.menuAction())
+            previous.deleteLater()
+        self._module_dll_functions.pop(module_id, None)
+        if not functions:
+            for dialog in tuple(self._dll_function_dialogs.values()):
+                if (
+                    isValid(dialog)
+                    and dialog.owner_kind == "module"
+                    and dialog.owner_id == module_id
+                ):
+                    dialog.close()
+            self._module_dll_separator.setVisible(
+                bool(self._module_dll_menus)
+            )
+            return
+
+        descriptor = self._module_descriptor(module_id)
+        self._module_dll_functions[module_id] = functions
+        submenu = self.modules_menu.addMenu(
+            f"{descriptor.name} — {module_id}"
+        )
+        for spec in functions:
+            action = submenu.addAction(spec.label)
+            action.triggered.connect(
+                lambda checked=False,
+                owner_id=module_id,
+                owner_name=descriptor.name,
+                function=spec: self._open_dll_function(
+                    "module",
+                    owner_id,
+                    owner_name,
+                    function,
+                )
+            )
+        self._module_dll_menus[module_id] = submenu
+        self._module_dll_separator.setVisible(True)
+
+    def _open_dll_function(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        owner_name: str,
+        spec: DLLFunctionSpec,
+    ) -> None:
+        """每次菜单操作都创建独立窗口，因此同一函数可同时打开多份。"""
+
+        dialog = DLLFunctionDialog(
+            owner_kind,
+            owner_id,
+            owner_name,
+            spec,
+            self,
+        )
+        dialog.runRequested.connect(self._execute_dll_function)
+        dialog.set_runtime_editable(
+            self.current_run_state in self.TERMINAL_STATES
+            and self._pending_run is None
+        )
+        dialog_id = id(dialog)
+        self._dll_function_dialogs[dialog_id] = dialog
+        dialog.destroyed.connect(
+            lambda _object=None, key=dialog_id: (
+                self._dll_function_dialogs.pop(key, None)
+            )
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _execute_dll_function(self, parameters: dict[str, object]) -> None:
+        """只在 SEQ Idle 时把窗口请求提交到原有仪表或模块 worker。"""
+
+        dialog = self.sender()
+        assert isinstance(dialog, DLLFunctionDialog)
+        if (
+            self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        ):
+            dialog.show_error(
+                "DLL functions are available only while the SEQ is idle."
+            )
+            return
+        if dialog.owner_kind == "instrument":
+            future = self.runtime.instrument_dll_function(
+                dialog.owner_id,
+                dialog.spec.function_id,
+                parameters,
+            )
+        else:
+            future = self.runtime.module_dll_function(
+                dialog.owner_id,
+                dialog.spec.function_id,
+                parameters,
+            )
+        dialog.set_busy(True)
+        self._pending_dll_operations.append((future, dialog))
+        self._update_run_availability()
+        self.statusBar().showMessage(
+            f"Running {dialog.spec.label}..."
+        )
+
     def _handle_module_state(self, payload: dict[str, object]) -> None:
         module_id = str(payload.get("module_id", ""))
         enabled = bool(payload.get("enabled", False))
@@ -1998,11 +2213,17 @@ class MainWindow(QMainWindow):
             "display_columns",
             [],
         )
+        dll_functions = payload.get("dll_functions", [])
         was_enabled = module_id in self.enabled_modules
         if enabled:
             self.enabled_modules.add(module_id)
         else:
             self.enabled_modules.discard(module_id)
+        self._set_module_dll_functions(
+            module_id,
+            enabled,
+            dll_functions,
+        )
         self.module_manager.update_state(module_id, enabled, state, message)
         window = self.module_windows.get(module_id)
         if enabled:
@@ -2403,6 +2624,8 @@ class MainWindow(QMainWindow):
         for window in self.module_windows.values():
             window.allow_application_close()
             window.close()
+        for dialog in tuple(self._dll_function_dialogs.values()):
+            dialog.close()
         self.timer.stop()
         try:
             self.runtime.shutdown()

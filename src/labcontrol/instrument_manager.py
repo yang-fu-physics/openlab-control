@@ -15,11 +15,15 @@ import heapq
 import math
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from .config import AppConfig, InstrumentConfig, InstrumentPanelConfig
+from .dll_functions import (
+    DLLFunctionSpec,
+    validate_dll_parameters,
+)
 from .instruments.base import (
     EventResponseSpec,
     InstrumentError,
@@ -137,6 +141,7 @@ class InstrumentManager:
             (command.instrument_id, command.command_id): command
             for command in self.sequence_commands
         }
+        self.dll_functions: dict[str, tuple[DLLFunctionSpec, ...]] = {}
         self.isolate_processes = isolate_processes
         self.instruments: dict[str, object] = {}
         self._client_factories: dict[str, Callable[[], object]] = {}
@@ -754,6 +759,10 @@ class InstrumentManager:
                         )
                         self._validate_snapshot(instrument_id, snapshot)
                         self._validate_recovered_state(instrument_id, snapshot)
+                        self.dll_functions[instrument_id] = await asyncio.wait_for(
+                            candidate.describe_dll_functions(),
+                            timeout=max(0.0, deadline - time.monotonic()),
+                        )
                         self.instruments[instrument_id] = candidate
                         self.latest[instrument_id] = snapshot
                         self._connection_states[instrument_id] = (
@@ -911,8 +920,10 @@ class InstrumentManager:
             gate = self._operation_gates[instrument_id]
             await gate.acquire(priority)
             try:
-                if operation in {"set_target", "hold"} or operation.startswith(
-                    "sequence_command:"
+                if (
+                    operation in {"set_target", "hold"}
+                    or operation.startswith("sequence_command:")
+                    or operation.startswith("dll_function:")
                 ):
                     self._ensure_event_response_control(
                         instrument_id,
@@ -930,6 +941,7 @@ class InstrumentManager:
                         "open",
                         "close",
                         "event_responses",
+                        "describe_dll_functions",
                         "poll",
                         "poll_measurement",
                     }
@@ -984,6 +996,12 @@ class InstrumentManager:
 
         async def connect(instrument_id: str, instrument: object) -> None:
             try:
+                functions = await self._operate(
+                    instrument_id,
+                    "describe_dll_functions",
+                    instrument.describe_dll_functions,
+                )
+                self.dll_functions[instrument_id] = functions
                 responses = await self._operate(
                     instrument_id,
                     "event_responses",
@@ -1176,6 +1194,22 @@ class InstrumentManager:
                     poll_succeeded=not isinstance(result, Exception),
                 )
         return deepcopy(measured if measurement else self.latest)
+
+    def dll_function_payload(self) -> list[dict[str, Any]]:
+        """返回已成功加载后端的静态 DLL 函数，供主菜单生成窗口。"""
+
+        return [
+            {
+                "instrument_id": config.id,
+                "display_name": config.display_name,
+                "functions": [
+                    function.to_payload()
+                    for function in self.dll_functions.get(config.id, ())
+                ],
+            }
+            for config in self.config.instrument_instances
+            if self.dll_functions.get(config.id)
+        ]
 
     async def _poll_one(
         self,
@@ -1977,6 +2011,88 @@ class InstrumentManager:
             )
             raise
         return True
+
+    async def execute_dll_function(
+        self,
+        instrument_id: str,
+        function_id: str,
+        parameters: Mapping[str, Any],
+        *,
+        origin: str = "manual",
+    ) -> dict[str, Any]:
+        """在原 System Instrument worker 中执行一个 Idle-only DLL 函数。"""
+
+        spec = next(
+            (
+                item
+                for item in self.dll_functions.get(instrument_id, ())
+                if item.function_id == function_id
+            ),
+            None,
+        )
+        if spec is None:
+            raise InstrumentError(
+                f"DLL function is unavailable: {instrument_id}.{function_id}",
+                "DLL_FUNCTION_UNKNOWN",
+                f"{instrument_id}.{function_id}",
+            )
+        issues = validate_dll_parameters(spec, parameters)
+        if issues:
+            raise InstrumentError(
+                "; ".join(issues),
+                "DLL_FUNCTION_PARAMETERS_INVALID",
+                f"{instrument_id}.{function_id}",
+            )
+        operation = f"dll_function:{function_id}"
+        try:
+            self._ensure_event_response_control(instrument_id, origin)
+            result = await self._operate(
+                instrument_id,
+                operation,
+                lambda: self.instruments[instrument_id].execute_dll_function(
+                    function_id,
+                    dict(parameters),
+                ),
+                origin=origin,
+            )
+        except InstrumentWarning as exc:
+            self.events.report(
+                Severity.WARNING,
+                instrument_id,
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            raise
+        except InstrumentError as exc:
+            if self._uncertain_write_error(exc):
+                await self._fault_uncertain_write(
+                    instrument_id,
+                    operation,
+                    exc,
+                )
+                raise InstrumentError(
+                    f"{self.instrument_configs[instrument_id].display_name} DLL "
+                    f"function {function_id!r} could not be confirmed and was not replayed",
+                    "INSTRUMENT_WRITE_RESULT_UNKNOWN",
+                    instrument_id,
+                ) from exc
+            self.events.report(
+                Severity.ERROR,
+                instrument_id,
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            raise
+        self.events.report(
+            Severity.INFO,
+            instrument_id,
+            "DLL_FUNCTION_COMPLETED",
+            f"{spec.label} completed: {result}",
+            function_id,
+        )
+        return result
 
     def _record_confirmed_hold(
         self,
