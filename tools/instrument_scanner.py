@@ -1247,10 +1247,13 @@ class InstrumentScannerWindow(QMainWindow):
                 elif matched:
                     suffixes.append("identity match")
                 label = draft.address
+                if draft.identity:
+                    label += " — " + draft.identity
                 if suffixes:
                     label += " — " + ", ".join(suffixes)
                 combo.addItem(label, draft.address)
                 item = combo.model().item(combo.count() - 1)
+                item.setToolTip(label)
                 owner_combo = selected_by_address.get(draft.address.casefold())
                 item.setEnabled(
                     draft.present and (owner_combo is None or owner_combo is combo)

@@ -284,7 +284,14 @@ class InstrumentScannerWindowTests(unittest.TestCase):
             window._add_instance(descriptor)
             instance = window._instrument_pages[descriptor.id]["instances"][0]
             resource = instance["resource"]
-            resource.setCurrentIndex(resource.findData("GPIB0::1::INSTR"))
+            detected_index = resource.findData("GPIB0::1::INSTR")
+            self.assertIn("TEST,CTRL,1", resource.itemText(detected_index))
+            self.assertIn("identity match", resource.itemText(detected_index))
+            self.assertIn(
+                "TEST,CTRL,1",
+                resource.itemData(detected_index, Qt.ItemDataRole.ToolTipRole),
+            )
+            resource.setCurrentIndex(detected_index)
             self.assertFalse(window._resource_rows[0]["keep"].isEnabled())
             window._add_instance(descriptor)
             second = window._instrument_pages[descriptor.id]["instances"][1]
