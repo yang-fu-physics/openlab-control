@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.20.2 - 2026-11-02
+
+- Instrument Scanner 的 System Instrument VISA 下拉框显示已扫描的完整 IDN 返回内容，
+  并提供悬停提示，方便按型号选择地址；继续复用扫描结果，不增加 `*IDN?` 查询。
+- 固定文档高亮依赖版本，修复 GitHub 文档构建中与 mkdocstrings 1.0.6 不兼容导致的
+  `Highlight.__init__()` 错误。
+
 ## 0.20.1 - 2026-09-10
 
 - System Instrument 与 Measurement Module 仓库新增 LabVIEW DLL 开发模板及 C 调用接口。

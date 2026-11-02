@@ -1,3 +1,5 @@
 mkdocs-material==9.7.7
 mkdocstrings[python]==1.0.6
+# Keep the Highlight constructor compatible with mkdocstrings 1.0.6.
+pymdown-extensions==11.0.1
 mike==2.2.0
