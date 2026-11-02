@@ -559,6 +559,7 @@ class InstrumentManagerTests(unittest.TestCase):
                 notice
                 for notice in notices
                 if notice.event.code == "STALE_READING"
+                and notice.event.source == "temperature"
             ]
             self.assertEqual(len(stale_notices), 2)
             self.assertFalse(stale_notices[0].is_resolution)
