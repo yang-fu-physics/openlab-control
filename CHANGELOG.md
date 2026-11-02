@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.3 - 2026-11-02
+
+- SEQ 的 Set Datafile 参数窗口首次宽度加倍，高度保持不变，仍可手动缩放。
+- Measurement Module 窗口的关闭、Alt+F4 和最小化均隐藏窗口，不再留下最小化小窗。
+  模块继续运行，左侧卡片显示 Hidden；点击卡片或管理器可重新打开原窗口，保留设置和状态。
+- 同一 Release 附带 `keithley_6221_2182a_delta-0.2.0b6.zip`：默认 ±1 mA、compliance 1 V、
+  delay 100 ms、count 10、2182A 量程 10 mV、1 PLC、滤波关闭、切换等待 0 秒；切换器仍为
+  None，仅启用 CH1。已有保存设置不覆盖。Connected Channel 与 Last Measured Channel
+  分别显示当前连接和最后完成测量的通道，无效结果清空电阻和标准差显示。
+- Delta 模块源码对应 Measurement Module 仓库提交 `68678e8`。模块 ZIP 保留 `modules/`
+  目录，可解压到主程序目录；更新已有模块前请备份自定义 `routing.toml`。本次未修改
+  2182A 串口桥查询等待，`VOLT:NPLC?` 空回复仍需进一步实机排查。
+
 ## 0.20.2 - 2026-11-02
 
 - Instrument Scanner 的 System Instrument VISA 下拉框显示已扫描的完整 IDN 返回内容，
