@@ -1,7 +1,7 @@
 """Measurement Module 列表、独立窗口和 Settings/Status 前端协调。
 
-所有模块启动为 Disabled。勾选 Enable 才初始化 worker 并打开不可由用户直接关闭的独立
-窗口；保存或随 SEQ 导入的设置只填入 Settings 页，必须由用户点击 Apply Settings 才送到
+所有模块启动为 Disabled。勾选 Enable 才初始化 worker 并打开独立窗口；关闭或最小化
+只隐藏窗口。保存或随 SEQ 导入的设置只填入 Settings 页，必须由用户点击 Apply Settings 才送到
 后端。Disable 与应用退出由主窗口统一回收窗口和进程。
 """
 
@@ -12,7 +12,7 @@ from copy import deepcopy
 import json
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -106,8 +106,7 @@ class ModuleWindow(QDialog):
         self._baseline_settings: dict[str, Any] = {}
 
         flags = self.windowFlags()
-        flags &= ~Qt.WindowType.WindowCloseButtonHint
-        flags |= Qt.WindowType.WindowMinimizeButtonHint
+        flags |= Qt.WindowType.WindowCloseButtonHint | Qt.WindowType.WindowMinimizeButtonHint
         self.setWindowFlags(flags)
         self.setWindowTitle(f"{descriptor.name} {descriptor.version}")
 
@@ -264,11 +263,18 @@ class ModuleWindow(QDialog):
     def allow_application_close(self) -> None:
         self._allow_close = True
 
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
+            self.hide()
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self._allow_close:
             event.accept()
         else:
             event.ignore()
+            self.hide()
 
 
 class ModuleManagerDialog(QDialog):

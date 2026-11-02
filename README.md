@@ -32,7 +32,7 @@ Module 每次启动默认 Disabled，由用户按需 Enable。
 - SEQ 完成、Stop 或 Error 都不控制 System Instrument；只有仪表明确注册的事件响应才会执行联动动作。2nd Stage 只显示。
 - 保存 SEQ 时同时保存模块设置伴随文件；Load SEQ 会导入设置，但不自动 Enable 或 Apply。
 - Enabled 模块可在命令栏注册自己的 SEQ 指令；Disable 后立即移除。
-- 模块监视卡显示在 `Sequence Status` 下，可查看最近值并恢复最小化的模块窗口。
+- 模块监视卡显示在 `Sequence Status` 下，可查看最近值并重新打开隐藏的模块窗口。
 - 每次打开 Data Browser 都会创建独立窗口，可同时比较多个 DAT；数据区的 View 会直接载入
   当前 Run 文件，文件追加后自动刷新。
 - 默认实验 DAT 只保存时间戳、主控温度和模块声明列；多通道模块每行只填写当前通道结果。

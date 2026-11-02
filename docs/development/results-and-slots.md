@@ -98,7 +98,7 @@ return row, raw_values
 
 ## 在主窗口显示最近结果
 
-如果希望模块窗口最小化后仍能看到几个关键数值，在 `columns` 下面增加一行：
+如果希望模块窗口隐藏后仍能看到几个关键数值，在 `columns` 下面增加一行：
 
 ```python
 class Module:

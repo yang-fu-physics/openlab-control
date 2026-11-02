@@ -1234,8 +1234,8 @@ class ModuleWindowTests(unittest.TestCase):
         )
         QTest.mouseClick(card, Qt.MouseButton.LeftButton)
         self.assertEqual(opened, ["compact_meter"])
-        card.set_minimized(True)
-        self.assertIn("Minimized", card.state_label.text())
+        card.set_window_hidden(True)
+        self.assertIn("Hidden", card.state_label.text())
         card.reset_results()
         self.assertEqual(
             card.results_label.text(),
@@ -1287,7 +1287,7 @@ class ModuleWindowTests(unittest.TestCase):
             enabled=True,
             state="enabled",
             message="",
-            minimized=False,
+            window_hidden=False,
             display_columns=["Resistance"],
         )
         card = panel.cards[descriptor.id]
@@ -1311,14 +1311,14 @@ class ModuleWindowTests(unittest.TestCase):
             enabled=False,
             state="disabled",
             message="",
-            minimized=False,
+            window_hidden=False,
             display_columns=[],
         )
         self.assertNotIn(descriptor.id, panel.cards)
         self.assertFalse(panel.empty_label.isHidden())
         panel.close()
 
-    def test_window_uses_generic_pages_and_ignores_user_close(self) -> None:
+    def test_window_close_and_minimize_hide_and_allow_reopening(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             descriptor = discover_modules(
                 copied_project(Path(temp))
@@ -1349,7 +1349,18 @@ class ModuleWindowTests(unittest.TestCase):
             self.assertGreaterEqual(window.height(), window.minimumHeight())
             window.close()
             self.application.processEvents()
+            self.assertTrue(window.isHidden())
+            window.show_in_front()
+            self.application.processEvents()
             self.assertTrue(window.isVisible())
+            window.showMinimized()
+            self.application.processEvents()
+            self.assertTrue(window.isHidden())
+            self.assertFalse(window.isMinimized())
+            window.show_in_front()
+            self.application.processEvents()
+            self.assertTrue(window.isVisible())
+            self.assertFalse(window.isMinimized())
             window.reject()
             self.application.processEvents()
             self.assertEqual(window.settings(), {})

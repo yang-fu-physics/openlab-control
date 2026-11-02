@@ -96,7 +96,7 @@ class ModuleMonitorCard(QFrame):
         self.descriptor = descriptor
         self._state = "enabled"
         self._message = ""
-        self._minimized = False
+        self._window_hidden = False
         self._alerts: tuple[str, ...] = ()
         self._display_columns: tuple[str, ...] = ()
         self._results: dict[int, dict[str, object]] = {}
@@ -177,18 +177,18 @@ class ModuleMonitorCard(QFrame):
         state: str,
         message: str = "",
         *,
-        minimized: bool | None = None,
+        window_hidden: bool | None = None,
     ) -> None:
         self._state = state
         self._message = message
-        if minimized is not None:
-            self._minimized = minimized
+        if window_hidden is not None:
+            self._window_hidden = window_hidden
         self._refresh_appearance()
 
-    def set_minimized(self, minimized: bool) -> None:
-        if self._minimized == minimized:
+    def set_window_hidden(self, hidden: bool) -> None:
+        if self._window_hidden == hidden:
             return
-        self._minimized = minimized
+        self._window_hidden = hidden
         self._refresh_appearance()
 
     def set_alerts(self, severities: object) -> None:
@@ -370,8 +370,8 @@ class ModuleMonitorCard(QFrame):
                 "_",
                 " ",
             ).title()
-        if self._minimized:
-            state_text += " · Minimized"
+        if self._window_hidden:
+            state_text += " · Hidden"
         self.state_label.setText(state_text)
         details = [self.descriptor.name, state_text]
         if self._message:
@@ -445,7 +445,7 @@ class ModuleMonitorPanel(QGroupBox):
         enabled: bool,
         state: str,
         message: str,
-        minimized: bool,
+        window_hidden: bool,
         display_columns: object,
     ) -> None:
         """根据一条 module_state 消息创建、更新或移除卡片。"""
@@ -478,7 +478,7 @@ class ModuleMonitorPanel(QGroupBox):
         card.update_runtime(
             state,
             message,
-            minimized=minimized,
+            window_hidden=window_hidden,
         )
 
     def remove_module(self, module_id: str) -> None:
@@ -508,14 +508,14 @@ class ModuleMonitorPanel(QGroupBox):
         if card is not None:
             card.reset_results()
 
-    def set_minimized(
+    def set_window_hidden(
         self,
         module_id: str,
-        minimized: bool,
+        hidden: bool,
     ) -> None:
         card = self.cards.get(module_id)
         if card is not None:
-            card.set_minimized(minimized)
+            card.set_window_hidden(hidden)
 
     def update_alert(
         self,

@@ -1867,11 +1867,11 @@ class MainWindow(QMainWindow):
 
         for module_id in self.module_monitor_cards:
             window = self.module_windows.get(module_id)
-            self.module_monitor_group.set_minimized(
+            self.module_monitor_group.set_window_hidden(
                 module_id,
                 bool(
                     window is not None
-                    and window.isMinimized()
+                    and window.isHidden()
                 )
             )
 
@@ -2267,9 +2267,9 @@ class MainWindow(QMainWindow):
             enabled=enabled,
             state=state,
             message=message,
-            minimized=bool(
+            window_hidden=bool(
                 window is not None
-                and window.isMinimized()
+                and window.isHidden()
             ),
             display_columns=display_columns,
         )
