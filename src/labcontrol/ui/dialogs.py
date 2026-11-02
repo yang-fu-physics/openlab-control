@@ -179,7 +179,12 @@ class CommandDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        fit_initial_window_width(self)
+        if command.type is CommandType.SET_DATAFILE:
+            # 路径通常较长，仅扩大首次宽度，仍允许用户自由缩放。
+            self.ensurePolished()
+            self.resize(self.minimumSizeHint().width() * 2, self.sizeHint().height())
+        else:
+            fit_initial_window_width(self)
 
     def _browse_datafile(self) -> None:
         """按当前 Mode 调用 Windows 文件窗口并回填绝对 DAT 路径。"""
