@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.20.4.dev3 - 2026-11-05
+
+- ZLAN 状态可选 DI、DO 或混选。所有已选位都是 1 才显示 On，任一为 0 则显示 Off。
+  空条件不显示状态，通讯失败不显示 Off。状态不参与联锁，不改变开关顺序。
+- 核心 Windows ZIP 不包含 ZLAN 驱动。另下载 [独立驱动预发布](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/zlan-v0.2.1.dev1)，
+  将 `zlan_6408_compressor/` 放入 `system_instruments/`，然后在新扫描器中重新保存。
+- 此版本仅供测试，未完成实机验证。
+
 ## 0.20.4.dev2 - 2026-11-05
 
 - Dev 测试版：ZLAN 6408I（四路）与 6842（八路）共用驱动，Windows ZIP 已附带该驱动。

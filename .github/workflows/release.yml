@@ -79,21 +79,6 @@ jobs:
           python -m PyInstaller --clean --noconfirm OpenLabControl.spec
           & .\tools\stage_windows_release.ps1
 
-      - name: Check out the ZLAN development driver
-        if: contains(env.RELEASE_TAG, '.dev')
-        uses: actions/checkout@v5
-        with:
-          repository: yang-fu-physics/openlab-control-Device
-          ref: 5bdc4ec65d0b65fef967607a3e688071a6381e6e
-          path: build/dev-system-instruments
-          persist-credentials: false
-
-      - name: Include the ZLAN driver in the development package
-        if: contains(env.RELEASE_TAG, '.dev')
-        shell: pwsh
-        run: |
-          Copy-Item -LiteralPath "build/dev-system-instruments/instruments/zlan_6408_compressor" -Destination "dist/OpenLabControl/system_instruments" -Recurse
-
       - name: Verify packaged programs
         shell: pwsh
         run: |
@@ -199,6 +184,7 @@ jobs:
               $name = $_.FullName.Replace("\", "/")
               $name -match "(^|/)(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache)(/|$)" -or
               $name -match "\.(pyc|pyo)$" -or
+              $name.StartsWith("OpenLabControl/system_instruments/zlan_6408_compressor/") -or
               $name -eq "OpenLabControl/configs/visa.resources.toml" -or
               ($name.StartsWith("OpenLabControl/configs/instruments/") -and -not $name.EndsWith("/")) -or
               ($name.StartsWith("OpenLabControl/configs/pid/") -and -not $name.EndsWith("/")) -or
@@ -210,14 +196,6 @@ jobs:
             }
             if ($generalConfig.Count -ne 1) {
               throw "Archive must contain exactly one configs/general.toml"
-            }
-            if ($version -match '\.dev[0-9]+$') {
-              foreach ($file in @("instrument.toml", "backend.py", "zlan_6408.py")) {
-                $driverPath = "OpenLabControl/system_instruments/zlan_6408_compressor/$file"
-                if (-not ($entries | Where-Object { $_.FullName.Replace("\", "/") -eq $driverPath })) {
-                  throw "Development archive missing $driverPath"
-                }
-              }
             }
             if ($toolsEntries.Count -ne 0) {
               throw "Archive unexpectedly contains tools entries"
