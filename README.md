@@ -10,6 +10,7 @@ OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Pyt
 Module 每次启动默认 Disabled，由用户按需 Enable。
 
 当前稳定版本为 `0.20.4`。
+本分支为 `0.20.5.dev1` 开发测试版。
 全新安装不启用任何 System Instrument 面板；三个内置仿真也都
 默认关闭，需要时在 Instrument Scanner 中明确选择。
 

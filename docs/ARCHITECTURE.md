@@ -1,6 +1,6 @@
 # 系统架构
 
-本文描述 OpenLab Control 0.20.4 的当前边界。
+本文描述 OpenLab Control 0.20.5.dev1 的当前边界。
 
 ## 运行模型
 
