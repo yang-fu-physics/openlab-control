@@ -1307,13 +1307,17 @@ class MainWindow(QMainWindow):
                 self.editor.rebuild(command.id)
                 self._mark_dirty()
             return
-        dialog = CommandDialog(
-            command,
-            spec,
-            self,
-            instrument_configs=self.config.instrument_instances,
-            data_directory=self._last_data_directory,
-        )
+        try:
+            dialog = CommandDialog(
+                command,
+                spec,
+                self,
+                instrument_configs=self.config.instrument_instances,
+                data_directory=self._last_data_directory,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Command Parameters", str(exc))
+            return
         try:
             if dialog.exec() == CommandDialog.DialogCode.Accepted:
                 values = dialog.values()

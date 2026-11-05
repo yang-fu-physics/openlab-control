@@ -365,7 +365,7 @@ class SequenceEngineTests(unittest.TestCase):
                 Command(CommandType.SET_FIELD, {
                     "target": 1.0, "unit": "T", "rate": 0.5, "mode": "Sweep",
                 }),
-                Command(CommandType.WAIT, {"seconds": 0.03}),
+                Command(CommandType.WAIT, {"seconds": 0.1}),
                 Command(CommandType.INJECT_ERROR, {"code": "FATAL", "message": "fatal"}),
                 Command(CommandType.MEASURE),
             ], "error.seq")

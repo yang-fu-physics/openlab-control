@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .sequence.model import Command, CommandType, FieldSpec
+from .formatting import require_precision
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -168,7 +169,15 @@ def _normalize_field(raw: object, command_id: str) -> FieldSpec:
         maximum,
         choices,
         unit_value,
-        decimals,
+        (
+            1
+            if field_type == "float" and (
+                (unit_value == "s" and "filter" not in name)
+                or unit_value.upper() in {"PLC", "NPLC"}
+                or name == "nplc"
+            )
+            else decimals
+        ),
     )
     issues = validate_module_field_value(field, default)
     if issues:
@@ -366,7 +375,9 @@ def normalize_module_commands(
     return tuple(specs)
 
 
-def validate_module_field_value(field: FieldSpec, value: object) -> tuple[str, ...]:
+def validate_module_field_value(
+    field: FieldSpec, value: object, *, check_precision: bool = False,
+) -> tuple[str, ...]:
     """验证一个声明字段的运行值；返回可直接展示给用户的原因。"""
 
     issues: list[str] = []
@@ -389,6 +400,11 @@ def validate_module_field_value(field: FieldSpec, value: object) -> tuple[str, .
         else:
             if field.field_type == "int" and not number.is_integer():
                 issues.append(f"{field.label} must be an integer")
+            if field.field_type == "float" and check_precision:
+                try:
+                    require_precision(number, field.decimals if field.decimals is not None else 9, field.label)
+                except ValueError as exc:
+                    issues.append(str(exc))
             if field.minimum is not None and number < field.minimum:
                 issues.append(f"{field.label} must be at least {field.minimum:g}")
             if field.maximum is not None and number > field.maximum:
@@ -427,7 +443,9 @@ def validate_module_command_parameters(
         issues.append("Unknown parameters: " + ", ".join(unknown))
     for field in spec.fields:
         if field.name in parameters:
-            issues.extend(validate_module_field_value(field, parameters[field.name]))
+            issues.extend(validate_module_field_value(
+                field, parameters[field.name], check_precision=not spec.custom_editor,
+            ))
     if spec.kind == "scan":
         points = parameters.get(spec.points_field)
         if isinstance(points, list) and not points:

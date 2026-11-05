@@ -283,6 +283,11 @@ class InstrumentScannerWindowTests(unittest.TestCase):
             )
             window._add_instance(descriptor)
             instance = window._instrument_pages[descriptor.id]["instances"][0]
+            controller_fields = instance["panels"][0]["fields"]
+            self.assertEqual(controller_fields["stability_dwell_seconds"].decimals(), 1)
+            self.assertEqual(controller_fields["stability_tolerance"].decimals(), 9)
+            with self.assertRaises(ValueError):
+                window._number_box(0.25, decimals=1)
             resource = instance["resource"]
             detected_index = resource.findData("GPIB0::1::INSTR")
             self.assertIn("TEST,CTRL,1", resource.itemText(detected_index))

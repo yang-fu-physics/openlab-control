@@ -243,7 +243,14 @@ def validate_dll_parameters(
             elif field.field_type == "choice" and value not in field.choices:
                 issues.append(f"{field.label} must match one declared choice exactly")
             else:
-                issues.extend(validate_module_field_value(field, value))
+                issues.extend(validate_module_field_value(
+                    field, value,
+                    check_precision=(
+                        (field.unit == "s" and "filter" not in field.name)
+                        or field.unit.upper() in {"PLC", "NPLC"}
+                        or field.name == "nplc"
+                    ),
+                ))
     try:
         json.dumps(dict(parameters), ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:

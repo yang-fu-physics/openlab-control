@@ -65,6 +65,7 @@ from labcontrol.instruments.manifest import (  # noqa: E402
     SystemInstrumentDescriptor,
     load_instrument_manifest,
 )
+from labcontrol.ui.widgets import PrecisionDoubleSpinBox  # noqa: E402
 
 
 NI_VISA_DOWNLOAD_URL = (
@@ -1267,9 +1268,11 @@ class InstrumentScannerWindow(QMainWindow):
         value: float,
         minimum: float = -1.0e100,
         maximum: float = 1.0e100,
+        *,
+        decimals: int = 9,
     ) -> QDoubleSpinBox:
-        box = QDoubleSpinBox(self)
-        box.setDecimals(9)
+        box = PrecisionDoubleSpinBox(self)
+        box.setDecimals(decimals)
         box.setRange(minimum, maximum)
         box.setValue(value)
         box.setKeyboardTracking(False)
@@ -1304,6 +1307,7 @@ class InstrumentScannerWindow(QMainWindow):
                 float(value),
                 float(field.minimum) if field.minimum is not None else -1.0e100,
                 float(field.maximum) if field.maximum is not None else 1.0e100,
+                decimals=1 if field.id.endswith("_seconds") and "filter" not in field.id else 9,
             )
         if field.field_type == "boolean":
             control = QCheckBox(self)
@@ -1549,7 +1553,10 @@ class InstrumentScannerWindow(QMainWindow):
                 panel_fields["reading"] = reading
                 panel_fields["role"] = role
                 for key, label, default in numeric_specs:
-                    box = self._number_box(float(saved.get(key, default)))
+                    box = self._number_box(
+                        float(saved.get(key, default)),
+                        decimals=1 if key.endswith("_seconds") else 9,
+                    )
                     panel_fields[key] = box
                     details_form.addRow(label, box)
                 enabled.toggled.connect(details.setVisible)
@@ -2157,11 +2164,15 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     values = _arguments(argv)
     application = QApplication.instance() or QApplication(sys.argv[:1])
-    window = InstrumentScannerWindow(
-        ROOT / "configs",
-        values.instruments,
-        timeout_seconds=values.timeout,
-    )
+    try:
+        window = InstrumentScannerWindow(
+            ROOT / "configs",
+            values.instruments,
+            timeout_seconds=values.timeout,
+        )
+    except ValueError as exc:
+        QMessageBox.critical(None, "Invalid Instrument Configuration", str(exc))
+        return 2
     window.show()
     return application.exec()
 

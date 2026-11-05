@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from .models import InstrumentKind
 
 
@@ -24,3 +26,12 @@ def fixed_number(value: object, decimals: int) -> str:
     if rounded == 0:
         rounded = 0.0
     return f"{rounded:.{decimals}f}"
+
+
+def require_precision(value: object, decimals: int, label: str = "Value") -> float:
+    """在参数输入边界拒绝会被控件舍入的值，容许浮点换算的末位误差。"""
+    number = float(value)
+    rounded = round(number, decimals)
+    if not math.isfinite(number) or not math.isclose(number, rounded, rel_tol=1e-14, abs_tol=0.0):
+        raise ValueError(f"{label}: {value} must have at most {decimals} decimal places")
+    return rounded

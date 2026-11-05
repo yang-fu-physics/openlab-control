@@ -17,6 +17,7 @@ from .config import (
     StabilityConfig,
 )
 from .instrument_resources import InstrumentResource
+from .formatting import require_precision
 from .models import InstrumentKind
 
 
@@ -88,6 +89,11 @@ def _finite(value: object, label: str) -> float:
         raise ConfigurationError(f"{label} must be a finite number") from exc
     if not math.isfinite(result):
         raise ConfigurationError(f"{label} must be a finite number")
+    if label.endswith(("stability_dwell_seconds", "stability_timeout_seconds", "stability_window_seconds")):
+        try:
+            result = require_precision(result, 1, label)
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
     return result
 
 
@@ -130,6 +136,11 @@ def _config_field_value(
         checked = value
     elif field_type == "number":
         checked = _finite(value, label)
+        if field.id.endswith("_seconds") and "filter" not in field.id:
+            try:
+                checked = require_precision(checked, 1, label)
+            except ValueError as exc:
+                raise ConfigurationError(str(exc)) from exc
     elif field_type == "boolean":
         checked = _boolean(value, label)
     else:

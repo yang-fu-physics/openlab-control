@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ..formatting import field_decimals, require_precision
+
 
 class CommandType(str, Enum):
     """框架支持的规范化 SEQ 命令类型。"""
@@ -324,7 +326,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.SCAN_TIME, "Scan Time", "System Commands", (
-        FieldSpec("duration_seconds", "Duration (s)", "float", 60.0, 0.0, 31536000.0),
+        FieldSpec("duration_seconds", "Duration (s)", "float", 60.0, 0.0, 31536000.0, decimals=1),
         FieldSpec("steps", "Points", "int", 60, 1, 1000000),
     )),
     CommandSpec(CommandType.SET_FIELD, "Set Field", "System Commands", (
@@ -339,7 +341,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.WAIT, "Wait", "System Commands", (
-        FieldSpec("seconds", "Wait time (s)", "float", 10.0, 0.0, 31536000.0),
+        FieldSpec("seconds", "Wait time (s)", "float", 10.0, 0.0, 31536000.0, decimals=1),
     )),
     CommandSpec(CommandType.INJECT_WARNING, "Inject Warning", "Advanced Commands (Simulation)", (
         FieldSpec("code", "Code", "text", "SIM_WARNING"),
@@ -353,6 +355,20 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
 
 
 SPECS_BY_TYPE = {spec.command_type: spec for spec in COMMAND_SPECS}
+
+
+def command_decimals(command: Command, field_name: str) -> int:
+    """内置 SEQ 编辑与执行验证使用同一套输入精度。"""
+    spec = SPECS_BY_TYPE.get(command.type)
+    if spec is not None:
+        field_spec = next(item for item in spec.fields if item.name == field_name)
+        if field_spec.decimals is not None:
+            return field_spec.decimals
+    if command.type in {CommandType.SET_TEMPERATURE, CommandType.SCAN_TEMPERATURE}:
+        return 3
+    if command.type in {CommandType.SET_FIELD, CommandType.SCAN_FIELD}:
+        return field_decimals(command.params.get("unit", "Oe"))
+    return 9
 
 
 def validate_command_parameters(command: Command) -> tuple[str, ...]:
@@ -381,6 +397,11 @@ def validate_command_parameters(command: Command) -> tuple[str, ...]:
             if field_spec.field_type == "int" and not number.is_integer():
                 issues.append(f"{field_spec.label} must be an integer")
                 continue
+            if field_spec.field_type == "float":
+                try:
+                    require_precision(number, command_decimals(command, field_spec.name), field_spec.label)
+                except ValueError as exc:
+                    issues.append(str(exc))
             if field_spec.minimum is not None and number < field_spec.minimum:
                 issues.append(
                     f"{field_spec.label} must be at least {field_spec.minimum:g}"

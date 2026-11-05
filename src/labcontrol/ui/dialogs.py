@@ -36,25 +36,16 @@ from ..config import InstrumentConfig, InstrumentPanelConfig
 from ..formatting import control_decimals, field_decimals, fixed_number
 from ..models import InstrumentKind, InstrumentSnapshot, LabEvent, Severity
 from ..module_commands import ModuleCommandSpec
-from ..sequence.model import Command, CommandSpec, CommandType
+from ..sequence.model import Command, CommandSpec, CommandType, command_decimals
 from ..sequence.parser import format_temperature_points, parse_temperature_points
 from ..units import UnitConversionError, convert_value
 from .scaling import scaled, scaled_text
 from .window_sizing import fit_initial_window_width
+from .widgets import PrecisionDoubleSpinBox
 
 
 TEMPERATURE_COMMANDS = {CommandType.SET_TEMPERATURE, CommandType.SCAN_TEMPERATURE}
 FIELD_COMMANDS = {CommandType.SET_FIELD, CommandType.SCAN_FIELD}
-
-
-def _command_decimals(command: Command, field_name: str) -> int:
-    """按温度、磁场单位和普通数值选择 SEQ 输入精度。"""
-
-    if command.type in TEMPERATURE_COMMANDS and field_name in {"target", "start", "stop", "rate"}:
-        return 3
-    if command.type in FIELD_COMMANDS and field_name in {"target", "start", "stop", "rate"}:
-        return field_decimals(command.params.get("unit", "Oe"))
-    return 9
 
 
 class CommandDialog(QDialog):
@@ -101,11 +92,11 @@ class CommandDialog(QDialog):
                 if field.unit:
                     widget.setSuffix(f" {field.unit}")
             elif field.field_type == "float":
-                widget = QDoubleSpinBox()
+                widget = PrecisionDoubleSpinBox()
                 decimals = (
                     field.decimals
                     if field.decimals is not None
-                    else _command_decimals(command, field.name)
+                    else command_decimals(command, field.name)
                 )
                 widget.setDecimals(decimals)
                 minimum = field.minimum if field.minimum is not None else -1e12
@@ -514,14 +505,15 @@ class ManualControlDialog(QDialog):
             else control_decimals(self.kind, self.reading.unit)
         )
         form = QFormLayout()
+        input_precision = control_decimals(self.kind, self.reading.unit)
         self.target_input = QDoubleSpinBox()
-        self.target_input.setDecimals(self._precision)
+        self.target_input.setDecimals(input_precision)
         self.target_input.setRange(panel.min_value, panel.max_value)
         self.target_input.setSuffix(f" {self.reading.unit}")
         self.target_input.setValue(config.initial_value)
         self.rate_input = QDoubleSpinBox()
-        self.rate_input.setDecimals(self._precision)
-        self.rate_input.setRange(10 ** -self._precision, panel.max_rate_per_minute)
+        self.rate_input.setDecimals(input_precision)
+        self.rate_input.setRange(10 ** -input_precision, panel.max_rate_per_minute)
         self.rate_input.setSuffix(f" {self.reading.unit}/min")
         self.rate_input.setValue(panel.default_rate_per_minute)
         form.addRow("Target", self.target_input)

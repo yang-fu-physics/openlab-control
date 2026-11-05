@@ -699,7 +699,7 @@ class InstrumentPanelTests(unittest.TestCase):
             field_config.panel("main"),
         )
         self.assertEqual(temperature_dialog.target_input.decimals(), 3)
-        self.assertEqual(field_dialog.target_input.decimals(), 3)
+        self.assertEqual(field_dialog.target_input.decimals(), 2)
 
         spec = SPECS_BY_TYPE[CommandType.SET_FIELD]
         command = spec.create()

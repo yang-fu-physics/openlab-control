@@ -366,6 +366,42 @@ class InstrumentResourceTests(unittest.TestCase):
                 [("control", 1, "sample_temp"), ("heater", 2, "none")],
             )
 
+    def test_instrument_time_precision_is_checked_without_rounding_filter_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            general = _write_external_configuration(root)
+            generated = root / "configs" / "instruments" / "dual_controller.toml"
+            extra_fields = (
+                '[[config_fields]]\nid = "io_timeout_seconds"\n'
+                'label = "Timeout"\ntype = "number"\ndefault = 1.0\n\n'
+                '[[config_fields]]\nid = "filter_time_seconds"\n'
+                'label = "Filter Time"\ntype = "number"\ndefault = 0.125\n\n'
+            )
+            original = EXTERNAL_GENERATED.replace(
+                "[[controls]]", extra_fields + "[[controls]]", 1,
+            ).replace(
+                'pid_file = "configs/pid/sample_controller.toml"',
+                'pid_file = "configs/pid/sample_controller.toml"\n'
+                'io_timeout_seconds = 1.2\nfilter_time_seconds = 0.125',
+            )
+            generated.write_text(original, encoding="utf-8")
+            config = load_config(general)
+            self.assertEqual(config.instrument("sample_controller").extras["filter_time_seconds"], 0.125)
+            for field in (
+                "stability_dwell_seconds",
+                "stability_timeout_seconds",
+                "stability_window_seconds",
+                "io_timeout_seconds",
+            ):
+                with self.subTest(field=field):
+                    if field == "io_timeout_seconds":
+                        invalid = original.replace("io_timeout_seconds = 1.2", "io_timeout_seconds = 0.25")
+                    else:
+                        invalid = original.replace('reading = "temperature"\n', f'reading = "temperature"\n{field} = 0.25\n')
+                    generated.write_text(invalid, encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigurationError, "decimal places"):
+                        load_config(general)
+
     def test_blank_identity_is_allowed_but_wrong_identity_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

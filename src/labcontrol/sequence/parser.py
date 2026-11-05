@@ -650,7 +650,11 @@ def parse_sequence(
 def _format_number(value: object, decimals: int = 3) -> str:
     """使用全框架一致的小数规则格式化 SEQ 数值。"""
 
-    return fixed_number(value, decimals)
+    number = float(value)
+    if not math.isclose(number, round(number, decimals), rel_tol=1e-14, abs_tol=0.0):
+        # 超精度参数保留真实值供用户修正，由公共验证拒绝执行，不能保存成另一个值。
+        return repr(number)
+    return fixed_number(number, decimals)
 
 
 def format_command(command: Command, *, preserve_raw: bool = True) -> str:

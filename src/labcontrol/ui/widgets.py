@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QResizeEvent
-from PySide6.QtWidgets import QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QDoubleSpinBox, QLabel, QSizePolicy, QWidget
+
+from ..formatting import require_precision
+
+
+class PrecisionDoubleSpinBox(QDoubleSpinBox):
+    """加载参数时明确拒绝精度损失；用户编辑仍遵循 Qt 的小数位限制。"""
+
+    def setValue(self, value: float) -> None:  # noqa: N802
+        super().setValue(require_precision(value, self.decimals()))
 
 
 class ElidedLabel(QLabel):
@@ -43,4 +52,4 @@ class ElidedLabel(QLabel):
         super().setText(displayed)
 
 
-__all__ = ["ElidedLabel"]
+__all__ = ["ElidedLabel", "PrecisionDoubleSpinBox"]
