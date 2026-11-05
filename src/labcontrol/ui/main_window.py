@@ -2505,7 +2505,7 @@ class MainWindow(QMainWindow):
         data_window.raise_()
         QTimer.singleShot(0, self._fit_mdi_windows)
         if path is not None:
-            browser.load_path(path, show_errors=True)
+            browser.queue_load(path)
         return data_window
 
     def _fit_mdi_windows(self) -> None:

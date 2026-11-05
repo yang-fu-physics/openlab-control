@@ -12,10 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .data_filter import DataFilter
+
 
 PLOT_FORMAT_MARKER = "OpenLab Control Plot Format"
-PLOT_FORMAT_VERSION = 2
-SUPPORTED_PLOT_FORMAT_VERSIONS = {1, PLOT_FORMAT_VERSION}
+PLOT_FORMAT_VERSION = 5
+SUPPORTED_PLOT_FORMAT_VERSIONS = {1, 2, 3, 4, PLOT_FORMAT_VERSION}
 PLOT_LAYOUTS = {"overlay", "stacked"}
 LINEAR_SCALE = "linear"
 LOG_SCALE = "log"
@@ -58,6 +60,7 @@ class PlotFormat:
     stacked_y_ranges: dict[str, Range] = field(default_factory=dict)
     x_scale: str = LINEAR_SCALE
     y_scale: str = LINEAR_SCALE
+    filters: DataFilter = field(default_factory=DataFilter.empty)
 
     def __post_init__(self) -> None:
         """在对象创建时统一执行布局、坐标类型和范围约束。"""
@@ -91,9 +94,10 @@ class PlotFormat:
     def to_dict(self) -> dict[str, Any]:
         """转换为包含格式标记和版本号的 JSON 对象。"""
 
-        return {
+        has_filter_state = self.filters != DataFilter.empty()
+        payload = {
             "format": PLOT_FORMAT_MARKER,
-            "version": PLOT_FORMAT_VERSION,
+            "version": PLOT_FORMAT_VERSION if has_filter_state else 2,
             "data_file": self.data_file,
             "layout": self.layout,
             "x_axis": self.x_column,
@@ -110,6 +114,12 @@ class PlotFormat:
                 },
             },
         }
+
+        if has_filter_state:
+            payload["filters"] = self.filters.to_list()
+        if self.filters.overflow_rows:
+            payload["filter_overflow"] = [row.to_dict() for row in self.filters.overflow_rows]
+        return payload
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> PlotFormat:
@@ -138,6 +148,13 @@ class PlotFormat:
             for name, raw_range in stacked_raw.items()
             if (value := _validated_range(raw_range, f"stacked_y_ranges.{name}")) is not None
         }
+        try:
+            filters = (
+                DataFilter.from_list(raw.get("filters"), raw.get("filter_overflow"), legacy=version < 5)
+                if version >= 3 else DataFilter.empty()
+            )
+        except ValueError as exc:
+            raise PlotFormatError(str(exc)) from exc
         return cls(
             data_file=str(raw.get("data_file", "")),
             layout=layout,
@@ -150,6 +167,7 @@ class PlotFormat:
             stacked_y_ranges=stacked,
             x_scale=str(raw.get("x_scale", LINEAR_SCALE)).casefold(),
             y_scale=str(raw.get("y_scale", LINEAR_SCALE)).casefold(),
+            filters=filters,
         )
 
 

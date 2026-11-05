@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -45,6 +46,7 @@ from ..axis_ticks import (
     timestamp_ticks,
 )
 from ..dat_reader import DatDocument, DatPoint
+from ..data_filter import DataFilter, matching_row_indices
 from ..plot_format import (
     LINEAR_SCALE,
     LOG_SCALE,
@@ -54,6 +56,7 @@ from ..plot_format import (
     PlotFormatError,
 )
 from .scaling import scaled, scaled_float
+from ..time_filter import discover_time_column
 from .window_sizing import fit_initial_window_width
 
 
@@ -166,6 +169,10 @@ class DatPlotCanvas(QWidget):
     axesChanged = Signal(str, object)
     displayChanged = Signal()
     pointActivated = Signal(object)
+    pointsChanged = Signal()
+    filterRequested = Signal()
+    filterInvalidated = Signal(object)
+    rawFileRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -188,6 +195,13 @@ class DatPlotCanvas(QWidget):
         self._drag_current: QPointF | None = None
         self._drag_series: str | None = None
         self._timestamp_reference: TimestampReference | None = None
+        self.data_filter = DataFilter.empty()
+        self.filter_match_count = 0
+        self.selected_hit: PlotHit | None = None
+        self._sorted_x_values_by_series: dict[str, tuple[float, ...]] = {}
+        self._path_cache: dict[int, tuple[tuple, QPainterPath]] = {}
+        self._natural_range_cache: dict[tuple, tuple[float, float] | None] = {}
+        self._plot_count: int | None = None
 
     @property
     def x_label(self) -> str:
@@ -218,6 +232,13 @@ class DatPlotCanvas(QWidget):
     def set_document(self, document: DatDocument, preserve_view: bool = False) -> None:
         """替换数据快照，选择有效数值列，并按请求保留或重置手动缩放。"""
 
+        if self.document is not None and self.document.path != document.path:
+            self.data_filter = DataFilter.empty()
+            self.selected_hit = None
+        filters, invalid = self.data_filter.reserve_time_column(
+            discover_time_column(document.columns),
+        ).disable_invalid_columns(document.columns, document.numeric_columns())
+        self.data_filter = filters
         self.document = document
         numeric = document.numeric_columns()
         if not self._axes_initialized or (
@@ -253,12 +274,14 @@ class DatPlotCanvas(QWidget):
         self.y_columns = valid_y
         self._axes_initialized = True
         self._rebuild_points()
-        if not preserve_view:
+        if not preserve_view or invalid:
             self.reset_zoom(notify=False)
         else:
             self._discard_invalid_views()
             self.update()
         self._emit_axes_changed()
+        if invalid:
+            self.filterInvalidated.emit(invalid)
 
     def set_axes(
         self,
@@ -293,6 +316,36 @@ class DatPlotCanvas(QWidget):
 
     def set_y_columns(self, y_columns: tuple[str, ...] | list[str]) -> bool:
         return self.set_axes(self.x_column, y_columns)
+
+    def set_data_filter(self, data_filter: DataFilter, *, notify: bool = True) -> bool:
+        """Apply one validated row selection to every plotted series."""
+
+        if self.document is not None:
+            data_filter = data_filter.reserve_time_column(
+                discover_time_column(self.document.columns)
+            )
+            invalid = data_filter.active_invalid_columns(
+                self.document.columns,
+                self.document.numeric_columns(),
+            )
+            if invalid:
+                raise PlotFormatError(
+                    "Filter columns are missing or non-numeric: %s"
+                    % ", ".join(invalid)
+                )
+            data_filter, _ = data_filter.disable_invalid_columns(
+                self.document.columns,
+                self.document.numeric_columns(),
+            )
+        changed = self.data_filter != data_filter
+        if not changed:
+            return False
+        self.data_filter = data_filter
+        self._rebuild_points()
+        self.reset_zoom(notify=False)
+        if notify:
+            self.displayChanged.emit()
+        return changed
 
     def toggle_y_column(self, column: str, enabled: bool) -> bool:
         """切换单条 Y 曲线，但始终至少保留一条。"""
@@ -339,6 +392,9 @@ class DatPlotCanvas(QWidget):
         if not changed:
             return True
         setattr(self, attribute, normalized)
+        self._natural_range_cache.clear()
+        self._plot_count = None
+        self.pointsChanged.emit()
         self.reset_zoom(notify=False)
         self.update()
         if notify:
@@ -369,6 +425,11 @@ class DatPlotCanvas(QWidget):
         missing = [name for name in plot_format.y_columns if name not in numeric]
         if missing:
             raise PlotFormatError("Y columns are not available: " + ", ".join(missing))
+        filters = plot_format.filters.reserve_time_column(discover_time_column(self.document.columns))
+        invalid = filters.active_invalid_columns(self.document.columns, numeric)
+        if invalid:
+            raise PlotFormatError("Filter columns are missing or non-numeric: " + ", ".join(invalid))
+        self.data_filter, _ = filters.disable_invalid_columns(self.document.columns, numeric)
         self.x_column = plot_format.x_column
         self.y_columns = plot_format.y_columns
         self.layout_mode = plot_format.layout
@@ -406,6 +467,7 @@ class DatPlotCanvas(QWidget):
             stacked_y_ranges=dict(self._stacked_y_views),
             x_scale=self.x_scale,
             y_scale=self.y_scale,
+            filters=self.data_filter,
         )
 
     def reset_zoom(self, *, notify: bool = True) -> None:
@@ -448,31 +510,48 @@ class DatPlotCanvas(QWidget):
     def _rebuild_points(self) -> None:
         """从不可变 DAT 文档重建每条曲线的有限数值点。"""
 
-        if self.document is None:
-            self.points_by_series = {}
+        self._path_cache.clear()
+        self._natural_range_cache.clear()
+        self._plot_count = None
+        document = self.document
+        if document is None:
+            self.points_by_series.clear()
+            self._sorted_x_values_by_series.clear()
+            self.filter_match_count = 0
             self._timestamp_reference = None
+            self.selected_hit = None
+            self.pointsChanged.emit()
             return
-        self.points_by_series = {
-            name: tuple(
-                point
-                for point in self.document.numeric_points(name, self.x_column)
-                if math.isfinite(point.x) and math.isfinite(point.y)
-            )
-            for name in self.y_columns
-        }
-        sample_x = next(
-            (
-                point.x
-                for points in self.points_by_series.values()
-                for point in points
-            ),
-            None,
+        matching = matching_row_indices(document, self.data_filter) if self.data_filter.is_active else None
+        self.filter_match_count = len(document.rows) if matching is None else len(matching)
+        self.points_by_series = document.numeric_points_by_series(self.y_columns, self.x_column, matching)
+        self._sorted_x_values_by_series = {}
+        for name, points in self.points_by_series.items():
+            x_values = tuple(point.x for point in points)
+            if all(x_values[index - 1] <= x_values[index] for index in range(1, len(x_values))):
+                self._sorted_x_values_by_series[name] = x_values
+        sample_x = None if self.x_column is None else next(
+            (value for value in document.numeric_values(self.x_column) if value is not None), None,
         )
         self._timestamp_reference = timestamp_reference(
             self.document.header_lines,
             self.x_column,
             sample_x,
         )
+        if self.selected_hit is not None:
+            selected = self.selected_hit
+            points = self.points_by_series.get(selected.series, ())
+            index = bisect_left(points, selected.row_index, key=lambda point: point.row_index)
+            self.selected_hit = (
+                PlotHit(selected.series, points[index])
+                if index < len(points) and points[index].row_index == selected.row_index
+                and points[index].row == selected.row else None
+            )
+        self.pointsChanged.emit()
+
+    def _select_point(self, hit: PlotHit) -> None:
+        self.selected_hit = hit
+        self.update()
 
     def format_x_value(
         self,
@@ -527,15 +606,22 @@ class DatPlotCanvas(QWidget):
         )
 
     def _natural_x_range(self) -> tuple[float, float] | None:
+        key = ("x",)
+        if key in self._natural_range_cache:
+            return self._natural_range_cache[key]
         values = [
             point.x
             for points in self.points_by_series.values()
             for point in points
             if self._point_is_plottable(point)
         ]
-        return self._padded_range(values, 0.035, self.x_scale)
+        self._natural_range_cache[key] = self._padded_range(values, 0.035, self.x_scale)
+        return self._natural_range_cache[key]
 
     def _natural_y_range(self, series: str | None) -> tuple[float, float] | None:
+        key = ("y", self.layout_mode, series)
+        if key in self._natural_range_cache:
+            return self._natural_range_cache[key]
         if self.layout_mode == OVERLAY_LAYOUT:
             values = [
                 point.y
@@ -549,7 +635,8 @@ class DatPlotCanvas(QWidget):
                 for point in self.points_by_series.get(series or "", ())
                 if self._point_is_plottable(point)
             ]
-        return self._padded_range(values, 0.06, self.y_scale)
+        self._natural_range_cache[key] = self._padded_range(values, 0.06, self.y_scale)
+        return self._natural_range_cache[key]
 
     def _ranges(self, series: str | None = None) -> tuple[float, float, float, float] | None:
         """合并手动范围与自然范围，得到一个面板的完整数据坐标。"""
@@ -707,7 +794,9 @@ class DatPlotCanvas(QWidget):
         if not has_points:
             painter.setPen(QColor("#657080"))
             message = (
-                "No positive points for the selected logarithmic axes"
+                "No rows match the data filters"
+                if self.data_filter.is_active and not self.filter_match_count
+                else "No positive points for the selected logarithmic axes"
                 if LOG_SCALE in {self.x_scale, self.y_scale}
                 else "No numeric points for the selected axes"
             )
@@ -719,12 +808,11 @@ class DatPlotCanvas(QWidget):
         elif self.layout_mode == OVERLAY_LAYOUT:
             self._draw_legend(painter, panels[0][1])
 
-        total = sum(
-            1
-            for points in self.points_by_series.values()
-            for point in points
-            if self._point_is_plottable(point)
-        )
+        if self._plot_count is None:
+            self._plot_count = sum(
+                self._point_is_plottable(point)
+                for points in self.points_by_series.values() for point in points
+            )
         footer = panels[-1][1] if panels else self._plot_rect()
         painter.setPen(QColor("#5e6875"))
         painter.drawText(
@@ -735,7 +823,7 @@ class DatPlotCanvas(QWidget):
                 scaled_float(18),
             ),
             Qt.AlignmentFlag.AlignRight,
-            f"{total:,} plotted points | drag to zoom | double-click a point for details",
+            f"{self._plot_count:,} plotted points | click to mark | drag to zoom | double-click for details",
         )
 
         if self._drag_origin is not None and self._drag_current is not None:
@@ -899,6 +987,34 @@ class DatPlotCanvas(QWidget):
                 continue
             color = QColor(PLOT_COLORS[self.y_columns.index(name) % len(PLOT_COLORS)])
             self._draw_series(painter, points, color, plot, ranges)
+        if self.selected_hit is not None and self.selected_hit.series in draw_series:
+            hit = self.selected_hit
+            if self._point_is_plottable(hit.point):
+                color = QColor(PLOT_COLORS[self.y_columns.index(hit.series) % len(PLOT_COLORS)])
+                self._draw_selected_marker(painter, hit.point, color, plot, ranges)
+
+    def _draw_selected_marker(
+        self,
+        painter: QPainter,
+        point: DatPoint,
+        color: QColor,
+        plot: QRectF,
+        ranges: tuple[float, float, float, float],
+    ) -> None:
+        """Draw the selected point independently of the normal marker policy."""
+
+        screen = self._screen_point(point.x, point.y, plot, ranges)
+        if screen is None:
+            return
+        painter.save()
+        painter.setClipRect(plot)
+        painter.setPen(QPen(QColor("#1f2937"), scaled_float(2.0)))
+        painter.setBrush(QColor("#ffd166"))
+        painter.drawEllipse(screen, scaled_float(7.0), scaled_float(7.0))
+        painter.setPen(QPen(QColor("#ffffff"), scaled_float(1.2)))
+        painter.setBrush(color)
+        painter.drawEllipse(screen, scaled_float(3.1), scaled_float(3.1))
+        painter.restore()
 
     def _draw_series(
         self,
@@ -908,25 +1024,27 @@ class DatPlotCanvas(QWidget):
         plot: QRectF,
         ranges: tuple[float, float, float, float],
     ) -> None:
-        stride = max(1, len(points) // 12_000)
-        path = QPainterPath()
-        segment_started = False
-        for index, point in enumerate(points):
-            if not self._point_is_plottable(point):
-                segment_started = False
-                continue
-            if segment_started and index % stride != 0 and index != len(points) - 1:
-                continue
-            screen = self._screen_point(point.x, point.y, plot, ranges)
-            if screen is None:
-                segment_started = False
-                continue
-            if segment_started:
-                path.lineTo(screen)
-            else:
-                path.moveTo(screen)
-                segment_started = True
+        # The path always contains every finite, plottable source point.  Only
+        # the marker layer is hidden for large series; path sampling would
+        # lose spikes, repeated X values, and zoomed-in detail.
+        cache_key = (
+            id(points),
+            self.x_scale,
+            self.y_scale,
+            tuple(float(value) for value in ranges),
+            float(plot.left()),
+            float(plot.top()),
+            float(plot.width()),
+            float(plot.height()),
+            float(self.devicePixelRatioF()),
+        )
+        cached = self._path_cache.get(id(points))
+        if cached is None or cached[0] != cache_key:
+            cached = (cache_key, self._build_series_path(points, plot, ranges))
+            self._path_cache[id(points)] = cached
+        path = cached[1]
         painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, len(points) <= 3_000)
         painter.setClipRect(plot)
         painter.setPen(QPen(color, 1.45))
         painter.drawPath(path)
@@ -938,6 +1056,31 @@ class DatPlotCanvas(QWidget):
                 if screen is not None:
                     painter.drawEllipse(screen, scaled_float(2.1), scaled_float(2.1))
         painter.restore()
+
+    def _build_series_path(
+        self,
+        points: tuple[DatPoint, ...],
+        plot: QRectF,
+        ranges: tuple[float, float, float, float],
+    ) -> QPainterPath:
+        """Build a complete plotted path without display-only point loss."""
+
+        path = QPainterPath()
+        segment_started = False
+        for point in points:
+            if not self._point_is_plottable(point):
+                segment_started = False
+                continue
+            screen = self._screen_point(point.x, point.y, plot, ranges)
+            if screen is None:
+                segment_started = False
+                continue
+            if segment_started:
+                path.lineTo(screen)
+            else:
+                path.moveTo(screen)
+                segment_started = True
+        return path
 
     def _draw_legend(self, painter: QPainter, plot: QRectF) -> None:
         cursor_x = plot.left() + scaled_float(8)
@@ -1001,11 +1144,11 @@ class DatPlotCanvas(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """完成足够大的框选，写入共享 X 和对应面板的 Y 范围。"""
+        """Commit a sufficiently large selection to shared X and panel Y ranges."""
 
         if event.button() == Qt.MouseButton.LeftButton and self._drag_origin is not None:
             plot = self._panel_for_series(self._drag_series)
-            current = self._drag_current or event.position()
+            current = event.position()
             selection = (
                 QRectF(self._drag_origin, current).normalized().intersected(plot)
                 if plot is not None
@@ -1013,6 +1156,10 @@ class DatPlotCanvas(QWidget):
             )
             ranges = self._ranges(self._drag_series)
             series = self._drag_series
+            drag_distance = math.hypot(
+                current.x() - self._drag_origin.x(),
+                current.y() - self._drag_origin.y(),
+            )
             self._drag_origin = None
             self._drag_current = None
             self._drag_series = None
@@ -1035,25 +1182,31 @@ class DatPlotCanvas(QWidget):
                 elif series is not None:
                     self._stacked_y_views[series] = y_range
                 self._manual_view = True
+                self._path_cache.clear()
                 self.displayChanged.emit()
+            elif drag_distance <= scaled_float(5.0):
+                hit = self._nearest_point(current)
+                if hit is not None:
+                    self._select_point(hit)
             self.update()
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """双击最近点时发出完整行命中结果。"""
+        """Emit a complete-row hit when the nearest point is double-clicked."""
 
         if event.button() == Qt.MouseButton.LeftButton:
             hit = self._nearest_point(event.position())
             if hit is not None:
+                self._select_point(hit)
                 self.pointActivated.emit(hit)
                 event.accept()
                 return
         super().mouseDoubleClickEvent(event)
 
     def _nearest_point(self, position: QPointF) -> PlotHit | None:
-        """在 12 个缩放像素半径内查找当前面板最近的可绘制点。"""
+        """Find the nearest drawable point within a 12-pixel radius."""
 
         panel = self._panel_at(position)
         if panel is None:
@@ -1068,7 +1221,24 @@ class DatPlotCanvas(QWidget):
             ranges = self._ranges(name)
             if ranges is None:
                 continue
-            for point in self.points_by_series.get(name, ()):
+            points = self.points_by_series.get(name, ())
+            x_values = self._sorted_x_values_by_series.get(name)
+            if x_values:
+                radius = scaled_float(12.0)
+                x_low = self._data_x(
+                    max(plot.left(), position.x() - radius),
+                    plot,
+                    ranges,
+                )
+                x_high = self._data_x(
+                    min(plot.right(), position.x() + radius),
+                    plot,
+                    ranges,
+                )
+                start = bisect_left(x_values, min(x_low, x_high))
+                end = bisect_right(x_values, max(x_low, x_high))
+                points = points[start:end]
+            for point in points:
                 screen = self._screen_point(point.x, point.y, plot, ranges)
                 if screen is None:
                     continue
@@ -1095,6 +1265,9 @@ class DatPlotCanvas(QWidget):
         reset_action.triggered.connect(lambda checked=False: self.reset_zoom())
         if self.document is not None:
             numeric = self.document.numeric_columns()
+            menu.addSeparator()
+            menu.addAction("Data Filter...", self.filterRequested.emit)
+            menu.addAction("Browse Raw File", self.rawFileRequested.emit)
             menu.addSeparator()
             layout_menu = menu.addMenu("Layout")
             layout_group = QActionGroup(layout_menu)

@@ -21,6 +21,7 @@ from labcontrol.plot_format import (  # noqa: E402
     plot_format_path,
     save_plot_format,
 )
+from labcontrol.data_filter import DataFilter, DataFilterRow  # noqa: E402
 
 
 class PlotFormatTests(unittest.TestCase):
@@ -70,6 +71,20 @@ class PlotFormatTests(unittest.TestCase):
         settings = PlotFormat.from_dict(legacy)
         self.assertEqual(settings.x_scale, LINEAR_SCALE)
         self.assertEqual(settings.y_scale, LINEAR_SCALE)
+
+    def test_version_five_round_trips_filter_and_legacy_disabled_row_stays_disabled(self) -> None:
+        filters = DataFilter((
+            DataFilterRow(column="Y", minimum=2),
+            DataFilterRow(), DataFilterRow(), DataFilterRow(), DataFilterRow(),
+        ))
+        plot = PlotFormat("sample.dat", "overlay", None, ("Y",), filters=filters)
+        payload = plot.to_dict()
+        self.assertEqual(payload["version"], 5)
+        self.assertEqual(PlotFormat.from_dict(payload), plot)
+        for version in (3, 4):
+            with self.subTest(version=version):
+                legacy = {**payload, "version": version}
+                self.assertFalse(PlotFormat.from_dict(legacy).filters.is_active)
 
     def test_finds_additive_name_but_prefers_canonical_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
+from bisect import bisect_left
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, QThreadPool, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -29,8 +32,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..dat_reader import DatDocument, DatReadError, read_dat
+from ..data_filter import DataFilter
+from ..dat_reader import DatDocument, DatPoint, DatReadError, read_dat, read_raw_dat
 from ..plot_format import (
+    LOG_SCALE,
     PlotFormatError,
     find_plot_format,
     load_plot_format,
@@ -42,8 +47,34 @@ from .dat_plot import (
     DatPlotCanvas,
     PlotHit,
 )
+from ..time_filter import time_filter_context
+from .data_filter_dialog import DataFilterDialog
 from .scaling import scaled
 from .window_sizing import fit_initial_window_width
+
+
+class _FileReadSignals(QObject):
+    finished = Signal(object, object, int)
+
+
+class _FileReadTask(QRunnable):
+    """Perform a read without ever touching Qt widgets from the worker."""
+
+    def __init__(self, read: Callable[[], DatDocument | str], generation: int) -> None:
+        super().__init__()
+        self.read = read
+        self.generation = generation
+        self.signals = _FileReadSignals()
+
+    def run(self) -> None:
+        try:
+            result = self.read()
+            if isinstance(result, DatDocument):
+                result.numeric_columns()
+        except (DatReadError, OSError) as exc:
+            self.signals.finished.emit(None, exc, self.generation)
+        else:
+            self.signals.finished.emit(result, None, self.generation)
 
 
 class PointDetailsDialog(QDialog):
@@ -56,45 +87,69 @@ class PointDetailsDialog(QDialog):
         x_label: str,
         x_value_text: str | None = None,
         parent: QWidget | None = None,
+        *,
+        points: tuple[DatPoint, ...] = (),
+        format_x: Callable[[float], str] | None = None,
+        select: Callable[[PlotHit], None] | None = None,
     ) -> None:
         super().__init__(parent)
-        point = hit.point
-        self.setWindowTitle(f"Data Point Details - Row {point.row_index + 1}")
+        self._document = document
+        self._series = hit.series
+        self._x_label = x_label
+        self._format_x = format_x
+        self._select = select
+        self._points = points or (hit.point,)
+        self._index = bisect_left(self._points, hit.row_index, key=lambda point: point.row_index)
         layout = QVBoxLayout(self)
-        displayed_x = (
-            x_value_text
-            if x_value_text is not None
-            else f"{point.x:.12g}"
-        )
-        self.summary_label = QLabel(
-            f"File: {document.path}\n"
-            f"Data row: {point.row_index + 1:,}    "
-            f"{x_label}: {displayed_x}    "
-            f"{hit.series}: {point.y:.12g}"
-        )
+        self.summary_label = QLabel()
         self.summary_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         self.summary_label.setWordWrap(True)
         layout.addWidget(self.summary_label)
-        table = QTableWidget(len(document.columns), 2)
+        self.table = table = QTableWidget(len(document.columns), 2)
         table.setHorizontalHeaderLabels(["Field", "Value"])
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.verticalHeader().setVisible(False)
-        for row, (column, value) in enumerate(zip(document.columns, point.row, strict=True)):
+        for row, column in enumerate(document.columns):
             table.setItem(row, 0, QTableWidgetItem(column))
-            table.setItem(row, 1, QTableWidgetItem(value))
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(table, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        self.previous_button = buttons.addButton("Previous Point", QDialogButtonBox.ButtonRole.ActionRole)
+        self.next_button = buttons.addButton("Next Point", QDialogButtonBox.ButtonRole.ActionRole)
+        self.previous_button.clicked.connect(lambda: self._navigate(-1))
+        self.next_button.clicked.connect(lambda: self._navigate(1))
         buttons.rejected.connect(self.accept)
         layout.addWidget(buttons)
+        self._render_point(x_value_text)
         fit_initial_window_width(
             self,
             preferred_height=scaled(470),
         )
+
+    def _render_point(self, x_value_text: str | None = None) -> None:
+        point = self._points[self._index]
+        x = x_value_text if x_value_text is not None else (
+            self._format_x(point.x) if self._format_x is not None else f"{point.x:.12g}"
+        )
+        self.setWindowTitle(f"Data Point Details - Row {point.row_index + 1}")
+        self.summary_label.setText(
+            f"File: {self._document.path}\nData row: {point.row_index + 1:,}    "
+            f"{self._x_label}: {x}    {self._series}: {point.y:.12g}"
+        )
+        for row, value in enumerate(point.row):
+            self.table.setItem(row, 1, QTableWidgetItem(value))
+        self.previous_button.setEnabled(self._index > 0)
+        self.next_button.setEnabled(self._index + 1 < len(self._points))
+
+    def _navigate(self, offset: int) -> None:
+        self._index += offset
+        self._render_point()
+        if self._select is not None:
+            self._select(PlotHit(self._series, self._points[self._index]))
 
 
 class DatBrowserWidget(QWidget):
@@ -110,7 +165,13 @@ class DatBrowserWidget(QWidget):
         self._signature: tuple[int, int] | None = None
         self._suspend_format_save = False
         self._format_status = ""
+        self._filter_status = ""
         self._last_auto_save_error: str | None = None
+        self._generation = 0
+        self._pending_read: tuple[Path, bool] | None = None
+        self._raw_generation = 0
+        self._raw_dialog: QDialog | None = None
+        self._details: PointDetailsDialog | None = None
         self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
@@ -125,12 +186,15 @@ class DatBrowserWidget(QWidget):
         open_button = QPushButton("Open DAT")
         reload_button = QPushButton("Reload")
         self.save_format_button = QPushButton("Save PLT")
+        self.filter_button = QPushButton("Data Filter...")
+        self.filter_button.setEnabled(False)
         reset_button = QPushButton("Reset Zoom")
         controls.addWidget(self.path_label, 1)
         controls.addWidget(QLabel("Layout:"))
         controls.addWidget(self.layout_combo)
         controls.addWidget(open_button)
         controls.addWidget(reload_button)
+        controls.addWidget(self.filter_button)
         controls.addWidget(self.save_format_button)
         controls.addWidget(reset_button)
         layout.addLayout(controls)
@@ -144,6 +208,7 @@ class DatBrowserWidget(QWidget):
         open_button.clicked.connect(self.open_dialog)
         reload_button.clicked.connect(self.reload)
         self.save_format_button.clicked.connect(lambda checked=False: self.save_format(show_errors=True))
+        self.filter_button.clicked.connect(self.open_data_filter)
         reset_button.clicked.connect(lambda checked=False: self.canvas.reset_zoom())
         self.layout_combo.currentIndexChanged.connect(self._layout_selected)
         self.canvas.openRequested.connect(self.open_dialog)
@@ -153,6 +218,10 @@ class DatBrowserWidget(QWidget):
         self.canvas.axesChanged.connect(self._update_status)
         self.canvas.displayChanged.connect(self._display_changed)
         self.canvas.pointActivated.connect(self._show_point_details)
+        self.canvas.pointsChanged.connect(self._close_point_details)
+        self.canvas.filterRequested.connect(self.open_data_filter)
+        self.canvas.filterInvalidated.connect(self._filter_invalidated)
+        self.canvas.rawFileRequested.connect(self.browse_raw_file)
 
         self.monitor_timer = QTimer(self)
         self.monitor_timer.setInterval(750)
@@ -175,26 +244,66 @@ class DatBrowserWidget(QWidget):
             "DAT data (*.dat);;All files (*)",
         )
         if selected:
-            self.load_path(selected, show_errors=True)
+            self.queue_load(selected)
 
     def load_path(self, path: str | Path, show_errors: bool = True) -> bool:
         """读取一个 DAT；刷新同一文件时保留视图，切换文件时加载其 PLT。"""
 
         source = Path(path).resolve()
+        self._generation += 1
+        self._pending_read = None
         try:
             document = read_dat(source)
         except (DatReadError, OSError) as exc:
-            self.status_label.setText(f"Unable to refresh {source.name}: {exc}")
-            if show_errors:
-                QMessageBox.warning(self, "Unable to Open DAT", str(exc))
+            self._report_read_error(source, exc, show_errors)
             return False
+        self._commit_document(document, show_errors)
+        return True
 
+    def queue_load(
+        self, path: str | Path, *, show_errors: bool = True, refresh: bool = False,
+    ) -> None:
+        source = Path(path).resolve()
+        self._generation += 1
+        self._pending_read = (source, show_errors)
+        if not refresh:
+            self.status_label.setText(f"Reading {source.name}…")
+        task = _FileReadTask(
+            lambda: read_dat(source, allow_unterminated_last_line=not refresh),
+            self._generation,
+        )
+        task.signals.finished.connect(self._finish_load, Qt.ConnectionType.QueuedConnection)
+        QThreadPool.globalInstance().start(task)
+
+    @Slot(object, object, int)
+    def _finish_load(self, document: DatDocument | None, error: Exception | None, generation: int) -> None:
+        if generation != self._generation:
+            return
+        source, show_errors = self._pending_read
+        self._pending_read = None
+        if error is not None:
+            self._report_read_error(source, error, show_errors)
+        else:
+            self._commit_document(document, show_errors)
+
+    def _report_read_error(self, source: Path, error: Exception, show_errors: bool) -> None:
+        self.status_label.setText(f"Unable to read {source.name}: {error}")
+        if show_errors:
+            QMessageBox.warning(self, "Unable to Open DAT", str(error))
+
+    def _commit_document(self, document: DatDocument, show_errors: bool) -> None:
+        source = document.path
         new_file = self.current_path != source or self.document is None
         preserve_view = not new_file
         self.current_path = source
         self.document = document
         self._signature = (document.modified_ns, document.size_bytes)
         self.path_label.setText(str(source))
+        self.filter_button.setEnabled(True)
+        if new_file:
+            self._format_status = ""
+            self._filter_status = ""
+            self._raw_generation += 1
 
         format_error: str | None = None
         format_loaded = False
@@ -225,15 +334,13 @@ class DatBrowserWidget(QWidget):
                 "Unable to Apply Plot Format",
                 f"The DAT file was loaded, but its PLT settings were ignored.\n\n{format_error}",
             )
-        return True
-
     def reload(self) -> None:
         """手动重读当前文件；尚未选择时打开文件对话框。"""
 
         if self.current_path is None:
             self.open_dialog()
         else:
-            self.load_path(self.current_path, show_errors=True)
+            self.queue_load(self.current_path)
 
     def save_format(self, show_errors: bool = True) -> bool:
         """保存当前列、布局、坐标类型和缩放范围；自动保存错误只提示一次。"""
@@ -310,7 +417,7 @@ class DatBrowserWidget(QWidget):
     def _check_for_updates(self) -> None:
         """通过文件签名变化触发无弹窗刷新；文件暂时不可用时等待重试。"""
 
-        if self.current_path is None:
+        if self.current_path is None or self._pending_read is not None:
             return
         try:
             stat = self.current_path.stat()
@@ -319,7 +426,67 @@ class DatBrowserWidget(QWidget):
             return
         signature = (stat.st_mtime_ns, stat.st_size)
         if signature != self._signature:
-            self.load_path(self.current_path, show_errors=False)
+            self.queue_load(self.current_path, show_errors=False, refresh=True)
+
+    def open_data_filter(self) -> None:
+        if self.document is None:
+            return
+        dialog = DataFilterDialog(
+            self.document.numeric_columns(), self.canvas.data_filter, self,
+            apply_callback=self._apply_data_filter,
+            time_context=time_filter_context(self.document),
+        )
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
+    def _apply_data_filter(self, data_filter: DataFilter) -> None:
+        self._filter_status = ""
+        self.canvas.set_data_filter(data_filter)
+        self._update_status(self.canvas.x_label, self.canvas.y_columns)
+
+    def _filter_invalidated(self, columns: tuple[str, ...]) -> None:
+        self._filter_status = "Filters cleared for unavailable columns: " + ", ".join(columns)
+
+    def browse_raw_file(self) -> None:
+        source = self.current_path
+        if source is None:
+            return
+        self._raw_generation += 1
+        task = _FileReadTask(lambda: read_raw_dat(source), self._raw_generation)
+        task.signals.finished.connect(self._finish_raw_read, Qt.ConnectionType.QueuedConnection)
+        QThreadPool.globalInstance().start(task)
+
+    @Slot(object, object, int)
+    def _finish_raw_read(self, text: str | None, error: Exception | None, generation: int) -> None:
+        if generation != self._raw_generation:
+            return
+        if error is not None:
+            QMessageBox.warning(self, "Unable to Read Raw DAT", str(error))
+            return
+        if self._raw_dialog is not None:
+            self._raw_dialog.close()
+        dialog = QDialog(self)
+        self._raw_dialog = dialog
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setWindowTitle(f"Raw File (read-only) - {self.current_path.name}")
+        layout = QVBoxLayout(dialog)
+        view = QPlainTextEdit()
+        view.setReadOnly(True)
+        view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        view.setPlainText(text)
+        layout.addWidget(view, 1)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.close)
+        layout.addWidget(buttons)
+        dialog.finished.connect(self._raw_dialog_closed)
+        dialog.resize(scaled(820), scaled(560))
+        dialog.show()
+
+    @Slot(int)
+    def _raw_dialog_closed(self, _result: int) -> None:
+        self._raw_dialog = None
 
     def _update_status(self, x_label: str, y_columns: object) -> None:
         if self.document is None:
@@ -328,11 +495,17 @@ class DatBrowserWidget(QWidget):
         y_text = ", ".join(names) if names else "None"
         layout = "Overlay" if self.canvas.layout_mode == OVERLAY_LAYOUT else "Stacked shared X"
         format_text = f" | {self._format_status}" if self._format_status else ""
+        filter_text = (
+            f" | Filtered: {self.canvas.filter_match_count:,}/{len(self.document.rows):,} rows"
+            if self.canvas.data_filter.is_active else ""
+        )
+        if self._filter_status:
+            filter_text += f" | {self._filter_status}"
         self.status_label.setText(
             f"{len(self.document.rows):,} rows | "
             f"X: {x_label} [{self.canvas.x_scale.title()}] | "
             f"Y: {y_text} [{self.canvas.y_scale.title()}] | {layout} | "
-            f"refreshed {datetime.now().strftime('%H:%M:%S')} | auto-refresh 0.75 s{format_text}"
+            f"refreshed {datetime.now().strftime('%H:%M:%S')} | auto-refresh 0.75 s{format_text}{filter_text}"
         )
 
     def _show_point_details(self, hit: PlotHit) -> None:
@@ -340,6 +513,9 @@ class DatBrowserWidget(QWidget):
 
         if self.document is None:
             return
+        points = self.canvas.points_by_series[hit.series]
+        if LOG_SCALE in (self.canvas.x_scale, self.canvas.y_scale):
+            points = tuple(point for point in points if self.canvas._point_is_plottable(point))
         dialog = PointDetailsDialog(
             self.document,
             hit,
@@ -349,11 +525,30 @@ class DatBrowserWidget(QWidget):
                 full=True,
             ),
             self,
+            points=points,
+            format_x=lambda value: self.canvas.format_x_value(value, full=True),
+            select=self.canvas._select_point,
         )
+        self._details = dialog
         try:
             dialog.exec()
         finally:
+            self._details = None
             dialog.deleteLater()
+
+    def _close_point_details(self) -> None:
+        if self._details is not None:
+            self._details.reject()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self.monitor_timer.stop()
+        self._generation += 1
+        self._raw_generation += 1
+        self._pending_read = None
+        self._close_point_details()
+        if self._raw_dialog is not None:
+            self._raw_dialog.close()
+        super().closeEvent(event)
 
     @staticmethod
     def _first_dat_path(event: QDragEnterEvent | QDropEvent) -> Path | None:
@@ -376,7 +571,8 @@ class DatBrowserWidget(QWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         path = self._first_dat_path(event)
-        if path is not None and self.load_path(path, show_errors=True):
+        if path is not None:
+            self.queue_load(path)
             event.acceptProposedAction()
         else:
             event.ignore()

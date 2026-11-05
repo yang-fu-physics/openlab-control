@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from PySide6.QtCore import QCoreApplication, QEvent, Qt  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QThreadPool, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
@@ -288,6 +288,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                 second_window = window._show_data_browser(
                     second_path
                 )
+                self.assertTrue(QThreadPool.globalInstance().waitForDone(5000))
                 self.application.processEvents()
                 first_browser = window.data_browser_windows[
                     first_window
@@ -363,6 +364,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                 )
 
                 window._view_data()
+                self.assertTrue(QThreadPool.globalInstance().waitForDone(5000))
                 self.application.processEvents()
                 first_window = next(
                     reversed(window.data_browser_windows)
@@ -387,6 +389,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                 )
 
                 window._view_data()
+                self.assertTrue(QThreadPool.globalInstance().waitForDone(5000))
                 self.application.processEvents()
                 second_window = next(
                     reversed(window.data_browser_windows)

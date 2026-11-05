@@ -385,7 +385,9 @@ System Instrument 可以为自己的稳定事件代码注册响应。命中后�
 - X Axis Log / Y Axis Log；
 - Reset Zoom 等。
 
-鼠标框选放大；双击最近数据点弹出该原始行完整字段。显示布局保存在 DAT 同目录同名 `.plt`，下次打开自动恢复。
+鼠标框选放大；单击标记点，双击查看完整原始行并可向前／后翻点。
+**Data Filter…** 筛选本视图，右键 **Browse Raw File** 只读查看原文。
+显示布局和筛选保存在 DAT 同目录同名 `.plt`，下次打开自动恢复。
 
 `Timestamp(s)`、`Time Stamp (sec)` 等绝对时间列在线性坐标下会显示实际日期时间。
 Quantum Design 文件优先按 `FILEOPENTIME` 校准；OpenLab 文件按

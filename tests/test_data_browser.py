@@ -5,22 +5,27 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Event
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt, QUrl  # noqa: E402
-from PySide6.QtGui import QDropEvent  # noqa: E402
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QThreadPool, Qt, QUrl  # noqa: E402
+from PySide6.QtGui import QColor, QDropEvent, QImage, QPainter  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QDialogButtonBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QPlainTextEdit  # noqa: E402
 
 from labcontrol.ui.data_browser import (  # noqa: E402
     DatBrowserWidget,
     PointDetailsDialog,
 )
 from labcontrol.plot_format import LOG_SCALE, load_plot_format  # noqa: E402
+from labcontrol.data_filter import DataFilter, DataFilterRow  # noqa: E402
+from labcontrol.dat_reader import read_dat  # noqa: E402
+from labcontrol.time_filter import format_time_bound, parse_time_bound, time_filter_context  # noqa: E402
 from labcontrol.ui.dat_plot import (  # noqa: E402
     PlotHit,
     YSeriesSelectionDialog,
@@ -31,6 +36,155 @@ class DataBrowserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
+
+    def _finish_reads(self) -> None:
+        self.assertTrue(QThreadPool.globalInstance().waitForDone(5000))
+        self.application.processEvents()
+
+    def test_background_refresh_keeps_complete_snapshot_and_raw_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "live.dat"
+            complete = "[Data]\nTime(s),Value\n0,1\n"
+            path.write_text(complete, encoding="utf-8")
+            browser = DatBrowserWidget(Path(temp))
+            browser.monitor_timer.stop()
+            browser.queue_load(path)
+            self._finish_reads()
+            prior = browser.document
+            for partial in ("1,", '1,"2\n'):
+                path.write_text(complete + partial, encoding="utf-8")
+                browser._check_for_updates()
+                self._finish_reads()
+                self.assertIs(browser.document, prior)
+            path.write_text(complete + "1,2\n", encoding="utf-8")
+            browser._check_for_updates()
+            self._finish_reads()
+            self.assertEqual(len(browser.document.rows), 2)
+            menu = browser.canvas.build_context_menu()
+            next(action for action in menu.actions() if action.text() == "Browse Raw File").trigger()
+            self._finish_reads()
+            raw = browser.findChild(QPlainTextEdit)
+            self.assertTrue(raw.isReadOnly())
+            self.assertEqual(raw.toPlainText(), complete + "1,2\n")
+            browser.close()
+
+    def test_new_file_request_wins_over_slow_previous_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            slow, quick = root / "slow.dat", root / "quick.dat"
+            for path in (slow, quick):
+                path.write_text("[Data]\nTime(s),Value\n0,1\n", encoding="utf-8")
+            browser = DatBrowserWidget(root)
+            browser.monitor_timer.stop()
+            entered, release = Event(), Event()
+
+            def delayed(path, **kwargs):
+                if path == slow.resolve():
+                    entered.set()
+                    release.wait(5)
+                return read_dat(path, **kwargs)
+
+            with patch("labcontrol.ui.data_browser.read_dat", side_effect=delayed):
+                try:
+                    browser.queue_load(slow, show_errors=False)
+                    self.assertTrue(entered.wait(2))
+                    browser.queue_load(quick, show_errors=False)
+                    for _ in range(200):
+                        if browser.current_path == quick.resolve():
+                            break
+                        QTest.qWait(10)
+                    self.assertEqual(browser.current_path, quick.resolve())
+                finally:
+                    release.set()
+                    self._finish_reads()
+            self.assertEqual(browser.current_path, quick.resolve())
+            self.assertFalse(slow.with_suffix(".plt").exists())
+            browser.close()
+
+    def test_filter_keeps_source_row_identity_navigation_and_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "filter.dat"
+            source = "[Data]\nTime(s),R1,R2,Gate\n0,0,10,2\n1,1,11,2\n2,2,12,text\n3,3,13,2\n"
+            path.write_text(source, encoding="utf-8")
+            browser = DatBrowserWidget(path.parent)
+            browser.monitor_timer.stop()
+            self.assertTrue(browser.load_path(path))
+            browser.canvas.set_axes("Time(s)", ("R1", "R2"))
+            filters = DataFilter((
+                DataFilterRow(column="Time(s)", minimum=1, maximum=3),
+                DataFilterRow(column="Gate", minimum=2, maximum=2),
+                DataFilterRow(), DataFilterRow(), DataFilterRow(),
+            ))
+            browser._apply_data_filter(filters)
+            for points in browser.canvas.points_by_series.values():
+                self.assertEqual([point.row_index for point in points], [1, 3])
+            self.assertIn("Filtered: 2/4", browser.status_label.text())
+            self.assertEqual(load_plot_format(path.with_suffix(".plt")).filters, filters)
+            points = browser.canvas.points_by_series["R1"]
+            dialog = PointDetailsDialog(
+                browser.document, PlotHit("R1", points[0]), "Time(s)",
+                points=points, select=browser.canvas._select_point,
+            )
+            dialog.next_button.click()
+            self.assertIn("Data row: 4", dialog.summary_label.text())
+            self.assertEqual(browser.canvas.selected_hit.row_index, 3)
+            dialog.close()
+            path.write_text("[Data]\nTime(s),R1,R2\n0,0,10\n1,1,11\n", encoding="utf-8")
+            browser._check_for_updates()
+            self._finish_reads()
+            self.assertIn("Filters cleared for unavailable columns: Gate", browser.status_label.text())
+            self.assertIsNone(browser.canvas.selected_hit)
+            browser.close()
+
+    def test_large_nonmonotonic_path_is_complete_and_cached(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "large.dat"
+            path.write_text(
+                "[Data]\nTime(s),Value\n" + "".join(
+                    f"{index % 101},{100000 if index == 12503 else index + 1}\n"
+                    for index in range(25_000)
+                ),
+                encoding="utf-8",
+            )
+            browser = DatBrowserWidget(path.parent)
+            browser.monitor_timer.stop()
+            self.assertTrue(browser.load_path(path))
+            canvas = browser.canvas
+            plot, ranges = canvas._plot_rect(), canvas._ranges()
+            image = QImage(900, 700, QImage.Format.Format_ARGB32)
+            painter = QPainter(image)
+            try:
+                canvas._draw_series(painter, canvas.points, QColor("black"), plot, ranges)
+                cached = canvas._path_cache[id(canvas.points)][1]
+                self.assertEqual(cached.elementCount(), 25_000)
+                canvas._draw_series(painter, canvas.points, QColor("black"), plot, ranges)
+                self.assertIs(canvas._path_cache[id(canvas.points)][1], cached)
+                canvas.set_y_scale(LOG_SCALE)
+                canvas._draw_series(painter, canvas.points, QColor("black"), plot, canvas._ranges())
+                self.assertEqual(canvas._path_cache[id(canvas.points)][1].elementCount(), 25_000)
+                self.assertIsNot(canvas._path_cache[id(canvas.points)][1], cached)
+            finally:
+                painter.end()
+            browser.close()
+
+    def test_time_bounds_use_first_record_and_preserve_wall_time_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "times.dat"
+            path.write_text("[Data]\nTime(s),Y\n90061,1\n1,2\n", encoding="utf-8")
+            context = time_filter_context(read_dat(path))
+            self.assertEqual(context.initial_minimum, 90061)
+            self.assertEqual(parse_time_bound("25:01:01", context), 90061)
+            self.assertIsNone(parse_time_bound("", context))
+            path.write_text(
+                "[Header]\nFILEOPENTIME,3589995867,04/26/2025,11:59 pm\n"
+                "[Data]\nTimestamp(s),Y\n3589995867,1\n3589995987,2\n",
+                encoding="utf-8",
+            )
+            context = time_filter_context(read_dat(path))
+            self.assertTrue(context.is_wall_time)
+            text = format_time_bound(3589995987, context)
+            self.assertTrue(text.startswith("2025-04-27 00:01"))
+            self.assertEqual(parse_time_bound(text, context), 3589995987)
 
     def test_load_axes_nearest_point_and_live_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -72,6 +226,7 @@ class DataBrowserTests(unittest.TestCase):
             )
             self.application.processEvents()
             self.assertEqual(activated[0].row[2], "second")
+            self.assertEqual(browser.canvas.selected_hit.row[2], "second")
 
             browser.canvas.set_axes(None, "Value")
             self.assertIsNone(browser.canvas.x_column)
@@ -88,8 +243,8 @@ class DataBrowserTests(unittest.TestCase):
                 "0,1,first\n1,2,second\n2,3,third\n",
                 encoding="utf-8",
             )
-            QTest.qWait(900)
-            self.application.processEvents()
+            browser.monitor_timer.timeout.emit()
+            self._finish_reads()
             self.assertEqual(len(browser.document.rows), 3)
             self.assertEqual(len(browser.canvas.points), 3)
             self.assertIsNone(browser.canvas.x_column)
@@ -111,6 +266,7 @@ class DataBrowserTests(unittest.TestCase):
             )
             browser.dropEvent(drop)
             self.assertTrue(drop.isAccepted())
+            self._finish_reads()
             self.assertEqual(browser.current_path, dropped_path.resolve())
             browser.close()
 

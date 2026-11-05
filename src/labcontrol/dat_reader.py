@@ -9,7 +9,8 @@ from __future__ import annotations
 import csv
 import io
 import math
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -37,6 +38,12 @@ class DatDocument:
     rows: tuple[tuple[str, ...], ...]
     modified_ns: int
     size_bytes: int
+    _numeric_cache: dict[int, tuple[float | None, ...]] = field(
+        default_factory=dict, init=False, repr=False, compare=False,
+    )
+    _numeric_columns: tuple[str, ...] | None = field(
+        default=None, init=False, repr=False, compare=False,
+    )
 
     def column_index(self, name: str) -> int:
         """按唯一显示名取得列索引。"""
@@ -49,11 +56,21 @@ class DatDocument:
     def numeric_columns(self) -> tuple[str, ...]:
         """返回至少含一个有限数值的列。"""
 
-        result: list[str] = []
-        for index, name in enumerate(self.columns):
-            if any(_as_float(row[index]) is not None for row in self.rows):
-                result.append(name)
-        return tuple(result)
+        if self._numeric_columns is None:
+            result = tuple(
+                name for name in self.columns
+                if any(value is not None for value in self.numeric_values(name))
+            )
+            object.__setattr__(self, "_numeric_columns", result)
+        return self._numeric_columns
+
+    def numeric_values(self, name: str) -> tuple[float | None, ...]:
+        """缓存每列的有限数值，供筛选、自动量程和绘图复用。"""
+
+        index = self.column_index(name)
+        if index not in self._numeric_cache:
+            self._numeric_cache[index] = tuple(_as_float(row[index]) for row in self.rows)
+        return self._numeric_cache[index]
 
     def numeric_series(
         self,
@@ -71,17 +88,28 @@ class DatDocument:
     ) -> tuple[DatPoint, ...]:
         """过滤空白、文本和非有限值，同时保留原始行关联。"""
 
-        y_index = self.column_index(y_column)
-        x_index = None if x_column is None else self.column_index(x_column)
-        result: list[DatPoint] = []
-        for row_index, row in enumerate(self.rows):
-            y_value = _as_float(row[y_index])
-            if y_value is None:
+        return self.numeric_points_by_series((y_column,), x_column)[y_column]
+
+    def numeric_points_by_series(
+        self,
+        y_columns: Sequence[str],
+        x_column: str | None = None,
+        row_indices: Iterable[int] | None = None,
+    ) -> dict[str, tuple[DatPoint, ...]]:
+        """共享 X 与所选原始行，一次遍历构建多条曲线。"""
+
+        x_values = None if x_column is None else self.numeric_values(x_column)
+        series = {name: self.numeric_values(name) for name in y_columns}
+        result: dict[str, list[DatPoint]] = {name: [] for name in series}
+        for index in range(len(self.rows)) if row_indices is None else row_indices:
+            x = float(index + 1) if x_values is None else x_values[index]
+            if x is None:
                 continue
-            x_value = float(row_index + 1) if x_index is None else _as_float(row[x_index])
-            if x_value is not None:
-                result.append(DatPoint(x_value, y_value, row_index, row))
-        return tuple(result)
+            for name, values in series.items():
+                y = values[index]
+                if y is not None:
+                    result[name].append(DatPoint(x, y, index, self.rows[index]))
+        return {name: tuple(points) for name, points in result.items()}
 
 
 def _as_float(value: str) -> float | None:
@@ -120,7 +148,15 @@ def _unique_columns(values: list[str]) -> list[str]:
     return result
 
 
-def read_dat(path: str | Path) -> DatDocument:
+def read_raw_dat(path: str | Path) -> str:
+    """Read the source text with the same decoder, without parsing or writing it."""
+
+    return _decode(Path(path).read_bytes())
+
+
+def read_dat(
+    path: str | Path, *, allow_unterminated_last_line: bool = True,
+) -> DatDocument:
     """读取整个 DAT 文件并返回与本次字节快照一致的文档。"""
 
     source = Path(path).resolve()
@@ -130,7 +166,10 @@ def read_dat(path: str | Path) -> DatDocument:
     except OSError as exc:
         raise DatReadError(f"Unable to read DAT file: {source}") from exc
 
-    lines = _decode(payload).replace("\x00", "").splitlines()
+    text = _decode(payload).replace("\x00", "")
+    if not allow_unterminated_last_line and not text.endswith(("\n", "\r")):
+        raise DatReadError("The final DAT line is incomplete")
+    lines = text.splitlines()
     marker = next(
         (index for index, line in enumerate(lines) if line.strip().casefold() == "[data]"),
         None,
@@ -139,13 +178,19 @@ def read_dat(path: str | Path) -> DatDocument:
         raise DatReadError("The file does not contain a [Data] section")
 
     header_lines = tuple(lines[:marker])
-    parsed = csv.reader(io.StringIO("\n".join(lines[marker + 1 :])))
-    records = [
-        [cell.strip() for cell in record]
-        for record in parsed
-        if any(cell.strip() for cell in record)
-        and not (record and record[0].lstrip().startswith(";"))
-    ]
+    parsed = csv.reader(
+        io.StringIO("\n".join(lines[marker + 1 :])),
+        strict=not allow_unterminated_last_line,
+    )
+    try:
+        records = [
+            [cell.strip() for cell in record]
+            for record in parsed
+            if any(cell.strip() for cell in record)
+            and not (record and record[0].lstrip().startswith(";"))
+        ]
+    except csv.Error as exc:
+        raise DatReadError(f"Incomplete or invalid DAT record: {exc}") from exc
     if not records:
         raise DatReadError("The [Data] section does not contain a column header")
 
