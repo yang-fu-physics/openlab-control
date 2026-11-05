@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.20.4.dev4 - 2026-11-05
+
+- System Instrument 的框架操作上限从 10 秒提高到 30 秒。各仪表单次 I/O、
+  工作进程启动和通讯重连时限保持不变。
+- ZLAN、Cryo-con 22C/24C 和 Lake Shore 340 的 I/O 超时设置超过操作预算时，
+  明确报告 `INSTRUMENT_IO_TIMEOUT_TOO_HIGH`，不尝试通讯重连。
+- ZLAN 将 DI／DO 合到一个可混选的 `Status Conditions` 列表，仍按与条件显示状态。
+  更新驱动后，重新选择状态条件并保存；没有新增 ZLAN 专用扫描器代码。
+- 核心 ZIP 不附带真实仪表驱动。需要的驱动请在
+  [独立系统仪表测试发布](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/instruments-v0.20.4.dev4)
+  下载并复制到 `system_instruments/`。
+
 ## 0.20.4.dev3 - 2026-11-05
 
 - ZLAN 状态可选 DI、DO 或混选。所有已选位都是 1 才显示 On，任一为 0 则显示 Off。
