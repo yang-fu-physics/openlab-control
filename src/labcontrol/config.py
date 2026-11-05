@@ -121,7 +121,7 @@ class InstrumentConfig:
     max_value: float = float("inf")
     max_rate_per_minute: float = float("inf")
     stale_after_seconds: float = 3.0
-    operation_timeout_seconds: float = 10.0
+    operation_timeout_seconds: float = 30.0
     shutdown_timeout_seconds: float = 3.0
     stability: StabilityConfig | None = None
     extras: dict[str, Any] = field(default_factory=dict)

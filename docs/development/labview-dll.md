@@ -135,7 +135,7 @@ Enable 成功后才出现在 `Modules` 下。每次选择都会打开一个独�
   "parameters": {
     "function_id": "diagnostic_read",
     "parameters": {"mode": "Current", "range": "Auto", "level": 0.001, "samples": 10},
-    "operation_timeout_seconds": 10.0
+    "operation_timeout_seconds": 30.0
   }
 }
 ```

@@ -301,12 +301,15 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
         )
     except Exception as exc:
         try:
+            error = {
+                "type": "boot_error",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+            if isinstance(exc, InstrumentError):
+                error.update(message=str(exc), code=exc.code, context=exc.context)
             _send_message(
                 connection,
-                {
-                    "type": "boot_error",
-                    "message": f"{type(exc).__name__}: {exc}",
-                },
+                error,
             )
         finally:
             connection.close()
@@ -616,8 +619,8 @@ class InstrumentWorkerClient:
             self._invalidate(parent, process, min(timeout, 1.0))
             raise InstrumentWorkerError(
                 str(hello.get("message", "Instrument worker failed to start")),
-                "INSTRUMENT_WORKER_START_FAILED",
-                self.spec.instrument_config.id,
+                str(hello.get("code", "INSTRUMENT_WORKER_START_FAILED")),
+                str(hello.get("context", self.spec.instrument_config.id)),
             )
         try:
             self.dll_functions = normalize_dll_functions(

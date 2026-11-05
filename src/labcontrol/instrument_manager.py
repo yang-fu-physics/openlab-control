@@ -603,6 +603,7 @@ class InstrumentManager:
             "NONFINITE_INSTRUMENT_READING",
             "INSTRUMENT_KIND_MISMATCH",
             "UNKNOWN_INSTRUMENT",
+            "INSTRUMENT_IO_TIMEOUT_TOO_HIGH",
         }
 
     @staticmethod
@@ -1020,11 +1021,14 @@ class InstrumentManager:
             except InstrumentError as exc:
                 if exc.code == "INVALID_EVENT_RESPONSES":
                     raise
-                if self.isolate_processes:
+                if self.isolate_processes and exc.code != "INSTRUMENT_IO_TIMEOUT_TOO_HIGH":
                     self._begin_recovery(instrument_id, exc)
                     return
                 self._connection_states[instrument_id] = (
                     InstrumentConnectionState.FAULTED
+                )
+                self._mark_snapshot_unavailable(
+                    instrument_id, InstrumentConnectionState.FAULTED, str(exc),
                 )
                 self.events.report(
                     Severity.ERROR,

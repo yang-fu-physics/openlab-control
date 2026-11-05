@@ -111,14 +111,12 @@ API v4 清单可声明以下输入类型：
 | `ordered_choices` | 选取、增删及排序的步骤列表 |
 | `pid_file` | 第一次配置时选择复制来源 |
 
-ZLAN 压缩机页面按实物选择 **Relay Channels**（6408I 选 4、6842 选 8），分别填写
-**Compressor On Steps** 和 **Compressor Off Steps**，再设置 **Delay Between Steps (s)**。
-例如开机按 DO7、DO8，关机按 DO8、DO7。扫描、预览和保存都不切换继电器。
-主界面和 SEQ 都使用已保存的同一套步骤。
+扫描器按已安装仪表的清单呈现这些字段。通道范围、动作顺序和状态判定由仪表定义；
+具体选项以该仪表随附的 README 为准。
 
-**Status Inputs (DI)** 和 **Status Outputs (DO)** 可以各选多路，也可以只选一类。
-所有选中的位均为 1 才显示 On，任何一个为 0 则显示 Off；两栏都空时不显示 On/Off。
-读取失败时按通讯故障处理，不显示 Off。状态仅供显示，不影响开关步骤，也不作为联锁。
+System Instrument 的单次框架操作上限为 30 秒，不是每条 I/O 的等待时间。若仪表的
+I/O 超时设置与完整操作的预算冲突，后端会报告 `INSTRUMENT_IO_TIMEOUT_TOO_HIGH`，
+列出配置值和框架上限；这属于配置错误，不会尝试通讯重连。
 
 每个字段都有作者给出的 `default`。请按该型号说明确认实际通道、协议超时和其他选项；不要
 把清单默认值当作现场验证。

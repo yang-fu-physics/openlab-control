@@ -80,6 +80,43 @@ class InstrumentWorkerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = load_simulated_config()
 
+    def test_timeout_configuration_error_crosses_worker_without_reconnect(self) -> None:
+        async def scenario() -> None:
+            self.assertTrue(self.config.instrument_instances)
+            for configured in self.config.instrument_instances:
+                self.assertEqual(configured.operation_timeout_seconds, 30.0)
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = (
+                    "from labcontrol.instruments.base import InstrumentError, SystemInstrument\n"
+                    "class IsolatedTestInstrument(SystemInstrument):\n"
+                    "    def __init__(self, config):\n"
+                    "        raise InstrumentError('Instrument I/O timeout setting is too high: "
+                    "91 s exceeds 30 s', 'INSTRUMENT_IO_TIMEOUT_TOO_HIGH', 'io_timeout_seconds')\n"
+                    "    def open(self): raise AssertionError('must not connect')\n"
+                    "    def close(self): pass\n"
+                    "    def read_status(self): return {'value': 0.0}\n"
+                )
+                _external_instrument(root, source)
+                instrument = replace(self.config.instrument_instances[0], backend="isolated_test")
+                config = replace(
+                    self.config,
+                    system_instruments=replace(self.config.system_instruments, directory=str(root)),
+                    instrument_instances=(instrument,),
+                )
+                events = EventManager()
+                manager = InstrumentManager(config, events, discover_system_instruments(config))
+                await manager.connect_all()
+                self.assertEqual(manager.connection_state(instrument.id).value, "faulted")
+                self.assertNotIn(instrument.id, manager._recovery_tasks)
+                error, = events.active_events()
+                self.assertEqual(error.code, "INSTRUMENT_IO_TIMEOUT_TOO_HIGH")
+                self.assertEqual(error.context, "io_timeout_seconds")
+                self.assertIn("91 s exceeds 30 s", error.message)
+                await manager.disconnect_all()
+
+        asyncio.run(scenario())
+
     def test_builtin_instruments_run_in_distinct_child_processes_and_close(self) -> None:
         async def scenario() -> None:
             manager = InstrumentManager(self.config, EventManager())
