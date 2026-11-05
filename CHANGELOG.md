@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.4 - 2026-11-05
+
+- System Instrument 的框架操作上限从 10 秒提高到 30 秒。单次 I/O、工作进程启动
+  和通讯重连时限不变；I/O 设置超过完整操作预算时明确报配置错误，不尝试重连。
+- 扫描器支持由仪表声明有序步骤和可留空的选项列表。独立 ZLAN 驱动支持四路／八路，
+  开关分别配置步骤及固定延时；DI／DO 可在同一列表混选，所有条件满足才显示 On。
+- 核心统一手动和 SEQ 温场输入精度及可编辑时间精度，拒绝会被静默舍入的外部参数。
+- 据 2026-11-05 现场确认，已完成 Lake Shore 340 温控、ZLAN 压缩机控制和
+  Keithley 6221 + 2182A Delta 测量的实机测试。记录仅覆盖实际测试的接线与配置。
+- 核心 Windows ZIP 不附带真实仪表驱动。
+  [ZLAN、Cryo-con 和 Lake Shore 340 驱动](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/instruments-v0.20.4.dev4)
+  独立下载；更新 ZLAN 后用扫描器重新选择状态条件并保存。
+
 ## 0.20.4.dev4 - 2026-11-05
 
 - System Instrument 的框架操作上限从 10 秒提高到 30 秒。各仪表单次 I/O、
