@@ -121,9 +121,12 @@ def _boolean(value: object, label: str) -> bool:
 
 def validate_ordered_choices(
     value: object, options: tuple[str, ...], label: str,
+    *, allow_empty: bool,
 ) -> list[str]:
-    """Validate an ordered, nonempty list against the selected options."""
-    if not isinstance(value, list) or not value:
+    """Validate a list against the selected options without changing its order."""
+    if not isinstance(value, list):
+        raise ConfigurationError(f"{label} must be a list")
+    if not value and not allow_empty:
         raise ConfigurationError(f"{label} requires at least one step")
     for item in value:
         if not isinstance(item, str) or item not in options:
@@ -556,6 +559,7 @@ def _configured_instance(
         if field.field_type == "ordered_choices":
             extras[field_id] = validate_ordered_choices(
                 value, field.available_options(extras), f"{prefix} {field_id}",
+                allow_empty=field.allow_empty,
             )
             continue
         extras[field_id] = _config_field_value(

@@ -445,6 +445,15 @@ default = []
 options = ["DO1", "DO2", "DO3", "DO4", "DO5", "DO6", "DO7", "DO8"]
 option_count_from = "output_count"
 
+[[config_fields]]
+id = "status_inputs"
+label = "Status Inputs (DI)"
+type = "ordered_choices"
+default = []
+options = ["DI1", "DI2", "DI3", "DI4", "DI5", "DI6", "DI7", "DI8"]
+option_count_from = "output_count"
+allow_empty = true
+
 [[panels]]
 """,
             ), encoding="utf-8")
@@ -457,7 +466,9 @@ option_count_from = "output_count"
             fields["host"][1].setText("192.0.2.10")
             count = fields["output_count"][1]
             steps = fields["on_channels"][1]
+            inputs = fields["status_inputs"][1]
             self.assertEqual(steps._combo.count(), 4)
+            self.assertEqual(inputs._combo.count(), 4)
             with self.assertRaisesRegex(ScannerConfigurationError, "at least one step"):
                 window._build_save_plan()
             count.setCurrentText("8")
@@ -473,16 +484,22 @@ option_count_from = "output_count"
                 window._build_save_plan()
             count.setCurrentText("8")
             window._refresh_order_list()
+            empty_plan = window._build_save_plan()
+            self.assertEqual(tomllib.loads(empty_plan.writes[0].text)["instances"][0]["status_inputs"], [])
+            inputs._combo.setCurrentText("DI8")
+            inputs._add_btn.click()
             plan = window._build_save_plan()
             execute_save_plan(window.visa_path, plan)
             config = load_config(general)
             self.assertEqual(config.instrument(descriptor.id).extras["on_channels"], ["DO7", "DO8"])
+            self.assertEqual(config.instrument(descriptor.id).extras["status_inputs"], ["DI8"])
 
             with patch("instrument_scanner.QTimer.singleShot"):
                 reopened = InstrumentScannerWindow(configs, instruments)
             self.addCleanup(reopened.close)
             saved = reopened._instrument_pages[descriptor.id]["instances"][0]["fields"]
             self.assertEqual(saved["on_channels"][1].values(), ["DO7", "DO8"])
+            self.assertEqual(saved["status_inputs"][1].values(), ["DI8"])
             path = configs / "instruments" / f"{descriptor.id}.toml"
             original = path.read_text(encoding="utf-8")
             path.write_text(original.replace('output_count = "8"', 'output_count = "4"'), encoding="utf-8")

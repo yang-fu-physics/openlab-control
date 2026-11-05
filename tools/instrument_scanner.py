@@ -1945,6 +1945,7 @@ class InstrumentScannerWindow(QMainWindow):
                     result[field_id] = validate_ordered_choices(
                         control.values(), field.available_options(result),
                         f"{descriptor.name} / {instance_id} / {field.label}",
+                        allow_empty=field.allow_empty,
                     )
                 except ConfigurationError as exc:
                     raise ScannerConfigurationError(str(exc)) from exc

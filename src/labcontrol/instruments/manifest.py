@@ -75,6 +75,7 @@ class InstrumentConfigFieldDescriptor:
     minimum: float | int | None = None
     maximum: float | int | None = None
     option_count_from: str = ""
+    allow_empty: bool = False
 
     def available_options(self, values: dict[str, Any]) -> tuple[str, ...]:
         if self.option_count_from:
@@ -202,7 +203,7 @@ def _parse_config_fields(
         unknown = sorted(
             set(raw) - {
                 "id", "label", "type", "default", "options", "min", "max",
-                "option_count_from",
+                "option_count_from", "allow_empty",
             }
         )
         if unknown:
@@ -211,6 +212,13 @@ def _parse_config_fields(
                 + ", ".join(unknown)
             )
         field_type = str(raw["type"]).strip()
+        allow_empty = raw.get("allow_empty", False)
+        if "allow_empty" in raw and (
+            field_type != "ordered_choices" or not isinstance(allow_empty, bool)
+        ):
+            raise ValueError(
+                f"config_fields entry {index} allow_empty must be a boolean for ordered_choices"
+            )
         options = _array_of_strings(
             raw.get("options", []),
             f"config_fields entry {index} options",
@@ -242,6 +250,7 @@ def _parse_config_fields(
                 minimum=minimum,
                 maximum=maximum,
                 option_count_from=str(raw.get("option_count_from", "")).strip(),
+                allow_empty=allow_empty,
             )
         )
     return tuple(fields)
