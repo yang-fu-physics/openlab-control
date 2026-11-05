@@ -25,7 +25,7 @@ _ENTRYPOINT = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*$"
 )
 _CONFIG_FIELD_TYPES = frozenset(
-    {"string", "integer", "number", "boolean", "choice", "pid_file"}
+    {"string", "integer", "number", "boolean", "choice", "ordered_choices", "pid_file"}
 )
 _PANEL_TEMPLATES = frozenset(
     {"controller", "readout", "readout_grid", "switch"}
@@ -74,6 +74,12 @@ class InstrumentConfigFieldDescriptor:
     options: tuple[str, ...] = ()
     minimum: float | int | None = None
     maximum: float | int | None = None
+    option_count_from: str = ""
+
+    def available_options(self, values: dict[str, Any]) -> tuple[str, ...]:
+        if self.option_count_from:
+            return self.options[:int(values[self.option_count_from])]
+        return self.options
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,7 +200,10 @@ def _parse_config_fields(
         if not isinstance(raw, dict):
             raise TypeError(f"config_fields entry {index} must be a table")
         unknown = sorted(
-            set(raw) - {"id", "label", "type", "default", "options", "min", "max"}
+            set(raw) - {
+                "id", "label", "type", "default", "options", "min", "max",
+                "option_count_from",
+            }
         )
         if unknown:
             raise ValueError(
@@ -232,6 +241,7 @@ def _parse_config_fields(
                 options=options,
                 minimum=minimum,
                 maximum=maximum,
+                option_count_from=str(raw.get("option_count_from", "")).strip(),
             )
         )
     return tuple(fields)
@@ -551,6 +561,7 @@ def load_instrument_manifest(
     config_field_ids = [field.id for field in descriptor.config_fields]
     if len(config_field_ids) != len(set(config_field_ids)):
         errors.append("config_field ids must be unique")
+    preceding_fields: dict[str, InstrumentConfigFieldDescriptor] = {}
     for field in descriptor.config_fields:
         if not _IDENTIFIER.fullmatch(field.id):
             errors.append("config_field ids must match [a-z][a-z0-9_]*")
@@ -574,6 +585,12 @@ def load_instrument_manifest(
             )
         elif field.field_type == "boolean":
             valid_default = isinstance(default, bool)
+        elif field.field_type == "ordered_choices":
+            valid_default = (
+                isinstance(default, list)
+                and all(isinstance(item, str) and item in field.options for item in default)
+                and len(default) == len(set(default))
+            )
         else:
             valid_default = (
                 isinstance(default, str)
@@ -585,16 +602,30 @@ def load_instrument_manifest(
                 f"config_field {field.id} default does not match "
                 f"type {field.field_type}"
             )
-        if field.field_type != "choice" and field.options:
+        if field.field_type not in {"choice", "ordered_choices"} and field.options:
             errors.append(
-                f"config_field {field.id} options require choice type"
+                f"config_field {field.id} options require a choice type"
             )
-        if field.field_type == "choice" and (
+        if field.field_type in {"choice", "ordered_choices"} and (
             not field.options or len(field.options) != len(set(field.options))
         ):
             errors.append(
                 f"config_field {field.id} choice options must be non-empty and unique"
             )
+        if field.option_count_from:
+            count = preceding_fields.get(field.option_count_from)
+            valid_counts = {str(i) for i in range(1, len(field.options) + 1)}
+            if (
+                field.field_type != "ordered_choices"
+                or count is None
+                or count.field_type != "choice"
+                or not set(count.options) <= valid_counts
+            ):
+                errors.append(
+                    f"config_field {field.id} option_count_from must refer to an "
+                    "earlier choice of valid option counts"
+                )
+        preceding_fields[field.id] = field
         if field.minimum is not None and field.maximum is not None:
             if field.minimum > field.maximum:
                 errors.append(

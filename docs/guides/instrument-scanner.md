@@ -108,7 +108,13 @@ API v4 清单可声明以下输入类型：
 | `number` | 数值框，可带 `min`/`max` |
 | `boolean` | 复选框 |
 | `choice` | `options` 下拉框 |
+| `ordered_choices` | 选取、增删及排序的步骤列表 |
 | `pid_file` | 第一次配置时选择复制来源 |
+
+ZLAN 压缩机页面按实物选择 **Relay Channels**（6408I 选 4、6842 选 8），分别填写
+**Compressor On Steps** 和 **Compressor Off Steps**，再设置 **Delay Between Steps (s)**。
+例如开机按 DO7、DO8，关机按 DO8、DO7。扫描、预览和保存都不切换继电器。
+主界面和 SEQ 都使用已保存的同一套步骤；面板显示的是 DO 输出，不是压缩机实际运行反馈。
 
 每个字段都有作者给出的 `default`。请按该型号说明确认实际通道、协议超时和其他选项；不要
 把清单默认值当作现场验证。

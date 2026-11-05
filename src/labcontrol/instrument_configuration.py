@@ -119,6 +119,22 @@ def _boolean(value: object, label: str) -> bool:
     return value
 
 
+def validate_ordered_choices(
+    value: object, options: tuple[str, ...], label: str,
+) -> list[str]:
+    """Validate an ordered, nonempty list against the selected options."""
+    if not isinstance(value, list) or not value:
+        raise ConfigurationError(f"{label} requires at least one step")
+    for item in value:
+        if not isinstance(item, str) or item not in options:
+            raise ConfigurationError(
+                f"{label}: {item!r} is not available; choose from {', '.join(options)}"
+            )
+    if len(set(value)) != len(value):
+        raise ConfigurationError(f"{label} must not repeat a step")
+    return value
+
+
 def _config_field_value(
     field: Any,
     value: object,
@@ -536,9 +552,15 @@ def _configured_instance(
 
     extras: dict[str, Any] = {}
     for field_id, field in config_fields.items():
+        value = raw.get(field_id, field.default)
+        if field.field_type == "ordered_choices":
+            extras[field_id] = validate_ordered_choices(
+                value, field.available_options(extras), f"{prefix} {field_id}",
+            )
+            continue
         extras[field_id] = _config_field_value(
             field,
-            raw.get(field_id, field.default),
+            value,
             project_root,
             f"{prefix} {field_id}",
         )

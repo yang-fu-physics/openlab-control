@@ -122,6 +122,11 @@ max = 65535
 后台通过 `config.extras["host"]`、`config.extras["port"]` 读取这些值。VISA 实例的地址则
 读取 `config.address`。
 
+需要操作者排列固定选项的执行顺序时，用 `type = "ordered_choices"` 声明
+`options` 和列表形式的 `default`。保存时至少需要一个步骤，不允许重复。
+`option_count_from` 可引用本字段之前的一个数字字符串下拉框（例如 `"4"`、`"8"`），
+只提供 `options` 的前若干项。驱动在 `config.extras` 中收到保持原顺序的字符串列表。
+
 ## 固定面板与角色
 
 API v4 有四种面板模板：

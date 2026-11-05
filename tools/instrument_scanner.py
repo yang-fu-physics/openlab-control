@@ -54,6 +54,8 @@ from PySide6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
+from labcontrol.config import ConfigurationError  # noqa: E402
+from labcontrol.instrument_configuration import validate_ordered_choices  # noqa: E402
 from labcontrol.instrument_resources import (  # noqa: E402
     InstrumentResource,
     InstrumentResourceError,
@@ -172,6 +174,101 @@ QListWidget#stepList::item:selected {
 QScrollArea { border: 0; background: #f8fafc; }
 QCheckBox { background: transparent; spacing: 6px; }
 """
+
+
+class OrderedChoices(QWidget):
+    """Compact editor for one ordered list of choices."""
+
+    def __init__(self, options, values, parent=None):
+        super().__init__(parent)
+        self._options = options
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        add_bar = QHBoxLayout()
+        self._combo = QComboBox(self)
+        self._combo.setAccessibleName("Available steps")
+        self._add_btn = QPushButton("Add", self)
+        self._add_btn.clicked.connect(self._add_step)
+        add_bar.addWidget(self._combo, 1)
+        add_bar.addWidget(self._add_btn)
+        layout.addLayout(add_bar)
+
+        self._list = QListWidget(self)
+        self._list.setAccessibleName("Step order")
+        self._list.setFixedHeight(self.fontMetrics().height() * 5)
+        layout.addWidget(self._list)
+
+        action_bar = QHBoxLayout()
+        self._up_btn = QPushButton("Move Up", self)
+        self._down_btn = QPushButton("Move Down", self)
+        self._remove_btn = QPushButton("Remove", self)
+        self._up_btn.clicked.connect(lambda: self._move_step(-1))
+        self._down_btn.clicked.connect(lambda: self._move_step(1))
+        self._remove_btn.clicked.connect(self._remove_step)
+        for button in (self._up_btn, self._down_btn, self._remove_btn):
+            action_bar.addWidget(button)
+        layout.addLayout(action_bar)
+        self._list.currentRowChanged.connect(self._update_nav_buttons)
+
+        for value in values:
+            self._append(value)
+        self.set_options(options)
+        self._update_nav_buttons()
+
+    def values(self) -> list[str]:
+        return [
+            self._list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._list.count())
+        ]
+
+    def set_options(self, options: tuple[str, ...]) -> None:
+        self._options = options
+        self._refresh_combo()
+        self._refresh_indices()
+
+    def _append(self, value: str) -> None:
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, value)
+        self._list.addItem(item)
+
+    def _refresh_combo(self) -> None:
+        selected = set(self.values())
+        self._combo.clear()
+        self._combo.addItems([option for option in self._options if option not in selected])
+        self._add_btn.setEnabled(self._combo.count() > 0)
+
+    def _refresh_indices(self) -> None:
+        for index, value in enumerate(self.values()):
+            suffix = "" if value in self._options else " (unavailable)"
+            self._list.item(index).setText(f"{index + 1}. {value}{suffix}")
+
+    def _add_step(self) -> None:
+        self._append(self._combo.currentText())
+        self._list.setCurrentRow(self._list.count() - 1)
+        self._refresh_indices()
+        self._refresh_combo()
+
+    def _remove_step(self) -> None:
+        self._list.takeItem(self._list.currentRow())
+        self._refresh_indices()
+        self._refresh_combo()
+        self._update_nav_buttons()
+
+    def _move_step(self, offset: int) -> None:
+        row = self._list.currentRow()
+        item = self._list.takeItem(row)
+        self._list.insertItem(row + offset, item)
+        self._list.setCurrentRow(row + offset)
+        self._refresh_indices()
+        self._update_nav_buttons()
+
+    def _update_nav_buttons(self) -> None:
+        row = self._list.currentRow()
+        self._up_btn.setEnabled(row > 0)
+        self._down_btn.setEnabled(0 <= row < self._list.count() - 1)
+        self._remove_btn.setEnabled(row >= 0)
 
 
 class ScannerConfigurationError(ValueError):
@@ -1319,6 +1416,21 @@ class InstrumentScannerWindow(QMainWindow):
                 control.addItem(option, option)
             control.setCurrentIndex(control.findData(str(value)))
             return control
+        if field.field_type == "ordered_choices":
+            if not isinstance(value, list) or any(not isinstance(step, str) for step in value):
+                raise ScannerConfigurationError(f"{field.label} must be a list of steps")
+            control = OrderedChoices(field.options, value, self)
+            if field.option_count_from:
+                _, count = instance_row["fields"][field.option_count_from]
+                if count.currentIndex() < 0:
+                    raise ScannerConfigurationError(f"Select a valid channel count for {field.label}")
+                def update_options() -> None:
+                    control.set_options(field.available_options({
+                        field.option_count_from: count.currentData(),
+                    }))
+                count.currentIndexChanged.connect(update_options)
+                update_options()
+            return control
         if field.field_type == "pid_file":
             wrapper = QWidget(self)
             row = QHBoxLayout(wrapper)
@@ -1828,6 +1940,15 @@ class InstrumentScannerWindow(QMainWindow):
             result["identity"] = draft.identity
         pid_creations: list[PlannedPidCreation] = []
         for field_id, (field, control) in row["fields"].items():
+            if field.field_type == "ordered_choices":
+                try:
+                    result[field_id] = validate_ordered_choices(
+                        control.values(), field.available_options(result),
+                        f"{descriptor.name} / {instance_id} / {field.label}",
+                    )
+                except ConfigurationError as exc:
+                    raise ScannerConfigurationError(str(exc)) from exc
+                continue
             if field.field_type != "pid_file":
                 result[field_id] = self._field_value(field, control)
                 continue

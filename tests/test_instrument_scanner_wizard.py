@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 from instrument_scanner import (  # noqa: E402
     InstrumentScannerWindow,
+    ScannerConfigurationError,
     SIMULATIONS,
     VisaScanResult,
     execute_save_plan,
@@ -29,6 +30,7 @@ from instrument_scanner import (  # noqa: E402
     render_generated_instrument,
     render_simulation,
 )
+from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.instrument_resources import (  # noqa: E402
     InstrumentResource,
     write_instrument_resources,
@@ -414,6 +416,78 @@ class InstrumentScannerWindowTests(unittest.TestCase):
             self.assertFalse(window._instance_is_complete(descriptor, instance))
             instance["fields"]["host"][1].setText("192.0.2.10")
             self.assertTrue(window._instance_is_complete(descriptor, instance))
+
+
+    def test_ordered_steps_save_reload_and_reject_channels_outside_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configs = root / "configs"
+            instruments = root / "system_instruments"
+            configs.mkdir()
+            general = configs / "general.toml"
+            general.write_text("", encoding="utf-8")
+            directory = _write_tcp_instrument(instruments)
+            (directory / "instrument.toml").write_text(TCP_MANIFEST.replace(
+                "[[panels]]",
+                """
+[[config_fields]]
+id = "output_count"
+label = "Relay Channels"
+type = "choice"
+default = "4"
+options = ["4", "8"]
+
+[[config_fields]]
+id = "on_channels"
+label = "On Steps"
+type = "ordered_choices"
+default = []
+options = ["DO1", "DO2", "DO3", "DO4", "DO5", "DO6", "DO7", "DO8"]
+option_count_from = "output_count"
+
+[[panels]]
+""",
+            ), encoding="utf-8")
+            with patch("instrument_scanner.QTimer.singleShot"):
+                window = InstrumentScannerWindow(configs, instruments)
+            self.addCleanup(window.close)
+            descriptor = window.descriptors[0]
+            window._add_instance(descriptor)
+            fields = window._instrument_pages[descriptor.id]["instances"][0]["fields"]
+            fields["host"][1].setText("192.0.2.10")
+            count = fields["output_count"][1]
+            steps = fields["on_channels"][1]
+            self.assertEqual(steps._combo.count(), 4)
+            with self.assertRaisesRegex(ScannerConfigurationError, "at least one step"):
+                window._build_save_plan()
+            count.setCurrentText("8")
+            for channel in ("DO8", "DO7"):
+                steps._combo.setCurrentText(channel)
+                steps._add_btn.click()
+            steps._up_btn.click()
+            self.assertEqual(steps.values(), ["DO7", "DO8"])
+            self.assertEqual(steps._combo.findText("DO7"), -1)
+            count.setCurrentText("4")
+            self.assertEqual(steps.values(), ["DO7", "DO8"])
+            with self.assertRaisesRegex(ScannerConfigurationError, "DO7.*not available"):
+                window._build_save_plan()
+            count.setCurrentText("8")
+            window._refresh_order_list()
+            plan = window._build_save_plan()
+            execute_save_plan(window.visa_path, plan)
+            config = load_config(general)
+            self.assertEqual(config.instrument(descriptor.id).extras["on_channels"], ["DO7", "DO8"])
+
+            with patch("instrument_scanner.QTimer.singleShot"):
+                reopened = InstrumentScannerWindow(configs, instruments)
+            self.addCleanup(reopened.close)
+            saved = reopened._instrument_pages[descriptor.id]["instances"][0]["fields"]
+            self.assertEqual(saved["on_channels"][1].values(), ["DO7", "DO8"])
+            path = configs / "instruments" / f"{descriptor.id}.toml"
+            original = path.read_text(encoding="utf-8")
+            path.write_text(original.replace('output_count = "8"', 'output_count = "4"'), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigurationError, "DO7.*not available"):
+                load_config(general)
 
 
 if __name__ == "__main__":
