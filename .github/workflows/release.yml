@@ -1,4 +1,4 @@
-name: Windows Stable Release
+name: Windows Release
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing stable tag to build and publish
+        description: Existing stable or .devN tag to build and publish
         required: true
         type: string
 
@@ -54,8 +54,8 @@ jobs:
             throw "Tag $env:RELEASE_TAG does not match project version $version"
           }
           $isPrerelease = (python -c "from packaging.version import Version; import sys; print(Version(sys.argv[1]).is_prerelease)" $version).Trim()
-          if ($isPrerelease -ne "False") {
-            throw "This workflow publishes stable versions only: $version"
+          if ($isPrerelease -eq "True" -and $version -notmatch '\.dev[0-9]+$') {
+            throw "Only stable or .devN versions can be published: $version"
           }
           $exactTag = (git describe --tags --exact-match HEAD).Trim()
           if ($exactTag -ne $env:RELEASE_TAG) {
@@ -78,6 +78,21 @@ jobs:
         run: |
           python -m PyInstaller --clean --noconfirm OpenLabControl.spec
           & .\tools\stage_windows_release.ps1
+
+      - name: Check out the ZLAN development driver
+        if: contains(env.RELEASE_TAG, '.dev')
+        uses: actions/checkout@v5
+        with:
+          repository: yang-fu-physics/openlab-control-Device
+          ref: 5bdc4ec65d0b65fef967607a3e688071a6381e6e
+          path: build/dev-system-instruments
+          persist-credentials: false
+
+      - name: Include the ZLAN driver in the development package
+        if: contains(env.RELEASE_TAG, '.dev')
+        shell: pwsh
+        run: |
+          Copy-Item -LiteralPath "build/dev-system-instruments/instruments/zlan_6408_compressor" -Destination "dist/OpenLabControl/system_instruments" -Recurse
 
       - name: Verify packaged programs
         shell: pwsh
@@ -196,6 +211,14 @@ jobs:
             if ($generalConfig.Count -ne 1) {
               throw "Archive must contain exactly one configs/general.toml"
             }
+            if ($version -match '\.dev[0-9]+$') {
+              foreach ($file in @("instrument.toml", "backend.py", "zlan_6408.py")) {
+                $driverPath = "OpenLabControl/system_instruments/zlan_6408_compressor/$file"
+                if (-not ($entries | Where-Object { $_.FullName.Replace("\", "/") -eq $driverPath })) {
+                  throw "Development archive missing $driverPath"
+                }
+              }
+            }
             if ($toolsEntries.Count -ne 0) {
               throw "Archive unexpectedly contains tools entries"
             }
@@ -240,7 +263,7 @@ jobs:
             [Text.UTF8Encoding]::new($false)
           )
 
-      - name: Publish stable GitHub Release
+      - name: Publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -249,6 +272,13 @@ jobs:
           $zipPath = "dist\OpenLabControl-$($env:RELEASE_TAG)-windows-x64.zip"
           $checksumPath = "$zipPath.sha256"
           $notesPath = "build\release-notes-$($env:RELEASE_TAG).md"
+          if ($version -match '\.dev[0-9]+$') {
+            & gh release create $env:RELEASE_TAG $zipPath $checksumPath --verify-tag --prerelease --latest=false --title "OpenLab Control $($env:RELEASE_TAG)" --notes-file $notesPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "gh development release creation failed with exit code $LASTEXITCODE"
+            }
+            return
+          }
           & gh release view $env:RELEASE_TAG *> $null
           $releaseExists = $LASTEXITCODE -eq 0
           if ($releaseExists) {
