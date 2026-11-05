@@ -11,6 +11,8 @@
 - 核心 ZIP 不附带真实仪表驱动。需要的驱动请在
   [独立系统仪表测试发布](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/instruments-v0.20.4.dev4)
   下载并复制到 `system_instruments/`。
+- 实机验证记录（2026-11-05，现场确认）：已完成 Lake Shore 340 温控、ZLAN 压缩机控制和
+  Keithley 6221 + 2182A Delta 测量测试；不扩展到未测试的接线、型号或运行模式。
 
 ## 0.20.4.dev3 - 2026-11-05
 

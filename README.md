@@ -9,9 +9,13 @@ OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Pyt
 两者有不同目录、清单和生命周期。System Instrument 一般随实验系统固定；Measurement
 Module 每次启动默认 Disabled，由用户按需 Enable。
 
-本分支为开发测试版 `0.20.4.dev4`，当前稳定版本仍为 `0.20.3`。
+当前源码版本为 `0.20.4.dev4`，最新稳定发布仍为 `0.20.3`。
 全新安装不启用任何 System Instrument 面板；三个内置仿真也都
-默认关闭，需要时在 Instrument Scanner 中明确选择。当前版本尚未完成真机验证。
+默认关闭，需要时在 Instrument Scanner 中明确选择。
+
+**实机验证（2026-11-05）**：据现场确认，已完成 Lake Shore 340 温控、
+ZLAN 压缩机控制和 Keithley 6221 + 2182A Delta 测量的实机测试。
+该记录仅覆盖已测试的接线和配置，不代表其他型号或运行模式也已验证。
 
 开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站包含面向初学者的中文
 使用教程、Measurement Module 教程和完整 System Instrument 教程。

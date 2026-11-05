@@ -76,6 +76,11 @@ jobs:
             version="$(project_version)"
           fi
 
+          if [[ "$version" =~ \.dev[0-9]+$ ]]; then
+            echo "Validated development docs for $version; leaving the stable site unchanged."
+            exit 0
+          fi
+
           # 当前只发布一个稳定站点。若旧的 dev 目录仍存在，发布时一并删除。
           if mike list -j dev >/dev/null 2>&1; then
             mike delete --push dev
