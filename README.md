@@ -108,10 +108,6 @@ class Module:
 含 `T Measure` 的 SEQ。模块仍然每次启动都保持 Disabled。
 
 完整教程见[第一个 Measurement Module](docs/development/first-module.md)。
-已有经过实际使用的 LabVIEW 驱动或测量 VI 时，优先使用
-[LabVIEW DLL 接入模板](docs/development/labview-dll.md)，避免重新翻译整套底层仪表协议。
-DLL 自描述的额外调试函数会在主菜单中自动生成输入/输出窗口，支持同时打开多个窗口；
-仅限 SEQ 空闲时执行，复用原有 worker 和仪表连接。
 
 ## System Instrument
 
@@ -156,8 +152,6 @@ panel ID，并保存 `enabled/order/role/reading` 与 controller 限制。一个
 
 从[仪表扫描与地址配置](docs/guides/instrument-scanner.md)和
 [System Instrument 教程](docs/development/system-instrument.md)开始学习。
-已有经过实际使用的 LabVIEW 控制 VI 时，同样优先使用
-[LabVIEW DLL 接入模板](docs/development/labview-dll.md)。
 
 ## 依赖与完全离线安装
 
@@ -192,7 +186,6 @@ tools/                    源码开发工具（发布包不复制该目录）
 - [操作手册](docs/OPERATIONS.md)
 - [Measurement Module 教程](docs/development/index.md)
 - [System Instrument 教程](docs/development/system-instrument.md)
-- [LabVIEW DLL 接入](docs/development/labview-dll.md)
 - [配置参考](docs/CONFIGURATION.md)
 - [SEQ 格式](docs/SEQUENCE_FORMAT.md)
 - [DAT 与事件格式](docs/DAT_FORMAT.md)

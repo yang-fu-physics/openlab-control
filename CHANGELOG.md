@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- LabVIEW DLL 接入、调试窗口及开发模板移到 `dev-labview-dll`，暂不进入主线。
+  已发布版本不变；现有 Python/VISA 驱动和 DAT 时间戳兼容行为不变。
+
 ## 0.20.4 - 2026-11-05
 
 - System Instrument 的框架操作上限从 10 秒提高到 30 秒。单次 I/O、工作进程启动
