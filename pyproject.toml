@@ -25,5 +25,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+labcontrol = ["labview/visa-str-to-source.dll"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

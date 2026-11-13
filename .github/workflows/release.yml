@@ -91,6 +91,11 @@ jobs:
           if (Test-Path -LiteralPath (Join-Path $releaseRoot "tools")) {
             throw "Release must not contain a tools directory"
           }
+          $converter = Join-Path $releaseRoot "_internal\labcontrol\labview\visa-str-to-source.dll"
+          $converterSource = "src\labcontrol\labview\visa-str-to-source.dll"
+          if ((Get-FileHash -LiteralPath $converter).Hash -ne (Get-FileHash -LiteralPath $converterSource).Hash) {
+            throw "Packaged VISA converter does not match the tested DLL"
+          }
 
           function Invoke-PackagedProgram {
             param(

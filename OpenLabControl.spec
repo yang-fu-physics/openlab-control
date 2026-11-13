@@ -24,7 +24,7 @@ from labcontrol import __version__
 
 
 hiddenimports = (
-    ["labcontrol.instruments.simulated"]
+    ["labcontrol.instruments.simulated", "labcontrol.labview_visa"]
     # System Instrument 与 Measurement Module 会在独立 worker 中动态 import PyVISA，
     # PyInstaller 静态分析看不到。由核心统一收集后，两者使用同一个 1.16.2 版本。
     + collect_submodules(
@@ -106,7 +106,10 @@ a = Analysis(
     # Mutable configuration, modules, examples, documentation, and integration
     # references are staged beside the EXE by build.bat. Bundling them here
     # would create an unused second copy under _internal.
-    datas=framework_metadata,
+    # 原样收集可选的 LabVIEW 转换 DLL；不把 NI Runtime 当作框架依赖打包。
+    datas=framework_metadata + [
+        ("src/labcontrol/labview/visa-str-to-source.dll", "labcontrol/labview"),
+    ],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

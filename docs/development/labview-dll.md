@@ -41,7 +41,29 @@ Measurement Module：modules/<新 ID>/
 四个固定 DLL 调用，并负责把 DLL 的 Warning/Error 转回框架。仪表命令、状态解析和原有测量
 流程继续留在 LabVIEW 中。
 
-## DLL 只导出四个函数
+## 已导出的旧仪表 DLL：转换 VISA 地址
+
+如果现有的 LabVIEW DLL 已导出 `Initialize`，而它的 C 头文件用 `uintptr_t *` 接收
+**LabVIEW VISA 资源引用**，可在同一仪表或模块的 worker 里调用框架的公共转换函数：
+
+```python
+from ctypes import byref
+from labcontrol.labview_visa import visa_resource_reference
+
+resource = visa_resource_reference("GPIB0::14::INSTR")
+# 按目标 DLL 的 .h 设置函数原型，将 byref(resource) 传给 Initialize。
+```
+
+框架自带 64 位 `visa-str-to-source.dll`，第一次调用时才加载。不需要转换的 DLL（包括
+自己接收地址并打开仪表的 `OLC_Open`）、普通 Python 后端和扫描器无需调用它。
+旧 DLL 的函数签名仍需按头文件绑定；框架不自动猜测参数类型或重写 DLL。
+
+转换函数会短暂打开再关闭 VISA。返回值只用于同一 worker 进程内的 DLL 初始化，
+不是仍然打开的会话；读写及 Close 使用目标 DLL 初始化后的输出。不要缓存这个引用跨
+worker 或重连复用。已在 Lake Shore 340 上验证：不复位、读取 Temp B、关闭会话。
+其他 DLL 要单独验证；实机仍需要匹配的 64 位 LabVIEW Runtime 和 NI-VISA 驱动。
+
+## 新 DLL 模板的四个导出函数
 
 ```text
 OLC_Describe  返回静态能力，不连接仪表
