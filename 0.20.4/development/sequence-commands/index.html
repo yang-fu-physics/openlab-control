@@ -13,7 +13,7 @@
         <link rel="canonical" href="https://yang-fu-physics.github.io/openlab-control/0.20.4/development/sequence-commands/">
       
       
-        <link rel="prev" href="../labview-dll/">
+        <link rel="prev" href="../frontend/">
       
       
         <link rel="next" href="../instrument-drivers/">
@@ -827,8 +827,6 @@
       
         
       
-        
-      
     
     
     
@@ -985,34 +983,6 @@
     
   
     设置与状态窗口
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../labview-dll/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    优先复用 LabVIEW DLL
   
 
     
@@ -1199,8 +1169,6 @@
       
         
       
-        
-      
     
     
     
@@ -1289,34 +1257,6 @@
     
   
     写第一个仪表
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../labview-dll/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    优先复用 LabVIEW DLL
   
 
     
@@ -1962,7 +1902,7 @@
 的时间字段统一一位；名称含 <code>filter</code> 的滤波字段保留作者声明精度。NPLC/PLC 浮点字段也
 统一一位，硬件要求整数时请声明为 <code>int</code>。通用参数窗口、文件加载和执行验证共同拒绝
 超精度值，不会自动舍入。需要极小电流时优先使用示例中的文字输入，并由后端解析 SI
-前缀；模块自定义编辑器和 DLL 数字文本输入不套用普通电流小数框的九位限制。</p>
+前缀；模块自定义编辑器不套用普通电流小数框的九位限制。</p>
 <h2 id="2">2. 收到指令后执行动作<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">execute_sequence_command</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">command_id</span><span class="p">,</span> <span class="n">parameters</span><span class="p">,</span> <span class="n">api</span><span class="p">):</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">if</span> <span class="n">command_id</span> <span class="o">!=</span> <span class="s2">"set_current"</span><span class="p">:</span>
@@ -2050,7 +1990,7 @@
       <nav class="md-footer__inner md-grid" aria-label="页脚" >
         
           
-          <a href="../labview-dll/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 优先复用 LabVIEW DLL">
+          <a href="../frontend/" class="md-footer__link md-footer__link--prev" aria-label="上一页: 设置与状态窗口">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
@@ -2060,7 +2000,7 @@
                 上一页
               </span>
               <div class="md-ellipsis">
-                优先复用 LabVIEW DLL
+                设置与状态窗口
               </div>
             </div>
           </a>

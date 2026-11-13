@@ -827,8 +827,6 @@
       
         
       
-        
-      
     
     
     
@@ -1005,34 +1003,6 @@
   
   
     <li class="md-nav__item">
-      <a href="labview-dll/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    优先复用 LabVIEW DLL
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="sequence-commands/" class="md-nav__link">
         
   
@@ -1097,8 +1067,6 @@
   
     
     
-      
-        
       
         
       
@@ -1198,34 +1166,6 @@
     
   
     写第一个仪表
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="labview-dll/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    优先复用 LabVIEW DLL
   
 
     
@@ -1869,9 +1809,6 @@
 </ul>
 <p>一个测量需要多台仪表时，把它们放进同一个模块。例如 6221、2182A 和 7001 一起完成
 Delta 测量，就应该是一个模块，而不是三个模块。</p>
-<p>如果这些仪表已经有经过实际使用的 LabVIEW 驱动或测量 VI，优先按照
-<a href="labview-dll/">复用 LabVIEW DLL</a>接入，不要重新翻译整套底层指令。Python 后台只负责把
-模块生命周期、安全检查和错误类型转给 DLL。没有可复用实现时，再直接编写 VISA 底层。</p>
 <h2 id="_3">模块不负责什么<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <ul>
 <li>不改变主程序管理的其他仪表；</li>
@@ -1919,11 +1856,10 @@ Delta 测量，就应该是一个模块，而不是三个模块。</p>
 <h2 id="_6">推荐阅读顺序<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
 <ol>
 <li><a href="first-module/">第一个测量模块</a></li>
-<li><a href="labview-dll/">复用 LabVIEW DLL</a>（已经有 LabVIEW 实现时优先）</li>
 <li><a href="reuse-identical-instruments/">多台相同测量仪表复用一个模块</a>（现场有同型号仪表时再看）</li>
 <li><a href="results-and-slots/">多通道数据</a></li>
 <li><a href="frontend/">设置与状态窗口</a>（需要设置时再看）</li>
-<li><a href="instrument-drivers/">一台仪表一个文件</a>（没有可复用 DLL 时再看）</li>
+<li><a href="instrument-drivers/">一台仪表一个文件</a>（连接真实仪表前再看）</li>
 <li><a href="sequence-commands/">模块自己的 SEQ 指令</a>（确实需要时再看）</li>
 </ol>
 <p>更完整、也更偏技术的内容放在 <a href="../DEVELOPMENT_REFERENCE/">完整开发规范</a> 中。初学者不需要先读。</p>

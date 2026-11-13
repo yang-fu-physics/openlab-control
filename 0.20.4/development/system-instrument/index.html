@@ -825,8 +825,6 @@
       
         
       
-        
-      
     
     
     
@@ -1000,34 +998,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../labview-dll/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    优先复用 LabVIEW DLL
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../sequence-commands/" class="md-nav__link">
         
   
@@ -1094,8 +1064,6 @@
   
     
     
-      
-        
       
         
       
@@ -1361,34 +1329,6 @@
     
   
     写第一个仪表
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../labview-dll/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    优先复用 LabVIEW DLL
   
 
     
@@ -2117,12 +2057,6 @@
 </tbody>
 </table>
 <p>System Instrument 通常随实验系统固定；Measurement Module 会按实验频繁 Enable 或 Disable。</p>
-<div class="admonition tip">
-<p class="admonition-title">已有 LabVIEW 驱动时优先复用</p>
-<p>如果仪表已有经过实际使用的 LabVIEW 驱动或控制 VI，优先使用
-<a href="../labview-dll/">LabVIEW DLL 模板</a>接入。这样不必重新翻译底层命令和状态字；OpenLab
-仍负责进程、上下限、超时和错误处理。没有可复用实现时，再编写 Python/VISA 驱动。</p>
-</div>
 <h2 id="_2">作者模板与现场实例<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <p>两份文件承担不同职责：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>system_instruments/&lt;id&gt;/instrument.toml
