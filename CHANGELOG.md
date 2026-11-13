@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.20.5.dev2 - 2026-11-13
+
+- 新增公共函数 `visa_resource_reference(address)`，供需要 LabVIEW VISA 引用的仪表
+  和模块在各自的 worker 内调用。Windows 包包含 64 位转换 DLL，首次调用时才加载。
+- 已在 Lake Shore 340 实机验证两份 DLL 的交接：不复位、读取 Temp B 并关闭会话。
+  本版本不替换现有 340 驱动，也不附带 LabVIEW Runtime 或 NI-VISA。
+
 ## 0.20.5.dev1 - 2026-11-06
 
 - 内置 Data Browser 增加时间和数值筛选、测量点导航及 DAT 原文查看。
