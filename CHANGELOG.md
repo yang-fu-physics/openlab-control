@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.20.5 - 2026-11-13
 
 - LabVIEW DLL 接入、调试窗口及开发模板移到 `dev-labview-dll`，暂不进入主线。
-  已发布版本不变；现有 Python/VISA 驱动和 DAT 时间戳兼容行为不变。
+  现有 Python/VISA 驱动和 DAT 时间戳兼容行为不变。
 
 ## 0.20.4 - 2026-11-05
 

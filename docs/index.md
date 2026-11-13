@@ -6,7 +6,7 @@ hide:
 
 <section class="olc-hero">
   <div>
-    <div class="olc-eyebrow">OpenLab Control 0.20.4 · 中文教程</div>
+    <div class="olc-eyebrow">OpenLab Control 0.20.5 · 中文教程</div>
     <h1>先做出一个能测量的模块，再慢慢增加功能。</h1>
     <p class="olc-hero-copy">
       不需要先读懂整个程序。你可以复制一个不连接仪表的四通道例子，运行成功后，再加入
