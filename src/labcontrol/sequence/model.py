@@ -399,7 +399,14 @@ def validate_command_parameters(command: Command) -> tuple[str, ...]:
                 continue
             if field_spec.field_type == "float":
                 try:
-                    require_precision(number, command_decimals(command, field_spec.name), field_spec.label)
+                    decimals = command_decimals(command, field_spec.name)
+                    if (
+                        command.type in {CommandType.SET_TEMPERATURE, CommandType.SCAN_TEMPERATURE}
+                        and field_spec.name in {"target", "start", "stop"}
+                    ):
+                        # The SEQ file is portable; the installed controller checks its own resolution.
+                        decimals = 4
+                    require_precision(number, decimals, field_spec.label)
                 except ValueError as exc:
                     issues.append(str(exc))
             if field_spec.minimum is not None and number < field_spec.minimum:

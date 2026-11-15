@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
+from labcontrol.events import EventManager
+from labcontrol.instrument_manager import InstrumentManager
+from labcontrol.instruments.base import SafetyViolation
 from labcontrol.module_commands import normalize_module_commands, validate_module_command_parameters
 from labcontrol.sequence.model import CommandType, SequenceDocument, SPECS_BY_TYPE, validate_command_parameters
 from labcontrol.sequence.parser import parse_sequence, serialize_sequence
@@ -75,6 +80,42 @@ class ParameterPrecisionTests(unittest.TestCase):
         self.assertEqual([field.decimals for field in spec.fields], [1, 1, 3])
         self.assertFalse(validate_module_command_parameters(spec, {"settle_seconds": 0.1, "nplc": 1.2, "filter_time": 0.125}))
         self.assertTrue(validate_module_command_parameters(spec, {"settle_seconds": 0.01, "nplc": 1.2, "filter_time": 0.125}))
+
+    def test_temperature_controller_applies_independent_target_and_rate_precision(self) -> None:
+        config = load_simulated_config()
+        instrument = config.instrument("temperature")
+        panel = replace(instrument.panel("main"), setpoint_decimals=3, fine_setpoint_below=10, rate_decimals=1)
+        instrument = replace(instrument, panels=(panel,))
+        config = replace(
+            config, instrument_instances=tuple(
+                instrument if item.id == instrument.id else item for item in config.instrument_instances
+            ),
+        )
+        manual = ManualControlDialog(instrument, panel)
+        self.addCleanup(manual.close)
+        spec = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE]
+        command = spec.create()
+        dialog = CommandDialog(command, spec, instrument_configs=(instrument,))
+        self.addCleanup(dialog.close)
+        self.assertEqual((manual.target_input.decimals(), manual.rate_input.decimals()), (4, 1))
+        self.assertEqual((dialog.inputs["target"].decimals(), dialog.inputs["rate"].decimals()), (4, 1))
+        dialog.inputs["target"].setValue(10.1234)
+        with patch.object(QMessageBox, "warning") as warning:
+            dialog.accept()
+            warning.assert_called_once()
+        dialog.inputs["target"].setValue(9.1234)
+        dialog.inputs["rate"].setValue(2.5)
+        dialog.accept()
+        command.update_params(dialog.values())
+        loaded = parse_sequence(serialize_sequence(SequenceDocument([command])))
+        self.assertFalse(loaded.has_errors)
+        self.assertEqual(loaded.document.commands[0].params["target"], 9.1234)
+
+        manager = InstrumentManager(config, EventManager())
+        manager.validate_target("temperature", 9.1234, 2.5, control=panel.control_id)
+        for target, rate in ((10.1234, 2.5), (9.1234, 2.55)):
+            with self.assertRaisesRegex(SafetyViolation, "decimal places"):
+                manager.validate_target("temperature", target, rate, control=panel.control_id)
 
     def test_loaded_values_are_not_silently_rounded(self) -> None:
         box = PrecisionDoubleSpinBox()

@@ -35,6 +35,7 @@ from .instruments.worker import (
     IsolatedInstrumentClient,
 )
 from .events import EventManager
+from .formatting import require_precision
 from .package_support.loading import load_import_object, load_source_object
 from .models import (
     EventNotice,
@@ -1808,6 +1809,15 @@ class InstrumentManager:
                 "RATE_OUT_OF_RANGE",
                 instrument_id,
             )
+
+        target_decimals = panel.target_precision(value)
+        try:
+            if target_decimals is not None:
+                require_precision(value, target_decimals, f"{panel.display_name} target")
+            if panel.rate_decimals is not None:
+                require_precision(rate_per_minute, panel.rate_decimals, f"{panel.display_name} rate")
+        except ValueError as exc:
+            raise SafetyViolation(str(exc), "SETPOINT_PRECISION", instrument_id) from exc
 
     async def set_target(
         self,

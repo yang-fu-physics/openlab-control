@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import InstrumentConfig, InstrumentPanelConfig
-from ..formatting import control_decimals, field_decimals, fixed_number
+from ..formatting import control_decimals, field_decimals, fixed_number, require_precision
 from ..models import InstrumentKind, InstrumentSnapshot, LabEvent, Severity
 from ..module_commands import ModuleCommandSpec
 from ..sequence.model import Command, CommandSpec, CommandType, command_decimals
@@ -78,6 +78,8 @@ class CommandDialog(QDialog):
             layout.addWidget(description)
         self.form = QFormLayout()
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        selected = self._selected_control() if command.type in TEMPERATURE_COMMANDS else None
+        panel = selected[1] if selected is not None else None
         for field in spec.fields:
             value = command.params.get(field.name, field.default)
             if field.field_type == "choice":
@@ -98,6 +100,11 @@ class CommandDialog(QDialog):
                     if field.decimals is not None
                     else command_decimals(command, field.name)
                 )
+                if panel is not None:
+                    if field.name == "rate" and panel.rate_decimals is not None:
+                        decimals = panel.rate_decimals
+                    elif field.name in {"target", "start", "stop"} and panel.setpoint_decimals is not None:
+                        decimals = panel.setpoint_decimals + (panel.fine_setpoint_below is not None)
                 widget.setDecimals(decimals)
                 minimum = field.minimum if field.minimum is not None else -1e12
                 if field.name == "rate" and command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS:
@@ -286,6 +293,20 @@ class CommandDialog(QDialog):
                     points_input.setFocus()
                     points_input.selectAll()
                     return
+        if self.command.type in TEMPERATURE_COMMANDS:
+            selected = self._selected_control()
+            if selected is not None:
+                for name in ("target", "start", "stop"):
+                    widget = self.inputs.get(name)
+                    if isinstance(widget, QDoubleSpinBox) and not widget.isHidden():
+                        precision = selected[1].target_precision(widget.value())
+                        if precision is not None:
+                            try:
+                                require_precision(widget.value(), precision, name.capitalize())
+                            except ValueError as exc:
+                                QMessageBox.warning(self, "Invalid Temperature", str(exc))
+                                widget.setFocus()
+                                return
         super().accept()
 
     def _selected_control(
@@ -407,6 +428,9 @@ class CommandDialog(QDialog):
         config, panel = selected
         instrument_unit = config.reading(panel.reading).unit
         for index, point in enumerate(points, start=1):
+            precision = panel.target_precision(point)
+            if precision is not None:
+                require_precision(point, precision, f"Temperature point {index} (K)")
             try:
                 instrument_value = convert_value(point, "K", instrument_unit)
             except UnitConversionError as exc:
@@ -507,13 +531,18 @@ class ManualControlDialog(QDialog):
         form = QFormLayout()
         input_precision = control_decimals(self.kind, self.reading.unit)
         self.target_input = QDoubleSpinBox()
-        self.target_input.setDecimals(input_precision)
+        target_precision = (
+            panel.setpoint_decimals + (panel.fine_setpoint_below is not None)
+            if panel.setpoint_decimals is not None else input_precision
+        )
+        rate_precision = panel.rate_decimals if panel.rate_decimals is not None else input_precision
+        self.target_input.setDecimals(target_precision)
         self.target_input.setRange(panel.min_value, panel.max_value)
         self.target_input.setSuffix(f" {self.reading.unit}")
         self.target_input.setValue(config.initial_value)
         self.rate_input = QDoubleSpinBox()
-        self.rate_input.setDecimals(input_precision)
-        self.rate_input.setRange(10 ** -input_precision, panel.max_rate_per_minute)
+        self.rate_input.setDecimals(rate_precision)
+        self.rate_input.setRange(10 ** -rate_precision, panel.max_rate_per_minute)
         self.rate_input.setSuffix(f" {self.reading.unit}/min")
         self.rate_input.setValue(panel.default_rate_per_minute)
         form.addRow("Target", self.target_input)
@@ -542,6 +571,14 @@ class ManualControlDialog(QDialog):
     def _emit_set(self) -> None:
         """只发出结构化请求；实际校验与 I/O 在后台运行时完成。"""
 
+        precision = self.panel.target_precision(self.target_input.value())
+        if precision is not None:
+            try:
+                require_precision(self.target_input.value(), precision, "Target")
+            except ValueError as exc:
+                QMessageBox.warning(self, "Invalid Target", str(exc))
+                self.target_input.setFocus()
+                return
         self.setRequested.emit(
             self.config.id,
             self.panel.control_id,

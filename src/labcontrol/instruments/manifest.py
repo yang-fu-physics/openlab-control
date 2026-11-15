@@ -47,6 +47,9 @@ _CONTROLLER_FIELDS = frozenset(
         "stability_dwell_seconds",
         "stability_timeout_seconds",
         "stability_window_seconds",
+        "setpoint_decimals",
+        "fine_setpoint_below",
+        "rate_decimals",
     }
 )
 
@@ -109,6 +112,9 @@ class InstrumentPanelDescriptor:
     stability_dwell_seconds: float = 0.0
     stability_timeout_seconds: float = 1800.0
     stability_window_seconds: float = 5.0
+    setpoint_decimals: int | None = None
+    fine_setpoint_below: float | None = None
+    rate_decimals: int | None = None
 
 
 @dataclass(slots=True)
@@ -306,6 +312,17 @@ def _parse_panels(raw_panels: object) -> tuple[InstrumentPanelDescriptor, ...]:
             "template": template,
         }
         if template == "controller":
+            for key in ("setpoint_decimals", "rate_decimals"):
+                if key in raw:
+                    count = raw[key]
+                    if type(count) is not int or not 0 <= count <= (4 if key == "setpoint_decimals" else 3):
+                        raise ValueError(f"panels entry {index} has invalid {key}")
+                    values[key] = count
+            if "fine_setpoint_below" in raw:
+                threshold = _finite_number(raw["fine_setpoint_below"], "fine_setpoint_below")
+                if threshold <= 0 or not 0 <= values.get("setpoint_decimals", 4) < 4:
+                    raise ValueError("fine_setpoint_below requires positive temperature and setpoint_decimals below 4")
+                values["fine_setpoint_below"] = threshold
             values.update(
                 control=str(raw["control"]).strip(),
                 reading_options=_array_of_strings(

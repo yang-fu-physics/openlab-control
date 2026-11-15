@@ -451,6 +451,12 @@ def _configured_panel(
             raise ConfigurationError(
                 f"{prefix} default rate must not exceed max rate"
             )
+        if template.rate_decimals is not None:
+            for name, value in (("default rate", default_rate), ("max rate", maximum_rate)):
+                try:
+                    require_precision(value, template.rate_decimals, f"{prefix} {name}")
+                except ValueError as exc:
+                    raise ConfigurationError(str(exc)) from exc
         stability = StabilityConfig(
             tolerance=_nonnegative(
                 raw.get(
@@ -507,6 +513,9 @@ def _configured_panel(
         default_rate_per_minute=default_rate,
         max_rate_per_minute=maximum_rate,
         stability=stability,
+        setpoint_decimals=template.setpoint_decimals,
+        fine_setpoint_below=template.fine_setpoint_below,
+        rate_decimals=template.rate_decimals,
     )
 
 

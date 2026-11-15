@@ -1667,7 +1667,11 @@ class InstrumentScannerWindow(QMainWindow):
                 for key, label, default in numeric_specs:
                     box = self._number_box(
                         float(saved.get(key, default)),
-                        decimals=1 if key.endswith("_seconds") else 9,
+                        decimals=(
+                            panel.rate_decimals if key in {"default_rate_per_minute", "max_rate_per_minute"}
+                            and panel.rate_decimals is not None
+                            else 1 if key.endswith("_seconds") else 9
+                        ),
                     )
                     panel_fields[key] = box
                     details_form.addRow(label, box)

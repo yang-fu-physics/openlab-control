@@ -93,6 +93,14 @@ class InstrumentPanelConfig:
     default_rate_per_minute: float = 1.0
     max_rate_per_minute: float = float("inf")
     stability: StabilityConfig | None = None
+    setpoint_decimals: int | None = None
+    fine_setpoint_below: float | None = None
+    rate_decimals: int | None = None
+
+    def target_precision(self, target: float) -> int | None:
+        if self.fine_setpoint_below is not None and target < self.fine_setpoint_below:
+            return self.setpoint_decimals + 1
+        return self.setpoint_decimals
 
     @property
     def key(self) -> str:

@@ -55,6 +55,8 @@ decimals = 3
 | `backend` | `Python 文件名:类名` |
 | `kinds` | 支持 `temperature`、`field` 或 `monitor` |
 | `[[panels]]` | 作者提供的固定面板；每项有稳定 `id` |
+| `setpoint_decimals` / `rate_decimals` | 控制面板可选的目标、速率小数位，独立于读数显示的小数位 |
+| `fine_setpoint_below` | 可选；目标低于该温度时，允许比 `setpoint_decimals` 多一位 |
 | `[readings.<id>]` | 每个读数的名称、单位和小数位 |
 | `discovery.identity_pattern` | 用 `*IDN?` 文本辅助匹配 VISA 地址 |
 
