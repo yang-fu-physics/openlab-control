@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
+from labcontrol.instrument_resources import InstrumentResource  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.measurement.manifest import (  # noqa: E402
     ModuleColumn,
@@ -137,6 +139,39 @@ class ManifestAndSettingsTests(unittest.TestCase):
 
 
 class ModuleServiceTests(unittest.TestCase):
+    def test_apply_rejects_a_visa_address_owned_by_another_module(self) -> None:
+        async def scenario(root: Path) -> None:
+            config = replace(copied_project(root), instrument_resources=(
+                InstrumentResource("source", "GPIB0::10::INSTR"),
+                InstrumentResource("alias", "gpib0::10::instr"),
+            ))
+            events = EventManager()
+            instruments = InstrumentManager(config, events, isolate_processes=False)
+            descriptors = tuple(
+                ModuleDescriptor(id=module_id, name=module_id, version="1.0.0", path=root,
+                                 columns=(ModuleColumn("Value", "V"),))
+                for module_id in ("delta", "ac")
+            )
+            modules = MeasurementModuleService(descriptors, events, instruments)
+            clients = {name: self._FailingClient("") for name in modules.records}
+            for name, record in modules.records.items():
+                record.enabled = True
+                record.client = clients[name]
+
+            await modules.apply_settings("delta", {"resource_6221": "source"})
+            with self.assertRaises(InstrumentError) as failure:
+                await modules.apply_settings("ac", {"resource": "alias"})
+            self.assertEqual(failure.exception.code, "MODULE_RESOURCE_IN_USE")
+            self.assertIn("delta", str(failure.exception))
+            self.assertEqual(clients["ac"].actions, [])
+
+            await modules.disable("delta")
+            await modules.apply_settings("ac", {"resource": "alias"})
+            self.assertEqual(clients["ac"].actions, ["configure"])
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(Path(temp)))
+
     class _FailingClient:
         def __init__(
             self,

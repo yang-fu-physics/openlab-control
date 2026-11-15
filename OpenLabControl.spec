@@ -24,7 +24,7 @@ from labcontrol import __version__
 
 
 hiddenimports = (
-    ["labcontrol.instruments.simulated"]
+    ["labcontrol.instruments.simulated", "labcontrol.measurement.visa"]
     # System Instrument 与 Measurement Module 会在独立 worker 中动态 import PyVISA，
     # PyInstaller 静态分析看不到。由核心统一收集后，两者使用同一个 1.16.2 版本。
     + collect_submodules(

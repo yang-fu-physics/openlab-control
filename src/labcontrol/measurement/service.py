@@ -48,6 +48,7 @@ class ModuleRuntimeRecord:
     status: dict[str, Any] = field(default_factory=dict)
     client: ModuleWorkerClient | None = None
     sequence_commands: tuple[ModuleCommandSpec, ...] = ()
+    resource_addresses: frozenset[str] = frozenset()
 
 
 @dataclass(slots=True)
@@ -589,11 +590,36 @@ class MeasurementModuleService:
         record.state = "disabled"
         record.sequence_commands = ()
         if failure is None:
+            record.resource_addresses = frozenset()
             self.events.resolve_source(f"module:{module_id}")
             self._publish(record, f"{record.descriptor.name} disabled")
         else:
             self._publish(record, f"{record.descriptor.name} forced closed: {failure}")
             raise failure
+
+    def _check_resource_addresses(
+        self, record: ModuleRuntimeRecord, settings: Mapping[str, Any]
+    ) -> frozenset[str]:
+        resources = self.app_config.resource_payload("measurement")
+        addresses = frozenset(
+            str(resources[value.strip()]["address"]).strip().upper()
+            for key, value in settings.items()
+            if (key == "resource" or key.startswith("resource_") or key.endswith("_resource"))
+            and not (key == "resource_switcher" and settings.get("switcher_type") == "none")
+            and isinstance(value, str)
+            and value.strip() in resources
+        )
+        for other in self.records.values():
+            conflict = addresses & other.resource_addresses
+            if other is not record and conflict:
+                address = min(conflict)
+                raise InstrumentError(
+                    f"VISA resource {address} is already assigned to {other.descriptor.name}. "
+                    "Disable that module or choose a different instrument.",
+                    "MODULE_RESOURCE_IN_USE",
+                    address,
+                )
+        return addresses
 
     async def apply_settings(self, module_id: str, settings: Mapping[str, Any]) -> None:
         """仅在 SEQ Idle 且模块 Enabled 时执行用户确认过的 Apply。"""
@@ -602,12 +628,16 @@ class MeasurementModuleService:
         record = self.records[module_id]
         if not record.enabled:
             raise InstrumentError("Module is disabled", "MODULE_DISABLED", module_id)
+        addresses = self._check_resource_addresses(record, settings)
+        # Keep the old and new addresses reserved until configure confirms the change.
+        record.resource_addresses |= addresses
         try:
             result = await self._request(record, "configure", {"settings": dict(settings)})
         except WorkerRequestError as exc:
             error = self._operation_error(record, exc)
             assert error is not None
             raise error from exc
+        record.resource_addresses = addresses
         record.status.update(result)
         self._publish(record, "Settings applied")
 
