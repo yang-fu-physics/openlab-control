@@ -1854,6 +1854,10 @@
 <h1 id="_1">写第一个测量模块<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
 <p>这一章做一个不连接真实仪表的四通道电阻模块。你可以先运行随框架提供的完整版，也可以从
 两个文件开始学习。两条路线使用不同的文件夹，不会互相覆盖。</p>
+<p>接真实仪表时，先查 <a href="https://pymeasure.readthedocs.io/en/latest/api/instruments/index.html">PyMeasure 驱动</a>、
+<a href="https://microsoft.github.io/Qcodes/drivers_api/index.html">QCoDeS 官方驱动</a>和
+<a href="https://github.com/QCoDeS/Qcodes_contrib_drivers">QCoDeS 社区驱动</a>。有匹配的底层通讯就优先复用，
+再用仪表手册确认型号、接口和命令。输出保护和停止时的动作仍由模块负责。</p>
 <div class="admonition info">
 <p class="admonition-title">开始前</p>
 <p>先完成 <a href="../../getting-started/windows/">Windows 发布包</a> 或
