@@ -554,7 +554,11 @@ class SequenceEngine:
         source_unit = "K" if kind is InstrumentKind.TEMPERATURE else str(p.get("unit", instrument_unit))
         rate = convert_value(float(p.get("rate", panel.default_rate_per_minute)), source_unit, instrument_unit)
         mode = str(p.get("mode", "Settle"))
-        if kind is InstrumentKind.TEMPERATURE and str(p.get("point_mode", "Linear")).casefold() == "list":
+        is_list_mode = (
+            kind is InstrumentKind.TEMPERATURE
+            and str(p.get("point_mode", "Linear")).casefold() == "list"
+        )
+        if is_list_mode:
             try:
                 source_points = parse_temperature_points(p.get("points", ""))
             except ValueError as exc:
@@ -628,6 +632,18 @@ class SequenceEngine:
                 f"{fixed_number(points[-1], decimals)} {instrument_unit}",
                 self._current_path,
             )
+
+        # 线性插值产生的非整除中间点按控制面板声明的目标精度量化，避免 300->10 K
+        # 等常见扫描被浮点循环小数拦截；用户手写 List 点仍保持原样严格校验。
+        if not is_list_mode:
+            quantized: list[float] = []
+            for point in points:
+                precision = panel.target_precision(point)
+                if precision is not None:
+                    rounded = round(point, precision)
+                    point = 0.0 if rounded == 0.0 else rounded
+                quantized.append(point)
+            points = quantized
 
         # 在移动第一个设定点之前验证完整路径。后面的坏点不能让实验停在“已执行一半”
         # 的中间状态。
@@ -1114,5 +1130,16 @@ class SequenceEngine:
     def _linspace(start: float, stop: float, steps: int) -> list[float]:
         if steps <= 1:
             return [start]
-        increment = (stop - start) / (steps - 1)
-        return [start + index * increment for index in range(steps)]
+        scale = max(abs(start), abs(stop), 1.0)
+        points: list[float] = []
+        for index in range(steps):
+            if index == 0:
+                value = start
+            elif index == steps - 1:
+                value = stop
+            else:
+                value = start + (stop - start) * index / (steps - 1)
+                if abs(value) <= 1e-14 * scale:
+                    value = 0.0
+            points.append(0.0 if value == 0.0 else value)
+        return points
