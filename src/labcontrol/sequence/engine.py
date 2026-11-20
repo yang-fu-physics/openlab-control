@@ -112,6 +112,7 @@ class SequenceEngine:
         self._fatal_abort = False
         self._abort_message = ""
         self._pause_gate.set()
+        self._set_stability_paused(False)
         self._paused_at = None
         self._paused_total = 0.0
         self._instrument_wait_total = 0.0
@@ -288,6 +289,7 @@ class SequenceEngine:
         else:
             self.state = RunState.COMPLETED
         finally:
+            self._set_stability_paused(False)
             # run_end 对 completed/stopped/error 都发送。它不是 close：Stop 后模块
             # 保持 Enabled，只结束本次运行资源。
             reason = {
@@ -311,6 +313,11 @@ class SequenceEngine:
             self.logger.close()
         return self.state
 
+    def _set_stability_paused(self, paused: bool) -> None:
+        callback = getattr(self.instruments, "set_stability_paused", None)
+        if callable(callback):
+            callback(paused)
+
     def pause(self) -> None:
         """请求协作 Pause；冻结调度和模块计时，不改变仪表当前输出。"""
 
@@ -318,6 +325,7 @@ class SequenceEngine:
             self.state = RunState.PAUSED
             self._paused_at = time.monotonic()
             self._pause_gate.clear()
+            self._set_stability_paused(True)
             pause_modules = getattr(
                 self.modules,
                 "pause_operations",
@@ -335,6 +343,7 @@ class SequenceEngine:
             self.state = RunState.RUNNING
             self._finish_pause()
             self._pause_gate.set()
+            self._set_stability_paused(False)
             resume_modules = getattr(
                 self.modules,
                 "resume_operations",
