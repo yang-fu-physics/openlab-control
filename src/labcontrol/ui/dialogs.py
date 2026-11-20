@@ -523,6 +523,9 @@ class ManualControlDialog(QDialog):
             raise ValueError("Manual control is available only for temperature and field instruments")
         self._runtime_editable = True
         self._connected = False
+        self._target_initialized = False
+        self._target_dirty = False
+        self._last_target: float | None = None
         self._precision = (
             self.reading.decimals
             if self.reading.decimals is not None
@@ -540,6 +543,7 @@ class ManualControlDialog(QDialog):
         self.target_input.setRange(panel.min_value, panel.max_value)
         self.target_input.setSuffix(f" {self.reading.unit}")
         self.target_input.setValue(config.initial_value)
+        self.target_input.valueChanged.connect(self._mark_target_dirty)
         self.rate_input = QDoubleSpinBox()
         self.rate_input.setDecimals(rate_precision)
         self.rate_input.setRange(10 ** -rate_precision, panel.max_rate_per_minute)
@@ -568,6 +572,33 @@ class ManualControlDialog(QDialog):
         self._update_control_state()
         fit_initial_window_width(self)
 
+    def _mark_target_dirty(self) -> None:
+        self._target_dirty = True
+
+    def _set_target_display(self, value: float) -> None:
+        self.target_input.blockSignals(True)
+        try:
+            self.target_input.setValue(value)
+        finally:
+            self.target_input.blockSignals(False)
+        self._target_initialized = True
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if (
+            not event.spontaneous()
+            and self._last_target is not None
+            and not self._target_dirty
+            and not self.target_input.hasFocus()
+        ):
+            self._set_target_display(self._last_target)
+
+    def hideEvent(self, event) -> None:
+        super().hideEvent(event)
+        if not event.spontaneous():
+            self._target_initialized = False
+            self._target_dirty = False
+
     def _emit_set(self) -> None:
         """只发出结构化请求；实际校验与 I/O 在后台运行时完成。"""
 
@@ -579,6 +610,7 @@ class ManualControlDialog(QDialog):
                 QMessageBox.warning(self, "Invalid Target", str(exc))
                 self.target_input.setFocus()
                 return
+        self._target_dirty = False
         self.setRequested.emit(
             self.config.id,
             self.panel.control_id,
@@ -587,21 +619,34 @@ class ManualControlDialog(QDialog):
         )
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
-        """刷新连接状态和读数；用户正在编辑目标时不覆盖输入。"""
+        """刷新连接状态和读数；绝不在轮询中覆盖用户已编辑的目标输入。"""
 
         self._connected = snapshot.connected
         self._update_control_state()
         if not snapshot.connected:
+            self.current_label.setText("Current: — (Disconnected)")
             return
-        state = snapshot.controls[self.panel.id]
+        state = snapshot.controls.get(self.panel.id)
+        if state is None:
+            self.current_label.setText("Current: —")
+            return
         current = state.current
         if isinstance(current, (int, float)) and not isinstance(current, bool):
             value = fixed_number(current, self._precision)
             self.current_label.setText(
                 f"Current: {value} {self.reading.unit}"
             )
-        if state.target is not None and not self.target_input.hasFocus():
-            self.target_input.setValue(state.target)
+        else:
+            self.current_label.setText("Current: —")
+        if state.target is not None:
+            self._last_target = state.target
+        if (
+            state.target is not None
+            and not self._target_initialized
+            and not self._target_dirty
+            and not self.target_input.hasFocus()
+        ):
+            self._set_target_display(state.target)
 
     def set_runtime_editable(self, editable: bool) -> None:
         """设置运行时是否允许手动控制，例如 SEQ 运行期间为假。"""
