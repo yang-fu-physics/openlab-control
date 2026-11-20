@@ -854,6 +854,7 @@ class ModuleWorkerClient:
                     action,
                 ) from exc
             event_error: Exception | None = None
+            paused_since: float | None = None
             while True:
                 remaining = deadline - time.monotonic()
                 try:
@@ -894,6 +895,26 @@ class ModuleWorkerClient:
                             event_result = event_handler(dict(message))
                         except Exception as exc:
                             event_error = exc
+                    if (
+                        message.get("type") == "context_request"
+                        and str(message.get("kind", "")) == "operation_state"
+                        and event_error is None
+                    ):
+                        op_state = (
+                            str((event_result or {}).get("state", ""))
+                            .strip()
+                            .casefold()
+                        )
+                        now = time.monotonic()
+                        if op_state == "paused":
+                            if paused_since is None:
+                                paused_since = now
+                            else:
+                                deadline += max(0.0, now - paused_since)
+                                paused_since = now
+                        elif paused_since is not None:
+                            deadline += max(0.0, now - paused_since)
+                            paused_since = None
                     if message.get("type") == "context_request":
                         # worker 在执行长测量时可同步询问新温场快照或 Pause/Stop 状态。
                         # 响应沿同一 Pipe 返回，仍由 request id 和子请求 id 双重关联。

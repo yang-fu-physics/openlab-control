@@ -349,10 +349,24 @@ class MeasurementModuleService:
             else timeout_seconds
         )
         deadline = time.monotonic() + timeout
+        paused_since: float | None = None
 
         def on_event(
             message: dict[str, Any],
         ) -> Mapping[str, Any] | None:
+            nonlocal deadline, paused_since
+            now = time.monotonic()
+            with self._operation_state_lock:
+                is_paused = self._operation_state == "paused"
+            if is_paused:
+                if paused_since is None:
+                    paused_since = now
+                else:
+                    deadline += max(0.0, now - paused_since)
+                    paused_since = now
+            elif paused_since is not None:
+                deadline += max(0.0, now - paused_since)
+                paused_since = None
             future = asyncio.run_coroutine_threadsafe(
                 self._worker_event(record.descriptor.id, message), loop
             )
