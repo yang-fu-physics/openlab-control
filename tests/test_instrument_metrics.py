@@ -96,6 +96,25 @@ class InstrumentMetricTests(unittest.TestCase):
             "NONFINITE_INSTRUMENT_READING",
         )
 
+        multi = {
+            "value": 4.2,
+            "auxiliary": {"shield": 40.0},
+            "controls": {
+                "loop_1": {"target": 4.0, "rate": 1.0, "moving": False, "ready": True},
+                "loop_2": {"target": 40.0, "rate": 2.0, "moving": True, "ready": False},
+            },
+        }
+        self.assertEqual(_reading_payload(multi), multi)
+
+        with self.assertRaises(InstrumentError) as captured_control:
+            _reading_payload(
+                {"value": 4.2, "controls": {"loop_1": {"target": float("inf")}}}
+            )
+        self.assertEqual(
+            captured_control.exception.code,
+            "NONFINITE_INSTRUMENT_READING",
+        )
+
     def test_concurrent_module_samples_share_one_immediate_instrument_poll(self) -> None:
         async def scenario() -> None:
             instruments = _FreshInstruments()
