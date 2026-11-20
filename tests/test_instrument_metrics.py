@@ -96,6 +96,40 @@ class InstrumentMetricTests(unittest.TestCase):
             "NONFINITE_INSTRUMENT_READING",
         )
 
+    def test_fresh_measurement_poll_does_not_fall_back_to_stale_cache(self) -> None:
+        class _SplitCacheInstruments(_FreshInstruments):
+            async def poll_measurement_all(self) -> dict[str, InstrumentSnapshot]:
+                self.measurement_poll_calls += 1
+                self.poll_calls += 1
+                fresh = deepcopy(self._snapshots)
+                fresh["temperature"].current = 22.0
+                fresh["temperature"].timestamp = time.monotonic()
+                return fresh
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.current: float | None = None
+
+            def write_system_row(self, snapshots, _sequence_step) -> None:
+                self.current = snapshots["temperature"].current
+
+        async def scenario() -> None:
+            instruments = _SplitCacheInstruments()
+            instruments._snapshots["temperature"].current = 11.0
+            service = MeasurementModuleService(
+                (),
+                EventManager(),
+                instruments,  # type: ignore[arg-type]
+            )
+            payload = await service._fresh_system_payload()
+            self.assertEqual(payload["temperature"]["current"], 22.0)
+
+            logger = _Logger()
+            await service.measure_all(logger, "Measure")  # type: ignore[arg-type]
+            self.assertEqual(logger.current, 22.0)
+
+        asyncio.run(scenario())
+
     def test_concurrent_module_samples_share_one_immediate_instrument_poll(self) -> None:
         async def scenario() -> None:
             instruments = _FreshInstruments()

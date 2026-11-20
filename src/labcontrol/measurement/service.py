@@ -100,6 +100,7 @@ class MeasurementModuleService:
         self._fresh_system_task: asyncio.Task[
             dict[str, InstrumentSnapshot]
         ] | None = None
+        self._fresh_system_snapshots: dict[str, InstrumentSnapshot] | None = None
         self._fresh_system_completed_at: float | None = None
 
     def _ensure_sequence_idle(self) -> None:
@@ -201,11 +202,15 @@ class MeasurementModuleService:
             },
         )
 
-    def _system_payload(self) -> dict[str, dict[str, Any]]:
+    def _system_payload(
+        self,
+        snapshots: Mapping[str, InstrumentSnapshot] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         """把核心 InstrumentSnapshot 转成只读、可 JSON 化的模块视图。"""
 
+        source = self.instruments.snapshots() if snapshots is None else snapshots
         payload: dict[str, dict[str, Any]] = {}
-        for instrument_id, snapshot in self.instruments.snapshots().items():
+        for instrument_id, snapshot in source.items():
             instrument_config = self.instruments.instrument_configs.get(
                 instrument_id
             )
@@ -240,6 +245,40 @@ class MeasurementModuleService:
             }
         return payload
 
+    async def _fresh_system_snapshots_sample(
+        self,
+        *,
+        reuse_within_seconds: float = 0.0,
+    ) -> dict[str, InstrumentSnapshot]:
+        """立即采样仪表，合并并发请求并返回本次最新快照副本。"""
+
+        completed_at = self._fresh_system_completed_at
+        if (
+            reuse_within_seconds > 0.0
+            and completed_at is not None
+            and self._fresh_system_snapshots is not None
+            and time.monotonic() - completed_at <= reuse_within_seconds
+        ):
+            return deepcopy(self._fresh_system_snapshots)
+
+        task = self._fresh_system_task
+        if task is None or task.done():
+            task = asyncio.create_task(
+                self.instruments.poll_measurement_all()
+            )
+            self._fresh_system_task = task
+        try:
+            measured = await asyncio.shield(task)
+        finally:
+            if self._fresh_system_task is task and task.done():
+                self._fresh_system_task = None
+        merged = self.instruments.snapshots()
+        if measured:
+            merged.update(measured)
+        self._fresh_system_snapshots = deepcopy(merged)
+        self._fresh_system_completed_at = time.monotonic()
+        return merged
+
     async def _fresh_system_payload(
         self,
         *,
@@ -252,27 +291,10 @@ class MeasurementModuleService:
         样本，既避免紧接着重复查询，也不会退回约 1 秒一次的前面板缓存。
         """
 
-        completed_at = self._fresh_system_completed_at
-        if (
-            reuse_within_seconds > 0.0
-            and completed_at is not None
-            and time.monotonic() - completed_at <= reuse_within_seconds
-        ):
-            return self._system_payload()
-
-        task = self._fresh_system_task
-        if task is None or task.done():
-            task = asyncio.create_task(
-                self.instruments.poll_measurement_all()
-            )
-            self._fresh_system_task = task
-        try:
-            await asyncio.shield(task)
-        finally:
-            if self._fresh_system_task is task and task.done():
-                self._fresh_system_task = None
-        self._fresh_system_completed_at = time.monotonic()
-        return self._system_payload()
+        snapshots = await self._fresh_system_snapshots_sample(
+            reuse_within_seconds=reuse_within_seconds,
+        )
+        return self._system_payload(snapshots)
 
     async def _worker_event(
         self,
@@ -1084,10 +1106,10 @@ class MeasurementModuleService:
                 "NO_ENABLED_MODULES",
                 "Measure continued without an enabled measurement module",
             )
-            await self._fresh_system_payload(
+            fresh_snapshots = await self._fresh_system_snapshots_sample(
                 reuse_within_seconds=_MEASUREMENT_SAMPLE_REUSE_SECONDS,
             )
-            logger.write_system_row(self.instruments.snapshots(), sequence_step)
+            logger.write_system_row(fresh_snapshots, sequence_step)
             return
         self.events.resolve("modules", "NO_ENABLED_MODULES")
         # 每个 T Measure 都是一组新的可见结果。先清空上一组缓存，防止本轮某个
@@ -1249,13 +1271,13 @@ class MeasurementModuleService:
                 for item in results
                 if item.raw_values is not None
             }
-            await self._fresh_system_payload(
+            fresh_snapshots = await self._fresh_system_snapshots_sample(
                 reuse_within_seconds=_MEASUREMENT_SAMPLE_REUSE_SECONDS,
             )
             logger.write_measurement_row(
                 # 每行使用写入前的即时系统快照；同一时刻并行模块发起的请求会合并，
                 # 且刚在 0.1 秒内读过时不会为了写行再次敲击慢速仪表。
-                self.instruments.snapshots(),
+                fresh_snapshots,
                 values,
                 sequence_step,
                 raw_values=raw_values,
