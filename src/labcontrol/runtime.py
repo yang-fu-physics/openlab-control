@@ -451,50 +451,81 @@ class RuntimeService:
         """
 
         if self.engine is not None:
+            self.engine.mark_shutting_down()
             self.engine.request_stop(False, "Application closing")
         sequence_task = self._sequence_task
-        if sequence_task is not None:
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(sequence_task),
-                    timeout=3.0,
-                )
-            except asyncio.TimeoutError:
-                # 取消是最后手段；SequenceEngine 仍会发送模块 run_end，但不控制仪表。
-                sequence_task.cancel()
-                await asyncio.gather(
-                    sequence_task,
-                    return_exceptions=True,
-                )
-            except asyncio.CancelledError:
-                sequence_task.cancel()
-                await asyncio.gather(
-                    sequence_task,
-                    return_exceptions=True,
-                )
-                raise
-            except Exception:
-                await asyncio.gather(
-                    sequence_task,
-                    return_exceptions=True,
-                )
-        if self._poll_task is not None:
-            self._poll_task.cancel()
-            await asyncio.gather(self._poll_task, return_exceptions=True)
-        if self.modules is not None:
-            # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
-            # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
-            await self.modules.shutdown()
-        if self.instruments is not None:
-            await self.instruments.disconnect_all()
-        if self.alarm_reporter is not None:
-            reporter = self.alarm_reporter
-            self.alarm_reporter = None
-            await asyncio.to_thread(
-                reporter.close,
-                self.config.alarms.reporting.shutdown_timeout_seconds,
-            )
-        if self.logger is not None:
-            self.logger.close()
-        assert self._loop is not None
-        self._loop.call_soon(self._loop.stop)
+        shutdown_wait = max(
+            1.0,
+            float(self.config.modules.shutdown_timeout_seconds),
+        )
+        try:
+            if sequence_task is not None:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(sequence_task),
+                        timeout=min(3.0, shutdown_wait),
+                    )
+                except asyncio.TimeoutError:
+                    # 取消是最后手段；SequenceEngine 仍会以有界关闭超时发送模块 run_end，但不控制仪表。
+                    sequence_task.cancel()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(
+                                sequence_task,
+                                return_exceptions=True,
+                            ),
+                            timeout=shutdown_wait,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                except asyncio.CancelledError:
+                    sequence_task.cancel()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(
+                                sequence_task,
+                                return_exceptions=True,
+                            ),
+                            timeout=shutdown_wait,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                    raise
+                except Exception:
+                    await asyncio.gather(
+                        sequence_task,
+                        return_exceptions=True,
+                    )
+        finally:
+            if self._poll_task is not None:
+                self._poll_task.cancel()
+                await asyncio.gather(self._poll_task, return_exceptions=True)
+            if self.modules is not None:
+                # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
+                # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
+                try:
+                    await self.modules.shutdown()
+                except Exception:
+                    pass
+            if self.instruments is not None:
+                try:
+                    await self.instruments.disconnect_all()
+                except Exception:
+                    pass
+            if self.alarm_reporter is not None:
+                reporter = self.alarm_reporter
+                self.alarm_reporter = None
+                try:
+                    await asyncio.to_thread(
+                        reporter.close,
+                        self.config.alarms.reporting.shutdown_timeout_seconds,
+                    )
+                except Exception:
+                    pass
+            if self.logger is not None:
+                try:
+                    self.logger.close()
+                except Exception:
+                    pass
+            assert self._loop is not None
+            self._loop.call_soon(self._loop.stop)

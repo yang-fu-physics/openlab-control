@@ -78,6 +78,7 @@ class SequenceEngine:
         self._waiting_for_instruments = False
         self._abort_requested = False
         self._fatal_abort = False
+        self._shutting_down = False
         self._abort_message = ""
         self._completed_steps = 0
         self._total_steps = 0
@@ -110,6 +111,7 @@ class SequenceEngine:
             raise RuntimeError("A sequence is already running")
         self._abort_requested = False
         self._fatal_abort = False
+        self._shutting_down = False
         self._abort_message = ""
         self._pause_gate.set()
         self._paused_at = None
@@ -294,22 +296,37 @@ class SequenceEngine:
                 RunState.COMPLETED: "completed",
                 RunState.STOPPED: "stopped",
             }.get(self.state, "error")
-            cleanup_succeeded = await self.modules.end_sequence(reason)
-            if not cleanup_succeeded:
-                self.state = RunState.FAULTED
-                self._abort_message = "One or more modules failed to end the sequence safely"
-                self.events.report(
-                    Severity.INFO,
-                    "sequence",
-                    "MODULE_END_SEQUENCE_FAILED",
-                    self._abort_message,
+            end_timeout = (
+                self.config.modules.shutdown_timeout_seconds
+                if self._shutting_down
+                else None
+            )
+            try:
+                cleanup_succeeded = await self.modules.end_sequence(
+                    reason,
+                    timeout_seconds=end_timeout,
                 )
-            elif self.state is RunState.COMPLETED:
-                self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
-            self._publish(self._abort_message or self.state.value)
-            self.events.resolve_source("logging")
-            self.logger.close()
+                if not cleanup_succeeded:
+                    self.state = RunState.FAULTED
+                    self._abort_message = "One or more modules failed to end the sequence safely"
+                    self.events.report(
+                        Severity.INFO,
+                        "sequence",
+                        "MODULE_END_SEQUENCE_FAILED",
+                        self._abort_message,
+                    )
+                elif self.state is RunState.COMPLETED:
+                    self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
+                self._publish(self._abort_message or self.state.value)
+            finally:
+                self.events.resolve_source("logging")
+                self.logger.close()
         return self.state
+
+    def mark_shutting_down(self) -> None:
+        """通知引擎应用正在关闭，使 run_end 使用有界的关闭超时。"""
+
+        self._shutting_down = True
 
     def pause(self) -> None:
         """请求协作 Pause；冻结调度和模块计时，不改变仪表当前输出。"""

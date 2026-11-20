@@ -1267,7 +1267,12 @@ class MeasurementModuleService:
             if first is not None:
                 raise first
 
-    async def end_sequence(self, reason: str) -> bool:
+    async def end_sequence(
+        self,
+        reason: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> bool:
         """并行结束本次模块运行，并在任何结果下解除冻结状态。
 
         先切回 running 是为了释放仍停在 Pause checkpoint 的 worker，使其能够执行
@@ -1281,6 +1286,7 @@ class MeasurementModuleService:
                     record,
                     "event",
                     {"name": "run_end", "data": {"reason": reason}},
+                    timeout_seconds=timeout_seconds,
                 )
             except WorkerRequestError as exc:
                 record.state = "faulted"
