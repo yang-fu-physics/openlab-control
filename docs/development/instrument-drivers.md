@@ -1,61 +1,55 @@
-# 一台仪表一个文件
+# 一台仪表一个文件（接入真实硬件的组织方式）
 
-真实测量可能同时使用电流源、电压表和切换器。把所有仪表命令都塞进 `backend.py` 会很快
-变得难读。简单的做法是：每台仪表一个 Python 文件，`backend.py` 只写测量顺序。
+真实电输运实验常常同时用到两三台仪器（例如电流源 + 纳伏表 + 切换器）。如果把所有 SCPI 字符串和状态机逻辑全塞进 `backend.py`，代码很快就会变得难以维护。
 
-这不是强制要求。模块只有一台简单仪表时，一个 `instrument.py` 就够了。
+最清晰的做法是**按职责拆开**：
 
-## 推荐目录
+- **仪表文件（如 `keithley_6221.py`、`keithley_2182a.py`）**：只管那一台仪表的命令拼接、回包解析和串口/VISA 通信，完全不知道 SEQ、Qt 或 `ModuleAPI`。
+- **`backend.py`**：只管整体流程编排——连接顺序、通道切换、等待稳定、超时预算、告警分级和异常收尾。
+
+## 推荐目录布局
 
 ```text
 modules/my_transport/
 ├─ module.toml
-├─ backend.py                 # 整体测量顺序
-├─ frontend.py                # 可选设置窗口
-├─ instruments/
-│  ├─ current_source.py       # 电流源命令
-│  ├─ nanovoltmeter.py        # 电压表命令
-│  └─ multiplexer.py          # 切换器命令
-└─ tests/
-   ├─ test_instruments.py
-   └─ test_measurement.py
+├─ backend.py                 # 流程编排与生命周期
+├─ frontend.py                # 可选：设置与状态界面
+├─ keithley_6221.py           # 电流源协议
+├─ keithley_2182a.py          # 纳伏表协议
+└─ keithley_7001.py           # 切换器协议
 ```
 
-不需要为了目录整齐再增加很多基类、工厂或其他中间层。
+不需要为了架构“好看”硬造一堆基类、工厂或抽象层；简单单仪表模块放一个 `my_meter.py` 就足够清爽。
 
-## 仪表文件只处理一台仪表
+## 1. 仪表文件只写协议与解析
+
+VISA 连接可以直接复用核心提供的 `labcontrol.measurement.visa.VisaSession`（只释放自己的仪表句柄，不会误关进程内共享的 VISA ResourceManager）：
 
 ```python
 class CurrentSource:
-    def __init__(self, resource):
-        self.resource = resource
+    def __init__(self, session):
+        self.session = session
 
     def identify(self):
-        return self.resource.query("*IDN?").strip()
+        return self.session.query("*IDN?").strip()
 
     def set_current(self, value_a, compliance_v):
-        self.resource.write(f"SOUR:CURR {value_a:.12g}")
-        self.resource.write(f"SENS:VOLT:PROT {compliance_v:.12g}")
+        self.session.write(f"SOUR:CURR {value_a:.12g}")
+        self.session.write(f"SENS:VOLT:PROT {compliance_v:.12g}")
 
     def output_on(self):
-        self.resource.write("OUTP ON")
+        self.session.write("OUTP ON")
 
     def output_off(self):
-        self.resource.write("OUTP OFF")
+        self.session.write("OUTP OFF")
 
     def close(self):
-        self.resource.close()
+        self.session.close()
 ```
 
-这个文件负责仪表命令、返回值解析、量程、状态字和关闭连接。它不需要知道 SEQ、DAT、Qt
-或其他模块。
+## 2. `backend.py` 只写清晰的测量步骤
 
-## backend.py 只写测量顺序
-
-下面是结构示意，不是可直接控制某台仪表的完整程序。`CurrentSource`、`Nanovoltmeter` 和
-`Multiplexer` 分别来自上面的三个仪表文件；`open_visa`、`verify_supported_pair` 和
-`close_all` 是模块作者按仪表手册实现并测试的帮助函数。示意中的地址、量程和换算规则也
-必须换成该模块自己的设置。
+下面是多仪表编排的结构示意（具体命令、回读与安全边界请以对应仪表的真实手册为准）：
 
 ```python
 class Module:
@@ -65,35 +59,17 @@ class Module:
         self.switch = None
 
     def open(self, api):
-        try:
-            self.source = CurrentSource(
-                open_visa(self.source_address, timeout=3.0)
-            )
-            self.meter = Nanovoltmeter(
-                open_visa(self.meter_address, timeout=3.0)
-            )
-            self.switch = Multiplexer(
-                open_visa(self.switch_address, timeout=3.0)
-            )
-            verify_supported_pair(
-                self.source.identify(), self.meter.identify()
-            )
-        except Exception:
-            close_all(self.switch, self.meter, self.source)
-            self.source = self.meter = self.switch = None
-            raise
+        # 仅核对可用资源，不自动改写仪表设置；也可在 configure() 中打开连接
+        api.resources()
 
     def on_event(self, event, data, api):
         if event == "run_start":
             self.source.output_on()
             return {"Output": "On"}
         if event == "run_end":
-            # completed、stopped、error 都会进入这里。
+            # completed / stopped / error 三种情况都会进入这里
             self.source.output_off()
-            return {
-                "Output": "Off",
-                "Last Run": data.get("reason", "—"),
-            }
+            return {"Output": "Off", "Last Run": data.get("reason", "—")}
         return {}
 
     def measure(self, channel, api):
@@ -101,43 +77,35 @@ class Module:
         self.switch.select(channel)
         api.sleep(self.switch_pause)
         voltage = self.meter.read_voltage()
-        return {
-            f"R{channel}": voltage / self.current_a,
-            "StatusCode": 0,
-        }
+        return {f"R{channel}": voltage / self.current_a, "StatusCode": 0}
 
     def close(self, api):
+        # 必须幂等，且任何一台关闭失败时仍继续释放其余会话
         try:
             if self.source is not None:
                 self.source.output_off()
         finally:
             close_all(self.switch, self.meter, self.source)
+            self.source = self.meter = self.switch = None
 ```
 
-这样打开 `backend.py` 就能直接看出：连接哪些仪表、先切换什么、等待多久、读取什么，以及
-结束时怎样处理输出。`run_end` 负责每次 SEQ 的收尾，默认关闭输出；`close` 只在 Disable
-或程序退出时调用，并再次关闭输出后释放连接。关闭动作应可重复调用而不报错。
+关于输出保持与关闭的三种常见模式：
 
-并非所有模块都要在 `run_start` 打开输出。若设置要求“每行测量完关闭”，就在
-`measure` 的 `finally` 中关闭，下次调用再打开。若连续栅压等偏置必须跨 SEQ 保持，可增加
-默认勾选的“SEQ 结束关闭输出”设置。取消勾选时，`run_end` 只能在读回输出和关键设置都
-正确后保持，并且下一次 `run_start` 不能先关再开。任何读回不确定、Apply、Disable、
-应用退出或测量异常仍要关闭；`close` 始终保证最终输出为 Off。
+1. **逐行关闭（最保守）**：每次 `measure()` 开头开输出、末尾 `finally` 关输出；
+2. **整轮保持、`run_end` 关闭（常见默认）**：在 `run_start` 开输出或测量时保持，每次 SEQ 结束/停止/报错在 `run_end` 关闭；
+3. **跨 SEQ 连续偏置（如连续栅压）**：提供**默认勾选**的“SEQ 结束关闭输出”开关；只有用户明确取消勾选，且 `run_end` 读回确认输出和关键配置完全一致时才保持，下一次 `run_start` 不做先关再开。Disable、重新 Apply、异常或读回不确定时仍须强制关闭。
 
-## 每次等待都要有上限
+## 3. 超时与写失败原则
 
-仪表读取不能无限等待。连接、查询和读取都应设置合理时间。所有步骤加起来，还要给关闭
-输出和释放连接留出时间。
+- 每次 VISA / 串口 / 网络调用都要设有限 I/O 超时，并给 `output_off()` 与资源释放留出余量，使其总时间小于 `api.timeout`。
+- 写命令如果超时，**无法判断仪表到底执行了没有**；千万不要自动重发，应中止当前操作并重新读回真实状态。
 
-写命令等待超时，不等于仪表没有执行。危险写命令不能自动再发一次；应重新连接并读回真实
-状态。无法确认时停止 SEQ。
+## 4. 不接真机也能测协议
 
-## 不接仪表也能检查命令
-
-可以准备一个假的 VISA 连接，记录程序发送了什么：
+把仪表文件独立出来后，只需写一个极简的 `FakeVisaSession` 就能在普通电脑上验证完整命令顺序与边界错误：
 
 ```python
-fake = FakeVisaResource(responses={"*IDN?": "MODEL,2400,..."})
+fake = FakeVisaSession(responses={"*IDN?": "KEITHLEY INSTRUMENTS INC.,MODEL 2400,..."})
 source = CurrentSource(fake)
 source.set_current(1e-3, 10.0)
 
@@ -147,5 +115,4 @@ assert fake.writes == [
 ]
 ```
 
-测试应检查命令顺序和错误处理，而不只是最后算出的数字。连接真实仪表前，还要按照手册做
-低风险现场检查。
+协议逻辑在假连接下全部通过后，再按 [仪表安全清单](../guides/safety-checklist.md) 接假负载进行真机验证。

@@ -1,42 +1,34 @@
 # 写第一个测量模块
 
-这一章做一个不连接真实仪表的四通道电阻模块。你可以先运行随框架提供的完整版，也可以从
-两个文件开始学习。两条路线使用不同的文件夹，不会互相覆盖。
+这一节做一个不连接真机的四通道电阻模块。你可以先运行程序自带的完整教学版，再从零写出一个只有两个文件的最小版本。
 
-接真实仪表时，先查 [PyMeasure 驱动](https://pymeasure.readthedocs.io/en/latest/api/instruments/index.html)、
-[QCoDeS 官方驱动](https://microsoft.github.io/Qcodes/drivers_api/index.html)和
-[QCoDeS 社区驱动](https://github.com/QCoDeS/Qcodes_contrib_drivers)。有匹配的底层通讯就优先复用，
-再用仪表手册确认型号、接口和命令。输出保护和停止时的动作仍由模块负责。
+> **接入真实仪表小贴士**：动笔写 SCPI 前，建议先查 [PyMeasure 驱动](https://pymeasure.readthedocs.io/en/latest/api/instruments/index.html)、[QCoDeS 官方驱动](https://microsoft.github.io/Qcodes/drivers_api/index.html) 或 [QCoDeS 社区驱动](https://github.com/QCoDeS/Qcodes_contrib_drivers)，有匹配的底层命令和解析逻辑可以优先对照复用，再拿仪表手册逐条核对。
 
-!!! info "开始前"
+!!! info "开始之前"
 
-    先完成 [Windows 发布包](../getting-started/windows.md) 或
-    [源码环境](../getting-started/source.md)，并至少运行一次
-    [第一条 SEQ](../getting-started/first-sequence.md)。下面的 PowerShell 命令都在
-    OpenLabControl 根目录执行。
+    请先按 [Windows 发布包](../getting-started/windows.md) 或 [源码环境](../getting-started/source.md) 启动软件，
+    并至少跑通一次 [第一条 SEQ](../getting-started/first-sequence.md)。
 
-## 路线 A：先运行完整例子
+## 路线 A：先跑一遍自带的完整教学模块
 
-这是最快看到结果的方式。`modules/tutorial_resistance/` 已随框架提供，启动程序后：
+软件的 `modules/tutorial_resistance/` 已经放好了一个完整教学模块：
 
-1. 打开 **Modules**，Enable **Tutorial Resistance**。
-2. 打开 Settings，检查数值后点击 **Apply Settings**。
-3. 按 [第一条 SEQ](../getting-started/first-sequence.md) 新建含 `Measure` 的 SEQ 并运行。
-4. 用 [Data Browser](../guides/data-browser.md) 打开本次
-   `runs/<时间>_<SEQ>/experiment.dat`。确认每个 Measure 写出四行，R1、R2、R3、R4
-   分别只出现在自己的行。
+1. 启动 OpenLab Control，打开工具栏 **Modules**，勾选 **Tutorial Resistance**。
+2. 在弹出的窗口中核对参数，点击 **Apply Settings**。
+3. 运行一条包含 `Measure` 的 SEQ。
+4. 用 [Data Browser](../guides/data-browser.md) 打开本次 `runs/<时间>_<SEQ>/experiment.dat`，观察每个 `Measure` 写出的四行数据（`R1`–`R4` 各自只出现在自己的行）。
 
-这个完整版包含设置窗口、原始数据和模块自己的 SEQ 指令。第一次运行不需要先读懂它们。
+这个模块还演示了自定义窗口、`rawdata` 和模块 SEQ 指令，第一次跑通时不必全部读懂。
 
-??? example "展开完整 backend.py"
+??? example "展开查看 tutorial_resistance/backend.py 完整源码"
 
     ```python
     --8<-- "modules/tutorial_resistance/backend.py"
     ```
 
-## 路线 B：从两个文件开始
+## 路线 B：从两个文件写出最小模块
 
-新建另一个目录，避免覆盖路线 A：
+在 `modules/` 下新建一个独立目录（避免覆盖教学模块），目录名即模块 ID（小写字母、数字和下划线）：
 
 ```text
 modules/tutorial_minimal/
@@ -44,16 +36,14 @@ modules/tutorial_minimal/
 └─ backend.py
 ```
 
-把下面内容放进 `module.toml`：
+**1. 编写 `module.toml`**
 
 ```toml
 name = "Tutorial Minimal"
 version = "0.1.0"
 ```
 
-文件夹名是模块在程序内部使用的名字。建议只用小写字母、数字和下划线。
-
-把下面内容放进 `backend.py`：
+**2. 编写 `backend.py`**
 
 ```python
 from labcontrol.module_api import ModuleError
@@ -90,45 +80,28 @@ class Module:
         self.ready = False
 ```
 
-重启并 Enable **Tutorial Minimal**。它没有 `frontend.py`，所以没有自定义设置，也不需要
-点击 Apply Settings。直接运行含 `Measure` 的 SEQ 即可。
+**3. 启用并试跑**
 
-这里先记住：
+重启软件（或在所有模块关闭时点 **Modules → Refresh**），勾选 **Tutorial Minimal**。因为它没有自定义设置窗口，不需要点 Apply，直接运行含 `Measure` 的 SEQ 就能写出四通道数据。
 
-- `open`：点击 Enable 后运行；以后在这里打开仪表连接。
-- `measure`：每次测一个逻辑通道并返回一行数据。
-- `close`：Disable 或退出时运行；再次确认输出关闭，再断开连接。
-- `columns`：DAT 中允许出现的列。
-- `display_columns`：可选；从这些已有列中挑几个显示在主窗口模块卡片里。
-- `slots = 4`：一次 `Measure` 依次请求四个逻辑行键。
+### 核心概念速记
 
-运行后可以用关闭或最小化按钮隐藏独立模块窗口，测量继续运行。主窗口左侧 `Sequence Status`
-下方的卡片仍会显示模块状态和本轮 R1–R4；点击卡片即可重新打开窗口。卡片只是显示 `measure` 已经返回的值，不会
-为了刷新界面再读一次仪表。
+- `columns`：声明要写入 DAT 的列名与单位（顺序固定）。
+- `display_columns`（可选）：从中挑最多 8 列显示在主窗口左侧的模块监视卡里。窗口关闭隐藏后，卡片仍会实时更新已返回的结果（不会为了刷新界面额外读仪表）。
+- `slots = 4`：告诉主程序每次 `Measure` 按 1、2、3、4 依次调用 `measure(channel, api)` 并各写一行。
+- `open` / `measure` / `close`：注意**不要在模块顶层 import 或 `__init__` 里连接真实仪表**，连接必须延迟到 `open()` 或 `configure()`，这样未勾选时绝不会碰硬件。
 
-!!! warning "真实输出必须在 run_end 明确收尾"
-
-    `close` 不会在每次 SEQ 结束时调用。真实模块若会打开电流、电压或其他输出，必须在
-    `on_event("run_end", ...)` 中处理；默认做法是关闭，正常完成、Stop 和 Error 都走
-    这条收尾。只有确实需要连续栅压等偏置时，才提供默认勾选的“SEQ 结束关闭输出”选项。
-    用户取消勾选后，`run_end` 必须读回输出和关键设置，确认无误才允许保持；Disable、
-    Apply、应用退出和测量异常仍要关闭。`close` 还要再做一次幂等关闭，作为最后保障。
-
-## 只在需要时使用帮助功能
+## 常用的 `api` 辅助方法
 
 ```python
-api.sleep(0.5)                              # 等待 0.5 秒，可被 Pause/Stop 控制
-api.checkpoint()                            # 检查是否 Pause 或 Stop
-api.warn("OVER_RANGE", "R1 超量程", "R1") # 报告一次可继续运行的问题
-api.status({"State": "Measuring"})        # 更新模块状态窗口
-resources = api.resources()              # 读取已确认的测量仪表地址表
+api.sleep(0.5)                              # 可被 Pause 冻结、可被 Stop 打断的等待
+api.checkpoint()                            # 在长循环或两次 I/O 间立即响应 Pause/Stop
+api.warn("OVER_RANGE", "R1 超量程", "R1")   # 报告可继续运行的 Warning（传 None 解除）
+api.status({"State": "Measuring"})          # 更新模块 Status 页显示
+resources = api.resources()                 # 读取扫描器确认过的 Measurement VISA 清单
+address = api.resource_address("k2400_1")   # 将稳定资源 ID 解析为当前物理地址
 ```
 
-不要在文件刚被读取时连接仪表，也不要在 `__init__` 中连接。必须等到 `open`，这样模块
-保持 Disabled 时不会碰真实仪表。
+真实模块请在设置里保存稳定的资源 ID，不要自己写一套全盘 VISA 扫描；先用 [Instrument Scanner](../guides/instrument-scanner.md) 统一登记仪表即可。
 
-真实模块把资源 ID 保存到设置中，后台用 `api.resource_address(id)` 取得当前地址。不要在
-每个模块里重复做一套 VISA 全盘扫描；先用
-[仪表扫描工具](../guides/instrument-scanner.md)统一确认物理仪表。
-
-下一步阅读 [多通道数据](results-and-slots.md)。
+下一步阅读：[让每个通道各写一行](results-and-slots.md)。

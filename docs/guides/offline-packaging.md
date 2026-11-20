@@ -1,73 +1,64 @@
 # 离线安装与发布
 
-第一阶段不提供在线商店。Measurement Module 和 System Instrument 都以一个完整目录为安装
-单元，可以通过 U 盘或内部文件服务复制；两者仍保持各自的名称和目录。
+OpenLab Control 面向常见处于内网或离线环境的实验室电脑，因此**不设在线插件商店**，所有扩展都以“复制整个文件夹”的方式离线安装。
 
-## 手动安装
+## 1. 离线安装扩展（复制目录即可）
 
-Measurement Module：
-
-```text
-repository/modules/<module-id>/
-    ↓
-OpenLabControl/modules/<module-id>/
-```
-
-System Instrument：
+**安装测量模块（Measurement Module）**：
 
 ```text
-repository/instruments/<instrument-id>/
-    ↓
-OpenLabControl/system_instruments/<instrument-id>/
+openlab-control-Module/modules/<模块ID>/
+        ↓ 整个目录复制到
+OpenLabControl/modules/<模块ID>/
 ```
 
-重启后，Measurement Module 会出现在 Modules Manager 中并保持 Disabled。复制 System
-Instrument 目录后还要运行 Instrument Scanner：为它添加物理实例，确认固定面板、角色、
-顺序和限制，再检查完整保存预览。单纯复制目录不会访问真实仪表。
+重启软件后，新模块会出现在 **Modules** 列表中（默认 Disabled）。
 
-扫描器把未分配 VISA 写入 `configs/visa.resources.toml`，把 System 实例写入
-`configs/instruments/<instrument-id>.toml`。每种型号可有多个 `[[instances]]`；一个实例的
-多个面板共用同一进程和连接。专用网络仪表的 Host/Port 由自己的模板字段提供。生成配置
-保存时按预览全量覆盖；`configs/pid/<instance-id>.toml` 第一次建立后不会被扫描器覆盖或删除。
+**安装系统仪表（System Instrument）**：
 
-一个完全干净的发布目录可以没有 System 面板并正常启动，三个内置仿真也默认关闭。
+```text
+openlab-control-Device/instruments/<仪表ID>/
+        ↓ 整个目录复制到
+OpenLabControl/system_instruments/<仪表ID>/
+```
 
-## 所有扩展共用核心依赖
+复制完成后，运行 **Instrument Scanner** 为该型号添加物理实例、配置连接与安全上下限并保存，再重启主程序。单纯复制目录不会接触任何真实硬件。
 
-主框架统一提供并锁定 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions。
-System Instrument 与 Measurement Module 不声明、不安装第二套依赖，也不建立自己的 Python
-runtime。
+> 扫描器保存的结果写入 `configs/visa.resources.toml` 与 `configs/instruments/<仪表ID>.toml`；已存在的 `configs/pid/<实例ID>.toml` 不会被扫描器覆盖或删除。
 
-新实现确实需要其他第三方包时：
+## 2. 依赖统一打包，现场无需装 Python
 
-1. 把精确版本加入核心 `pyproject.toml` 和 `requirements-lock.txt`；
-2. 在全新环境运行核心、System Instrument 和 Measurement Module 测试；
-3. 由 GitHub Actions 重新构建完整 Windows 发布包。
+框架共享并锁定以下五个核心包：
 
-这样发布 ZIP 本身就是完整离线环境，现场电脑不需要 Python 或联网安装。
+- `PySide6`
+- `QtAwesome`
+- `packaging`
+- `PyVISA`
+- `typing_extensions`
 
-## 发布前清单
+所有测量模块和系统仪表直接复用主框架环境，不各自建虚拟环境，也不在界面里临时装包。如果新驱动确实需要额外的第三方 Python 包，正确做法是：
 
-- [ ] 核心稳定版使用与项目版本一致的 `v<版本>` 标签，由 GitHub Actions 的 Windows
-      Runner 重新测试、打包和上传。
-- [ ] 发布 ZIP 根目录有 `OpenLabControl.exe`、`InstrumentScanner.exe` 和唯一的
-      `_internal/`，没有发布用 `tools/` 目录。
-- [ ] 目录名、清单 ID 和文档一致。
-- [ ] 版本号已更新，变化写入 README/CHANGELOG。
-- [ ] 没有仪表地址、令牌、私钥、真实 DAT 或本机状态。
-- [ ] 最小生命周期、异常状态、Pause/Stop、重复关闭测试通过。
-- [ ] 真实仪表代码明确标注真机验证状态。
-- [ ] 从一个全新的 OpenLab Control 文件夹完成手动复制安装测试。
+1. 将精确版本号加入核心 `pyproject.toml` 和 `requirements-lock.txt`；
+2. 在全新环境跑通核心、系统仪表和测量模块的全部测试；
+3. 推送版本标签，由 GitHub Actions 重新打出完整离线的 Windows ZIP 发布包。
 
-## 第三方 Measurement Module
+## 3. 正式版本发布自检清单
 
-第三方目录应说明：
+- [ ] `pyproject.toml` 版本号与 Git 标签 `v<版本>` 一致，由 GitHub Actions Windows Runner 自动测试、打包并发布。
+- [ ] 发布 ZIP 根目录包含 `OpenLabControl.exe`、`InstrumentScanner.exe` 和唯一的 `_internal/`，不含 `tools/`。
+- [ ] 目录名、清单 ID 与文档完全一致。
+- [ ] 版本变更已写入 `CHANGELOG.md` 与 `README.md`。
+- [ ] 包内没有任何本机仪表地址、Token、私钥、真实 DAT 或 `module_data/`。
+- [ ] 生命周期、异常状态、Pause/Stop 与重复关闭测试全部通过。
+- [ ] 驱动文档明确写清了实机验证状态（已验证范围 / Beta 未验证）。
+- [ ] 在一个全新解压的发布文件夹中实测过“手动复制安装 → 启动运行”。
 
-- 仪表组合、接线与固件要求；
-- 数字状态码表；
-- 默认设置和安全边界；
-- 已验证与未验证的硬件；
-- 自动测试和真机测试摘要。
+## 4. 分享第三方模块建议附带的内容
 
-System Instrument 通常随实验系统固定并由系统维护者部署。当前两类内容都只支持手动复制，
-不提供在线索引或自动安装。
+给同事或社区分享一个测量模块目录时，建议在目录 `README.md` 里写清：
+
+1. 适用仪表型号、接线方式与固件版本要求；
+2. `StatusCode` 数字状态码对照表；
+3. 默认参数与硬件安全限制；
+4. 哪些组合已经实机测过、哪些仍为 Beta；
+5. 自动化测试与真机测试记录摘要。
