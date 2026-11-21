@@ -123,6 +123,181 @@ class RuntimeShutdownTests(unittest.TestCase):
             )
             self.assertGreaterEqual(len(status_rows), 3)
 
+    def test_shutdown_shares_total_budget_and_surfaces_cleanup_errors(
+        self,
+    ) -> None:
+        import asyncio
+        from labcontrol.events import EventManager
+
+        events = EventManager()
+        trace: list[str] = []
+
+        class _SlowModules:
+            async def shutdown(self, *, timeout_seconds: float | None = None) -> None:
+                trace.append("module.start")
+                await asyncio.sleep(3.0)
+                trace.append("module.done")
+
+        class _FailingInstruments:
+            async def disconnect_all(self) -> None:
+                trace.append("instrument.start")
+                raise RuntimeError("instrument disconnect failed")
+
+        class _Logger:
+            def close(self) -> None:
+                trace.append("logger.close")
+
+        async def scenario() -> None:
+            runtime = RuntimeService(load_simulated_config(), module_descriptors=())
+            runtime._loop = SimpleNamespace(
+                call_soon=lambda fn, *args: trace.append("loop.stop"),
+                stop=lambda: None,
+            )  # type: ignore[assignment]
+            runtime.events = events
+            runtime.modules = _SlowModules()  # type: ignore[assignment]
+            runtime.instruments = _FailingInstruments()  # type: ignore[assignment]
+            runtime.logger = _Logger()  # type: ignore[assignment]
+            runtime.engine = SimpleNamespace(
+                mark_shutting_down=lambda **_: None,
+                request_stop=lambda *_: None,
+            )  # type: ignore[assignment]
+            runtime._sequence_task = asyncio.create_task(asyncio.sleep(3.0))
+
+            started = time.monotonic()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "modules.shutdown.*instruments.disconnect_all",
+            ):
+                await runtime._shutdown_async(deadline=started + 1.2)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 2.0)
+            self.assertIn("module.start", trace)
+            self.assertIn("instrument.start", trace)
+            self.assertIn("logger.close", trace)
+            self.assertIn("loop.stop", trace)
+
+        asyncio.run(scenario())
+
+    def test_shutdown_bounds_blocked_instrument_close_and_completes_worker_shutdown_and_logger(
+        self,
+    ) -> None:
+        import asyncio
+        from labcontrol.events import EventManager
+        from labcontrol.instrument_manager import InstrumentManager
+
+        events = EventManager()
+        trace: list[str] = []
+
+        class _SlowModules:
+            async def shutdown(self, *, timeout_seconds: float | None = None) -> None:
+                trace.append("module.start")
+                await asyncio.sleep(0.15)
+                trace.append("module.done")
+
+        class _BlockedCloseInstrument:
+            enforces_timeouts = True
+
+            async def close(self) -> None:
+                trace.append("instrument.close.start")
+                await asyncio.sleep(10.0)
+
+            async def shutdown(self, timeout_seconds: float | None = None) -> None:
+                del timeout_seconds
+                trace.append("instrument.worker.shutdown.start")
+                await asyncio.sleep(0.15)
+                trace.append("instrument.worker.shutdown.done")
+
+            async def force_stop(self, timeout_seconds: float = 0.25) -> None:
+                del timeout_seconds
+                trace.append("instrument.force_stop")
+
+        class _Logger:
+            def close(self) -> None:
+                trace.append("logger.close")
+
+        async def scenario() -> None:
+            config = load_simulated_config()
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            first_id = next(iter(manager.instruments))
+            manager.instruments = {first_id: _BlockedCloseInstrument()}  # type: ignore[assignment]
+            runtime = RuntimeService(config, module_descriptors=())
+            runtime._loop = SimpleNamespace(
+                call_soon=lambda fn, *args: trace.append("loop.stop"),
+                stop=lambda: None,
+            )  # type: ignore[assignment]
+            runtime.events = events
+            runtime.modules = _SlowModules()  # type: ignore[assignment]
+            runtime.instruments = manager
+            runtime.logger = _Logger()  # type: ignore[assignment]
+            runtime._poll_task = asyncio.create_task(asyncio.sleep(1000.0))
+
+            started = time.monotonic()
+            await runtime._shutdown_async(deadline=started + 1.5)
+            self.assertLess(time.monotonic() - started, 1.5)
+            self.assertTrue(runtime._poll_task.cancelled())
+            self.assertEqual(
+                trace,
+                [
+                    "module.start",
+                    "module.done",
+                    "instrument.close.start",
+                    "instrument.worker.shutdown.start",
+                    "instrument.worker.shutdown.done",
+                    "logger.close",
+                    "loop.stop",
+                ],
+            )
+
+        asyncio.run(scenario())
+
+    def test_shutdown_with_active_poll_task_completes_all_cleanup_steps(
+        self,
+    ) -> None:
+        import asyncio
+        from labcontrol.events import EventManager
+
+        trace: list[str] = []
+
+        class _Modules:
+            async def shutdown(self, *, timeout_seconds: float | None = None) -> None:
+                del timeout_seconds
+                trace.append("module.shutdown")
+
+        class _Instruments:
+            async def disconnect_all(self, *, timeout_seconds: float | None = None) -> None:
+                del timeout_seconds
+                trace.append("instrument.disconnect_all")
+
+        class _Logger:
+            def close(self) -> None:
+                trace.append("logger.close")
+
+        async def scenario() -> None:
+            runtime = RuntimeService(load_simulated_config(), module_descriptors=())
+            runtime._loop = SimpleNamespace(
+                call_soon=lambda fn, *args: trace.append("loop.stop"),
+                stop=lambda: None,
+            )  # type: ignore[assignment]
+            runtime.events = EventManager()
+            runtime.modules = _Modules()  # type: ignore[assignment]
+            runtime.instruments = _Instruments()  # type: ignore[assignment]
+            runtime.logger = _Logger()  # type: ignore[assignment]
+            runtime._poll_task = asyncio.create_task(asyncio.sleep(1000.0))
+
+            await runtime._shutdown_async(deadline=time.monotonic() + 2.0)
+            self.assertTrue(runtime._poll_task.cancelled())
+            self.assertEqual(
+                trace,
+                [
+                    "module.shutdown",
+                    "instrument.disconnect_all",
+                    "logger.close",
+                    "loop.stop",
+                ],
+            )
+
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

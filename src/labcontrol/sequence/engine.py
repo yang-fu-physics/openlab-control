@@ -11,6 +11,7 @@ Stop/Error 都沿协作路径退出当前命令，但不改变任何 System Inst
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import time
@@ -78,6 +79,8 @@ class SequenceEngine:
         self._waiting_for_instruments = False
         self._abort_requested = False
         self._fatal_abort = False
+        self._shutting_down = False
+        self._shutdown_timeout_seconds: float | None = None
         self._abort_message = ""
         self._completed_steps = 0
         self._total_steps = 0
@@ -110,6 +113,8 @@ class SequenceEngine:
             raise RuntimeError("A sequence is already running")
         self._abort_requested = False
         self._fatal_abort = False
+        self._shutting_down = False
+        self._shutdown_timeout_seconds = None
         self._abort_message = ""
         self._pause_gate.set()
         self._set_stability_paused(False)
@@ -296,27 +301,83 @@ class SequenceEngine:
                 RunState.COMPLETED: "completed",
                 RunState.STOPPED: "stopped",
             }.get(self.state, "error")
-            cleanup_succeeded = await self.modules.end_sequence(reason)
-            if not cleanup_succeeded:
-                self.state = RunState.FAULTED
-                self._abort_message = "One or more modules failed to end the sequence safely"
-                self.events.report(
-                    Severity.INFO,
-                    "sequence",
-                    "MODULE_END_SEQUENCE_FAILED",
-                    self._abort_message,
-                )
-            elif self.state is RunState.COMPLETED:
-                self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
-            self._publish(self._abort_message or self.state.value)
-            self.events.resolve_source("logging")
-            self.logger.close()
+            try:
+                if self._shutting_down:
+                    end_timeout = max(
+                        0.05,
+                        float(
+                            self._shutdown_timeout_seconds
+                            if self._shutdown_timeout_seconds is not None
+                            else self.config.modules.shutdown_timeout_seconds
+                        ),
+                    )
+                    cleanup_succeeded = await self._end_sequence_bounded(
+                        reason,
+                        end_timeout,
+                    )
+                else:
+                    cleanup_succeeded = await self.modules.end_sequence(reason)
+                if not cleanup_succeeded:
+                    self.state = RunState.FAULTED
+                    self._abort_message = "One or more modules failed to end the sequence safely"
+                    self.events.report(
+                        Severity.INFO,
+                        "sequence",
+                        "MODULE_END_SEQUENCE_FAILED",
+                        self._abort_message,
+                    )
+                elif self.state is RunState.COMPLETED:
+                    self.events.report(Severity.INFO, "sequence", "RUN_COMPLETED", "Sequence completed")
+                self._publish(self._abort_message or self.state.value)
+            finally:
+                self.events.resolve_source("logging")
+                self.logger.close()
         return self.state
 
     def _set_stability_paused(self, paused: bool) -> None:
         callback = getattr(self.instruments, "set_stability_paused", None)
         if callable(callback):
             callback(paused)
+
+    async def _end_sequence_bounded(
+        self,
+        reason: str,
+        timeout_seconds: float,
+    ) -> bool:
+        """关闭阶段使用有界超时结束模块序列，同时兼容仅接受 ``(reason)`` 的模块替身。"""
+
+        end_sequence = self.modules.end_sequence
+        accepts_timeout = False
+        try:
+            parameters = inspect.signature(end_sequence).parameters
+            accepts_timeout = (
+                "timeout_seconds" in parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in parameters.values()
+                )
+            )
+        except (TypeError, ValueError):
+            accepts_timeout = False
+        if accepts_timeout:
+            return await asyncio.wait_for(
+                end_sequence(reason, timeout_seconds=timeout_seconds),
+                timeout=timeout_seconds + 0.1,
+            )
+        return await asyncio.wait_for(
+            end_sequence(reason),
+            timeout=timeout_seconds,
+        )
+
+    def mark_shutting_down(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """通知引擎应用正在关闭，使 run_end 使用有界的关闭超时。"""
+
+        self._shutting_down = True
+        self._shutdown_timeout_seconds = timeout_seconds
 
     def pause(self) -> None:
         """请求协作 Pause；冻结调度和模块计时，不改变仪表当前输出。"""
