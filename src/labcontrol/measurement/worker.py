@@ -854,10 +854,21 @@ class ModuleWorkerClient:
                     action,
                 ) from exc
             event_error: Exception | None = None
+            active_remaining = deadline - time.monotonic()
+            active_since = time.monotonic()
+            is_paused = False
+            pause_heartbeat_timeout = min(max(timeout, 2.0), 10.0)
+            pause_heartbeat_deadline = 0.0
             while True:
-                remaining = deadline - time.monotonic()
+                now = time.monotonic()
+                if is_paused:
+                    poll_timeout = pause_heartbeat_deadline - now
+                else:
+                    active_remaining -= max(0.0, now - active_since)
+                    active_since = now
+                    poll_timeout = active_remaining
                 try:
-                    ready = remaining > 0 and connection.poll(remaining)
+                    ready = poll_timeout > 0 and connection.poll(poll_timeout)
                 except (EOFError, OSError) as exc:
                     self._invalidate(connection, process, min(timeout, 1.0))
                     raise WorkerRequestError(
@@ -887,6 +898,7 @@ class ModuleWorkerClient:
                     # 正常串行协议不应出现其他 id。忽略它并继续受同一 deadline 约束，
                     # 不允许异常消息延长请求。
                     continue
+                received_at = time.monotonic()
                 if message.get("type") != "response":
                     event_result: Mapping[str, Any] | None = None
                     if event_handler is not None:
@@ -894,6 +906,33 @@ class ModuleWorkerClient:
                             event_result = event_handler(dict(message))
                         except Exception as exc:
                             event_error = exc
+                    if (
+                        message.get("type") == "context_request"
+                        and str(message.get("kind", "")) == "operation_state"
+                        and event_error is None
+                    ):
+                        op_state = (
+                            str((event_result or {}).get("state", ""))
+                            .strip()
+                            .casefold()
+                        )
+                        now = time.monotonic()
+                        if op_state == "paused":
+                            if not is_paused:
+                                # 首次确认已处于 Pause 时，只结算消息到达前的活动耗时，
+                                # 不把暂停态下事件回调/调度的延迟算进活动预算。
+                                active_remaining -= max(
+                                    0.0,
+                                    received_at - active_since,
+                                )
+                            is_paused = True
+                            active_since = now
+                            pause_heartbeat_deadline = (
+                                now + pause_heartbeat_timeout
+                            )
+                        elif is_paused:
+                            is_paused = False
+                            active_since = now
                     if message.get("type") == "context_request":
                         # worker 在执行长测量时可同步询问新温场快照或 Pause/Stop 状态。
                         # 响应沿同一 Pipe 返回，仍由 request id 和子请求 id 双重关联。

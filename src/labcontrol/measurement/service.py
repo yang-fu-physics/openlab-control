@@ -97,6 +97,8 @@ class MeasurementModuleService:
         self._sequence_active = False
         self._operation_state = "idle"
         self._operation_state_lock = threading.RLock()
+        self._paused_since: float | None = None
+        self._paused_total_seconds = 0.0
         self._fresh_system_task: asyncio.Task[
             dict[str, InstrumentSnapshot]
         ] | None = None
@@ -407,19 +409,33 @@ class MeasurementModuleService:
             if timeout_seconds is None
             else timeout_seconds
         )
-        deadline = time.monotonic() + timeout
+        request_started = time.monotonic()
+        with self._operation_state_lock:
+            request_paused_base = self._paused_total_locked(request_started)
+        pause_event_timeout = min(max(timeout, 2.0), 10.0)
 
         def on_event(
             message: dict[str, Any],
         ) -> Mapping[str, Any] | None:
+            now = time.monotonic()
+            with self._operation_state_lock:
+                currently_paused = self._operation_state == "paused"
+                paused_elapsed = max(
+                    0.0,
+                    self._paused_total_locked(now) - request_paused_base,
+                )
+            active_elapsed = max(0.0, (now - request_started) - paused_elapsed)
+            active_remaining = timeout - active_elapsed
+            event_timeout = (
+                pause_event_timeout if currently_paused else active_remaining
+            )
+            if event_timeout <= 0:
+                raise TimeoutError("Module event processing timed out")
             future = asyncio.run_coroutine_threadsafe(
                 self._worker_event(record.descriptor.id, message), loop
             )
             try:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Module event processing timed out")
-                return future.result(timeout=remaining)
+                return future.result(timeout=event_timeout)
             except Exception:
                 future.cancel()
                 raise
@@ -1368,7 +1384,19 @@ class MeasurementModuleService:
             self._logical_slots = (1,)
             self._sequence_active = False
             with self._operation_state_lock:
+                self._end_pause_locked(time.monotonic())
                 self._operation_state = "idle"
+
+    def _paused_total_locked(self, now: float) -> float:
+        total = self._paused_total_seconds
+        if self._paused_since is not None:
+            total += max(0.0, now - self._paused_since)
+        return total
+
+    def _end_pause_locked(self, now: float) -> None:
+        if self._paused_since is not None:
+            self._paused_total_seconds += max(0.0, now - self._paused_since)
+            self._paused_since = None
 
     def pause_operations(self) -> None:
         """让模块下一次 context checkpoint 进入 Paused；不直接改变仪表输出。"""
@@ -1376,17 +1404,20 @@ class MeasurementModuleService:
         with self._operation_state_lock:
             if self._operation_state == "running":
                 self._operation_state = "paused"
+                self._paused_since = time.monotonic()
 
     def resume_operations(self) -> None:
         """让模块 checkpoint 继续，并用于 end_sequence 前解除 Pause。"""
 
         with self._operation_state_lock:
+            self._end_pause_locked(time.monotonic())
             self._operation_state = "running"
 
     def cancel_operations(self) -> None:
         """让模块 checkpoint 抛出协作取消；不能中断正在阻塞的第三方驱动调用。"""
 
         with self._operation_state_lock:
+            self._end_pause_locked(time.monotonic())
             self._operation_state = "stopping"
 
     async def shutdown(
