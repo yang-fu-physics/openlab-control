@@ -1274,10 +1274,15 @@ class InstrumentScannerWindow(QMainWindow):
                 address = str(
                     instance["resource"].currentData() or ""
                 ).strip()
-                if not address:
+                draft = self._resource_draft(address) if address else None
+                if not address or draft is None:
                     status.setText("Choose a detected VISA resource")
-                elif self._resource_draft(address).present:
+                elif draft.present:
                     status.setText("Detected and ready to save")
+                elif self._is_saved_offline_instance(instance, address):
+                    status.setText(
+                        "Not detected — saved configuration will be preserved"
+                    )
                 else:
                     status.setText("Not detected — this instance will not be saved")
         for row in self._resource_rows:
@@ -1354,10 +1359,19 @@ class InstrumentScannerWindow(QMainWindow):
                 item.setToolTip(label)
                 owner_combo = selected_by_address.get(draft.address.casefold())
                 item.setEnabled(
-                    draft.present and (owner_combo is None or owner_combo is combo)
+                    (draft.present or owner_combo is combo)
+                    and (owner_combo is None or owner_combo is combo)
                 )
-            index = combo.findData(selected)
-            combo.setCurrentIndex(max(0, index))
+            index = next(
+                (
+                    i
+                    for i in range(combo.count())
+                    if str(combo.itemData(i) or "").casefold()
+                    == selected.casefold()
+                ),
+                0,
+            )
+            combo.setCurrentIndex(index)
             combo.blockSignals(False)
 
     def _number_box(
@@ -1708,7 +1722,16 @@ class InstrumentScannerWindow(QMainWindow):
         self._refresh_resource_choices()
         if resource_combo is not None:
             selected = str(values.get("resource", ""))
-            resource_combo.setCurrentIndex(max(0, resource_combo.findData(selected)))
+            matched_index = next(
+                (
+                    i
+                    for i in range(resource_combo.count())
+                    if str(resource_combo.itemData(i) or "").casefold()
+                    == selected.casefold()
+                ),
+                0,
+            )
+            resource_combo.setCurrentIndex(matched_index)
         self._refresh_resource_assignments()
 
     def _remove_instance(
@@ -1739,12 +1762,23 @@ class InstrumentScannerWindow(QMainWindow):
             f"Unsupported config field type: {field.field_type}"
         )
 
-    def _resource_draft(self, address: str) -> ResourceDraft:
+    def _resource_draft(self, address: str) -> ResourceDraft | None:
         return next(
-            item
-            for item in self.resources
-            if item.address.casefold() == address.casefold()
+            (
+                item
+                for item in self.resources
+                if item.address.casefold() == address.casefold()
+            ),
+            None,
         )
+
+    @staticmethod
+    def _is_saved_offline_instance(
+        row: dict[str, Any],
+        address: str,
+    ) -> bool:
+        saved_address = str(row.get("source_values", {}).get("resource", "")).strip()
+        return bool(saved_address and saved_address.casefold() == address.casefold())
 
     def _instance_is_complete(
         self,
@@ -1761,7 +1795,12 @@ class InstrumentScannerWindow(QMainWindow):
         if not descriptor.identity_pattern:
             return True
         address = str(row["resource"].currentData() or "").strip()
-        return bool(address and self._resource_draft(address).present)
+        if not address:
+            return False
+        draft = self._resource_draft(address)
+        if draft is None:
+            return False
+        return draft.present or self._is_saved_offline_instance(row, address)
 
     def _panel_key(
         self,
@@ -1940,6 +1979,8 @@ class InstrumentScannerWindow(QMainWindow):
         if descriptor.identity_pattern:
             address = str(row["resource"].currentData())
             draft = self._resource_draft(address)
+            if draft is None:
+                return None, ()
             result["resource"] = address
             result["identity"] = draft.identity
         pid_creations: list[PlannedPidCreation] = []
