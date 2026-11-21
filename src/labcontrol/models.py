@@ -122,6 +122,7 @@ class InstrumentSnapshot:
     ready: bool | None = None
     metrics: dict[str, InstrumentMetric] = field(default_factory=dict)
     controls: dict[str, InstrumentControlState] = field(default_factory=dict)
+    sampled_metrics: frozenset[str] | None = None
 
     @property
     def connected(self) -> bool:
