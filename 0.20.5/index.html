@@ -494,7 +494,7 @@
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        写测量模块的学习顺序
+        根据你的角色选择入口
       
     </span>
   </a>
@@ -505,7 +505,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        温度和磁场仪表是另一条路线
+        一张表分清两个核心概念
       
     </span>
   </a>
@@ -516,7 +516,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        先记住一条原则
+        典型实验工作流
       
     </span>
   </a>
@@ -1793,7 +1793,7 @@
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        写测量模块的学习顺序
+        根据你的角色选择入口
       
     </span>
   </a>
@@ -1804,7 +1804,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        温度和磁场仪表是另一条路线
+        一张表分清两个核心概念
       
     </span>
   </a>
@@ -1815,7 +1815,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        先记住一条原则
+        典型实验工作流
       
     </span>
   </a>
@@ -1846,105 +1846,121 @@
 
 <section class="olc-hero">
   <div>
-    <div class="olc-eyebrow">OpenLab Control 0.20.5 · 中文教程</div>
-    <h1>先做出一个能测量的模块，再慢慢增加功能。</h1>
+    <div class="olc-eyebrow">OpenLab Control 0.20.5 · 中文使用与开发手册</div>
+    <h1>像 MultiVu 一样编排你的低温与输运实验。</h1>
     <p class="olc-hero-copy">
-      不需要先读懂整个程序。你可以复制一个不连接仪表的四通道例子，运行成功后，再加入
-      自己的设置、仪表命令和测量步骤。Enable 后，模块状态和最近通道值会留在主窗口
-      左侧；不必一直展开每个独立窗口。
+      OpenLab Control 是一套开源的实验室自动化控制框架：用树状 SEQ 编排变温、扫场和定时步骤，
+      按需勾选测量模块采集多通道数据，并在独立窗口中实时看图。无需读懂整个主程序，就能快速上手使用或扩展自己的仪表。
     </p>
     <div class="olc-actions">
-      <a class="md-button md-button--primary" href="getting-started/">第一次使用</a>
-      <a class="md-button" href="development/first-module/">写第一个测量模块</a>
-      <a class="md-button" href="development/system-instrument/">编写 System Instrument</a>
+      <a class="md-button md-button--primary" href="getting-started/">快速上手</a>
+      <a class="md-button" href="OPERATIONS/">操作手册</a>
+      <a class="md-button" href="development/">开发测量模块</a>
     </div>
   </div>
-  <div class="olc-terminal" aria-label="最小测量模块示例">
-    <pre><code># 一行生命周期骨架；四通道完整例子见教程
+  <div class="olc-terminal" aria-label="最小 SEQ 与模块示意">
+    <pre><code><span class="olc-keyword"># 1. 用树状 SEQ 编排变温、扫场与测量</span>
+T Set Temperature 10 K at 5 K/min in Settle mode
+T Scan Field -1 T to 1 T in 21 steps at 0.5 T/min, Settle
+T     Measure
+T End Scan
+T End Sequence
+
+<span class="olc-keyword"># 2. 最小测量模块只需三个方法</span>
 <span class="olc-keyword">class</span> Module:
     columns = {<span class="olc-string">"Resistance"</span>: <span class="olc-string">"Ohm"</span>}
-    display_columns = (<span class="olc-string">"Resistance"</span>,)
-
-    <span class="olc-keyword">def</span> <span class="olc-method">open</span>(self, api):
-        self.ready = <span class="olc-keyword">True</span>
-        self.output_enabled = <span class="olc-keyword">False</span>
-
-    <span class="olc-keyword">def</span> <span class="olc-method">measure</span>(self, channel, api):
+    <span class="olc-keyword">def</span> <span class="olc-method">open</span>(self, api): ...
+    <span class="olc-keyword">def</span> <span class="olc-method">measure</span>(self, slot, api):
         <span class="olc-keyword">return</span> {<span class="olc-string">"Resistance"</span>: 100.0}
-
-    <span class="olc-keyword">def</span> <span class="olc-method">on_event</span>(self, event, data, api):
-        <span class="olc-keyword">if</span> event == <span class="olc-string">"run_end"</span>:
-            self.output_enabled = <span class="olc-keyword">False</span>
-
-    <span class="olc-keyword">def</span> <span class="olc-method">close</span>(self, api):
-        self.output_enabled = <span class="olc-keyword">False</span>
-        self.ready = <span class="olc-keyword">False</span></code></pre>
+    <span class="olc-keyword">def</span> <span class="olc-method">close</span>(self, api): ...</code></pre>
   </div>
 </section>
 
 <div class="olc-statbar">
-  <div class="olc-stat"><strong>每次收尾</strong><span>默认关闭，明确选择才保持</span></div>
-  <div class="olc-stat"><strong>4 通道</strong><span>现成教学例子</span></div>
-  <div class="olc-stat"><strong>70%–150%</strong><span>文字可独立缩放</span></div>
-  <div class="olc-stat"><strong>无需仪表</strong><span>先在电脑上练习</span></div>
+  <div class="olc-stat"><strong>开箱仿真</strong><span>无需硬件，5 分钟跑通完整实验</span></div>
+  <div class="olc-stat"><strong>按需加载</strong><span>测量模块独立开关，互不干扰</span></div>
+  <div class="olc-stat"><strong>完整留痕</strong><span>数据、配置、日志自动归档</span></div>
+  <div class="olc-stat"><strong>安全优先</strong><span>三层限值保护，不悄悄改写仪表</span></div>
 </div>
 
-<h2 id="_1">写测量模块的学习顺序<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<h2 id="_1">根据你的角色选择入口<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
 <p class="olc-section-lead">
-Measurement Module 是“完成一次测量”的小程序，例如读取电阻、电压或电流。初学时按下面
-四步学习即可。
+不需要从头到尾读完所有文档。先看你想做什么，再直接进入对应章节。
 </p>
 
 <div class="olc-card-grid">
-  <a class="olc-card" href="development/first-module/">
-    <span class="olc-card-number">01</span>
-    <h3>复制并运行教学模块</h3>
-    <p>先让一个不连接真实仪表的模块出现在列表中，并写出四行测试数据。</p>
+  <a class="olc-card" href="getting-started/">
+    <span class="olc-card-number">01 · 实验员</span>
+    <h3>安装、配表与运行实验</h3>
+    <p>解压即用 Windows 发布包，用扫描向导认出仪表，编写第一条 SEQ 并在 Data Browser 中实时看图。</p>
   </a>
-  <a class="olc-card" href="development/results-and-slots/">
-    <span class="olc-card-number">02</span>
-    <h3>让每个通道各写一行</h3>
-    <p>只填写本通道测到的数值；没有测量的列保持空白。</p>
+  <a class="olc-card" href="development/">
+    <span class="olc-card-number">02 · 测量模块开发者</span>
+    <h3>接入电阻、电压或锁相测量</h3>
+    <p>把一台或多台测量仪表封装成独立模块，支持多通道对齐、设置窗口、原始数据和自定义 SEQ 指令。</p>
   </a>
-  <a class="olc-card" href="development/frontend/">
-    <span class="olc-card-number">03</span>
-    <h3>按需增加设置窗口</h3>
-    <p>简单模块可以没有窗口；需要量程、电流等参数时再添加。</p>
-  </a>
-  <a class="olc-card" href="development/instrument-drivers/">
-    <span class="olc-card-number">04</span>
-    <h3>接入真实仪表</h3>
-    <p>每台仪表的命令放在自己的文件里，主文件只写测量顺序。</p>
+  <a class="olc-card" href="development/system-instrument/">
+    <span class="olc-card-number">03 · 系统维护者</span>
+    <h3>接入温控仪、磁体或监视表</h3>
+    <p>只有更换或新增主温度、主磁场、压缩机开关或常驻监控仪表时才需要阅读这一部分。</p>
   </a>
 </div>
 
-<h2 id="_2">温度和磁场仪表是另一条路线<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>温控仪和磁场控制器不属于 Measurement Module。只有需要更换主温度、主磁场或只读监视
-仪表时，才阅读 <a href="development/system-instrument/">System Instrument 教程</a>。普通测量模块作者可以
-完全跳过那一章。一个温控器同时给出样品温度、冷头温度、加热输出等值时，0.20.1 可以
-让它们共用一个通讯连接；前面板按普通周期刷新，测量模块需要温场时则会即时读取。同一
-仪表不会同时执行两次通讯；当前完整指令完成后，测量读取会先于等待中的后台刷新。</p>
-<p>连接仪表前，先打开<a href="guides/instrument-scanner/">扫描与配置仪表</a>。第一页确认 VISA 地址；
-未分配地址保存给 Measurement Module，分配给 System Instrument 的地址只进入对应实例。
-网络仪表的 Host/Port 由自己的 System Instrument 模板声明并显示在该型号页面。最后一页
-统一检查固定面板、角色、全局顺序和完整写入预览。三个内置仿真默认都关闭，没有 System
-面板时程序也能启动。</p>
-<h2 id="_3">先记住一条原则<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>模块只负责自己的仪表和测量步骤。SEQ、DAT 文件、温度目标和磁场目标由主程序管理。这样
-开发一个新模块时，不需要理解或修改整个主程序。</p>
+<h2 id="_2">一张表分清两个核心概念<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>OpenLab Control 把所有硬件分成两类，职责清晰、互不越界：</p>
+<table>
+<thead>
+<tr>
+<th>对比项</th>
+<th>System Instrument（系统仪表）</th>
+<th>Measurement Module（测量模块）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>管什么</strong></td>
+<td>实验环境：主温度、主磁场、压缩机、冷头温度等</td>
+<td>数据采集：电阻、I-V、Delta、锁相、电桥等</td>
+</tr>
+<tr>
+<td><strong>什么时候启用</strong></td>
+<td>随实验台固定配置，主程序启动后常驻连接</td>
+<td>每次启动默认关闭，做实验前按需勾选 Enable</td>
+</tr>
+<tr>
+<td><strong>怎么配置</strong></td>
+<td>使用 <strong>Instrument Scanner</strong> 向导统一扫描并设置安全限值</td>
+<td>在主程序 <strong>Modules</strong> 窗口中打开专属 Settings 页并手动 Apply</td>
+</tr>
+<tr>
+<td><strong>谁负责数据文件</strong></td>
+<td>持续记录到 <code>instrument_status.dat</code>，并在测量时刻提供同步温场</td>
+<td>返回各通道测量值，由主程序统一写入实验 <code>.dat</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">典型实验工作流<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>① Instrument Scanner 确认仪表地址与限值（首次或更换硬件时）
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        ↓
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>② 打开主程序 → 在 Modules 勾选所需测量模块 → 核对参数并点击 Apply Settings
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        ↓
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>③ 编辑或加载 .seq → 确认数据文件路径 → 点击 Run
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        ↓
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>④ 左侧卡片看实时数值 / Data Browser 对比曲线 / runs/ 自动保存完整记录
+</span></code></pre></div>
 <div class="olc-screenshot">
-  <img src="main-window-preview.png" alt="OpenLab Control 主窗口与 Sequence Command Bar" loading="lazy">
-  <p>v0.13.0 主窗口；已安装一个示例模块，但仍保持 Disabled。</p>
+  <img src="main-window-preview.png" alt="OpenLab Control 主窗口界面示意" loading="lazy">
+  <p>OpenLab Control 主窗口：左侧为运行控制与模块监视卡，中间为 SEQ 与画图区，右侧为指令栏，底部为系统仪表面板。</p>
 </div>
 
 <div class="admonition warning">
-<p class="admonition-title">连接真实仪表前仍要现场检查</p>
-<p>教学例子只能说明程序怎样运行，不能代替仪表本机的限流、限压、联锁和人工急停。
-没有完成低风险真机检查前，不要无人值守运行。</p>
+<p class="admonition-title">接入真实硬件前请先做低风险验证</p>
+<p>2026-11-05 已现场完成 Lake Shore 340 温控、ZLAN 压缩机控制和 Keithley 6221 + 2182A Delta 测量的实机测试（仅覆盖已测接线与配置）。
+接入其他型号或新接线前，请先阅读<a href="guides/safety-checklist/">仪表安全清单</a>，务必保留仪表本机限流/限压/限温保护、硬件联锁与人工急停。</p>
 </div>
 <div class="olc-next">
-  <a href="getting-started/">第一次使用：先运行仿真 →</a>
-  <a href="development/first-module/">开始写第一个测量模块 →</a>
+  <a href="getting-started/">开始使用：5 分钟跑通仿真实验 →</a>
+  <a href="development/first-module/">模块开发：动手写第一个测量模块 →</a>
 </div>
 
 

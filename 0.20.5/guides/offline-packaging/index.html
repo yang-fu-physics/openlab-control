@@ -1427,10 +1427,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        手动安装
+        1. 离线安装扩展（复制目录即可）
       
     </span>
   </a>
@@ -1438,10 +1438,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#2-python" class="md-nav__link">
     <span class="md-ellipsis">
       
-        所有扩展共用核心依赖
+        2. 依赖统一打包，现场无需装 Python
       
     </span>
   </a>
@@ -1449,10 +1449,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        发布前清单
+        3. 正式版本发布自检清单
       
     </span>
   </a>
@@ -1460,10 +1460,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#measurement-module" class="md-nav__link">
+  <a href="#4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        第三方 Measurement Module
+        4. 分享第三方模块建议附带的内容
       
     </span>
   </a>
@@ -1810,10 +1810,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        手动安装
+        1. 离线安装扩展（复制目录即可）
       
     </span>
   </a>
@@ -1821,10 +1821,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#2-python" class="md-nav__link">
     <span class="md-ellipsis">
       
-        所有扩展共用核心依赖
+        2. 依赖统一打包，现场无需装 Python
       
     </span>
   </a>
@@ -1832,10 +1832,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        发布前清单
+        3. 正式版本发布自检清单
       
     </span>
   </a>
@@ -1843,10 +1843,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#measurement-module" class="md-nav__link">
+  <a href="#4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        第三方 Measurement Module
+        4. 分享第三方模块建议附带的内容
       
     </span>
   </a>
@@ -1874,62 +1874,58 @@
 
 
 <h1 id="_1">离线安装与发布<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>第一阶段不提供在线商店。Measurement Module 和 System Instrument 都以一个完整目录为安装
-单元，可以通过 U 盘或内部文件服务复制；两者仍保持各自的名称和目录。</p>
-<h2 id="_2">手动安装<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>Measurement Module：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>repository/modules/&lt;module-id&gt;/
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    ↓
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>OpenLabControl/modules/&lt;module-id&gt;/
+<p>OpenLab Control 面向常见处于内网或离线环境的实验室电脑，因此<strong>不设在线插件商店</strong>，所有扩展都以“复制整个文件夹”的方式离线安装。</p>
+<h2 id="1">1. 离线安装扩展（复制目录即可）<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p><strong>安装测量模块（Measurement Module）</strong>：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>openlab-control-Module/modules/&lt;模块ID&gt;/
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>        ↓ 整个目录复制到
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>OpenLabControl/modules/&lt;模块ID&gt;/
 </span></code></pre></div>
-<p>System Instrument：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>repository/instruments/&lt;instrument-id&gt;/
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    ↓
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>OpenLabControl/system_instruments/&lt;instrument-id&gt;/
+<p>重启软件后，新模块会出现在 <strong>Modules</strong> 列表中（默认 Disabled）。</p>
+<p><strong>安装系统仪表（System Instrument）</strong>：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>openlab-control-Device/instruments/&lt;仪表ID&gt;/
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>        ↓ 整个目录复制到
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>OpenLabControl/system_instruments/&lt;仪表ID&gt;/
 </span></code></pre></div>
-<p>重启后，Measurement Module 会出现在 Modules Manager 中并保持 Disabled。复制 System
-Instrument 目录后还要运行 Instrument Scanner：为它添加物理实例，确认固定面板、角色、
-顺序和限制，再检查完整保存预览。单纯复制目录不会访问真实仪表。</p>
-<p>扫描器把未分配 VISA 写入 <code>configs/visa.resources.toml</code>，把 System 实例写入
-<code>configs/instruments/&lt;instrument-id&gt;.toml</code>。每种型号可有多个 <code>[[instances]]</code>；一个实例的
-多个面板共用同一进程和连接。专用网络仪表的 Host/Port 由自己的模板字段提供。生成配置
-保存时按预览全量覆盖；<code>configs/pid/&lt;instance-id&gt;.toml</code> 第一次建立后不会被扫描器覆盖或删除。</p>
-<p>一个完全干净的发布目录可以没有 System 面板并正常启动，三个内置仿真也默认关闭。</p>
-<h2 id="_3">所有扩展共用核心依赖<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>主框架统一提供并锁定 PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions。
-System Instrument 与 Measurement Module 不声明、不安装第二套依赖，也不建立自己的 Python
-runtime。</p>
-<p>新实现确实需要其他第三方包时：</p>
-<ol>
-<li>把精确版本加入核心 <code>pyproject.toml</code> 和 <code>requirements-lock.txt</code>；</li>
-<li>在全新环境运行核心、System Instrument 和 Measurement Module 测试；</li>
-<li>由 GitHub Actions 重新构建完整 Windows 发布包。</li>
-</ol>
-<p>这样发布 ZIP 本身就是完整离线环境，现场电脑不需要 Python 或联网安装。</p>
-<h2 id="_4">发布前清单<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核心稳定版使用与项目版本一致的 <code>v&lt;版本&gt;</code> 标签，由 GitHub Actions 的 Windows
-      Runner 重新测试、打包和上传。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 发布 ZIP 根目录有 <code>OpenLabControl.exe</code>、<code>InstrumentScanner.exe</code> 和唯一的
-      <code>_internal/</code>，没有发布用 <code>tools/</code> 目录。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 目录名、清单 ID 和文档一致。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 版本号已更新，变化写入 README/CHANGELOG。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 没有仪表地址、令牌、私钥、真实 DAT 或本机状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 最小生命周期、异常状态、Pause/Stop、重复关闭测试通过。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 真实仪表代码明确标注真机验证状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 从一个全新的 OpenLab Control 文件夹完成手动复制安装测试。</li>
-</ul>
-<h2 id="measurement-module">第三方 Measurement Module<a class="headerlink" href="#measurement-module" title="Permanent link">&para;</a></h2>
-<p>第三方目录应说明：</p>
+<p>复制完成后，运行 <strong>Instrument Scanner</strong> 为该型号添加物理实例、配置连接与安全上下限并保存，再重启主程序。单纯复制目录不会接触任何真实硬件。</p>
+<blockquote>
+<p>扫描器保存的结果写入 <code>configs/visa.resources.toml</code> 与 <code>configs/instruments/&lt;仪表ID&gt;.toml</code>；已存在的 <code>configs/pid/&lt;实例ID&gt;.toml</code> 不会被扫描器覆盖或删除。</p>
+</blockquote>
+<h2 id="2-python">2. 依赖统一打包，现场无需装 Python<a class="headerlink" href="#2-python" title="Permanent link">&para;</a></h2>
+<p>框架共享并锁定以下五个核心包：</p>
 <ul>
-<li>仪表组合、接线与固件要求；</li>
-<li>数字状态码表；</li>
-<li>默认设置和安全边界；</li>
-<li>已验证与未验证的硬件；</li>
-<li>自动测试和真机测试摘要。</li>
+<li><code>PySide6</code></li>
+<li><code>QtAwesome</code></li>
+<li><code>packaging</code></li>
+<li><code>PyVISA</code></li>
+<li><code>typing_extensions</code></li>
 </ul>
-<p>System Instrument 通常随实验系统固定并由系统维护者部署。当前两类内容都只支持手动复制，
-不提供在线索引或自动安装。</p>
+<p>所有测量模块和系统仪表直接复用主框架环境，不各自建虚拟环境，也不在界面里临时装包。如果新驱动确实需要额外的第三方 Python 包，正确做法是：</p>
+<ol>
+<li>将精确版本号加入核心 <code>pyproject.toml</code> 和 <code>requirements-lock.txt</code>；</li>
+<li>在全新环境跑通核心、系统仪表和测量模块的全部测试；</li>
+<li>推送版本标签，由 GitHub Actions 重新打出完整离线的 Windows ZIP 发布包。</li>
+</ol>
+<h2 id="3">3. 正式版本发布自检清单<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<ul class="task-list">
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>pyproject.toml</code> 版本号与 Git 标签 <code>v&lt;版本&gt;</code> 一致，由 GitHub Actions Windows Runner 自动测试、打包并发布。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 发布 ZIP 根目录包含 <code>OpenLabControl.exe</code>、<code>InstrumentScanner.exe</code> 和唯一的 <code>_internal/</code>，不含 <code>tools/</code>。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 目录名、清单 ID 与文档完全一致。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 版本变更已写入 <code>CHANGELOG.md</code> 与 <code>README.md</code>。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 包内没有任何本机仪表地址、Token、私钥、真实 DAT 或 <code>module_data/</code>。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 生命周期、异常状态、Pause/Stop 与重复关闭测试全部通过。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 驱动文档明确写清了实机验证状态（已验证范围 / Beta 未验证）。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 在一个全新解压的发布文件夹中实测过“手动复制安装 → 启动运行”。</li>
+</ul>
+<h2 id="4">4. 分享第三方模块建议附带的内容<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<p>给同事或社区分享一个测量模块目录时，建议在目录 <code>README.md</code> 里写清：</p>
+<ol>
+<li>适用仪表型号、接线方式与固件版本要求；</li>
+<li><code>StatusCode</code> 数字状态码对照表；</li>
+<li>默认参数与硬件安全限制；</li>
+<li>哪些组合已经实机测过、哪些仍为 Beta；</li>
+<li>自动化测试与真机测试记录摘要。</li>
+</ol>
 
 
 

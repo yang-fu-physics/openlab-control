@@ -1246,10 +1246,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#read_status" class="md-nav__link">
+  <a href="#1-read_status" class="md-nav__link">
     <span class="md-ellipsis">
       
-        read_status()：完整状态
+        1. read_status()：完整状态轮询
       
     </span>
   </a>
@@ -1257,10 +1257,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#read_measurement-dat" class="md-nav__link">
+  <a href="#2-read_measurement" class="md-nav__link">
     <span class="md-ellipsis">
       
-        read_measurement()：写 DAT 前的即时主值
+        2. read_measurement()：测量时刻的快速读取
       
     </span>
   </a>
@@ -1268,10 +1268,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        同一连接不会被并发访问
+        3. 核心如何保证同一连接绝不并发冲突？
       
     </span>
   </a>
@@ -1279,10 +1279,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        一台仪表返回多个值
+        4. 一台仪表展示多个面板
       
     </span>
   </a>
@@ -1290,10 +1290,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        两类数据文件
+        5. 两份日志各自记什么？
       
     </span>
   </a>
@@ -1301,10 +1301,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ready" class="md-nav__link">
+  <a href="#6-ready" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ready 不能绕过核心判稳
+        6. ready 与核心判稳的关系
       
     </span>
   </a>
@@ -1832,10 +1832,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#read_status" class="md-nav__link">
+  <a href="#1-read_status" class="md-nav__link">
     <span class="md-ellipsis">
       
-        read_status()：完整状态
+        1. read_status()：完整状态轮询
       
     </span>
   </a>
@@ -1843,10 +1843,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#read_measurement-dat" class="md-nav__link">
+  <a href="#2-read_measurement" class="md-nav__link">
     <span class="md-ellipsis">
       
-        read_measurement()：写 DAT 前的即时主值
+        2. read_measurement()：测量时刻的快速读取
       
     </span>
   </a>
@@ -1854,10 +1854,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        同一连接不会被并发访问
+        3. 核心如何保证同一连接绝不并发冲突？
       
     </span>
   </a>
@@ -1865,10 +1865,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#4" class="md-nav__link">
     <span class="md-ellipsis">
       
-        一台仪表返回多个值
+        4. 一台仪表展示多个面板
       
     </span>
   </a>
@@ -1876,10 +1876,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        两类数据文件
+        5. 两份日志各自记什么？
       
     </span>
   </a>
@@ -1887,10 +1887,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ready" class="md-nav__link">
+  <a href="#6-ready" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ready 不能绕过核心判稳
+        6. ready 与核心判稳的关系
       
     </span>
   </a>
@@ -1918,11 +1918,9 @@
 
 
 <h1 id="_1">读取、前面板与日志<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>多数 System Instrument 只需写 <code>read_status()</code>。只有完整状态读取明显较慢时，才额外写
-<code>read_measurement()</code>。</p>
-<h2 id="read_status"><code>read_status()</code>：完整状态<a class="headerlink" href="#read_status" title="Permanent link">&para;</a></h2>
-<p>核心周期性调用它，用于前面板、温度/磁场判稳、Live Trend、报警和
-<code>instrument_status.dat</code>。返回一个普通字典：</p>
+<p>多数系统仪表只需要实现一个 <code>read_status()</code>。只有当完整状态查询很慢（例如要发十几条命令）、会影响实验采样速度时，才需要额外覆盖 <code>read_measurement()</code>。</p>
+<h2 id="1-read_status">1. <code>read_status()</code>：完整状态轮询<a class="headerlink" href="#1-read_status" title="Permanent link">&para;</a></h2>
+<p>核心按周期调用它来刷新底部面板、判定温场稳定、绘制 Live Trend、触发报警以及写入 <code>instrument_status.dat</code>。返回值是一个普通 Python 字典：</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">return</span> <span class="p">{</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="s2">"value"</span><span class="p">:</span> <span class="n">temp_b</span><span class="p">,</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="s2">"target"</span><span class="p">:</span> <span class="n">setpoint</span><span class="p">,</span>
@@ -1936,76 +1934,69 @@
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="p">},</span>
 </span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>字段很少：</p>
 <table>
 <thead>
 <tr>
 <th>键</th>
 <th>必需</th>
-<th>含义</th>
+<th>说明</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>value</code></td>
 <td>是</td>
-<td>主读数；数值或 <code>None</code></td>
+<td>主读数（有限数值或 <code>None</code>）</td>
 </tr>
 <tr>
 <td><code>target</code></td>
 <td>否</td>
-<td>当前目标</td>
+<td>当前目标值（单回路简写）</td>
 </tr>
 <tr>
 <td><code>rate</code></td>
 <td>否</td>
-<td>每分钟速率</td>
+<td>当前每分钟变化速率</td>
 </tr>
 <tr>
 <td><code>moving</code></td>
 <td>否</td>
-<td>仪表是否正在改变值</td>
+<td>仪表是否正在升降温/升降场（bool）</td>
 </tr>
 <tr>
 <td><code>ready</code></td>
 <td>否</td>
-<td>仪表自己的就绪/稳定状态字</td>
+<td>仪表自身的状态字是否就绪（bool，没有就省略或填 <code>None</code>）</td>
 </tr>
 <tr>
 <td><code>auxiliary</code></td>
 <td>否</td>
-<td>选中的附加读数</td>
+<td>清单中声明的附加读数字典（数值、短文本、布尔值或 <code>None</code>）</td>
 </tr>
 </tbody>
 </table>
-<p>上表是单控制端点的简写。若同一实例启用了多个不同的 control，顶层仍返回 <code>value</code> 和
-<code>auxiliary</code>，但每个回路的 <code>target/rate/moving/ready</code> 必须放进
-<code>controls[control_id]</code>。完整示例见 <a href="../system-instrument/#multiple-controls">System Instrument 从这里开始</a>。</p>
-<p>核心从 <code>instrument.toml</code> 取得名称、单位和小数位，并负责时间戳、连接状态和内部快照。后端
-不要重复返回这些元数据。数值必须有限；附加值可以是有限数值、短文字、布尔值或 <code>None</code>。</p>
-<p>完整状态读取仍要检查所有安全状态，即使操作者没有勾选某个辅助读数。例如 TempA 未显示时，
-TempA 过温仍必须报错。</p>
-<h2 id="read_measurement-dat"><code>read_measurement()</code>：写 DAT 前的即时主值<a class="headerlink" href="#read_measurement-dat" title="Permanent link">&para;</a></h2>
-<p>Measurement Module 调用 <code>api.instruments()</code> 时，核心请求一次即时仪表读数，不复用最多一秒前
-的前面板缓存。同一时刻多个模块的请求会合并。</p>
-<p>基类默认调用 <code>read_status()</code>。若完整查询需要很多命令，可只实现：</p>
+<blockquote>
+<p><strong>多回路控制器</strong>：若同一物理实例启用了多个不同的 <code>control</code>，顶层仍返回 <code>value</code> 和 <code>auxiliary</code>，但每个回路各自的 <code>target / rate / moving / ready</code> 必须放进 <code>controls[control_id]</code> 返回，详见 <a href="../system-instrument/#multiple-controls">多个独立控制回路</a>。</p>
+</blockquote>
+<p>名称、单位和小数位统一来自 <code>instrument.toml</code>，后端不需要重复返回。即使操作员在界面上隐藏了某个辅助读数，<code>read_status()</code> 也仍应照常检查该仪表的关键安全状态。</p>
+<h2 id="2-read_measurement">2. <code>read_measurement()</code>：测量时刻的快速读取<a class="headerlink" href="#2-read_measurement" title="Permanent link">&para;</a></h2>
+<p>当测量模块调用 <code>api.instruments()</code> 或核心准备写一条实验 DAT 行时，框架会主动请求一次<strong>测量专用即时读取</strong>，而不直接拿前面板最多 1 秒前的旧缓存敷衍。同一时刻多个模块的请求会自动合并为一次查询。</p>
+<p>默认基类直接调用 <code>read_status()</code>。如果完整状态太慢，可以只覆盖 <code>read_measurement()</code> 读最关键的主值：</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">read_measurement</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">"value"</span><span class="p">:</span> <span class="n">read_sample_temperature</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_transport</span><span class="p">)}</span>
 </span></code></pre></div>
-<p>本次没有同步读取的辅助列会写空，不会沿用旧值。后台 <code>read_status()</code> 仍持续负责完整安全
-检查；<code>read_measurement()</code> 自己读到无效主值时也必须报错。</p>
-<h2 id="_2">同一连接不会被并发访问<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>核心对每个 System Instrument 串行执行：</p>
+<p>本次没有同步查的附加列会干净地留空，不会混入旧缓存值；后台常规 <code>read_status()</code> 依然按周期运行并负责完整安全检查。</p>
+<h2 id="3">3. 核心如何保证同一连接绝不并发冲突？<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
+<p>每个物理仪表实例的所有操作都走同一个<strong>带优先级的串行队列</strong>，绝不会同时向同一串口/GPIB 发两条命令：</p>
 <ol>
-<li>已经开始的一条仪表指令先完成；</li>
-<li>等待中的控制和安全操作优先；</li>
-<li><code>read_measurement()</code> 先于尚未开始的普通 <code>read_status()</code>；</li>
-<li>后台 <code>read_status()</code> 最后执行。</li>
+<li>已经发出的当前指令先跑完（不会被中途强行打断，因此底层必须设有限超时）；</li>
+<li>等待中的<strong>安全联动响应</strong>与<strong>控制写命令</strong>最先执行；</li>
+<li>等待中的 <code>read_measurement()</code> 排在尚未开始的普通轮询之前；</li>
+<li>常规后台 <code>read_status()</code> 最后执行。</li>
 </ol>
-<p>“优先”不会中断已经发出的命令，所以底层 I/O 仍必须有有限超时。后端不要另开线程访问同一
-VISA Session。</p>
-<h2 id="_3">一台仪表返回多个值<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>在 API v4 清单中分别声明固定面板和读数：</p>
+<p>后端请保持纯同步，不要自己再另开后台线程去抢同一个 VISA 会话。</p>
+<h2 id="4">4. 一台仪表展示多个面板<a class="headerlink" href="#4" title="Permanent link">&para;</a></h2>
+<p>以温控仪为例，可以在同一份 <code>instrument.toml</code> 中声明一个 <code>controller</code> 面板加一个 <code>readout_grid</code> 面板，共用同一物理连接：</p>
 <div class="language-toml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[[controls]]</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"loop_1"</span>
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Loop 1"</span>
@@ -2048,42 +2039,35 @@ VISA Session。</p>
 </span><span id="__span-2-40"><a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="n">unit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"%FS"</span>
 </span><span id="__span-2-41"><a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a><span class="n">decimals</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span>
 </span></code></pre></div>
-<p>扫描器为实例列出这两个固定面板。操作者可以分别开启、关闭和排序它们，并给 controller
-选择 <code>temp_b</code> 与角色；不能临时创建作者未声明的面板。运行时会收集所有已开启面板引用的
-读数。<code>read_status()</code> 的 <code>auxiliary</code> 应返回这些附加键，键集合在运行中不能变化。</p>
-<p><code>readout</code> 显示一个读数，<code>readout_grid</code> 显示一到四个，<code>switch</code> 把 0/1 状态显示为 Off/On
-并提供清单引用的指令按钮。多个面板仍共用同一物理实例和通讯会话。结构化字典保留数值
-类型、单位和精度；不要把多个值拼成一段字符串。</p>
-<p>一个实例有多个 Controller 时，各面板分别保存目标、速率、动作、ready 和核心判定的
-稳定状态。标准温度或磁场角色对应的回路仍作为实验 DAT 的主控制值；所有已启用 Controller
-的完整独立状态都写入 <code>instrument_status.dat</code>。</p>
-<h2 id="_4">两类数据文件<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>请返回结构化的数字字典，不要把多个值拼成一长段字符串。</p>
+<h2 id="5">5. 两份日志各自记什么？<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>文件</th>
-<th>何时写</th>
-<th>内容</th>
+<th>写入时机</th>
+<th>记录内容</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>实验 DAT</td>
-<td>每个 <code>Measure</code> 结果行</td>
-<td>与模块测量同步的主值和本次即时辅助值</td>
+<td>实验 DAT（如 <code>experiment.dat</code>）</td>
+<td>每条 <code>Measure</code> 结果行</td>
+<td>测量时刻的同步主值与模块测量列</td>
 </tr>
 <tr>
 <td><code>instrument_status.dat</code></td>
-<td>Run 期间按独立周期</td>
-<td>每个 Controller 的独立状态，以及每台物理仪表一次连接信息和辅助读数</td>
+<td>Run 期间按独立周期（默认 1 秒）</td>
+<td>每个控制回路的当前值、目标、速率、动作、稳定性，以及每台物理仪表的连接状态与全部附加读数</td>
 </tr>
 </tbody>
 </table>
-<p>Data Browser 可打开多个独立窗口；数据区的 View 载入当前 Run DAT，其他窗口可打开任意
-DAT。Live Trend 使用已有快照，不会额外读取仪表。</p>
-<h2 id="ready"><code>ready</code> 不能绕过核心判稳<a class="headerlink" href="#ready" title="Permanent link">&para;</a></h2>
-<p><code>ready = false</code> 会阻止稳定；<code>ready = true</code> 以后，核心仍要检查目标误差、斜率和 dwell。没有
-独立状态字时省略该键或返回 <code>None</code>。</p>
+<h2 id="6-ready">6. <code>ready</code> 与核心判稳的关系<a class="headerlink" href="#6-ready" title="Permanent link">&para;</a></h2>
+<p>后端返回的 <code>ready</code> 只是必要条件而非充分条件：</p>
+<ul>
+<li><code>ready = False</code> 时，核心绝不判定为稳定；</li>
+<li><code>ready = True</code>（或省略）后，核心仍会独立检查误差容限、斜率和稳定驻留时间（dwell）。</li>
+</ul>
 
 
 

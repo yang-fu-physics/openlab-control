@@ -837,10 +837,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#initializing" class="md-nav__link">
+  <a href="#visa-visa-implementation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块一直停留在 Initializing
+        找不到 VISA 驱动（VISA implementation）
       
     </span>
   </a>
@@ -848,10 +848,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#visa-implementation" class="md-nav__link">
+  <a href="#initializing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        找不到 VISA implementation
+        模块一直卡在 Initializing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enable-seq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        勾选 Enable 或加载 SEQ 后，参数没有发给仪表
       
     </span>
   </a>
@@ -862,18 +873,7 @@
   <a href="#enable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Enable 立即提示设置不合法
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#load-seq" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Load SEQ 后模块参数没有作用
+        刚勾选 Enable 就报错说旧设置不合法
       
     </span>
   </a>
@@ -884,7 +884,7 @@
   <a href="#measure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Measure 没有某个模块的数据
+        跑完 Measure 却少了某个模块的数据
       
     </span>
   </a>
@@ -892,10 +892,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#run" class="md-nav__link">
+  <a href="#seq-run" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块指令标红或 Run 前被拒绝
+        SEQ 里某条模块指令标红，点 Run 被拒绝
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reconnecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        仪表一直显示 Reconnecting
       
     </span>
   </a>
@@ -906,7 +917,7 @@
   <a href="#live-trend" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Live Trend 打开后仪表超时
+        打开 Live Trend 后仪表变慢或超时
       
     </span>
   </a>
@@ -917,7 +928,7 @@
   <a href="#data-browser" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Data Browser 不自动刷新
+        Data Browser 图表不自动更新
       
     </span>
   </a>
@@ -928,7 +939,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        停止后进程没有退出
+        停用模块或关软件后进程卡住
       
     </span>
   </a>
@@ -939,7 +950,7 @@
   <a href="#4k" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4K 或弹窗出现横向滚动条
+        4K 高分屏字体不对或窗口跑到屏幕外
       
     </span>
   </a>
@@ -950,7 +961,7 @@
   <a href="#http" class="md-nav__link">
     <span class="md-ellipsis">
       
-        报警 HTTP 失败
+        远程 HTTP 报警发不出去
       
     </span>
   </a>
@@ -1887,10 +1898,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#initializing" class="md-nav__link">
+  <a href="#visa-visa-implementation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块一直停留在 Initializing
+        找不到 VISA 驱动（VISA implementation）
       
     </span>
   </a>
@@ -1898,10 +1909,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#visa-implementation" class="md-nav__link">
+  <a href="#initializing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        找不到 VISA implementation
+        模块一直卡在 Initializing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#enable-seq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        勾选 Enable 或加载 SEQ 后，参数没有发给仪表
       
     </span>
   </a>
@@ -1912,18 +1934,7 @@
   <a href="#enable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Enable 立即提示设置不合法
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#load-seq" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Load SEQ 后模块参数没有作用
+        刚勾选 Enable 就报错说旧设置不合法
       
     </span>
   </a>
@@ -1934,7 +1945,7 @@
   <a href="#measure" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Measure 没有某个模块的数据
+        跑完 Measure 却少了某个模块的数据
       
     </span>
   </a>
@@ -1942,10 +1953,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#run" class="md-nav__link">
+  <a href="#seq-run" class="md-nav__link">
     <span class="md-ellipsis">
       
-        模块指令标红或 Run 前被拒绝
+        SEQ 里某条模块指令标红，点 Run 被拒绝
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reconnecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        仪表一直显示 Reconnecting
       
     </span>
   </a>
@@ -1956,7 +1978,7 @@
   <a href="#live-trend" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Live Trend 打开后仪表超时
+        打开 Live Trend 后仪表变慢或超时
       
     </span>
   </a>
@@ -1967,7 +1989,7 @@
   <a href="#data-browser" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Data Browser 不自动刷新
+        Data Browser 图表不自动更新
       
     </span>
   </a>
@@ -1978,7 +2000,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        停止后进程没有退出
+        停用模块或关软件后进程卡住
       
     </span>
   </a>
@@ -1989,7 +2011,7 @@
   <a href="#4k" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4K 或弹窗出现横向滚动条
+        4K 高分屏字体不对或窗口跑到屏幕外
       
     </span>
   </a>
@@ -2000,7 +2022,7 @@
   <a href="#http" class="md-nav__link">
     <span class="md-ellipsis">
       
-        报警 HTTP 失败
+        远程 HTTP 报警发不出去
       
     </span>
   </a>
@@ -2028,68 +2050,78 @@
 
 
 <h1 id="_1">常见问题与排错<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>先保留当前运行目录和脱敏日志。不要为了“再试一次”连续重放可能改变输出的命令。</p>
-<h2 id="initializing">模块一直停留在 Initializing<a class="headerlink" href="#initializing" title="Permanent link">&para;</a></h2>
-<p>检查顺序：</p>
-<ol>
-<li>查看 Modules 窗口底部的稳定错误码和 Context。</li>
-<li>查看模块是否在导入、构造或 <code>open()</code> 中执行了无界等待。</li>
-<li>确认所有 VISA/串口调用都有 timeout。</li>
-<li>确认 <code>open()</code> 不等待用户界面，也不等待 SEQ 事件。</li>
-<li>关闭应用后检查是否仍有模块 worker 进程。</li>
-</ol>
-<p>首次 Enable 失败、重启后正常通常说明初始化时序、残留资源或 timeout 有问题，不应当把
-“重启可恢复”视为修复。</p>
-<h2 id="visa-implementation">找不到 VISA implementation<a class="headerlink" href="#visa-implementation" title="Permanent link">&para;</a></h2>
-<p>PyVISA 已由框架提供，但仍需要与 GPIB/USB 接口匹配的厂商 VISA Runtime。打开
-<code>InstrumentScanner.exe</code> 后会自动尝试扫描；若初始化失败，弹窗中的链接会打开
-<a href="https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html">NI-VISA 官方下载页</a>。也可以安装
-Keysight VISA 或接口厂商指定的 Runtime。安装完成后重新打开扫描器，不需要重新打包程序，
-也不要在模块中安装另一套 PyVISA。扫描成功后的选择步骤见<a href="../instrument-scanner/">扫描与配置仪表</a>。</p>
-<h2 id="enable">Enable 立即提示设置不合法<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h2>
-<p>Enable 只应打开模块安全初态，不应把保存设置自动写入仪表。若模块必须验证界面设置，应在
-用户点击 Apply Settings 时进行。对于旧保存值超出新量程的情况，Frontend 应显示并允许
-用户修正，不应在构造阶段崩溃。</p>
-<h2 id="load-seq">Load SEQ 后模块参数没有作用<a class="headerlink" href="#load-seq" title="Permanent link">&para;</a></h2>
-<p>这是安全设计：<code>.seq</code> 的同名 <code>.modules.toml</code> 只导入界面值，不自动 Enable、连接或 Apply。
-逐个打开 Enabled 模块的 Settings，检查后点击 Apply Settings。</p>
-<h2 id="measure">Measure 没有某个模块的数据<a class="headerlink" href="#measure" title="Permanent link">&para;</a></h2>
-<p>检查：</p>
+<p>排查真实仪表故障前，先保留当次 <code>runs/</code> 目录和脱敏日志；<strong>不要为了“再试一次”盲目重复下发可能改变输出的写命令</strong>。</p>
+<h2 id="visa-visa-implementation">找不到 VISA 驱动（VISA implementation）<a class="headerlink" href="#visa-visa-implementation" title="Permanent link">&para;</a></h2>
+<p>PyVISA 已经由软件自带，但连接 GPIB / USB / 串口仪表仍需要本机安装硬件厂商的底层 VISA Runtime。</p>
 <ul>
-<li>模块是否 Enabled；</li>
-<li>是否在本次 Run 开始前已 Enabled；</li>
-<li>模块声明的 <code>slots</code> 是否包含当前行；</li>
-<li>模块是否返回了声明列；</li>
-<li>Warning 是否使本槽位测量值留空；</li>
-<li>DAT 是否使用旧列头打开了不兼容文件。</li>
+<li>打开 <code>InstrumentScanner.exe</code> 时若弹出缺失提示，直接点击其中的 <a href="https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html">NI-VISA 官方下载页</a>（或安装 Keysight IO Libraries）；</li>
+<li>装好后重开扫描器即可，不需要重新打包程序，也不要在模块里另装 PyVISA。</li>
 </ul>
-<h2 id="run">模块指令标红或 Run 前被拒绝<a class="headerlink" href="#run" title="Permanent link">&para;</a></h2>
-<p>SEQ 可以保留缺失模块指令，但执行时必须满足：模块已安装、Enabled、仍声明相同稳定
-<code>command_id</code>，并且参数通过当前声明校验。框架不会自动 Enable 或跳过。</p>
-<h2 id="live-trend">Live Trend 打开后仪表超时<a class="headerlink" href="#live-trend" title="Permanent link">&para;</a></h2>
-<p>Live Trend 只应消费已有仪表快照，不增加仪表轮询。若打开图表改变 timeout：</p>
+<h2 id="initializing">模块一直卡在 <code>Initializing</code><a class="headerlink" href="#initializing" title="Permanent link">&para;</a></h2>
+<p>按顺序排查：</p>
 <ol>
-<li>检查 GUI 是否直接查询仪表；</li>
-<li>检查重绘是否阻塞 Runtime 消息处理；</li>
-<li>限制绘制点数并合并刷新；</li>
-<li>对比打开前后的 <code>instrument_status.dat</code> 采样间隔和事件日志。</li>
+<li>查看 Modules 管理器底部的错误码和详细说明；</li>
+<li>检查模块源码是否在文件顶层 import、<code>__init__</code> 或 <code>open()</code> 里做了无限等待或弹窗；</li>
+<li>确认所有 VISA / 串口 / 网口调用都设置了有限超时；</li>
+<li>确认 <code>open()</code> 没有去等 GUI 或 SEQ 事件；</li>
+<li>关闭软件后在任务管理器检查是否有残留的模块子进程。</li>
 </ol>
-<h2 id="data-browser">Data Browser 不自动刷新<a class="headerlink" href="#data-browser" title="Permanent link">&para;</a></h2>
-<p>每个 Data Browser 窗口只追踪自己打开的 DAT。若要查看当前 Run，使用左侧数据区的
-<strong>View</strong> 重新打开一个窗口；若要查看其他文件，使用 <strong>Graph → Data Browser → Open DAT</strong>。
-确认目标文件仍存在，列头没有在写入过程中被外部程序改写。</p>
-<h2 id="_2">停止后进程没有退出<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p><code>close</code>、worker shutdown 和进程回收都有界。如果厂商 C/COM 调用无界阻塞，核心最终只能
-终止本机进程，无法保证仪表输出。修复驱动 timeout，并测试重复 close；不要只增加核心总
-timeout。</p>
-<h2 id="4k">4K 或弹窗出现横向滚动条<a class="headerlink" href="#4k" title="Permanent link">&para;</a></h2>
-<p>不要写死像素宽度。使用 Qt layout 和 sizeHint，让核心窗口尺寸工具计算“没有横向滚动条的
-最小宽度”。长地址和路径应使用可收缩控件或省略显示，而不是撑大整个窗口。</p>
-<p>使用者可在 <strong>View → Appearance</strong> 把整体大小设为 Automatic，并单独调整 70%–150% 的
-文字倍率。更换显示器后若窗口位置异常，点击 <code>Reset Window Positions</code>、保存并重启。</p>
-<h2 id="http">报警 HTTP 失败<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
-<p>报警报告不是安全控制链。网络失败只形成去重的本地 Warning，不应阻塞 SEQ 或代替 Error
-后的停机流程。检查 endpoint、X-Token 和测试员/管理员目标配置时不要把 token 写入日志。</p>
+<blockquote>
+<p>如果“第一次 Enable 失败、重启就好”，通常意味着初始化时序、超时或资源释放有 bug，请排查根因，不要把重启当解决办法。</p>
+</blockquote>
+<h2 id="enable-seq">勾选 Enable 或加载 SEQ 后，参数没有发给仪表<a class="headerlink" href="#enable-seq" title="Permanent link">&para;</a></h2>
+<p>这是刻意设计的安全行为。</p>
+<ul>
+<li>勾选 Enable 只初始化连接并把上次保存的值填回界面；</li>
+<li>打开 <code>.seq</code> 及其配套 <code>.modules.toml</code> 也只更新界面参数；</li>
+<li>只有你核对完毕并点击 <strong>Apply Settings</strong>（或在点击 Run 时选 <strong>Apply and Run</strong>），设置才会发给仪表。</li>
+</ul>
+<h2 id="enable">刚勾选 Enable 就报错说旧设置不合法<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h2>
+<p>模块在 <code>open()</code> 阶段不应自动把旧配置写给仪表；参数校验应放在 <strong>Apply Settings</strong> 时。若历史配置超出新版本范围，<code>Frontend.load()</code> 也应先原样显示让用户改，而不是在打开窗口时崩溃。</p>
+<h2 id="measure">跑完 <code>Measure</code> 却少了某个模块的数据<a class="headerlink" href="#measure" title="Permanent link">&para;</a></h2>
+<p>逐项核对：</p>
+<ol>
+<li>该模块是否在点击 <strong>Run</strong> 之前就已勾选 Enable；</li>
+<li>多通道模块中，对应通道（slot）是否已勾选启用；</li>
+<li>该测量点是否触发了 Warning（异常数据点会留空并写非零 <code>StatusCode</code>）；</li>
+<li>如果使用 <code>Set Datafile open</code> 向旧文件追加，确认新旧列头是否一致。</li>
+</ol>
+<h2 id="seq-run">SEQ 里某条模块指令标红，点 Run 被拒绝<a class="headerlink" href="#seq-run" title="Permanent link">&para;</a></h2>
+<p>为了防止丢失旧脚本，SEQ 允许打开引用了未安装/未启用模块的指令，但会在编辑器中标红并阻止运行。解决办法：</p>
+<ul>
+<li>确认对应模块已安装并在 <strong>Modules</strong> 中勾选 Enable；</li>
+<li>确认模块升级后该指令的稳定 <code>command_id</code> 与参数格式未变更；</li>
+<li>如果确实不再需要该步骤，右键 <strong>Disable</strong> 或删除该行。</li>
+</ul>
+<h2 id="reconnecting">仪表一直显示 <code>Reconnecting</code><a class="headerlink" href="#reconnecting" title="Permanent link">&para;</a></h2>
+<p>普通读取断线时，主程序会自动重启该仪表进程并按配置重连（默认每 2 秒一次、最长 60 秒）：</p>
+<ul>
+<li>重连期间请检查网线/GPIB/USB 与仪表面板，不要反复点手动 Set/Hold；</li>
+<li>超过恢复时间仍连不上会自动转为 <code>Faulted</code>，不会无限死等或盲目猜测状态。</li>
+</ul>
+<h2 id="live-trend">打开 Live Trend 后仪表变慢或超时<a class="headerlink" href="#live-trend" title="Permanent link">&para;</a></h2>
+<p>Live Trend 只读取已有缓存，正常不会增加任何仪表查询。如果打开它后出现超时，排查：</p>
+<ol>
+<li>是否有自定义 UI 代码直接在界面线程查询仪表；</li>
+<li>界面重绘是否卡死了主线程消息处理；</li>
+<li>对比打开前后的 <code>instrument_status.dat</code> 时间间隔，确认瓶颈在通信还是绘图。</li>
+</ol>
+<h2 id="data-browser">Data Browser 图表不自动更新<a class="headerlink" href="#data-browser" title="Permanent link">&para;</a></h2>
+<ul>
+<li>每个 Data Browser 窗口只监听自己打开的那个文件；</li>
+<li>要看当前正在跑的新实验，请点左侧数据区的 <strong>View</strong> 重新开窗；</li>
+<li>确认文件没有被外部程序（如 Excel）独占锁定或改写表头。</li>
+</ul>
+<h2 id="_2">停用模块或关软件后进程卡住<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>框架对 <code>close()</code> 和进程退出都有时间上限，但无法强行打断已经卡死在厂商 C/DLL 里的无限阻塞 I/O，只能强杀本机进程——<strong>这不代表仪表已经安全关断输出</strong>。请缩短驱动自身的单次 I/O 超时并测试重复 <code>close()</code>，不要一味调大框架总超时。</p>
+<h2 id="4k">4K 高分屏字体不对或窗口跑到屏幕外<a class="headerlink" href="#4k" title="Permanent link">&para;</a></h2>
+<ul>
+<li>打开 <strong>View → Appearance</strong>：整体大小保持 <code>Automatic</code>，再单独把 <code>Text size</code> 调到舒服的比例（70%–150%），保存并重启；</li>
+<li>拔掉外接显示器后如果找不到窗口，在同一对话框勾选 <strong>Reset Window Positions</strong>，保存并重启；</li>
+<li>开发模块前端时请使用 Qt Layout，避免写死像素宽高，防止出现横向滚动条。</li>
+</ul>
+<h2 id="http">远程 HTTP 报警发不出去<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
+<p>报警通道是独立的异步线程，网络不通只会记一条去重的本地 Warning，不影响实验运行。请排查 <code>[alarms.reporting]</code> 的 URL（非本机需 HTTPS）、<code>X-Token</code> 与接收端配置，排查时切勿把 Token 打进公开日志。</p>
 
 
 

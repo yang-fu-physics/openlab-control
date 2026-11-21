@@ -1455,10 +1455,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        连接前
+        1. 上电与接线前（硬件层）
       
     </span>
   </a>
@@ -1466,10 +1466,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#connect-open" class="md-nav__link">
+  <a href="#2-open" class="md-nav__link">
     <span class="md-ellipsis">
       
-        connect / open
+        2. 连接与初始化（open）
       
     </span>
   </a>
@@ -1477,10 +1477,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        设置与写命令
+        3. 写入与参数设置
       
     </span>
   </a>
@@ -1488,10 +1488,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#4-measurement-module" class="md-nav__link">
     <span class="md-ellipsis">
       
-        测量
+        4. 测量过程（Measurement Module）
       
     </span>
   </a>
@@ -1499,10 +1499,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pause-stop-error" class="md-nav__link">
+  <a href="#5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pause / Stop / Error
+        5. 暂停、停止与异常收尾
       
     </span>
   </a>
@@ -1510,10 +1510,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#system-instrument" class="md-nav__link">
+  <a href="#6-system-instrument" class="md-nav__link">
     <span class="md-ellipsis">
       
-        System Instrument 特别检查
+        6. 系统仪表特别检查（System Instrument）
       
     </span>
   </a>
@@ -1521,10 +1521,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
+  <a href="#7" class="md-nav__link">
     <span class="md-ellipsis">
       
-        真机放行
+        7. 分阶段实机放行
       
     </span>
   </a>
@@ -1843,10 +1843,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        连接前
+        1. 上电与接线前（硬件层）
       
     </span>
   </a>
@@ -1854,10 +1854,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#connect-open" class="md-nav__link">
+  <a href="#2-open" class="md-nav__link">
     <span class="md-ellipsis">
       
-        connect / open
+        2. 连接与初始化（open）
       
     </span>
   </a>
@@ -1865,10 +1865,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        设置与写命令
+        3. 写入与参数设置
       
     </span>
   </a>
@@ -1876,10 +1876,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#4-measurement-module" class="md-nav__link">
     <span class="md-ellipsis">
       
-        测量
+        4. 测量过程（Measurement Module）
       
     </span>
   </a>
@@ -1887,10 +1887,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pause-stop-error" class="md-nav__link">
+  <a href="#5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pause / Stop / Error
+        5. 暂停、停止与异常收尾
       
     </span>
   </a>
@@ -1898,10 +1898,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#system-instrument" class="md-nav__link">
+  <a href="#6-system-instrument" class="md-nav__link">
     <span class="md-ellipsis">
       
-        System Instrument 特别检查
+        6. 系统仪表特别检查（System Instrument）
       
     </span>
   </a>
@@ -1909,10 +1909,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
+  <a href="#7" class="md-nav__link">
     <span class="md-ellipsis">
       
-        真机放行
+        7. 分阶段实机放行
       
     </span>
   </a>
@@ -1940,76 +1940,66 @@
 
 
 <h1 id="_1">真实仪表安全清单<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>这份清单是进入真实仪表测试前的最低门槛，不是免责条款。任何一项无法确认，都应停止自动
-控制并回到只读或仿真模式。</p>
-<h2 id="_2">连接前<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>在把任何新驱动、新模块或新接线接到昂贵样品、超导磁体或低温系统之前，请逐项核对这份清单。<strong>只要有一项拿不准，就停留在只读或仿真模式，不要直接进入自动运行。</strong></p>
+<h2 id="1">1. 上电与接线前（硬件层）<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核对仪表完整型号、选件、固件和接口类型。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 仪表本机限流、限压、限温、磁体保护和联锁已经人工设置。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 明确人工急停位置和断电后的仪表行为。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 样品与测试负载能承受最坏输出。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 软件配置的地址和上下限不包含实验室秘密或误连其他仪表的风险。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核对实体仪表的完整型号、选件板卡、固件版本和通讯接口（GPIB / USB / 串口 / 网口）。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 在<strong>仪表本机面板</strong>设好限流、限压、限温、磁体保护和物理联锁。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 确认人工急停按钮的位置，并清楚断电后各仪表的默认动作。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 首次测试使用假负载（如标准电阻）或能承受最坏输出的非关键样品。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 检查软件配置中的地址与上下限，确保不会误连到旁边的另一台设备。</li>
 </ul>
-<h2 id="connect-open">connect / open<a class="headerlink" href="#connect-open" title="Permanent link">&para;</a></h2>
+<h2 id="2-open">2. 连接与初始化（<code>open</code>）<a class="headerlink" href="#2-open" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 导入和构造阶段没有 I/O。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 会话使用有限 timeout。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 第一条操作是身份/状态读取，而不是配置写入。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 型号或固件不匹配时 fail-closed。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 保存设置只加载到界面，不自动 Apply。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 部分初始化失败后仍能安全 close/disconnect。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 导入代码和构造对象阶段不发生任何硬件通信。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 所有通讯会话都设置了有限 I/O 超时。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 连接后的第一条命令是查询身份/状态（只读），而不是下发修改命令。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 型号或固件不匹配时立即报错退出，不继续操作。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 启用或加载历史设置只填界面，绝不自动下发到仪表。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 初始化进行到一半失败时，已打开的句柄能干净关闭。</li>
 </ul>
-<h2 id="_3">设置与写命令<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h2 id="3">3. 写入与参数设置<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核心、System Instrument/Measurement Module 和仪表本机三层都有限制。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 后端再次验证单位、有限数、符号、量程和当前状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> Apply 后读取关键配置并比较。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 写 timeout 被视为结果不确定，不自动重放。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 多条设置命令失败时能识别仪表可能处于部分配置状态。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 核心配置、驱动代码和仪表本机三层都设置了安全边界。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 后端发命令前重新校验单位、有限数值、正负号和量程。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 写入关键参数后读回确认，不一致则报错停止。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 写命令超时视为“结果不确定”，绝不盲目重发。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 多步配置中途出错时，能明确识别仪表处于部分配置状态。</li>
 </ul>
-<h2 id="_4">测量<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<h2 id="4-measurement-module">4. 测量过程（Measurement Module）<a class="headerlink" href="#4-measurement-module" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 每个通道切换、pause、dwell、arm 和 trigger 顺序来自对应手册。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 每个 I/O timeout 为总操作超时预留安全清理时间。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 超量程、compliance、坏状态字和损坏响应分别测试。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 数据异常留空测量值并写模块数字状态码。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 通讯、输出或联锁状态无法确认时抛 Error，而不是仅写状态码。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> rawdata 只含有限测量值，行与正式 DAT 对齐。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 通道切换、等待、触发与读数顺序与仪表手册一致。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 单次 I/O 超时远小于框架总操作超时，为异常关断输出留足余量。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 已用测试覆盖：正常读数、超量程、compliance、乱码响应及对应数字状态码。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 单点数据无效时留空测量列、写非零状态码并报 Warning；通信中断或输出状态不明时直接抛 Error 停机。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 若输出 <code>rawdata</code>，确保全为有限数字且行数与主 DAT 严格对齐。</li>
 </ul>
-<h2 id="pause-stop-error">Pause / Stop / Error<a class="headerlink" href="#pause-stop-error" title="Permanent link">&para;</a></h2>
+<h2 id="5">5. 暂停、停止与异常收尾<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 长循环和相邻 I/O 之间调用 <code>api.checkpoint()</code>。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 人工验证 Pause 不会造成意外输出变化。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> completed、stopped、error 三种 <code>run_end</code> 都执行模块定义的收尾。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 若允许跨 SEQ 保持输出：默认仍关闭；保持前读回输出和关键设置；下一次
-  <code>run_start</code> 不产生短暂掉电；Apply、Disable、退出和测量异常仍关闭。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 完成、Stop、Error 后没有向 System Instrument 发送 Set 或 Hold。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 若 System Instrument 注册事件响应：重复事件只执行一次，源事件解除前不能复位目标锁。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>close</code> 可重复调用，并在部分初始化后工作。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 即使一个仪表关闭失败，也继续释放其他会话。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 长循环与多次 I/O 之间调用 <code>api.checkpoint()</code> / <code>api.sleep()</code> 响应 Pause/Stop。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 人工确认点击 <strong>Pause</strong> 不会引起意外输出跳变。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 正常完成、Stop、Error 三种 <code>run_end</code> 都能按约定关闭输出（若提供跨 SEQ 保持偏置选项，必须默认关闭，保持前回读确认，且 Disable / 重新 Apply / 异常时仍强制关闭）。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 确认 SEQ 完成、Stop 或 Error 不会擅自给系统仪表发 Set 或 Hold。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>close()</code> 可重复调用，即使某台仪表关闭出错，其余会话也会继续释放。</li>
 </ul>
-<h2 id="system-instrument">System Instrument 特别检查<a class="headerlink" href="#system-instrument" title="Permanent link">&para;</a></h2>
+<h2 id="6-system-instrument">6. 系统仪表特别检查（System Instrument）<a class="headerlink" href="#6-system-instrument" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>read_status()</code> 返回有限主值和真实状态；核心负责生成单调时间戳。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>hold()</code> 使用新鲜读回，绝不代入缓存零或猜测值。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 读链路重连后读取真实 target/rate，不自动重放旧写命令。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 恢复窗结束后进入 Faulted，并阻止后续控制。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>sample_temp</code> 和 <code>field</code> 角色各自全局最多一个，角色为 <code>none</code> 的 controller 不被标准
-  温场 SEQ 选择。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>read_status()</code> 返回有限数值与真实状态。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <code>hold()</code> 使用同一次操作里现读的新鲜值，绝不用旧缓存或 0。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 断线重连后先读回真实目标和速率，绝不重放旧写命令；恢复超时后进入 Faulted 并禁止写入。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 确认 <code>sample_temp</code> / <code>field</code> 角色配置唯一且正确。</li>
 </ul>
-<h2 id="_5">真机放行<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h2 id="7">7. 分阶段实机放行<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
 <ul class="task-list">
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 先以只读方式测试身份和状态。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 再用最低风险输出和测试负载执行单次命令。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 人工制造 timeout、断线、Stop 和 Error。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 对照仪表面板确认软件报告与真实输出一致。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 保存脱敏命令顺序、读回和测试结果。</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> 未完成验证时继续标注 Beta，并禁止无人值守。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <strong>阶段 1（只读）</strong>：只核对地址、型号、读数和状态位。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <strong>阶段 2（假负载低风险写入）</strong>：用最小安全输出试跑单步命令并核对仪表面板。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <strong>阶段 3（故障演练）</strong>：人为拔线、制造超时、点击 Stop 和触发 Error，观察收尾是否符合预期。</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled/><span class="task-list-indicator"></span></label> <strong>阶段 4（归档）</strong>：保存脱敏后的命令日志与测试结论；全部确认前保持 Beta 标记，不无人值守运行。</li>
 </ul>
 <div class="admonition danger">
-<p class="admonition-title">进程退出不等于仪表安全</p>
-<p>worker 被终止只能证明本机进程结束，不能证明外部仪表已关闭输出。最终安全必须由仪表
-本机保护、联锁和人工急停保证。</p>
+<p class="admonition-title">进程结束 ≠ 外部仪表已安全</p>
+<p>软件强杀后台子进程只能回收电脑本地资源，无法保证外部仪器已经关掉输出或停止升场。
+最终安全永远依赖仪表本机保护、硬件联锁与人工急停。</p>
 </div>
 
 

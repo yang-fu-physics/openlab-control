@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#data-browser-dat" class="md-skip">
+        <a href="#data-browser" class="md-skip">
           跳转至
         </a>
       
@@ -812,7 +812,7 @@
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        打开文件
+        打开数据文件
       
     </span>
   </a>
@@ -823,7 +823,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        选择曲线
+        常用交互操作
       
     </span>
   </a>
@@ -834,7 +834,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        时间与刻度
+        时间轴与坐标刻度
       
     </span>
   </a>
@@ -842,10 +842,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#plt" class="md-nav__link">
     <span class="md-ellipsis">
       
-        保存显示方式
+        自动记住视图设置（.plt）
       
     </span>
   </a>
@@ -1813,7 +1813,7 @@
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        打开文件
+        打开数据文件
       
     </span>
   </a>
@@ -1824,7 +1824,7 @@
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        选择曲线
+        常用交互操作
       
     </span>
   </a>
@@ -1835,7 +1835,7 @@
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        时间与刻度
+        时间轴与坐标刻度
       
     </span>
   </a>
@@ -1843,10 +1843,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#plt" class="md-nav__link">
     <span class="md-ellipsis">
       
-        保存显示方式
+        自动记住视图设置（.plt）
       
     </span>
   </a>
@@ -1873,36 +1873,38 @@
   
 
 
-<h1 id="data-browser-dat">用 Data Browser 查看 DAT<a class="headerlink" href="#data-browser-dat" title="Permanent link">&para;</a></h1>
-<p>Data Browser 可以打开任意 DAT，不要求它属于当前 SEQ，也不会改变正在运行的实验文件。
-每次打开都会创建一个独立窗口，因此可以同时查看多个文件。</p>
-<h2 id="_1">打开文件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<h1 id="data-browser">用 Data Browser 查看数据<a class="headerlink" href="#data-browser" title="Permanent link">&para;</a></h1>
+<p><strong>Data Browser</strong> 可以打开任意 <code>.dat</code> 文件（包括正在跑的实验或历史数据），不会修改原始数据，也不会影响当前正在运行的 SEQ。你可以同时打开多个独立的 Data Browser 窗口对比不同曲线。</p>
+<h2 id="_1">打开数据文件<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>有三种快捷方式：</p>
 <ol>
-<li>当前 Run 已有数据文件时，可点击左侧数据区的 <strong>View</strong>，新窗口会直接载入该文件。</li>
-<li>点击 <strong>Graph → Data Browser</strong> 会打开一个空白的新窗口，再用 <strong>Open DAT</strong> 选择任意
-   <code>.dat</code>；也可以把 DAT 拖到主窗口。</li>
-<li>重复以上操作可创建多个窗口，每个窗口保持自己的文件、曲线和 <code>.plt</code> 设置。</li>
+<li><strong>看当前正在跑的实验</strong>：直接点击主窗口左侧数据区的 <strong>View</strong>，会弹出新窗口并自动加载当前 Run 的 DAT。</li>
+<li><strong>看任意历史文件</strong>：点击顶部菜单 <strong>Graph → Data Browser</strong> 打开新窗口，再点 <strong>Open DAT</strong> 选择文件。</li>
+<li><strong>拖放打开</strong>：直接把 Windows 资源管理器里的 <code>.dat</code> 文件拖进主窗口。</li>
 </ol>
-<p>每个窗口只跟踪自己打开的文件。文件继续追加时会自动刷新；临时无法读取时会等待并重试，
-不会因此增加仪表查询次数。需要立即重新读取时点击 <strong>Reload</strong>。</p>
-<h2 id="_2">选择曲线<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>在图区域右键可以：</p>
+<p>每个窗口只盯住自己打开的那个文件。如果文件正在持续追加新行，图表会自动刷新（不增加任何仪表通讯）；想立即手动刷新，点击工具栏 <strong>Reload</strong>。</p>
+<h2 id="_2">常用交互操作<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>在图表空白处<strong>点击鼠标右键</strong>可以：</p>
 <ul>
-<li>选择 X 列；</li>
-<li>勾选一个或多个 Y 列；</li>
-<li>选择 Overlay（多条曲线放在同一图）或 Stacked（分图、共用 X）；</li>
-<li>切换 X/Y 对数坐标；</li>
-<li>Reset Zoom。</li>
+<li>选择 <strong>X 轴</strong>数据列；</li>
+<li>一次勾选一个或多个 <strong>Y 轴</strong>数据列，确认后同时绘制；</li>
+<li>切换布局：<strong>Overlay</strong>（多条曲线叠在同一坐标系）或 <strong>Stacked</strong>（上下分图、共用 X 轴）；</li>
+<li>独立开关 <strong>X / Y 对数坐标（Log）</strong>；</li>
+<li>点击 <strong>Reset Zoom</strong> 恢复全貌。</li>
 </ul>
-<p>鼠标拖框可以放大。双击离鼠标最近的数据点，会显示该行的完整字段。</p>
-<h2 id="_3">时间与刻度<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<p>能确认来源的 <code>Timestamp(s)</code> 或 <code>Time Stamp (sec)</code> 会显示成实际日期和时间。老 DAT 若没有
-足够信息判断时间起点，则保留原始秒值，避免显示错误日期。</p>
-<p>普通数值轴使用 <code>1 / 2 / 5 × 10ⁿ</code> 一类整齐刻度；时间轴按毫秒、秒、分钟、小时或日期
-对齐。缩放只改变显示范围，不修改 DAT。</p>
-<h2 id="_4">保存显示方式<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<p>点击 <strong>Save PLT</strong> 会在 DAT 旁保存同名 <code>.plt</code>，记录 X/Y、布局和坐标类型。以后再次打开
-该 DAT 时会自动恢复；<code>.plt</code> 不包含测量数据，可以删除后重新设置。</p>
+<p>常用鼠标操作：</p>
+<ul>
+<li><strong>左键拖框</strong>：局部放大；</li>
+<li><strong>双击曲线附近</strong>：弹出离鼠标最近数据点的完整原始行信息。</li>
+</ul>
+<h2 id="_3">时间轴与坐标刻度<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<ul>
+<li>对于能确认时间基准的 <code>Timestamp(s)</code> / <code>Time Stamp (sec)</code> 列（支持 OpenLab DAT 和 Quantum Design DAT），在线性轴上会自动换算成直观的日期和时间；遇到无法确定时间起点的老文件，则保留原始秒数，避免显示错误日期。</li>
+<li>双击查看单点详情时，顶部摘要会给出可读的完整日期时间，下方字段表仍保留文件里的原始数值。</li>
+<li>数值轴自动使用 <code>1 / 2 / 5 × 10ⁿ</code> 整齐刻度，时间轴自动按毫秒、秒、分钟、小时或日期对齐。</li>
+</ul>
+<h2 id="plt">自动记住视图设置（<code>.plt</code>）<a class="headerlink" href="#plt" title="Permanent link">&para;</a></h2>
+<p>点击 <strong>Save PLT</strong> 后，程序会在数据文件旁边生成一个同名的 <code>.plt</code> 文件，记录你选的 X/Y 列、Overlay/Stacked 布局、对数坐标和缩放范围。下次打开这个 DAT 时会自动恢复视图。<code>.plt</code> 里不含实验数据，随时可以删掉重配。</p>
 
 
 

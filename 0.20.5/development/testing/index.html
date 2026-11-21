@@ -1399,10 +1399,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        先运行教学模块测试
+        1. 先跑一遍自带的教学模块测试
       
     </span>
   </a>
@@ -1410,10 +1410,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        每个模块至少检查这些情况
+        2. 离线自动化测试应覆盖的场景
       
     </span>
   </a>
@@ -1421,43 +1421,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        单独检查仪表命令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        检查设置窗口
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        修改主程序后运行完整测试
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        最后才连接真实仪表
+        3. 低风险真机检查步骤
       
     </span>
   </a>
@@ -1832,10 +1799,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        先运行教学模块测试
+        1. 先跑一遍自带的教学模块测试
       
     </span>
   </a>
@@ -1843,10 +1810,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        每个模块至少检查这些情况
+        2. 离线自动化测试应覆盖的场景
       
     </span>
   </a>
@@ -1854,43 +1821,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#3" class="md-nav__link">
     <span class="md-ellipsis">
       
-        单独检查仪表命令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        检查设置窗口
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        修改主程序后运行完整测试
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        最后才连接真实仪表
+        3. 低风险真机检查步骤
       
     </span>
   </a>
@@ -1917,59 +1851,48 @@
   
 
 
-<h1 id="_1">怎样检查测量模块<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>测试的目的不是证明“永远不会出错”，而是尽早发现明显问题。先在不连接仪表时检查，再做
-低风险真机检查。</p>
-<h2 id="_2">先运行教学模块测试<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<div class="language-powershell highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="p">`</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  <span class="n">-s</span> <span class="n">tests</span> <span class="n">-p</span> <span class="s2">"test_bundled_*.py"</span> <span class="n">-v</span>
+<h1 id="_1">怎样检查和测试测量模块<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>测试分两步走：<strong>先在电脑上用假连接验证全部逻辑和异常路径</strong>，把代码里的坑全清干净，<strong>再接假负载做低风险真机验证</strong>。</p>
+<h2 id="1">1. 先跑一遍自带的教学模块测试<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<div class="language-powershell highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="n">-s</span> <span class="n">tests</span> <span class="n">-p</span> <span class="s2">"test_bundled_*.py"</span> <span class="n">-v</span>
 </span></code></pre></div>
-<p>这些测试会检查教学模块能否启动、应用设置、逐通道测量、报告超量程并安全关闭。完整例子在
-<code>tests/test_bundled_tutorial_resistance.py</code>。</p>
-<h2 id="_3">每个模块至少检查这些情况<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>可以参考 <code>tests/test_bundled_tutorial_resistance.py</code> 的写法，为自己的模块编写同类测试。</p>
+<h2 id="2">2. 离线自动化测试应覆盖的场景<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<p><strong>模块生命周期与数据契约</strong></p>
 <ul>
-<li>正常 Enable 和 Disable；</li>
-<li>连接进行到一半时失败，仍能安全关闭；</li>
-<li>仪表型号不正确时拒绝继续；</li>
-<li>没有点击 Apply Settings 时拒绝测量；</li>
-<li>每个通道只写自己的列；</li>
-<li>未测量和出错的电阻值保持空白；</li>
-<li>正常、超量程、仪表保护限制和其他状态码；</li>
-<li>Pause 和 Stop 能在等待步骤中生效；</li>
-<li>重复关闭不会报错；</li>
-<li>程序结束或出错时，输出按模块设置安全关闭。</li>
+<li>正常的 Enable → Apply Settings → Measure → Disable 流程；</li>
+<li>未点击 Apply Settings 直接测量时明确拒绝；</li>
+<li>连接或配置进行到一半报错时，已打开的句柄仍能干净关闭；</li>
+<li>仪表 <code>*IDN?</code> 型号不匹配时立即拒绝，不发送后续配置命令；</li>
+<li>多通道模块每行只填本通道列，未测列和异常点测量值留空；</li>
+<li>正常、超量程、compliance、乱码响应分别映射到正确的整数 <code>StatusCode</code>；</li>
+<li>在等待步骤中测试 <code>Pause</code> 和 <code>Stop</code>；</li>
+<li>正常完成、Stop、Error 三种 <code>run_end</code> 均按约定收尾输出；</li>
+<li>重复调用 <code>close()</code> 不报错，且一台仪表关闭失败不影响其余仪表释放。</li>
 </ul>
-<h2 id="_4">单独检查仪表命令<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
-<p>不接真实仪表，用假的 VISA 或串口连接检查：</p>
+<p><strong>底层仪表协议（用假连接检查）</strong></p>
 <ul>
-<li>先确认仪表型号，再发送设置命令；</li>
-<li>设置、读回、触发和读取的顺序正确；</li>
-<li>每种量程和状态都能正确解释；</li>
-<li>空返回、乱码和无效数字会被发现；</li>
-<li>写命令等待超时后不会盲目重发；</li>
-<li>一个资源关闭失败时，其他资源仍会继续释放；</li>
-<li>每次读取都有等待上限。</li>
+<li>不仅验证最后算出的数值，更要断言<strong>发送给仪表的完整命令顺序</strong>；</li>
+<li>覆盖空回包、乱码、<code>NaN</code> / <code>Infinity</code> 与超量程哨兵值；</li>
+<li>写命令超时时不自动重发；</li>
+<li>每次 I/O 都配置了有限超时。</li>
 </ul>
-<h2 id="_5">检查设置窗口<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p><strong>前端界面（如果写了 <code>frontend.py</code>）</strong></p>
 <ul>
-<li>保存值载入后仍能原样取出；</li>
-<li>Load SEQ 不会自动连接仪表或应用设置；</li>
-<li>状态更新只改变显示；</li>
-<li>初始宽度不出现横向滚动条；</li>
+<li><code>load()</code> 后再 <code>dump()</code> 数值保持一致；</li>
+<li><code>load()</code> 和加载 SEQ 绝不触发连接或 Apply；</li>
+<li>初始窗口宽度合适，不出现横向滚动条。</li>
 </ul>
-<h2 id="_6">修改主程序后运行完整测试<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
-<p>普通模块通常不需要修改主程序。如果确实修改了主程序，再运行：</p>
+<p>如果同时改动了核心源码，提交前还需运行全量核心测试：</p>
 <div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="n">-m</span> <span class="n">unittest</span> <span class="n">discover</span> <span class="n">-s</span> <span class="n">tests</span> <span class="n">-v</span>
 </span></code></pre></div>
-<h2 id="_7">最后才连接真实仪表<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<h2 id="3">3. 低风险真机检查步骤<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
 <ol>
-<li>先不接样品，只读取型号和状态。</li>
-<li>在仪表面板上设置最低风险的限流、限压或量程。</li>
-<li>每发送一次设置，立即从仪表读回确认。</li>
-<li>人工测试 Stop、断线和等待超时。</li>
-<li>确认硬件联锁和人工急停有效。</li>
-<li>保存去除隐私信息的命令日志和测试结果。</li>
-<li>完成这些检查前，模块保持 Beta，不要无人值守运行。</li>
+<li><strong>先不接样品</strong>：只做只读连接，核对型号、固件和当前状态；</li>
+<li><strong>接假负载</strong>：在仪表本机设好最低风险的限流/限压/量程；</li>
+<li><strong>单步核对</strong>：每下发一次配置，立即回读并与仪表面板对照；</li>
+<li><strong>故障演练</strong>：人为测试 Stop、拔线、超时，确认输出按预期安全收尾；</li>
+<li><strong>留档放行</strong>：确认硬件联锁与急停可靠，保存脱敏命令日志。未完成真机验证前请标明 Beta，勿无人值守运行。</li>
 </ol>
 
 

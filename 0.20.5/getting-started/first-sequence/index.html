@@ -725,43 +725,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 先打开三个内置仿真面板
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 编排一条扫描序列
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 点击运行并查看产出文件
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-pause-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 运行中途的 Pause 和 Stop 会做什么？
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        先启用仿真面板
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        在界面中建立命令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        运行并检查结果
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pausestop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pause、Stop 与模块收尾
+        下一步
       
     </span>
   </a>
@@ -1810,43 +1821,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. 先打开三个内置仿真面板
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. 编排一条扫描序列
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. 点击运行并查看产出文件
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-pause-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. 运行中途的 Pause 和 Stop 会做什么？
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        先启用仿真面板
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        在界面中建立命令
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        运行并检查结果
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pausestop" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pause、Stop 与模块收尾
+        下一步
       
     </span>
   </a>
@@ -1874,28 +1896,29 @@
 
 
 <h1 id="seq">运行第一条 SEQ<a class="headerlink" href="#seq" title="Permanent link">&para;</a></h1>
-<p>这一页只使用仿真温度和磁场，不需要连接仪表。SEQ 是一棵可以缩进的命令树；扫描命令下面
-可以继续放扫描或 <code>Measure</code>。</p>
-<h2 id="_1">先启用仿真面板<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p>全新安装不会自动启用 System Instrument。先关闭主程序并打开 Instrument Scanner，在最后
-一页勾选 <strong>Simulated Temperature</strong>、<strong>Simulated Magnetic Field</strong> 和 <strong>Simulated 2nd Stage</strong>，
-检查面板顺序后保存。然后再启动 OpenLab Control。这个操作只生成仿真配置，不连接真实仪表。</p>
-<h2 id="_2">在界面中建立命令<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>这一节带你用内置仿真跑通一条完整的“定温 → 扫场 → 测量”自动序列，全程不需要真实仪表。</p>
+<p><strong>什么是 SEQ？</strong> 它是 OpenLab Control 的实验脚本文件（<code>.seq</code>），结构类似 MultiVu：每行一条指令，扫描指令（<code>Scan ...</code>）和对应的 <code>End Scan</code> 构成一层缩进，可以任意多层嵌套。</p>
+<h2 id="1">1. 先打开三个内置仿真面板<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
+<p>全新安装默认关闭所有仿真。请先关闭主程序，打开 <strong>Instrument Scanner</strong>：</p>
 <ol>
-<li>启动程序，确认底部 Temperature、Magnetic Field 和 2nd Stage 都有仿真读数。</li>
-<li>点击 <strong>File → New</strong>。编辑器中会保留最后一行 <code>End Sequence</code>。</li>
-<li>选中 <code>End Sequence</code>，在右侧 <strong>Sequence Command Bar</strong> 依次双击并确认：
-   <strong>Remark</strong>、<strong>Set Datafile</strong>、<strong>Set Temperature</strong>、<strong>Scan Field</strong>。</li>
-<li><code>Remark</code> 的文字填写 <code>First simulated run</code>。<code>Set Datafile</code> 的 Mode 选择 <code>create</code>，
-   Location 选择 <code>Run folder</code>，文件名填写
-   <code>experiment.dat</code>。</li>
-<li><code>Set Temperature</code> 填 300 K、10 K/min、Settle。</li>
-<li><code>Scan Field</code> 填 0 Oe 到 200 Oe、3 points、5000 Oe/min、Settle。</li>
-<li>选中刚插入的 <strong>Scan Field</strong> 或它的 <strong>End Scan</strong>，双击 <strong>Measure</strong>。Measure 会缩进到
-   Scan Field 里面。</li>
-<li>点击 <strong>File → Save As</strong>，把文件保存为 <code>first-run.seq</code>。</li>
+<li>一直切到最后一页 <strong>Review &amp; Save</strong>；</li>
+<li>勾选 <strong>Simulated Temperature</strong>、<strong>Simulated Magnetic Field</strong> 和 <strong>Simulated 2nd Stage</strong>；</li>
+<li>确认面板顺序无误后点击保存；</li>
+<li>重新启动 OpenLab Control，确认底部三个面板都出现了仿真读数。</li>
 </ol>
-<p>界面中应看到与下面等价的内容；缩进和 <code>End Scan</code> 由编辑器自动维护：</p>
+<p>（可选）点击顶部工具栏 <strong>Modules</strong>，勾选自带的 <strong><code>Simulated Transport</code></strong>，这样待会儿就能看到真实的四通道模拟电阻数据写入文件。</p>
+<h2 id="2">2. 编排一条扫描序列<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
+<ol>
+<li>点击 <strong>File → New</strong>，新建的序列会自动带有一行末尾的 <code>End Sequence</code>。</li>
+<li>选中 <code>End Sequence</code>，在右侧 <strong>Sequence Command Bar</strong> 中依次双击以下指令并填好参数：</li>
+<li><strong>Remark</strong>：填写备注 <code>First simulated run</code></li>
+<li><strong>Set Datafile</strong>：Mode 选 <code>create</code>，Location 选 <code>Run folder</code>，文件名填 <code>experiment.dat</code></li>
+<li><strong>Set Temperature</strong>：<code>300 K</code>，速率 <code>10 K/min</code>，模式 <code>Settle</code></li>
+<li><strong>Scan Field</strong>：从 <code>0 Oe</code> 到 <code>200 Oe</code>，共 <code>3</code> 个点，速率 <code>5000 Oe/min</code>，模式 <code>Settle</code></li>
+<li>选中刚插入的 <strong>Scan Field</strong>（或它的 <strong>End Scan</strong>），双击右侧的 <strong>Measure</strong>，它会自动缩进放进 <code>Scan Field</code> 内部。</li>
+<li>点击 <strong>File → Save As</strong>，保存为 <code>first-run.seq</code>。</li>
+</ol>
+<p>完成后，序列编辑器里会显示类似下面的内容（缩进和 <code>End Scan</code> 由程序自动维护）：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>T Remark First simulated run
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>T Set Datafile create experiment.dat
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>T Set Temperature 300 K at 10 K/min in Settle mode
@@ -1904,43 +1927,41 @@
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>T End Scan
 </span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>T End Sequence
 </span></code></pre></div>
-<p><code>T</code> 表示该命令启用；切换为 <code>F</code> 后该命令不会执行。<code>Settle</code> 表示到达目标并满足稳定条件后
-再继续。这里使用明确的 <code>create</code>，不是需要替换的占位文字；默认的 <code>open|create</code> 表示文件
-存在时追加、不存在时创建。</p>
-<h2 id="_3">运行并检查结果<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>几个小符号的含义</strong>：
+- 行首的 <code>T</code> 表示启用该行，改为 <code>F</code>（右键 Disable）则跳过执行；
+- <code>Settle</code> 表示等温度/磁场稳定后再走下一步；<code>Sweep</code> 则下发目标后立即继续；
+- <code>Set Datafile</code> 的三种模式：<code>create</code>（新建/覆盖）、<code>open</code>（向已有文件追加）、<code>open|create</code>（存在则追加、不存在则新建）。</p>
+</blockquote>
+<h2 id="3">3. 点击运行并查看产出文件<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
 <ol>
-<li>点击主窗口左侧或工具栏的 <strong>Run</strong>。</li>
-<li>等待状态变为 <strong>Completed</strong>。</li>
-<li>打开 <code>runs/&lt;时间&gt;_first-run/</code>，应看到：</li>
+<li>点击左侧控制区的 <strong>Run</strong> 按钮；</li>
+<li>观察左侧进度条和模块监视卡，直到状态变为 <strong>Completed</strong>；</li>
+<li>打开项目目录下的 <code>runs/&lt;时间戳&gt;_first-run/</code>，每次实验都会自动保存一整套文件：</li>
 </ol>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>runs/&lt;时间&gt;_first-run/
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ sequence.seq
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ configuration/
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│  ├─ general.toml
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│  └─ instruments/
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>├─ module_settings/
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>├─ experiment.dat
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>├─ instrument_status.dat
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>└─ events.dat
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>runs/&lt;时间戳&gt;_first-run/
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├─ experiment.dat            # 实验测量数据（可直接拖进 Data Browser 画图）
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├─ instrument_status.dat     # 运行期间每秒记录的完整温场/状态日志
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├─ events.dat                # Warning / Error / Remark 事件日志
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├─ sequence.seq              # 本次实际运行的 SEQ 快照
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>├─ configuration/            # 当次使用的系统配置快照
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>└─ module_settings/          # 已启用模块的参数与初始状态快照
 </span></code></pre></div>
-<p>如果没有 Enable 任何 Measurement Module，<code>Measure</code> 仍会写系统温场快照，并产生一条
-“没有模块”的 Warning。这是正常的练习结果。若已 Enable 四通道教学模块，每个场点会按
-四个逻辑行键写四行模块数据。只有模块实际返回原始序列时，运行目录才会另外出现
-<code>rawdata/</code>。</p>
-<p><code>Measure</code> 执行时会先取得一次温场快照，再调用本次 Run 已冻结的 Enabled 模块。一次调用
-写一行还是多行，由这些模块声明的逻辑行键决定；初次操作不需要手工设置这个编号。</p>
-<h2 id="pausestop">Pause、Stop 与模块收尾<a class="headerlink" href="#pausestop" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Pause 冻结框架等待和 <code>ModuleAPI.sleep()</code> 计时，不主动关闭模块输出。</li>
-<li>Stop 在安全检查点取消测量，但不向 System Instrument 发送 Set 或 Hold。</li>
-<li>正常完成、Stop 和 Error 都会向模块发送 <code>run_end</code>。真实模块默认在这里关闭本次 Run
-  的输出；明确选择连续偏置时，模块可读回确认后保持。它仍保持 Enabled，只有 Disable
-  或应用退出才调用 <code>close</code> 关闭输出并释放连接。</li>
-<li>厂商驱动中已经阻塞的 I/O 只能等待它自己的有限 timeout，所以真实仪表调用不能无限等。</li>
+<li>如果你启用了 <code>Simulated Transport</code>，<code>experiment.dat</code> 里每个磁场点会按 4 个通道写出 4 行数据（如果模块返回原始波形，还会多出一个 <code>rawdata/</code> 目录）。</li>
+<li>如果没有启用任何测量模块，<code>Measure</code> 仍会记录系统温场并弹出一条“无模块”的 Warning，实验继续跑完——这是正常的练习行为。</li>
 </ul>
-<p>只想使用软件，请继续阅读 <a href="../../OPERATIONS/">操作手册</a> 和
-<a href="../../guides/data-browser/">Data Browser</a>。准备编写 Measurement Module 或 System Instrument 时，再进入
-<a href="../../development/first-module/">第一个测量模块</a>。</p>
+<h2 id="4-pause-stop">4. 运行中途的 Pause 和 Stop 会做什么？<a class="headerlink" href="#4-pause-stop" title="Permanent link">&para;</a></h2>
+<p>了解这两个按钮的行为对后续做真实实验非常重要：</p>
+<ul>
+<li><strong>Pause（暂停）</strong>：在下一个安全检查点暂停序列推进与等待计时；<strong>不会</strong>断开仪表，也<strong>不会</strong>主动关掉模块输出。点击 Resume 后从原位置继续。</li>
+<li><strong>Stop（停止）</strong>：取消后续序列步骤；<strong>不会向温控仪或磁体发送新的 Set 或 Hold</strong>（系统仪表维持自己当前目标继续运行），同时向所有测量模块发出 <code>run_end</code> 通知，模块默认在这里安全关闭自身输出，但仍保持 Enabled 状态，方便你改完参数后再次运行。</li>
+</ul>
+<h2 id="_1">下一步<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<ul>
+<li>想全面掌握日常操作、看图和排错：阅读 <a href="../../OPERATIONS/">操作手册</a> 和 <a href="../../guides/data-browser/">Data Browser</a>。</li>
+<li>想开始写自己的测量模块：进入 <a href="../../development/first-module/">写第一个测量模块</a>。</li>
+</ul>
 
 
 
