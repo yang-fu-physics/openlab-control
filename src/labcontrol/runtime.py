@@ -8,12 +8,16 @@ MeasurementModuleService。UI 只通过线程安全提交与消息队列交互�
 from __future__ import annotations
 
 import asyncio
+import inspect
+import logging
 import queue
 import threading
 import time
 from concurrent.futures import Future
 from copy import deepcopy
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 from .alarm_reporting import AlarmReporter
 from .config import AppConfig
@@ -422,15 +426,27 @@ class RuntimeService:
         if self._loop is None or self._thread is None:
             return
         thread = self._thread
+        deadline = time.monotonic() + timeout
+        shutdown_error: Exception | None = None
         if self._loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self._shutdown_async(), self._loop)
+            async_deadline = deadline - min(0.25, timeout * 0.05)
+            future = asyncio.run_coroutine_threadsafe(
+                self._shutdown_async(deadline=async_deadline),
+                self._loop,
+            )
             try:
                 future.result(timeout=timeout)
-            except Exception:
-                # 异步清理超出调用方总时限时先要求 loop 停止；之后仍 join 并在残留时
-                # 明确抛错，不能静默留下后台线程。
-                self._loop.call_soon_threadsafe(self._loop.stop)
-        thread.join(timeout=timeout)
+            except Exception as exc:
+                shutdown_error = exc
+                # 异步清理超出调用方总时限或报告清理异常时确保 loop 停止；之后仍 join
+                # 并在残留时明确抛错，不能静默留下后台线程或吞掉清理错误。
+                if self._loop.is_running():
+                    try:
+                        self._loop.call_soon_threadsafe(self._loop.stop)
+                    except RuntimeError:
+                        pass
+        join_timeout = max(0.5, deadline - time.monotonic())
+        thread.join(timeout=join_timeout)
         if thread.is_alive():
             raise TimeoutError(
                 "OpenLab runtime thread did not stop within "
@@ -438,94 +454,244 @@ class RuntimeService:
             )
         self._thread = None
         self._loop = None
+        if shutdown_error is not None:
+            raise shutdown_error
 
-    async def _shutdown_async(self) -> None:
-        """按安全依赖顺序关闭运行时。
+    @staticmethod
+    def _accepts_timeout_keyword(func: Any) -> bool:
+        try:
+            parameters = inspect.signature(func).parameters
+        except (TypeError, ValueError):
+            return False
+        return "timeout_seconds" in parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
 
-        1. 请求 SEQ Stop，使正常路径有机会发送模块 run_end；
-        2. 最多等待 3 秒，超时才取消 task；
+    async def _shutdown_async(
+        self,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """按安全依赖顺序在共享总时限内关闭运行时。
+
+        1. 按调用方总 deadline 为模块关闭、仪表断开、报警收尾与日志关闭预留预算；
+        2. 请求 SEQ Stop 并在其分片预算内等待或取消；
         3. 停止轮询，避免清理期间又产生新仪表请求；
-        4. 调用模块 close 并回收 worker；
-        5. 断开温场和 Monitor；
-        6. 有界关闭非关键报警线程，最后关闭日志和 event loop。
+        4. 有界关闭模块并回收 worker，再有界断开系统仪表；
+        5. 有界关闭报警线程，在关闭日志前记录任何清理错误，最后关闭日志与 event loop；
+        6. 若任一步骤超时或失败，完成全部剩余清理后抛出聚合错误，绝不静默吞错。
         """
 
+        now = time.monotonic()
+        total_budget = (
+            max(0.5, deadline - now)
+            if deadline is not None
+            else 8.0
+        )
+        effective_deadline = now + total_budget
+
+        def remaining() -> float:
+            return max(0.0, effective_deadline - time.monotonic())
+
+        logger_reserve = (
+            min(0.15, total_budget * 0.05)
+            if self.logger is not None
+            else 0.0
+        )
+        alarm_reserve = (
+            min(
+                0.3,
+                float(self.config.alarms.reporting.shutdown_timeout_seconds),
+                total_budget * 0.08,
+            )
+            if self.alarm_reporter is not None
+            else 0.0
+        )
+        instrument_reserve = (
+            min(2.5, total_budget * 0.34)
+            if self.instruments is not None
+            else 0.0
+        )
+        module_reserve = (
+            min(
+                float(self.config.modules.shutdown_timeout_seconds),
+                total_budget * 0.34,
+            )
+            if self.modules is not None
+            else 0.0
+        )
+
+        cleanup_errors: list[str] = []
+        seq_budget = min(
+            3.0,
+            max(
+                0.2,
+                remaining()
+                - module_reserve
+                - instrument_reserve
+                - alarm_reserve
+                - logger_reserve,
+            ),
+        )
+        seq_deadline = time.monotonic() + seq_budget
         if self.engine is not None:
-            self.engine.mark_shutting_down()
+            mark_shutting_down = getattr(
+                self.engine,
+                "mark_shutting_down",
+                None,
+            )
+            if callable(mark_shutting_down):
+                mark_shutting_down(
+                    timeout_seconds=max(0.1, seq_budget * 0.45),
+                )
             self.engine.request_stop(False, "Application closing")
         sequence_task = self._sequence_task
-        shutdown_wait = max(
-            1.0,
-            float(self.config.modules.shutdown_timeout_seconds),
-        )
         try:
             if sequence_task is not None:
+                graceful_wait = max(0.05, seq_budget * 0.55)
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(sequence_task),
-                        timeout=min(3.0, shutdown_wait),
+                        timeout=graceful_wait,
                     )
                 except asyncio.TimeoutError:
                     # 取消是最后手段；SequenceEngine 仍会以有界关闭超时发送模块 run_end，但不控制仪表。
                     sequence_task.cancel()
+                    post_cancel_wait = max(
+                        0.1,
+                        seq_deadline - time.monotonic(),
+                    )
                     try:
                         await asyncio.wait_for(
                             asyncio.gather(
                                 sequence_task,
                                 return_exceptions=True,
                             ),
-                            timeout=shutdown_wait,
+                            timeout=post_cancel_wait,
                         )
                     except asyncio.TimeoutError:
-                        pass
+                        cleanup_errors.append(
+                            "sequence stop did not complete within shutdown budget"
+                        )
                 except asyncio.CancelledError:
                     sequence_task.cancel()
+                    post_cancel_wait = max(
+                        0.1,
+                        seq_deadline - time.monotonic(),
+                    )
                     try:
                         await asyncio.wait_for(
                             asyncio.gather(
                                 sequence_task,
                                 return_exceptions=True,
                             ),
-                            timeout=shutdown_wait,
+                            timeout=post_cancel_wait,
                         )
                     except asyncio.TimeoutError:
-                        pass
+                        cleanup_errors.append(
+                            "sequence cancellation did not complete within shutdown budget"
+                        )
                     raise
-                except Exception:
+                except Exception as exc:
+                    cleanup_errors.append(
+                        f"sequence task: {type(exc).__name__}: {exc}"
+                    )
                     await asyncio.gather(
                         sequence_task,
                         return_exceptions=True,
                     )
         finally:
-            if self._poll_task is not None:
-                self._poll_task.cancel()
-                await asyncio.gather(self._poll_task, return_exceptions=True)
-            if self.modules is not None:
-                # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
-                # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
-                try:
-                    await self.modules.shutdown()
-                except Exception:
-                    pass
-            if self.instruments is not None:
-                try:
-                    await self.instruments.disconnect_all()
-                except Exception:
-                    pass
-            if self.alarm_reporter is not None:
-                reporter = self.alarm_reporter
-                self.alarm_reporter = None
-                try:
-                    await asyncio.to_thread(
-                        reporter.close,
-                        self.config.alarms.reporting.shutdown_timeout_seconds,
+            try:
+                if self._poll_task is not None:
+                    self._poll_task.cancel()
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(
+                                self._poll_task,
+                                return_exceptions=True,
+                            ),
+                            timeout=min(0.25, max(0.05, remaining())),
+                        )
+                    except asyncio.TimeoutError:
+                        cleanup_errors.append("poll task cancellation timed out")
+                if self.modules is not None:
+                    # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
+                    # poll loop 停止后执行，避免新的状态轮询与关闭交叉。
+                    module_budget = max(
+                        0.15,
+                        remaining()
+                        - instrument_reserve
+                        - alarm_reserve
+                        - logger_reserve,
                     )
-                except Exception:
-                    pass
-            if self.logger is not None:
-                try:
-                    self.logger.close()
-                except Exception:
-                    pass
-            assert self._loop is not None
-            self._loop.call_soon(self._loop.stop)
+                    try:
+                        if self._accepts_timeout_keyword(self.modules.shutdown):
+                            coro = self.modules.shutdown(
+                                timeout_seconds=module_budget,
+                            )
+                        else:
+                            coro = self.modules.shutdown()
+                        await asyncio.wait_for(coro, timeout=module_budget)
+                    except Exception as exc:
+                        cleanup_errors.append(
+                            f"modules.shutdown: {type(exc).__name__}: {exc}"
+                        )
+                if self.instruments is not None:
+                    instrument_budget = max(
+                        0.15,
+                        remaining() - alarm_reserve - logger_reserve,
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            self.instruments.disconnect_all(),
+                            timeout=instrument_budget,
+                        )
+                    except Exception as exc:
+                        cleanup_errors.append(
+                            f"instruments.disconnect_all: {type(exc).__name__}: {exc}"
+                        )
+                if self.alarm_reporter is not None:
+                    reporter = self.alarm_reporter
+                    self.alarm_reporter = None
+                    alarm_budget = min(
+                        float(self.config.alarms.reporting.shutdown_timeout_seconds),
+                        max(0.05, remaining() - logger_reserve),
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(reporter.close, alarm_budget),
+                            timeout=alarm_budget + 0.1,
+                        )
+                    except Exception as exc:
+                        cleanup_errors.append(
+                            f"alarm_reporter.close: {type(exc).__name__}: {exc}"
+                        )
+                if cleanup_errors and self.events is not None:
+                    try:
+                        self.events.report(
+                            Severity.ERROR,
+                            "runtime",
+                            "RUNTIME_SHUTDOWN_CLEANUP_FAILED",
+                            "; ".join(cleanup_errors),
+                        )
+                    except Exception as exc:
+                        cleanup_errors.append(
+                            f"events.report: {type(exc).__name__}: {exc}"
+                        )
+                if self.logger is not None:
+                    try:
+                        self.logger.close()
+                    except Exception as exc:
+                        cleanup_errors.append(
+                            f"logger.close: {type(exc).__name__}: {exc}"
+                        )
+            finally:
+                if self._loop is not None:
+                    self._loop.call_soon(self._loop.stop)
+        if cleanup_errors:
+            summary = "; ".join(cleanup_errors)
+            _LOGGER.error("Runtime shutdown completed with cleanup errors: %s", summary)
+            raise RuntimeError(
+                f"Runtime shutdown completed with cleanup errors: {summary}"
+            )

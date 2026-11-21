@@ -1330,17 +1330,25 @@ class MeasurementModuleService:
         with self._operation_state_lock:
             self._operation_state = "stopping"
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
         """并行关闭全部 worker，每个模块共用一个 module-close 总时限。"""
+
+        shutdown_timeout = float(self.config.shutdown_timeout_seconds)
+        if timeout_seconds is not None:
+            shutdown_timeout = max(
+                0.05,
+                min(shutdown_timeout, float(timeout_seconds)),
+            )
 
         async def stop(record: ModuleRuntimeRecord) -> None:
             if record.client is None:
                 return
             client = record.client
-            deadline = (
-                time.monotonic()
-                + self.config.shutdown_timeout_seconds
-            )
+            deadline = time.monotonic() + shutdown_timeout
             if record.enabled:
                 try:
                     remaining = max(

@@ -123,6 +123,61 @@ class RuntimeShutdownTests(unittest.TestCase):
             )
             self.assertGreaterEqual(len(status_rows), 3)
 
+    def test_shutdown_shares_total_budget_and_surfaces_cleanup_errors(
+        self,
+    ) -> None:
+        import asyncio
+        from labcontrol.events import EventManager
+
+        events = EventManager()
+        trace: list[str] = []
+
+        class _SlowModules:
+            async def shutdown(self, *, timeout_seconds: float | None = None) -> None:
+                trace.append("module.start")
+                await asyncio.sleep(3.0)
+                trace.append("module.done")
+
+        class _FailingInstruments:
+            async def disconnect_all(self) -> None:
+                trace.append("instrument.start")
+                raise RuntimeError("instrument disconnect failed")
+
+        class _Logger:
+            def close(self) -> None:
+                trace.append("logger.close")
+
+        async def scenario() -> None:
+            runtime = RuntimeService(load_simulated_config(), module_descriptors=())
+            runtime._loop = SimpleNamespace(
+                call_soon=lambda fn, *args: trace.append("loop.stop"),
+                stop=lambda: None,
+            )  # type: ignore[assignment]
+            runtime.events = events
+            runtime.modules = _SlowModules()  # type: ignore[assignment]
+            runtime.instruments = _FailingInstruments()  # type: ignore[assignment]
+            runtime.logger = _Logger()  # type: ignore[assignment]
+            runtime.engine = SimpleNamespace(
+                mark_shutting_down=lambda **_: None,
+                request_stop=lambda *_: None,
+            )  # type: ignore[assignment]
+            runtime._sequence_task = asyncio.create_task(asyncio.sleep(3.0))
+
+            started = time.monotonic()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "modules.shutdown.*instruments.disconnect_all",
+            ):
+                await runtime._shutdown_async(deadline=started + 1.2)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 2.0)
+            self.assertIn("module.start", trace)
+            self.assertIn("instrument.start", trace)
+            self.assertIn("logger.close", trace)
+            self.assertIn("loop.stop", trace)
+
+        asyncio.run(scenario())
+
 
 if __name__ == "__main__":
     unittest.main()
