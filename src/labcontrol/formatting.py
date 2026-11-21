@@ -32,6 +32,12 @@ def require_precision(value: object, decimals: int, label: str = "Value") -> flo
     """在参数输入边界拒绝会被控件舍入的值，容许浮点换算的末位误差。"""
     number = float(value)
     rounded = round(number, decimals)
-    if not math.isfinite(number) or not math.isclose(number, rounded, rel_tol=1e-14, abs_tol=0.0):
+    abs_tol = 10.0 ** -(decimals + 6)
+    if not math.isfinite(number) or not math.isclose(
+        number,
+        rounded,
+        rel_tol=1e-14,
+        abs_tol=abs_tol,
+    ):
         raise ValueError(f"{label}: {value} must have at most {decimals} decimal places")
-    return rounded
+    return 0.0 if rounded == 0.0 else rounded
