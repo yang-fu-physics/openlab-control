@@ -229,10 +229,12 @@ class RuntimeShutdownTests(unittest.TestCase):
             runtime.modules = _SlowModules()  # type: ignore[assignment]
             runtime.instruments = manager
             runtime.logger = _Logger()  # type: ignore[assignment]
+            runtime._poll_task = asyncio.create_task(asyncio.sleep(1000.0))
 
             started = time.monotonic()
             await runtime._shutdown_async(deadline=started + 1.5)
             self.assertLess(time.monotonic() - started, 1.5)
+            self.assertTrue(runtime._poll_task.cancelled())
             self.assertEqual(
                 trace,
                 [
@@ -241,6 +243,54 @@ class RuntimeShutdownTests(unittest.TestCase):
                     "instrument.close.start",
                     "instrument.worker.shutdown.start",
                     "instrument.worker.shutdown.done",
+                    "logger.close",
+                    "loop.stop",
+                ],
+            )
+
+        asyncio.run(scenario())
+
+    def test_shutdown_with_active_poll_task_completes_all_cleanup_steps(
+        self,
+    ) -> None:
+        import asyncio
+        from labcontrol.events import EventManager
+
+        trace: list[str] = []
+
+        class _Modules:
+            async def shutdown(self, *, timeout_seconds: float | None = None) -> None:
+                del timeout_seconds
+                trace.append("module.shutdown")
+
+        class _Instruments:
+            async def disconnect_all(self, *, timeout_seconds: float | None = None) -> None:
+                del timeout_seconds
+                trace.append("instrument.disconnect_all")
+
+        class _Logger:
+            def close(self) -> None:
+                trace.append("logger.close")
+
+        async def scenario() -> None:
+            runtime = RuntimeService(load_simulated_config(), module_descriptors=())
+            runtime._loop = SimpleNamespace(
+                call_soon=lambda fn, *args: trace.append("loop.stop"),
+                stop=lambda: None,
+            )  # type: ignore[assignment]
+            runtime.events = EventManager()
+            runtime.modules = _Modules()  # type: ignore[assignment]
+            runtime.instruments = _Instruments()  # type: ignore[assignment]
+            runtime.logger = _Logger()  # type: ignore[assignment]
+            runtime._poll_task = asyncio.create_task(asyncio.sleep(1000.0))
+
+            await runtime._shutdown_async(deadline=time.monotonic() + 2.0)
+            self.assertTrue(runtime._poll_task.cancelled())
+            self.assertEqual(
+                trace,
+                [
+                    "module.shutdown",
+                    "instrument.disconnect_all",
                     "logger.close",
                     "loop.stop",
                 ],

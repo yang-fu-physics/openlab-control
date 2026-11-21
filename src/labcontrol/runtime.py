@@ -484,7 +484,7 @@ class RuntimeService:
         )
 
     @staticmethod
-    def _discard_abandoned_task_exception(task: asyncio.Task[Any]) -> None:
+    def _discard_abandoned_task_exception(task: asyncio.Future[Any]) -> None:
         if not task.cancelled():
             try:
                 task.exception()
@@ -492,16 +492,37 @@ class RuntimeService:
                 pass
 
     @classmethod
+    async def _await_cancelled_task(
+        cls,
+        task: asyncio.Task[Any],
+        timeout_seconds: float,
+    ) -> None:
+        """取消已有任务并在硬时限内等待其结束；超时后不再滞留。"""
+
+        task.cancel()
+        done, _ = await asyncio.wait(
+            {task},
+            timeout=max(0.01, timeout_seconds),
+        )
+        if task in done:
+            cls._discard_abandoned_task_exception(task)
+            return
+        task.add_done_callback(cls._discard_abandoned_task_exception)
+        raise TimeoutError(
+            f"Cancelled task did not stop within {timeout_seconds:.2f} s"
+        )
+
+    @classmethod
     async def _await_bounded(
         cls,
-        coro: Any,
+        awaitable: Any,
         timeout_seconds: float,
         *,
         cancel_grace: float = 0.15,
     ) -> Any:
-        """硬边界等待协程；超时取消后仅等待有限 cancel_grace，绝不被滞留 finally 无限拖延。"""
+        """硬边界等待协程或 Future；超时取消后仅等待有限 cancel_grace，绝不被滞留 finally 无限拖延。"""
 
-        task = asyncio.create_task(coro)
+        task = asyncio.ensure_future(awaitable)
         done, _ = await asyncio.wait(
             {task},
             timeout=max(0.01, timeout_seconds),
@@ -604,44 +625,41 @@ class RuntimeService:
             if sequence_task is not None:
                 graceful_wait = max(0.05, seq_budget * 0.55)
                 try:
-                    await asyncio.wait_for(
-                        asyncio.shield(sequence_task),
+                    done, _ = await asyncio.wait(
+                        {sequence_task},
                         timeout=graceful_wait,
                     )
-                except asyncio.TimeoutError:
-                    # 取消是最后手段；SequenceEngine 仍会以有界关闭超时发送模块 run_end，但不控制仪表。
-                    sequence_task.cancel()
-                    post_cancel_wait = max(
-                        0.1,
-                        seq_deadline - time.monotonic(),
-                    )
-                    try:
-                        await self._await_bounded(
-                            asyncio.gather(
+                    if sequence_task in done:
+                        if not sequence_task.cancelled():
+                            exc = sequence_task.exception()
+                            if exc is not None:
+                                cleanup_errors.append(
+                                    f"sequence task: {type(exc).__name__}: {exc}"
+                                )
+                    else:
+                        # 取消是最后手段；SequenceEngine 仍会以有界关闭超时发送模块 run_end，但不控制仪表。
+                        post_cancel_wait = max(
+                            0.1,
+                            seq_deadline - time.monotonic(),
+                        )
+                        try:
+                            await self._await_cancelled_task(
                                 sequence_task,
-                                return_exceptions=True,
-                            ),
-                            post_cancel_wait,
-                            cancel_grace=0.05,
-                        )
-                    except TimeoutError:
-                        cleanup_errors.append(
-                            "sequence stop did not complete within shutdown budget"
-                        )
+                                post_cancel_wait,
+                            )
+                        except TimeoutError:
+                            cleanup_errors.append(
+                                "sequence stop did not complete within shutdown budget"
+                            )
                 except asyncio.CancelledError:
-                    sequence_task.cancel()
                     post_cancel_wait = max(
                         0.1,
                         seq_deadline - time.monotonic(),
                     )
                     try:
-                        await self._await_bounded(
-                            asyncio.gather(
-                                sequence_task,
-                                return_exceptions=True,
-                            ),
+                        await self._await_cancelled_task(
+                            sequence_task,
                             post_cancel_wait,
-                            cancel_grace=0.05,
                         )
                     except TimeoutError:
                         cleanup_errors.append(
@@ -652,25 +670,18 @@ class RuntimeService:
                     cleanup_errors.append(
                         f"sequence task: {type(exc).__name__}: {exc}"
                     )
-                    await asyncio.gather(
-                        sequence_task,
-                        return_exceptions=True,
-                    )
         finally:
             try:
                 if self._poll_task is not None:
-                    self._poll_task.cancel()
                     try:
-                        await self._await_bounded(
-                            asyncio.gather(
-                                self._poll_task,
-                                return_exceptions=True,
-                            ),
+                        await self._await_cancelled_task(
+                            self._poll_task,
                             min(0.25, max(0.05, remaining())),
-                            cancel_grace=0.05,
                         )
-                    except TimeoutError:
-                        cleanup_errors.append("poll task cancellation timed out")
+                    except Exception as exc:
+                        cleanup_errors.append(
+                            f"poll task cancellation: {type(exc).__name__}: {exc}"
+                        )
                 if self.modules is not None:
                     # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
                     # poll loop 停止后执行，避免新的状态轮询与关闭交叉。

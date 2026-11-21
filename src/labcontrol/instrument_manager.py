@@ -1048,7 +1048,7 @@ class InstrumentManager:
         )
 
     @staticmethod
-    def _discard_abandoned_task_exception(task: asyncio.Task[object]) -> None:
+    def _discard_abandoned_task_exception(task: asyncio.Future[object]) -> None:
         if not task.cancelled():
             try:
                 task.exception()
@@ -1124,7 +1124,7 @@ class InstrumentManager:
                     # 为 finally 中的 worker shutdown 保留大部分预算，避免阻塞的 close
                     # 耗尽整个仪表断开时限。
                     close_budget = max(0.05, min(0.8, remaining * 0.25))
-                    close_task = asyncio.create_task(close_coro)
+                    close_task = asyncio.ensure_future(close_coro)
                     done, _ = await asyncio.wait(
                         {close_task},
                         timeout=close_budget,
@@ -1167,7 +1167,7 @@ class InstrumentManager:
                             if self._accepts_timeout_keyword(shutdown_fn)
                             else shutdown_fn()
                         )
-                        shutdown_task = asyncio.create_task(shutdown_coro)
+                        shutdown_task = asyncio.ensure_future(shutdown_coro)
                         done, _ = await asyncio.wait(
                             {shutdown_task},
                             timeout=shutdown_budget,
@@ -1187,7 +1187,7 @@ class InstrumentManager:
                                     0.05,
                                     min(0.25, deadline - time.monotonic()),
                                 )
-                                force_task = asyncio.create_task(
+                                force_task = asyncio.ensure_future(
                                     force_stop(force_budget)
                                 )
                                 done_force, _ = await asyncio.wait(
