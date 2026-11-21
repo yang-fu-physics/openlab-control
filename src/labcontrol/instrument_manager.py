@@ -1352,6 +1352,7 @@ class InstrumentManager:
             connection_state=InstrumentConnectionState.CONNECTED,
             ready=reading.get("ready"),
             metrics=metrics,
+            sampled_metrics=frozenset(returned) if measurement else None,
         )
         if measurement:
             return snapshot

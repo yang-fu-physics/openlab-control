@@ -1,55 +1,42 @@
-# 第一次使用从这里开始
+# 快速上手路线图
 
-先在不连接真实仪表的情况下运行一次程序。确认基本操作后，再选择是否学习模块开发。
+第一次接触 OpenLab Control 时，建议**先不接任何真实仪表**，花 5 分钟用内置仿真跑通一次完整流程，弄清软件怎么工作，再连接真实硬件或开发自己的模块。
 
-## 选择运行方式
+## 选择你的入口
 
-| 目标 | 建议入口 | 适合谁 |
+| 你现在想做什么 | 推荐页面 | 适合谁 |
 | --- | --- | --- |
-| 直接体验界面和 SEQ | [Windows 发布包](windows.md) | 使用者、实验员 |
-| 写测量模块或修改程序 | [源码环境](source.md) | 开发者 |
-| 理解运行流程 | [第一条 SEQ](first-sequence.md) | 所有人 |
+| 直接在实验室电脑上安装并运行软件 | [使用 Windows 发布包](windows.md) | 实验员、日常使用者 |
+| 从源码运行、改代码或跑单元测试 | [搭建源码环境](source.md) | 开发者 |
+| 亲手新建并跑通第一条自动扫描序列 | [运行第一条 SEQ](first-sequence.md) | 所有人 |
+| 把真实的 GPIB / USB / 网口仪表接进来 | [扫描与配置仪表](../guides/instrument-scanner.md) | 实验室管理员 |
 
-## 五分钟检查点
+## 5 分钟自检清单
 
-- [ ] 全新安装在没有 System Instrument 面板时也能启动。
-- [ ] 所有 Measurement Module 启动时都是 Disabled。
-- [ ] 需要运行温场示例时，能先在 Instrument Scanner 最后一页明确启用对应仿真。
-- [ ] 启用仿真后，能打开 `examples/nested_scan.seq` 并在无真实硬件时运行。
-- [ ] 每次 Run 在 `runs/` 下产生独立目录、DAT、事件和仪表状态日志。
-- [ ] Stop 后温度和磁场继续仪表原有动作，框架没有发送 Set 或 Hold。
+完成下面这几步，你就掌握了 OpenLab Control 的核心操作：
 
-!!! info "先判断要接入哪一类"
+- [ ] 启动软件（全新安装时底部没有任何仪表面板，这是正常的）。
+- [ ] 用 **Instrument Scanner** 勾选内置仿真温度、磁场和二级冷头，重启后看到底部实时读数。
+- [ ] 在工具栏点击 **Modules**，勾选启用自带的 `Simulated Transport` 示例模块。
+- [ ] 打开 `examples/nested_scan.seq` 并点击 **Run**，观察左侧进度与模块监视卡。
+- [ ] 在 `runs/` 下找到刚生成的实验文件夹，并用 **Data Browser** 打开其中的 `experiment.dat` 画图。
 
-    **Measurement Module** 用来测量电阻、电压、电流等数据。
+## 准备接入自己的设备？先分清该写哪一类
 
-    **System Instrument** 只用来更换主温度、主磁场或只读监视仪表。普通测量模块不需要它。
+不要按仪表品牌区分，按**它在实验里承担的角色**选：
 
-## 按职责选择接入方式
+| 你希望这台仪表做什么 | 应该选哪类 | 配置方式 |
+| --- | --- | --- |
+| 响应标准 `Set / Scan Temperature` 或 `Set / Scan Field` 指令 | **System Instrument** | 控制器面板角色设为 `sample_temp` 或 `field`（全局各最多 1 个） |
+| 只在底部面板手动设温/设场，不参与标准温场 SEQ | **System Instrument** | 控制器面板角色设为 `none` |
+| 常驻显示冷头温度、液位、气压或提供简单开关按钮 | **System Instrument** | 只读面板或开关面板，角色为 `none` |
+| 在 SEQ 执行到 `Measure` 时采集电阻、电压、电流等实验数据 | **Measurement Module** | 放入 `modules/`，实验前手动 Enable |
 
-不要只看仪表型号；先看它在 OpenLab Control 中负责什么。
+> 同一型号仪表在不同实验台上可能扮演不同角色：主温控仪放进 System Instrument 并设为 `sample_temp`；只在某次实验里顺带读数据的辅助表则可以做成 Measurement Module。
 
-| 你希望它做什么 | 应写什么 |
-| --- | --- |
-| 接受标准温度/磁场 SEQ | System Instrument controller 面板，角色为 `sample_temp` 或 `field` |
-| 只供手动控制，不接管标准温场 SEQ | System Instrument controller 面板，角色为 `none` |
-| 显示 2nd Stage 等一般辅助量 | System Instrument 只读面板，角色为 `none` |
-| 在 `Measure` 时产生电阻、电压、电流等实验列 | Measurement Module |
+## 接下来去哪？
 
-同一型号也可能承担不同职责。例如一台温控仪若负责标准样品温度控制，就把它的 controller
-面板角色设为 `sample_temp`；另一台温控仪可以保持 `none`，只显示或手动控制。若仪表只在
-某个实验方案里读取传感器并写测量列，也可以属于 Measurement Module。角色为 `none` 的
-面板不参与标准温度/磁场 SEQ。
-
-## 推荐学习顺序
-
-1. 运行一次嵌套扫描，观察 Sequence Editor、状态卡和运行目录。
-2. 按 [Windows 安装说明](windows.md) 把 `simulated_transport` 复制到
-   `modules/`；源码环境也使用相同目录。
-3. 重启，确认模块出现在 Modules 中，再练习 Enable 和 Disable。
-4. 跟随 [第一个测量模块](../development/first-module.md) 完成四通道教程模块。
-5. 根据需要增加设置窗口或模块自己的 SEQ 指令。
-6. 在连接真实仪表前完成 [安全清单](../guides/safety-checklist.md)。
-
-如果你的目标只是更换温控仪或磁场控制器，请直接阅读
-[编写 System Instrument](../development/system-instrument.md)，不要从测量模块教程开始。
+- **日常做实验**：按顺序看 [Windows 发布包](windows.md) → [第一条 SEQ](first-sequence.md) → [扫描与配置仪表](../guides/instrument-scanner.md) → [操作手册](../OPERATIONS.md)。
+- **写测量模块**：直接进入 [Measurement Module 教程](../development/index.md)。
+- **写温控仪 / 磁体驱动**：直接进入 [System Instrument 教程](../development/system-instrument.md)，不必先看测量模块章节。
+- **准备接真机前**：务必核对 [真实仪表安全清单](../guides/safety-checklist.md)。
