@@ -51,6 +51,7 @@ class RuntimeService:
         self._ready = threading.Event()
         self._sequence_task: asyncio.Task[Any] | None = None
         self._poll_task: asyncio.Task[Any] | None = None
+        self._logger_closed_during_shutdown = False
         self.events: EventManager | None = None
         self.instruments: InstrumentManager | None = None
         self.logger: DatRunLogger | None = None
@@ -428,6 +429,7 @@ class RuntimeService:
         thread = self._thread
         deadline = time.monotonic() + timeout
         shutdown_error: Exception | None = None
+        self._logger_closed_during_shutdown = False
         if self._loop.is_running():
             async_deadline = deadline - min(0.25, timeout * 0.05)
             future = asyncio.run_coroutine_threadsafe(
@@ -448,10 +450,23 @@ class RuntimeService:
         join_timeout = max(0.5, deadline - time.monotonic())
         thread.join(timeout=join_timeout)
         if thread.is_alive():
+            if self.logger is not None and not self._logger_closed_during_shutdown:
+                try:
+                    self.logger.close()
+                    self._logger_closed_during_shutdown = True
+                except Exception as exc:
+                    _LOGGER.error("Fallback logger.close failed: %s", exc)
             raise TimeoutError(
                 "OpenLab runtime thread did not stop within "
                 f"{timeout:g} seconds"
             )
+        if self.logger is not None and not self._logger_closed_during_shutdown:
+            try:
+                self.logger.close()
+                self._logger_closed_during_shutdown = True
+            except Exception as exc:
+                if shutdown_error is None:
+                    shutdown_error = exc
         self._thread = None
         self._loop = None
         if shutdown_error is not None:
@@ -466,6 +481,44 @@ class RuntimeService:
         return "timeout_seconds" in parameters or any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD
             for parameter in parameters.values()
+        )
+
+    @staticmethod
+    def _discard_abandoned_task_exception(task: asyncio.Task[Any]) -> None:
+        if not task.cancelled():
+            try:
+                task.exception()
+            except Exception:
+                pass
+
+    @classmethod
+    async def _await_bounded(
+        cls,
+        coro: Any,
+        timeout_seconds: float,
+        *,
+        cancel_grace: float = 0.15,
+    ) -> Any:
+        """硬边界等待协程；超时取消后仅等待有限 cancel_grace，绝不被滞留 finally 无限拖延。"""
+
+        task = asyncio.create_task(coro)
+        done, _ = await asyncio.wait(
+            {task},
+            timeout=max(0.01, timeout_seconds),
+        )
+        if task in done:
+            return task.result()
+        task.cancel()
+        if cancel_grace > 0.0:
+            done_after, _ = await asyncio.wait({task}, timeout=cancel_grace)
+            if task in done_after:
+                cls._discard_abandoned_task_exception(task)
+                raise TimeoutError(
+                    f"Operation timed out after {timeout_seconds:.2f} s"
+                )
+        task.add_done_callback(cls._discard_abandoned_task_exception)
+        raise TimeoutError(
+            f"Operation timed out after {timeout_seconds:.2f} s"
         )
 
     async def _shutdown_async(
@@ -509,7 +562,7 @@ class RuntimeService:
             else 0.0
         )
         instrument_reserve = (
-            min(2.5, total_budget * 0.34)
+            min(3.5, total_budget * 0.44)
             if self.instruments is not None
             else 0.0
         )
@@ -563,14 +616,15 @@ class RuntimeService:
                         seq_deadline - time.monotonic(),
                     )
                     try:
-                        await asyncio.wait_for(
+                        await self._await_bounded(
                             asyncio.gather(
                                 sequence_task,
                                 return_exceptions=True,
                             ),
-                            timeout=post_cancel_wait,
+                            post_cancel_wait,
+                            cancel_grace=0.05,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         cleanup_errors.append(
                             "sequence stop did not complete within shutdown budget"
                         )
@@ -581,14 +635,15 @@ class RuntimeService:
                         seq_deadline - time.monotonic(),
                     )
                     try:
-                        await asyncio.wait_for(
+                        await self._await_bounded(
                             asyncio.gather(
                                 sequence_task,
                                 return_exceptions=True,
                             ),
-                            timeout=post_cancel_wait,
+                            post_cancel_wait,
+                            cancel_grace=0.05,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         cleanup_errors.append(
                             "sequence cancellation did not complete within shutdown budget"
                         )
@@ -606,14 +661,15 @@ class RuntimeService:
                 if self._poll_task is not None:
                     self._poll_task.cancel()
                     try:
-                        await asyncio.wait_for(
+                        await self._await_bounded(
                             asyncio.gather(
                                 self._poll_task,
                                 return_exceptions=True,
                             ),
-                            timeout=min(0.25, max(0.05, remaining())),
+                            min(0.25, max(0.05, remaining())),
+                            cancel_grace=0.05,
                         )
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         cleanup_errors.append("poll task cancellation timed out")
                 if self.modules is not None:
                     # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
@@ -632,7 +688,11 @@ class RuntimeService:
                             )
                         else:
                             coro = self.modules.shutdown()
-                        await asyncio.wait_for(coro, timeout=module_budget)
+                        await self._await_bounded(
+                            coro,
+                            module_budget,
+                            cancel_grace=min(0.15, max(0.05, remaining() * 0.1)),
+                        )
                     except Exception as exc:
                         cleanup_errors.append(
                             f"modules.shutdown: {type(exc).__name__}: {exc}"
@@ -643,9 +703,18 @@ class RuntimeService:
                         remaining() - alarm_reserve - logger_reserve,
                     )
                     try:
-                        await asyncio.wait_for(
-                            self.instruments.disconnect_all(),
-                            timeout=instrument_budget,
+                        if self._accepts_timeout_keyword(
+                            self.instruments.disconnect_all
+                        ):
+                            coro = self.instruments.disconnect_all(
+                                timeout_seconds=instrument_budget,
+                            )
+                        else:
+                            coro = self.instruments.disconnect_all()
+                        await self._await_bounded(
+                            coro,
+                            instrument_budget,
+                            cancel_grace=min(0.15, max(0.05, remaining() * 0.1)),
                         )
                     except Exception as exc:
                         cleanup_errors.append(
@@ -659,9 +728,10 @@ class RuntimeService:
                         max(0.05, remaining() - logger_reserve),
                     )
                     try:
-                        await asyncio.wait_for(
+                        await self._await_bounded(
                             asyncio.to_thread(reporter.close, alarm_budget),
-                            timeout=alarm_budget + 0.1,
+                            alarm_budget + 0.1,
+                            cancel_grace=0.05,
                         )
                     except Exception as exc:
                         cleanup_errors.append(
@@ -682,6 +752,7 @@ class RuntimeService:
                 if self.logger is not None:
                     try:
                         self.logger.close()
+                        self._logger_closed_during_shutdown = True
                     except Exception as exc:
                         cleanup_errors.append(
                             f"logger.close: {type(exc).__name__}: {exc}"

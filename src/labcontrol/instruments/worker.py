@@ -825,10 +825,16 @@ class IsolatedInstrumentClient:
             {"command_id": command_id},
         )
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        effective = self.shutdown_timeout_seconds
+        if timeout_seconds is not None:
+            effective = max(0.05, min(effective, float(timeout_seconds)))
         await asyncio.to_thread(
             self.worker.close,
-            self.shutdown_timeout_seconds,
+            effective,
         )
 
     async def force_stop(self, timeout_seconds: float = 0.25) -> None:
@@ -898,7 +904,11 @@ class InProcessInstrumentClient:
             command_id,
         )
 
-    async def shutdown(self) -> None:
+    async def shutdown(
+        self,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        del timeout_seconds
         return None
 
     async def force_stop(self, timeout_seconds: float = 0.25) -> None:

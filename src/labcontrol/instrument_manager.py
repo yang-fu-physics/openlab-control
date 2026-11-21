@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import heapq
+import inspect
 import math
 import re
 import time
@@ -1035,10 +1036,44 @@ class InstrumentManager:
             *(connect(instrument_id, instrument) for instrument_id, instrument in self.instruments.items())
         )
 
-    async def disconnect_all(self) -> None:
-        """停止恢复任务并有界断开全部仪表，用于应用关闭。"""
+    @staticmethod
+    def _accepts_timeout_keyword(func: object) -> bool:
+        try:
+            parameters = inspect.signature(func).parameters  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return False
+        return "timeout_seconds" in parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+
+    @staticmethod
+    def _discard_abandoned_task_exception(task: asyncio.Task[object]) -> None:
+        if not task.cancelled():
+            try:
+                task.exception()
+            except Exception:
+                pass
+
+    async def disconnect_all(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        """停止恢复任务并在可选总时限内断开全部仪表，用于应用关闭。"""
 
         self._shutting_down = True
+        deadline = (
+            time.monotonic() + max(0.1, float(timeout_seconds))
+            if timeout_seconds is not None
+            else None
+        )
+        force_stop_reserve = (
+            min(0.25, max(0.05, float(timeout_seconds) * 0.12))
+            if timeout_seconds is not None
+            else 0.0
+        )
+
         response_tasks = tuple(self._event_response_tasks.values())
         for task in response_tasks:
             task.cancel()
@@ -1069,14 +1104,46 @@ class InstrumentManager:
                 return_exceptions=True,
             )
 
+        timeout_failures: list[str] = []
+
         async def disconnect(instrument_id: str, instrument: object) -> None:
             try:
-                await self._operate(
+                close_coro = self._operate(
                     instrument_id,
                     "close",
-                    instrument.close,
+                    instrument.close,  # type: ignore[attr-defined]
                     shutdown=True,
                 )
+                if deadline is None:
+                    await close_coro
+                else:
+                    remaining = max(
+                        0.0,
+                        deadline - time.monotonic() - force_stop_reserve,
+                    )
+                    # 为 finally 中的 worker shutdown 保留大部分预算，避免阻塞的 close
+                    # 耗尽整个仪表断开时限。
+                    close_budget = max(0.05, min(0.8, remaining * 0.25))
+                    close_task = asyncio.create_task(close_coro)
+                    done, _ = await asyncio.wait(
+                        {close_task},
+                        timeout=close_budget,
+                    )
+                    if close_task in done:
+                        close_task.result()
+                    else:
+                        close_task.cancel()
+                        await asyncio.wait({close_task}, timeout=0.05)
+                        if not close_task.done():
+                            close_task.add_done_callback(
+                                self._discard_abandoned_task_exception
+                            )
+                        self.events.report(
+                            Severity.WARNING,
+                            instrument_id,
+                            "DISCONNECT_TIMEOUT",
+                            f"Instrument close exceeded {close_budget:.2f} s shutdown budget",
+                        )
             except Exception as exc:
                 self.events.report(
                     Severity.WARNING,
@@ -1087,7 +1154,67 @@ class InstrumentManager:
                 )
             finally:
                 try:
-                    await instrument.shutdown()  # type: ignore[attr-defined]
+                    shutdown_fn = instrument.shutdown  # type: ignore[attr-defined]
+                    if deadline is None:
+                        await shutdown_fn()
+                    else:
+                        shutdown_budget = max(
+                            0.05,
+                            deadline - time.monotonic() - force_stop_reserve,
+                        )
+                        shutdown_coro = (
+                            shutdown_fn(timeout_seconds=shutdown_budget)
+                            if self._accepts_timeout_keyword(shutdown_fn)
+                            else shutdown_fn()
+                        )
+                        shutdown_task = asyncio.create_task(shutdown_coro)
+                        done, _ = await asyncio.wait(
+                            {shutdown_task},
+                            timeout=shutdown_budget,
+                        )
+                        if shutdown_task in done:
+                            shutdown_task.result()
+                        else:
+                            shutdown_task.cancel()
+                            await asyncio.wait({shutdown_task}, timeout=0.05)
+                            if not shutdown_task.done():
+                                shutdown_task.add_done_callback(
+                                    self._discard_abandoned_task_exception
+                                )
+                            force_stop = getattr(instrument, "force_stop", None)
+                            if callable(force_stop):
+                                force_budget = max(
+                                    0.05,
+                                    min(0.25, deadline - time.monotonic()),
+                                )
+                                force_task = asyncio.create_task(
+                                    force_stop(force_budget)
+                                )
+                                done_force, _ = await asyncio.wait(
+                                    {force_task},
+                                    timeout=force_budget,
+                                )
+                                if force_task in done_force:
+                                    try:
+                                        force_task.result()
+                                    except Exception:
+                                        pass
+                                else:
+                                    force_task.cancel()
+                                    force_task.add_done_callback(
+                                        self._discard_abandoned_task_exception
+                                    )
+                            message = (
+                                f"Instrument worker shutdown exceeded "
+                                f"{shutdown_budget:.2f} s budget"
+                            )
+                            timeout_failures.append(f"{instrument_id}: {message}")
+                            self.events.report(
+                                Severity.WARNING,
+                                instrument_id,
+                                "INSTRUMENT_WORKER_CLOSE_FAILED",
+                                message,
+                            )
                 except Exception as exc:
                     self.events.report(
                         Severity.WARNING,
@@ -1107,6 +1234,11 @@ class InstrumentManager:
         await asyncio.gather(
             *(disconnect(instrument_id, instrument) for instrument_id, instrument in self.instruments.items())
         )
+        if timeout_failures:
+            raise TimeoutError(
+                "Instrument disconnect exceeded shutdown budget: "
+                + "; ".join(timeout_failures)
+            )
 
     async def poll_all(self) -> dict[str, InstrumentSnapshot]:
         """并发轮询已连接仪表并返回快照副本；单台失败不会阻塞其他仪表。"""
