@@ -106,6 +106,10 @@ class InstrumentMetricTests(unittest.TestCase):
                 fresh["temperature"].target = None
                 fresh["temperature"].rate_per_minute = None
                 fresh["temperature"].controls = {}
+                fresh["temperature"].metrics["second_stage"] = InstrumentMetric(
+                    "2nd Stage", None, "K", 3
+                )
+                fresh["temperature"].sampled_metrics = frozenset()
                 fresh["temperature"].timestamp = time.monotonic()
                 return fresh
 
@@ -113,10 +117,12 @@ class InstrumentMetricTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.current: float | None = None
                 self.target: float | None = None
+                self.second_stage: float | None = None
 
             def write_system_row(self, snapshots, _sequence_step) -> None:
                 self.current = snapshots["temperature"].current
                 self.target = snapshots["temperature"].target
+                self.second_stage = snapshots["temperature"].metrics["second_stage"].value
 
         async def scenario() -> None:
             instruments = _SplitCacheInstruments()
@@ -132,11 +138,16 @@ class InstrumentMetricTests(unittest.TestCase):
             self.assertEqual(payload["temperature"]["current"], 22.0)
             self.assertEqual(payload["temperature"]["target"], 50.0)
             self.assertEqual(payload["temperature"]["rate_per_minute"], 2.0)
+            self.assertEqual(
+                payload["temperature"]["metrics"]["second_stage"]["value"],
+                20.0,
+            )
 
             logger = _Logger()
             await service.measure_all(logger, "Measure")  # type: ignore[arg-type]
             self.assertEqual(logger.current, 22.0)
             self.assertEqual(logger.target, 50.0)
+            self.assertEqual(logger.second_stage, 20.0)
 
         asyncio.run(scenario())
 

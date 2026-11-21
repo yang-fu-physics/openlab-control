@@ -259,8 +259,15 @@ class MeasurementModuleService:
         merged.connection_state = measured.connection_state
         merged.current = measured.current
         merged.message = measured.message
-        if measured.metrics:
-            merged.metrics = deepcopy(measured.metrics)
+        if measured.sampled_metrics is None:
+            if measured.metrics:
+                merged.metrics = deepcopy(measured.metrics)
+        else:
+            for metric_key in measured.sampled_metrics:
+                if metric_key in measured.metrics:
+                    merged.metrics[metric_key] = deepcopy(
+                        measured.metrics[metric_key]
+                    )
         if measured.target is not None:
             merged.target = measured.target
         if measured.rate_per_minute is not None:
