@@ -1,199 +1,136 @@
 # OpenLab Control
 
-OpenLab Control 是一个参考 Quantum Design MultiVu 操作方式、使用 Python/PySide6 编写的
-实验控制框架。它不控制 PPMS。本项目把实验接入分成两类：
+**OpenLab Control** 是一套参考 Quantum Design MultiVu 交互方式、用 Python / PySide6 开发的低温与磁场输运实验控制框架（当前版本 `0.20.5`）。它不控制 PPMS，而是用来统一管理你自己搭建的低温、磁场与电输运测量系统。
 
-- **System Instrument**：主温控仪、主磁场控制器和长期只读监视仪表；
-- **Measurement Module**：电阻、电压、电流、换向器等按实验需要加载的测量方案。
+> **在线使用与开发手册**：<https://yang-fu-physics.github.io/openlab-control/>
 
-两者有不同目录、清单和生命周期。System Instrument 一般随实验系统固定；Measurement
-Module 每次启动默认 Disabled，由用户按需 Enable。
+![OpenLab Control 主窗口](docs/main-window-preview.png)
 
-当前稳定版本为 `0.20.5`。
-全新安装不启用任何 System Instrument 面板；三个内置仿真也都
-默认关闭，需要时在 Instrument Scanner 中明确选择。
+## 10 秒看懂架构：两类扩展
 
-**实机验证（2026-11-05）**：据现场确认，已完成 Lake Shore 340 温控、
-ZLAN 压缩机控制和 Keithley 6221 + 2182A Delta 测量的实机测试。
-该记录仅覆盖已测试的接线和配置，不代表其他型号或运行模式也已验证。
+OpenLab Control 把实验室里的硬件按“职责”分成两类，目录和生命周期完全分开：
 
-开发者网站：<https://yang-fu-physics.github.io/openlab-control/>。网站包含面向初学者的中文
-使用教程、Measurement Module 教程和完整 System Instrument 教程。
+| 类型 | 负责什么 | 典型设备 | 使用习惯 | 目录 |
+| --- | --- | --- | --- | --- |
+| **System Instrument（系统仪表）** | 维持实验环境、持续监控状态 | 主温控仪、磁体电源、压缩机开关、冷头温度计 | 随实验台固定配置，启动时自动连接 | `system_instruments/` |
+| **Measurement Module（测量模块）** | 执行一次具体的电学/物性测量 | Keithley 6221+2182A Delta、2400、2614B、6517B、LS 372A、LR-700、OE1022D 锁相 | 每次启动默认关闭（Disabled），按实验需要勾选启用 | `modules/` |
 
-![主窗口](docs/main-window-preview.png)
+配套驱动仓库（按需手动复制到对应目录即可离线使用）：
 
-## 主要能力
+- 系统仪表仓库：[openlab-control-Device](https://github.com/yang-fu-physics/openlab-control-Device)（Lake Shore 340、Cryo-con 22C/24C、ZLAN 压缩机继电器）
+- 测量模块仓库：[openlab-control-Module](https://github.com/yang-fu-physics/openlab-control-Module)（Keithley 6221/2182A Delta、6221 AC、2400、2614B、6517B、Lake Shore 372A、LR-700、OE1022D）
 
-- MultiVu 风格的浮动 SEQ 编辑器，支持任意嵌套 Temperature、Field、Time 和模块扫描。
-- Pause、Stop、Call Sequence、Set Datafile、Remark 和无参数 `Measure`。
-- 配置中的温场上下限与最大速率同时约束手动控制、SEQ 参数窗口和运行时执行。
-- 每个 System Instrument 实例和每个 Enabled Measurement Module 分别运行在独立子进程。
-- `sample_temp` 和 `field` 角色各自全局最多一个；其他面板使用 `none`，只显示、记录或提供
-  自己的系统指令。
-- 主控仪表普通失联后按配置重连；默认每 2 秒尝试一次，60 秒后转为故障。
-- 一个 `Measure` 按所有 Enabled 模块的通道槽位展开，每个通道一行；同一槽位的模块并行。
-- 模块可返回多行结果、数字状态码和独立 `rawdata`；无结果或报错的值保持空单元格。
-- Warning 继续运行并按 Source/Code/Context 去重；Error 中止 SEQ。
-- SEQ 完成、Stop 或 Error 都不控制 System Instrument；只有仪表明确注册的事件响应才会执行联动动作。2nd Stage 只显示。
-- 保存 SEQ 时同时保存模块设置伴随文件；Load SEQ 会导入设置，但不自动 Enable 或 Apply。
-- Enabled 模块可在命令栏注册自己的 SEQ 指令；Disable 后立即移除。
-- 模块监视卡显示在 `Sequence Status` 下，可查看最近值并重新打开隐藏的模块窗口。
-- 每次打开 Data Browser 都会创建独立窗口，可同时比较多个 DAT；数据区的 View 会直接载入
-  当前 Run 文件，文件追加后自动刷新。
-- 默认实验 DAT 只保存时间戳、主控温度和模块声明列；多通道模块每行只填写当前通道结果。
-- Live Trend 使用已有快照缓存，不会为绘图增加仪表读取。
-- 每次 Run 保存实验 DAT、事件、SEQ/配置快照和独立 `instrument_status.dat`。
-- 可选异步 HTTP 报警报告：Warning 仅测试员，Error 同时通知管理员和测试员。
-- **View → Appearance** 可分别调整整体界面和文字大小，并选择窗口尺寸策略。
+## 核心功能一览
 
-## 读取顺序
+- **MultiVu 风格序列编辑（SEQ）**：可视化拖拽/双击插入指令，支持任意层级的温度扫描、磁场扫描、时间扫描与模块自定义扫描嵌套，支持 `Pause`、`Stop`、`Call Sequence`、`Set Datafile`、`Remark` 和无参数 `Measure`。
+- **多模块协同与隔离运行**：每个系统仪表和每个启用的测量模块都在独立子进程中运行；同一 `Measure` 下不同模块可并行测量，多通道模块自动按槽位对齐写出每通道一行的数据。
+- **实时看数与对比画图**：主窗口左侧卡片实时展示最近通道结果；**Data Browser** 可同时打开多个独立窗口对比不同 `.dat` 文件，新数据写入时自动刷新；**Live Trend** 复用已有轮询缓存，不增加额外仪表通讯。
+- **完整可追溯的运行记录**：每次 Run 自动在 `runs/` 下生成独立目录，保存实验 `.dat`、原始采样 `rawdata/`、连续仪表状态 `instrument_status.dat`、事件日志 `events.dat` 以及当次 SEQ、配置与模块参数快照。
+- **清晰的安全边界**：
+  - 全新安装默认不启用任何面板或仿真，所有测量模块默认 `Disabled`；加载历史 SEQ 只把参数填回界面，不会自动下发到仪表（须手动点击 **Apply Settings** 确认）。
+  - 温度/磁场的上下限与最大速率在配置、界面弹窗和运行时统一生效。
+  - **Warning** 记录并继续实验，**Error** 立即中止 SEQ；SEQ 结束、Stop 或报错默认不会擅自改写温控/磁体设定值，测量模块则在 `run_end` 中按约定收尾输出。
+  - 可选异步 HTTP 报警通知（Warning 通知测试员，Error 同时通知管理员和测试员）。
+- **高分屏友好**：在 **View → Appearance** 中可分别调整整体缩放与文字大小，并自由选择窗口启动策略。
 
-System Instrument 的前面板完整读取和测量即时读取相互分开：
+## 快速开始
 
-- `read_status()` 默认约每秒读取完整状态，用于前面板、安全检查、判稳和状态日志；
-- `read_measurement()` 可只读取写测量行需要的即时主值；不实现时自动使用完整
-  `read_status()`；
-- 同一 System Instrument 不会并发访问。当前完整仪表指令先完成，等待中的控制/安全操作
-  优先，测量即时读取再先于尚未开始的普通后台读取。
+### 方式一：Windows 离线发布包（推荐实验员使用）
 
-## 启动与测试
+从 GitHub Releases 下载对应版本的 `OpenLabControl-v0.20.5-windows-x64.zip`，完整解压到可写目录（无需安装 Python）：
 
-源码环境：
+1. 如需配置真实仪表或打开内置仿真，先双击根目录的 **`InstrumentScanner.exe`** 完成扫描与保存。
+2. 双击 **`OpenLabControl.exe`** 启动主程序。
+3. 在工具栏点击 **Modules** 勾选需要的测量模块（例如自带的 `Simulated Transport`），即可打开 `examples/nested_scan.seq` 体验完整运行流程。
 
-```text
-setup.bat
-run.bat
+> 两个 EXE 共享根目录的 `_internal/`，请保持整个文件夹完整，不要单独移动单个 EXE。连接 GPIB/USB 等真实仪表时，本机仍需安装对应厂商的 VISA Runtime（如 NI-VISA）。
+
+### 方式二：源码运行（适合开发者）
+
+需要 Python 3.11+：
+
+```powershell
+.\setup.bat
+.\run.bat
 ```
 
-完整源码测试：
+常用开发命令：
 
-```text
-.venv\Scripts\python.exe -m unittest discover -s tests -v
+```powershell
+# 启动仪表扫描与配置向导
+.\.venv\Scripts\python.exe .\tools\instrument_scanner.py
+
+# 运行完整单元测试
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+
+# 本地构建 Windows 文件夹发布包（输出到 dist\OpenLabControl\）
+.\build.bat
 ```
 
-无界面运行包含 Temperature/Field 的示例前，先在 Instrument Scanner 中明确启用所需仿真。
+正式稳定版由 GitHub Actions 在打上与版本号一致的 `v<版本>` 标签后自动完成全量测试、严格文档检查、双 EXE 打包并上传 ZIP 与 SHA-256 校验文件。
 
-Windows 文件夹发布包：
+## 配置仪表只需四步
 
-```text
-build.bat
-```
+1. 将所需的系统仪表目录复制到 `system_instruments/<仪表名>/`（如仅使用内置仿真可跳过此步）。
+2. 关闭主程序，运行 `InstrumentScanner.exe`（源码版运行 `tools\instrument_scanner.py`）。
+3. 按向导完成三页配置：
+   - **VISA Resources**：扫描 GPIB/USB 地址，未分配给系统仪表的地址自动留给测量模块（写入 `configs/visa.resources.toml`）。
+   - **各系统仪表页**：添加物理实例，选择地址（或网络仪表的 Host/Port）、确认面板角色（`sample_temp` / `field` 全局各最多一个，其余为 `none`）及现场安全上下限。
+   - **Review & Save**：按需勾选内置仿真、调整底部面板全局顺序，检查写入预览后保存。
+4. 重启 OpenLab Control，在底部面板和 Run Log 中确认连接状态与读数。
 
-输出位于 `dist\OpenLabControl\`，其中包含同级的 `OpenLabControl.exe` 和
-`InstrumentScanner.exe`。两个程序共享根目录下唯一的 `_internal`，发布包不建立
-`tools/`；源码版扫描器继续使用主项目 `.venv` 中的锁定依赖。源码版和打包版都从程序旁的
-`configs/`、`modules/`、`system_instruments/` 和可写数据目录读取，不在 `_internal/`
-放第二份副本。
+> 首次配置带 PID 文件的温控仪时，扫描器会把示例模板复制到 `configs/pid/<实例ID>.toml`；此后重新保存不会覆盖或删除已有的 PID 文件。若模板中 `zones` 为空，须先填入现场验证过的参数再启动。
 
-正式稳定版由 GitHub Actions 自动构建：项目版本与 `v<版本>` 标签一致时，Windows Runner
-会重新执行完整测试、严格文档构建、双 EXE 打包与 ZIP 检查，再直接创建 Release 并上传
-ZIP 和 SHA-256。本地 `build.bat` 只用于发布前复核，不作为正式资产上传来源。
+## 写一个最小测量模块
 
-## Measurement Module
-
-最小后台只需：
+不需要继承框架基类，在 `modules/<模块ID>/` 下放 `module.toml` 和 `backend.py` 即可：
 
 ```python
 class Module:
-    def open(self, api): ...
-    def measure(self, slot, api): ...
-    def close(self, api): ...
+    columns = {"Resistance": "Ohm", "StatusCode": ""}
+
+    def open(self, api): ...          # 点击 Enable 时初始化
+    def measure(self, slot, api): ... # 每次 Measure 按槽位调用，返回一行字典
+    def close(self, api): ...         # 点击 Disable 或退出时释放资源
 ```
 
-会跨测量行保持输出的模块，应在 `on_event("run_end", ...)` 中按设置完成明确收尾。默认应在
-本轮结束时关闭输出；确实需要连续偏置时，可以提供默认关闭的“保持输出”选项，并在保留前
-回读确认。模块可按需增加 `configure`、`slots`、自定义界面和自己的 SEQ 指令。
+如果模块会在测量期间打开电流/电压输出，请同时实现 `on_event("run_end", data, api)`：默认在 SEQ 结束、Stop 或报错时关闭输出；仅当实验确实需要跨 SEQ 保持连续偏置时，再提供默认关闭的“保持输出”选项并在保持前回读确认。
 
-第一次使用仿真模块：打开 `Modules`，Enable 已随框架提供的 `Simulated Transport`，再运行
-含 `T Measure` 的 SEQ。模块仍然每次启动都保持 Disabled。
+完整入门见 [写第一个测量模块](docs/development/first-module.md)；编写温控仪/磁体控制器见 [System Instrument 教程](docs/development/system-instrument.md)。
 
-完整教程见[第一个 Measurement Module](docs/development/first-module.md)。
+## 共享依赖说明
 
-## System Instrument
+`PySide6`、`QtAwesome`、`packaging`、`PyVISA` 和 `typing_extensions` 由框架共享并统一锁定版本（见 `pyproject.toml` 与 `requirements-lock.txt`）。所有系统仪表和测量模块直接使用这份环境，不需要各自安装依赖。如需引入新的第三方包，统一更新核心依赖并重新构建发布包即可，确保实验室离线电脑开箱即用。
 
-核心只提供接口、三个可选仿真和 `system_instruments/` 中的简单示例，不宣称示例可以控制
-任意真实仪表。正式实现应按具体型号、固件、接线和现场安全范围编写。
-
-安装与配置：
-
-1. 把完整目录复制到 `system_instruments/<instrument-id>/`。
-2. 源码版运行 `.venv\Scripts\python.exe tools\instrument_scanner.py`；打包版双击根目录的
-   `InstrumentScanner.exe`。
-3. 第一页确认 VISA 地址。留给 Measurement Module 的未分配地址写入
-   `configs/visa.resources.toml`，每条只有 `id/address/identity`。某地址分配给 System
-   Instrument 后会从这份清单移除。
-4. 在对应 System Instrument 页面添加一个或多个物理实例，确认型号专用字段、固定面板、
-   角色、读数、控制限制和稳定参数。专用网络仪表由自己的 API v4 清单声明 `host`、`port`
-   等字段，在该型号页面填写。
-5. 最后一页选择是否启用三个仿真、调整全部面板的全局顺序并检查完整预览。保存会完整覆盖
-   预览中的 `configs/instruments/<instrument-id>.toml`，并删除标为 DELETE 的其他生成文件。
-6. 重启 OpenLab Control，检查连接状态、前面板和 Run Log。没有 System 面板也是有效状态。
-
-扫描时没有发现、但已经保存的 Measurement VISA 会灰显并默认保留；取消保留才会删除。
-System Instrument 的 PID 字段第一次保存时把作者示例或操作者选择的文件复制到
-`configs/pid/<instance-id>.toml`。以后扫描器不会覆盖或删除现有 PID 文件；若示例含空
-`zones`，必须先填写现场验证值，否则相应后台会阻止启动。
-
-System Instrument 的后台以 `SystemInstrument` 为基类，提供同步的
-`open/read_status/read_measurement/set_target/hold/execute_sequence_command/event_responses/close`。通讯命令建议单独放在
-`instrument.py`，让 `backend.py` 只处理生命周期、安全判断和读数组装。
-
-一份 System Instrument 代码对应一种物理型号或协议，不对应 TempA、TempB 这样的单个通道。
-同一物理实例只建立一个会话；主读数写入 `value`，其余读数放入 `auxiliary`。API v4
-`instrument.toml` 用 `config_fields`、`controls`、`panels`、`readings` 和
-`sequence_commands` 描述表单、控制端点、固定面板、读数和无参数指令。实例只引用固定
-panel ID，并保存 `enabled/order/role/reading` 与 controller 限制。一个文件可包含多个
-`[[instances]]`，不同物理实例各有独立进程，可以并发轮询。
-
-同一物理实例可以声明多个独立 Controller 回路，它们仍共用一个 worker 和通讯会话。
-只有一个控制端点时，`read_status()` 可在顶层返回 `target/rate/moving/ready`；启用了多个
-不同控制端点时，必须按作者清单中的 control ID 返回 `controls` 字典，不能让多个面板
-共享一份目标或稳定状态。
-
-从[仪表扫描与地址配置](docs/guides/instrument-scanner.md)和
-[System Instrument 教程](docs/development/system-instrument.md)开始学习。
-
-## 依赖与完全离线安装
-
-PySide6、QtAwesome、packaging、PyVISA 和 typing_extensions 由框架统一提供并锁定版本。
-所有 System Instrument 和 Measurement Module 直接使用同一份框架依赖，不建立独立
-runtime，也不在界面中安装依赖。新仪表确实需要第三方包时，应把精确版本加入核心
-`pyproject.toml` 与 `requirements-lock.txt`，完整测试并重新构建离线发布包。
-源码运行时，`setup.bat` 会用 `requirements-lock.txt` 建立 `.venv`；发布 EXE 则已包含同一
-组依赖，不要求现场电脑另装 Python 包。
-
-## 目录
+## 目录结构
 
 ```text
-configs/general.toml      唯一通用配置
-configs/visa.resources.toml  未分配的 Measurement VISA（扫描器生成）
-configs/instruments/      System Instrument 实例（扫描器生成）
-configs/pid/              每个物理实例的 PID 文件
-modules/                  Measurement Module 与随框架提供的示例
-system_instruments/       System Instrument 与随框架提供的示例
-module_data/<id>/         模块保存设置
-examples/                 SEQ、DAT、PLT 示例
-runs/                     每次 Run 的数据、日志和快照
-docs/                     操作、格式、架构和开发教程
-src/labcontrol/           核心源码
-tests/                    核心自动测试
-tools/                    源码开发工具（发布包不复制该目录）
+configs/
+├─ general.toml              唯一通用配置（界面、日志、报警、超时）
+├─ visa.resources.toml       测量模块可用的 VISA 清单（扫描器生成）
+├─ instruments/              系统仪表实例与限值配置（扫描器生成）
+└─ pid/                      各温控实例独立的现场 PID 参数
+modules/                     测量模块目录（自带教学与仿真示例）
+system_instruments/          系统仪表目录（自带教学骨架）
+module_data/<id>/            各模块保存的界面设置
+examples/                    示例 SEQ / DAT / PLT 文件
+runs/                        每次实验的完整数据、日志与配置快照
+docs/                        中文使用与开发教程（MkDocs 站点源码）
+src/labcontrol/              核心框架源码
+tests/                       核心自动化测试
+tools/                       扫描器与打包辅助脚本（发布包中不保留此目录）
 ```
 
-## 文档
+## 文档导航
 
-- [开发者网站](https://yang-fu-physics.github.io/openlab-control/)
-- [操作手册](docs/OPERATIONS.md)
-- [Measurement Module 教程](docs/development/index.md)
-- [System Instrument 教程](docs/development/system-instrument.md)
-- [配置参考](docs/CONFIGURATION.md)
-- [SEQ 格式](docs/SEQUENCE_FORMAT.md)
-- [DAT 与事件格式](docs/DAT_FORMAT.md)
-- [完整开发规范](docs/DEVELOPMENT_REFERENCE.md)
+- [在线中文文档](https://yang-fu-physics.github.io/openlab-control/)
+- [操作手册](docs/OPERATIONS.md) · [仪表扫描与配置](docs/guides/instrument-scanner.md) · [Data Browser](docs/guides/data-browser.md)
+- [Measurement Module 开发教程](docs/development/index.md) · [System Instrument 开发教程](docs/development/system-instrument.md)
+- [配置参考](docs/CONFIGURATION.md) · [SEQ 格式](docs/SEQUENCE_FORMAT.md) · [DAT 与事件格式](docs/DAT_FORMAT.md)
+- [系统架构](docs/ARCHITECTURE.md) · [完整开发规范](docs/DEVELOPMENT_REFERENCE.md)
 
-## 真实仪表安全门槛
+## 实机验证状态与安全提示
 
-当前版本没有真实硬件验证，不应直接用于无人值守实验。接入真实仪表前必须完成只读身份
-确认、有限通讯超时、低风险写入、三层上下限、写后回读、手动 Hold 新鲜读数、写超时不重放、
-失联恢复、SEQ 退出不控制仪表、注册事件响应、进程强杀和硬件联锁测试。软件进程隔离不能替代限流、限压、限温、
-磁体保护或人工急停。
+- **已实机验证（2026-11-05，现场确认）**：Lake Shore 340 温控、ZLAN 压缩机控制以及 Keithley 6221 + 2182A Delta 测量已完成现场实机测试（仅覆盖已测试的接线与配置）。
+- **其他型号与模式**：目前仅完成仿真和协议测试，接入真机前请务必对照 [真实仪表安全清单](docs/guides/safety-checklist.md) 从只读检查与低风险负载开始逐步验证，完成验证前请勿无人值守运行。
+- **硬件保护优先**：软件限值与进程隔离永远不能替代仪表本机的限流/限压/限温保护、硬件联锁和人工急停。

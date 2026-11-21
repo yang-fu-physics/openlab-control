@@ -1,80 +1,67 @@
 # 使用 Windows 发布包
 
-Windows 文件夹发布包已经包含 Python、PySide6、PyVISA 和框架统一依赖，不需要另装
-Python。纯仿真不需要 VISA Runtime；只有连接 GPIB/USB/VISA 硬件时，才需要安装与接口
-匹配的厂商 Runtime，例如 NI-VISA。
+Windows 发布包已内置 Python 及所有必需依赖（PySide6、PyVISA 等），**解压就能运行，不需要在实验电脑上安装 Python**。
 
-## 下载与校验
+- 如果只跑仿真练习，不需要装任何驱动；
+- 如果要连接真实的 GPIB / USB / 串口 VISA 仪表，需先在本机安装对应硬件的 VISA 驱动（最常见的是 [NI-VISA](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html) 或 Keysight IO Libraries）。
+
+## 1. 下载与完整性校验
 
 当前稳定版本为 `v0.20.5`：
 
 - [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.5/OpenLabControl-v0.20.5-windows-x64.zip)
-- [下载 SHA-256 文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.5/OpenLabControl-v0.20.5-windows-x64.zip.sha256)
+- [下载 SHA-256 校验文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.5/OpenLabControl-v0.20.5-windows-x64.zip.sha256)
 
-在 PowerShell 中校验：
+下载后可在 PowerShell 中核对哈希值（两行结果一致即完整无损）：
 
 ```powershell
 Get-FileHash .\OpenLabControl-v0.20.5-windows-x64.zip -Algorithm SHA256
 Get-Content .\OpenLabControl-v0.20.5-windows-x64.zip.sha256
 ```
 
-两处哈希必须完全一致。不要直接从 ZIP 内运行程序；先完整解压到普通可写目录。
+将 ZIP **完整解压**到一个普通可写目录（例如 `D:\OpenLabControl\`），不要在压缩包里直接双击运行。
 
-## 第一次启动
+!!! tip "保持目录完整"
 
-1. 双击 `OpenLabControl.exe`。程序读取 `configs/general.toml`；全新安装没有 System 面板也能
-   正常打开。
-2. 需要确认仪表或启用仿真时，关闭主程序，再双击同目录的 `InstrumentScanner.exe`。两个
-  程序共享一个 `_internal`，不要单独移动任一 EXE。
-3. 扫描器第一页只处理 VISA。未分配地址保存到 `configs/visa.resources.toml`，供
-   Measurement Module 使用；分配给 System Instrument 的地址只写入对应实例。
-4. 后续每页配置一种已安装的 System Instrument。专用网络仪表的 Host/Port 由自己的模板
-   字段提供。最后一页可以选择三个仿真，它们默认都不勾选。
-5. 检查完整写入预览和面板顺序后保存，再启动 `OpenLabControl.exe`。
-6. 打开 **Modules**，按下一节使用示例模块练习 Enable/Disable 和数据写入。
+    根目录下的 `OpenLabControl.exe` 与 `InstrumentScanner.exe` 共用同一个 `_internal/` 文件夹，
+    同时程序会直接读写同级的 `configs/`、`modules/`、`system_instruments/`、`module_data/` 和 `runs/`。
+    不要单独把某个 EXE 拖到桌面，如需快捷方式请右键创建快捷方式。
 
-## 调整字号和窗口大小
+## 2. 首次启动与启用仿真
 
-打开 **View → Appearance**。整体界面可选自动或 75%–200%，文字还可独立选择
-70%–150%；例如按钮保持 100%，文字选择 80%。窗口启动方式可以选择记住上次位置、始终
-最大化或恢复默认布局。
+1. **体验空启动**：双击 `OpenLabControl.exe`。全新安装不带任何系统仪表面板，也能正常打开界面。
+2. **打开仪表扫描器**：关闭主程序，双击同目录的 **`InstrumentScanner.exe`**。
+   - **第 1 页（VISA Resources）**：扫描本机 VISA 仪表，未分配给系统仪表的地址会保存到 `configs/visa.resources.toml` 供测量模块使用。
+   - **中间页（各系统仪表）**：如果已安装真实系统仪表驱动，在这里添加实例并填写连接信息（网口仪表的 Host/Port 也在对应型号页面填写）。
+   - **最后一页（Review & Save）**：这里有三个内置仿真选项（默认关闭）。首次练习时可勾选它们，检查面板顺序与写入预览后点击保存。
+3. **重新打开主程序**：双击 `OpenLabControl.exe`，底部就会出现对应的仪表面板。
 
-点击 Save 后关闭并重新打开程序。这个设置只保存在当前 Windows 用户目录，不会修改
-`configs/*.toml`、仪表安全上下限、SEQ 或 DAT。模块窗口也会自动继承同一字号，不需要在
-每个模块中重复设置。
+更详细的向导说明见 [扫描与配置仪表](../guides/instrument-scanner.md)。
 
-!!! note "VISA 资源发现"
+## 3. 试用自带的示例测量模块
 
-    PyVISA 是框架共享依赖，但它不是 GPIB 硬件驱动。若提示找不到 VISA implementation，
-    可直接点击扫描失败弹窗中的 [NI-VISA 官方下载链接](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)，
-    或安装仪表接口厂商提供的其他 VISA Runtime。安装后重新打开扫描器；不要在模块中重复
-    安装另一套 PyVISA。完整选择步骤见[扫描与配置仪表](../guides/instrument-scanner.md)。
+解压后的 `modules/` 目录里已经自带两个不依赖真实硬件的示例模块：
 
-## 运行示例模块
+- **`Simulated Transport`**：最简四通道模拟电阻模块，没有复杂设置，适合熟悉 Enable / Measure / Disable 流程。
+- **`Tutorial Resistance`**：带设置页、原始数据和自定义 SEQ 指令的完整教学模块。
 
-`simulated_transport` 与 `tutorial_resistance` 已放在程序旁的 `modules/`。打开 Modules
-并勾选需要的模块；Enable 会初始化并打开独立窗口，它会
-读取保存的界面值，但不会自动 Apply。
+操作方式：点击工具栏 **Modules** → 勾选模块 → 窗口自动弹出。注意：**勾选 Enable 只是加载模块并恢复上次界面上的参数，不会自动把参数发给仪表**；如果模块有 Settings 页，检查无误后点击 **Apply Settings** 才会真正下发。
 
-`simulated_transport` 用于体验最小 Enable/Measure/Disable 流程，没有自定义设置。开发者
-教程中的 `tutorial_resistance` 是另一个示例，用来学习设置窗口、四行结果和模块附加功能。
+## 4. 调整界面缩放与字体（高分屏适配）
 
-现场只需维护 `configs/general.toml`；仪表地址和面板选择由 Instrument Scanner 写入
-`configs/visa.resources.toml` 与 `configs/instruments/`。不要把含真实地址的生成配置上传到
-公开仓库。扫描器每次保存都会完整覆盖最终预览中的生成文件；现有 `configs/pid/` 文件不会
-被覆盖或删除。
+如果 4K 屏幕下文字过小或窗口太挤，点击顶部菜单 **View → Appearance**：
 
-!!! danger "改地址不等于可以控制真机"
+- **Overall size**：整体缩放（自动或 75%–200%）；
+- **Text size**：在整体缩放基础上独立调整字号（70%–150%）；
+- **At startup**：选择记住上次窗口位置、始终最大化或恢复默认布局。
 
-    先取得与实际型号、固件和接线匹配的 [System Instrument](../development/system-instrument.md)，
-    审查其命令与安全行为，并完成 [仪表安全清单](../guides/safety-checklist.md)。之后才进行
-    有人在场的低风险真机测试；System Instrument 示例不能直接用于任意仪表。
+点击 **Save** 并重启软件后生效（所有测量模块窗口会自动继承同一套字号）。该设置保存在 Windows 当前用户目录，不会改动项目里的 `configs/`、SEQ 或数据文件。
 
-## Windows 包不会改变的规则
+## 5. 准备接入真实仪表前
 
-- 模块和仪表实例仍各自在独立子进程运行。
-- Warning 继续 SEQ，Error 中止 SEQ。
-- Load SEQ 只导入模块界面值，不自动 Enable、连接或 Apply。
-- Data Browser 可同时打开多个独立窗口；数据区的 View 自动载入当前 Run DAT，Graph 菜单
-  仍可打开任意文件。
-- 打包版与源码版使用同一解析器、安全限制和测试语义。
+平时只需维护 `configs/general.toml`；扫描器生成的 `configs/visa.resources.toml`、`configs/instruments/` 含有本机地址，不要提交到公开仓库。已有 `configs/pid/` 文件在重新保存扫描器配置时不会被覆盖或删除。
+
+!!! danger "接入真实硬件前请先核对"
+
+    复制驱动或改完地址后，请先阅读该型号的 README 并完成 [真实仪表安全清单](../guides/safety-checklist.md)，
+    从只读查询与低风险测试负载开始，切勿跳过现场检查直接无人值守运行。

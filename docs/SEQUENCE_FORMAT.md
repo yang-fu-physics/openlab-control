@@ -1,48 +1,20 @@
 # SEQ 格式参考
 
-OpenLab Control 的 `.seq` 是可直接阅读和编辑的单行指令文件。右侧 Sequence Command Bar 双击命令后弹出参数窗口并插入；SEQ 编辑器双击已有行可再次修改。
+`.seq` 是纯文本格式的实验序列文件，既可以在主窗口里通过双击图形化编辑，也可以用文本编辑器直接查看或审查。
 
-## 基本规则
+## 基本语法
 
-每行格式：
+每条指令占一行，行首用 `T` / `F` 标记启用或禁用：
 
 ```text
 <T|F> <command>
 ```
 
-- `T`：该命令启用。
-- `F`：该命令禁用；若是 Scan，整个子树都跳过，但子命令自己的 T/F 状态保留。
-- 每个命令占一行。
-- Scan 以 `End Scan` 结束，文件以 `End Sequence` 结束。
-- 缩进只用于显示；真正层级由 Scan/End Scan 决定。
-- 解析器保留未知厂商行并给 Warning；结构错误、旧 Initialize、带参数 Measure 给 Error，Run 会被阻止。
-
-## 模块设置伴随文件
-
-SEQ 指令仍只保存在 `.seq` 文本中。File → Save 会把当前实验已关联模块及所有 Enabled
-模块的 Settings 页值另存为同目录同名文件：
-
-```text
-experiment.seq
-experiment.modules.toml
-```
-
-File → Open `experiment.seq` 时会自动读取 `experiment.modules.toml`。导入只改变
-模块 Settings 页的期望值：
-
-- 不自动 Enable 或 Disable 任何模块；
-- 不连接仪表，不调用模块 `configure`，不发送命令；
-- 已 Enabled 模块会显示 `SEQ settings imported — not applied`；
-- Disabled 模块以后 Enable 时才看到导入值，仍须人工核对并点击 Apply Settings；
-- 缺少模块或模块版本变化只给 Warning，并保留原始设置供安装/升级后检查；
-- 伴随文件损坏、超过 1 MiB、格式版本错误或含非法模块 ID 时，模块设置整体不导入，
-  但 `.seq` 指令仍可打开；
-- 没有伴随文件的旧 SEQ 与以前完全相同。
-
-运行目录使用既有快照结构。打开其中的标准 `sequence.seq` 时，如果没有同名伴随文件，
-程序会兼容读取同目录 `module_settings/*.settings.toml`。`Call Sequence` 不会在运行中
-切换被调用文件的伴随设置，防止一次 Run 中隐式重配真实仪表；只有用户在界面中 Load
-的顶层 SEQ 才导入设置。
+- `T`：启用该行；
+- `F`：禁用该行（如果是 `Scan`，整个扫描子树都会跳过，但子行自身的 `T/F` 状态保留）；
+- 缩进只为了方便人眼阅读，真正的嵌套层级由 `Scan ...` 和对应的 `End Scan` 决定；
+- 文件以 `End Sequence` 结束；
+- 遇到未知厂商行会保留并提示 Warning；结构错误或带参数的旧格式 `Measure` 会报 Error 并阻止运行。
 
 多层嵌套示例：
 
@@ -55,126 +27,85 @@ T End Scan
 T End Sequence
 ```
 
-## 指令
+## 配套模块设置文件（`.modules.toml`）
 
-### Set Datafile
+在界面保存 `experiment.seq` 时，程序会在同目录自动保存 `experiment.modules.toml`，记录本次实验关联的模块 Settings 值：
 
-运行目录内文件：
+- 重新打开 `experiment.seq` 时自动把参数填进模块界面（打开历史运行目录中的 `sequence.seq` 时也会兼容读取其 `module_settings/*.settings.toml`）；
+- **只填界面，不自动 Enable，也不自动 Apply**；
+- `Call Sequence` 调用的子序列不会在运行中途悄悄切换模块设置；
+- 缺失对应模块、版本变更或伴随文件损坏时不会丢失 `.seq` 本体，只给出明确提示。
+
+---
+
+## 全部指令速查
+
+### Set Datafile（指定输出数据文件）
 
 ```text
 T Set Datafile open|create experiment.dat
-```
-
-用户明确选择的自定义目录：
-
-```text
 T Set Datafile create external C:\Experiment Data\sample.dat
 ```
 
-Mode：
+- **模式**：`create`（新建/覆盖）、`open`（向已有文件追加）、`open|create`（存在则追加、否则新建）；
+- **`external`**：明确授权把实验 DAT 写到运行目录之外的自定义路径（其他快照和 `instrument_status.dat` 仍留在自动运行目录）；
+- 在界面编辑弹窗中点击 `Browse…` 可直接用系统文件对话框选择路径。
 
-- `create`：覆盖/新建目标 DAT；
-- `open`：目标必须已存在并追加；
-- `open|create`：存在则追加，否则创建。
-
-`external` 是该命令对自定义路径的明确授权。运行目录中的 SEQ、配置、模块设置和 Status 快照不会随 DAT 移走。
-
-在图形界面插入或双击 `Set Datafile` 后，可点击 `Browse…`。框架直接调用 Windows
-原生文件选择窗口：`open` 选择已有 DAT，`create` / `open|create` 选择或新建 DAT；
-确认后写入绝对路径并自动切换为 `Custom folder`。路径仍可手动输入。
-
-### Wait
+### Wait（等待）
 
 ```text
 T Wait For 10.0 secs
 ```
 
-Pause 会冻结等待进度；Stop/Error 可在最多约一个运行时检查周期内打断。
-等待时间必须在 0 到 31536000 秒之间；手写 SEQ 与运行时使用同一限制。
+有效范围 `0`–`31,536,000` 秒（1 位小数）。`Pause` 会冻结计时，`Stop` / `Error` 可立即打断。
 
-### 标准温场仪表
-
-Temperature 和 Scan Temperature 固定使用全局唯一的 `sample_temp` 面板；Field 和 Scan
-Field 固定使用全局唯一的 `field` 面板。角色由 Instrument Scanner 写入 System Instrument
-实例，SEQ 文本不保存物理实例 ID，也不接受 `using instrument` 后缀。
-
-参数窗口直接使用相应 controller 面板的上下限与最大速率。缺少对应角色、角色重复或面板
-不是可控制 controller 时，程序会在连接真实仪表或执行命令前明确拒绝配置。
-
-### Set Temperature
+### Set Temperature / Set Field（单点控温 / 控场）
 
 ```text
 T Set Temperature 20.000 K at 5.000 K/min in Settle mode
 T Set Temperature 300.000 K at 10.000 K/min in Sweep mode
-```
-
-- `Settle`：发送目标后等待中央数值判稳。
-- `Sweep`：发送目标后立即进入下一条顶层指令。
-
-Target 与 Rate 在弹窗和执行前都使用配置文件的 `min/max/max_rate` 检查。温度显示三位小数。
-
-### Set Field
-
-```text
 T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
 T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 ```
 
-仪表默认原生单位为 Oe；SEQ 可选 Oe 或 T，但 Target 与 Rate 必须同单位。中央换算到仪表单位后再做限制检查。Oe 显示两位，T 显示六位。
+- 温度固定使用角色为 `sample_temp` 的控制器面板，磁场固定使用角色为 `field` 的控制器面板；
+- `Settle`：发目标后等待核心判定稳定再继续；`Sweep`：发目标后立即进入下一条指令；
+- 磁场支持 `Oe`（2 位小数）或 `T`（6 位小数），同一条指令内目标与速率须用相同单位。
 
-### Scan Temperature — Linear
+### Scan Temperature（线性扫温 / 列表扫温）
 
 ```text
+# 线性扫温（steps 为包含起点与终点的总点数，范围 1–100,000）
 T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
 T     Measure
 T End Scan
-```
 
-`steps` 是包含起点和终点的点数。每个点到达后执行全部子命令。
-Linear Temperature/Field Scan 的 `steps` 范围为 1 到 100000，Rate 必须大于零。
-
-- `Settle`：每点等待中央 Stable。
-- `Sweep`：每点等待进入目标容差，不要求斜率/驻留判稳，再执行子命令。
-
-### Scan Temperature — List
-
-```text
+# 列表扫温（保留原顺序和重复点，不排序不去重，最多 100,000 点）
 T Scan Temperature List [300, 100, 20, 20, 4.2] K at 5.000 K/min, Settle
 T     Measure
 T End Scan
 ```
 
-- 保留原顺序和重复点，不排序、不去重。
-- 方括号用于清楚标识列表边界；每个点保留输入的小数位，不会自动补成三位小数。
-- 旧版不带方括号的列表仍可读取；未编辑时保存也不会改写原始行。
-- 最多 100000 点。
-- Run 前整表转换并验证；任一点越过温度上下限则在移动第一点前 Error。
-- 仍可嵌套 Field/Time/Temperature Scan 和 Measure。
+- `Settle`：每点等待核心判定完全稳定后再执行子指令；
+- `Sweep`：每点进入目标容差即执行子指令，不额外等斜率/驻留判稳；
+- 执行前会整表校验所有点是否在温度上下限内，任意一点越界都会在启动移动前报错。
 
-### Scan Field
+### Scan Field（扫场）
 
 ```text
 T Scan Field -90000.00 Oe to 90000.00 Oe in 181 steps at 5000.00 Oe/min, Settle
 T     Measure
 T End Scan
-```
 
-起点、终点和速率必须使用同一单位。所有点在移动前整体验证。
-
-参数窗口中的 `Choose nearer start or its negative` 默认关闭。开启后保存为：
-
-```text
+# 可选“就近极性”：根据执行时当前真实磁场决定按原路径或整条反号路径扫描
 T Scan Field 9.000000 T to 3.000000 T in 7 steps at 1.000000 T/min, Settle, Nearest +/- Polarity
 T     Measure
 T End Scan
 ```
 
-运行到该 Scan 时，框架会取得所选磁场仪表已通过新鲜度检查的当前实际场读回，并比较它
-到输入起点和输入起点负值的距离。更靠近负值时，整条路径同时反号；例如实际场为 `-6 T`，上例执行
-`-9 T` 到 `-3 T`。距离相同时保留输入路径。无法取得有限的实际场会 Error，且不会移动
-到第一个点；反号后的全部点仍会在首次写入前经过配置上下限和速率检查。
+开启 `Nearest +/- Polarity` 后，运行到该步骤时会读回当前新鲜磁场值，比较离起点还是离起点负值更近（例如当前 `-6 T` 时，自动执行 `-9 T → -3 T`），所有点同样在移动前通过上下限校验。
 
-### Scan Time
+### Scan Time（定时扫描）
 
 ```text
 T Scan Time 60.0 secs in 61 steps
@@ -182,136 +113,52 @@ T     Measure
 T End Scan
 ```
 
-第一个点位于 `t=0`，最后一个点位于指定 duration。调度使用单调时钟，避免系统日期变化影响间隔。
-duration 范围为 0 到 31536000 秒，`steps` 范围为 1 到 1000000。
-解析器和执行器都会验证这些边界，不会把非法值静默截断为零或一点。
+使用单调时钟调度（不受系统校时影响）：第 1 点在 `t = 0`，最后一点在 `duration` 处；范围 `0`–`31,536,000` 秒，`steps` 为 `1`–`1,000,000`。
 
-### System Instrument 简单指令
+### System Instrument 无参数指令
 
-配置中的 System Instrument 可以声明无参数指令。它们会直接出现在右侧 **System Commands**，
-SEQ 文本就是显示名称：
+配置了无参数指令的系统仪表（例如压缩机开关）会直接按显示名出现在 SEQ 中：
 
 ```text
 T Compressor On
 T Compressor Off
 ```
 
-- 只有对应 System Instrument 已安装，并且扫描器生成了该物理实例时才会注册；
-- 双击后直接插入，不弹参数窗口；
-- 指令本身不写 DAT；
-- Warning 报警后继续，Error 中止 SEQ；
-- 底部 `switch` 面板可以调用同一指令，但 SEQ 运行时禁用手动按钮；
-- 实现缺失时 Load 保留原文并给 Warning，Run 预检阻止执行。
+这类指令不产生 DAT 行；对应系统仪表未配置时，加载会保留原文并提示 Warning，运行前拦截。
 
-### Measurement Module 自定义指令
-
-模块完成 Enable 后，可以在右侧以自己的名称注册普通指令和扫描指令。SEQ 使用固定的
-通用信封，而不是把每家仪表语法写入核心解析器：
+### Measurement Module 自定义指令与扫描
 
 ```text
-T Module Command "keithley_2400" "set_current" {"current":0.001,"output":true}
-T Module Scan "keithley_2400" "scan_current" {"points":["1 mA","2 mA"],"settle_seconds":0}
+T Module Command "oe1022d_lockin" "auto_range" {"auto_reserve":true}
+T Module Scan "keithley_6221_ac" "scan_current" {"points":["100u","200u","500u"],"settle_seconds":3.0}
 T     Measure
 T End Scan
 ```
 
-- 第一个 JSON 字符串是模块目录 ID，第二个是模块声明的稳定指令 ID，最后必须是标准
-  JSON object；不接受 NaN、Infinity、注释或尾随文本。
-- `Module Command` 完成一次模块动作后继续，不拥有子树。
-- `Module Scan` 的点字段由模块声明。核心按列表原顺序逐点调用模块；该点成功后才执行
-  全部子指令，因此可以继续任意嵌套温场、时间或其他模块 Scan。
-- 模块指令本身不写 DAT。只有显式 `Measure` 按 Enabled 模块和逻辑槽位规则写测量行。
-- 普通动作发生 Warning 时跳到下一条指令；扫描点发生 Warning 时不执行该点子树，随后
-  继续下一点。Error 仍中止整个 SEQ。
-- 指令只改变当前运行中的模块/仪表状态，不修改 Settings 页或持久设置；最终输出保持或
-  关闭仍由模块 `run_end(reason)` 决定。
-- 模块未安装、Disabled 或不再声明该 ID 时，Load 保留完整文本并给 Warning，编辑器把
-  行标红；Run 预检阻止执行，不会自动 Enable、Apply、安装或把它降级为可跳过未知行。
-- 模块 Disable 后，右侧对应指令组立即移除；SEQ 中已经存在的行不会被删除。
+- 依次为：模块目录 ID、稳定指令 ID、标准 JSON 参数对象（禁止 `NaN`/`Infinity`）；
+- 本身不写 DAT 行，需要在循环内显式放 `Measure`；
+- 普通命令 Warning 继续下一条，扫描点 Warning 跳过该点子树继续下一点，Error 中止整个 SEQ；
+- 对应模块未安装或未启用时，行在编辑器里标红并保留原文本，运行预检阻止执行。
 
-参数的字段、默认值、范围和可选自定义窗口由模块声明。参数窗口只是提前检查；模块后端
-必须在发送真实仪表指令前再次验证单位、范围、compliance、输出状态和通信 timeout。
-框架不提供任意 SCPI 直通命令。
+### Measure（采集数据）
 
-### Measure
-
-唯一有效格式：
+唯一合法格式（无任何参数）：
 
 ```text
 T Measure
 ```
 
-Measure 无参数。旧格式例如：
+参与测量的模块由 Run 前在 **Modules** 中勾选的状态决定；重复采集请用 `Scan Time` 或多次插入 `Measure`。每个逻辑通道槽位并行调用参与该槽位的模块，写出一行 DAT。
 
-```text
-T Measure instruments=transport repeats=3 interval=1s
-```
-
-会产生 Error 并阻止 Run，不做兼容转换。重复测量用 Scan Time 或重复插入 Measure；选择测量方案则在运行前通过 Modules Manager Enable/Disable。
-
-执行语义：
-
-1. 锁定本次 Run 开始时所有 Enabled 模块及其设置。
-2. 核心按所有可选 `slots` 的并集展开；每个逻辑槽位调用参与模块，每次
-   `measure(slot, api)` 返回一行结果。
-3. 同一槽位的参与模块并行，结果合入该通道对应的一行；CH1–CH4 仍是四行，未参与模块列为空，
-   没有槽位钩子的模块每行重新测量。
-4. 等所有槽位结束后才继续下一条 SEQ。
-5. 没有 Enabled 模块时弹一个锁存 Warning，写一行系统状态，继续 SEQ。
-6. 模块 Warning 继续；模块 Error 使运行进入 Faulted，并以 `reason="error"` 发送
-   `run_end`；`close` 只在 Disable 或应用退出执行。
-
-### Remark
+### Remark / Call Sequence / 仿真故障注入
 
 ```text
 T Remark Cooldown complete; begin transport scan
-```
-
-写入事件日志，不改变仪表。
-
-### Call Sequence
-
-```text
 T Call Sequence subsequences\field_loop.seq
-```
-
-相对路径以调用者 SEQ 所在目录解析。循环调用、文件不存在或子 SEQ 解析 Error 都会使主运行 Faulted。子 SEQ 中的 Measure 使用主运行锁定的同一模块集合和 DAT Schema。
-
-### 仿真故障指令
-
-```text
 T Inject Warning SIM_WARNING simulated warning
 T Inject Error SIM_ERROR simulated fatal error
 ```
 
-仅用于验证事件与 Stop 路径；真实实验 SEQ 通常不需要。
-
-## 已删除的 Initialize
-
-0.10.0 不再接受：
-
-```text
-T Initialize Lakeshore372AC model ...
-```
-
-模块初始化由 Modules Manager 的 Enable 自动调用。仓库保留 `examples/template_original.seq` 作为用户提供原文件和解析回归材料，但它是明确的旧格式示例，不能直接 Run。新示例是 `examples/module_measurement.seq`。
-
-## 编辑操作
-
-SEQ 支持单行或多行选择：
-
-- 右键：Disable、Enable、Delete、Copy、Paste；
-- 键盘：Delete、Ctrl+C、Ctrl+V，以及相应启用/禁用快捷键；
-- 选择父 Scan 与其子行时，结构操作只作用于最外层选中节点，避免重复删除/复制；
-- 复制完整 Scan 会包含其全部子树；
-- SEQ Running/Paused/Stopping 时所有修改操作禁用，Copy 仍可使用。
-
-Disable 的序列化示例：
-
-```text
-F Scan Field -1000.00 Oe to 1000.00 Oe in 3 steps at 500.00 Oe/min, Settle
-T     Measure
-T End Scan
-```
-
-此时 Scan 及 Measure 都不执行；重新 Enable Scan 后，Measure 原有 `T` 状态恢复生效。
+- `Remark` 记入事件日志，不动硬件；
+- `Call Sequence` 按调用者目录解析相对路径，预检阶段检查递归循环与语法错误；
+- `Inject Warning / Error` 仅用于仿真测试事件与停机流程。
