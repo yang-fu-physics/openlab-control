@@ -122,7 +122,7 @@ def _reading_payload(reading: object) -> dict[str, Any]:
             "Instrument read methods must return a dictionary",
             "INVALID_INSTRUMENT_READING",
         )
-    allowed = {"value", "target", "rate", "moving", "ready", "auxiliary"}
+    allowed = {"value", "target", "rate", "moving", "ready", "auxiliary", "controls"}
     unknown = set(reading) - allowed
     if unknown:
         raise InstrumentError(
@@ -153,6 +153,48 @@ def _reading_payload(reading: object) -> dict[str, Any]:
                 f"Instrument reading {key} must be boolean or null",
                 "INVALID_INSTRUMENT_READING",
             )
+    if "controls" in result and result["controls"] is not None:
+        raw_controls = result["controls"]
+        if not isinstance(raw_controls, dict):
+            raise InstrumentError(
+                "Instrument reading controls must be a dictionary",
+                "INVALID_INSTRUMENT_READING",
+            )
+        control_allowed = {"target", "rate", "moving", "ready"}
+        normalized_controls: dict[str, dict[str, Any]] = {}
+        for control_id, raw_state in raw_controls.items():
+            if not isinstance(control_id, str) or not isinstance(raw_state, dict):
+                raise InstrumentError(
+                    "Instrument reading controls entries must map string IDs to dictionaries",
+                    "INVALID_INSTRUMENT_READING",
+                )
+            unknown_control_fields = set(raw_state) - control_allowed
+            if unknown_control_fields:
+                raise InstrumentError(
+                    f"Instrument control {control_id!r} contains unknown fields: "
+                    + ", ".join(sorted(unknown_control_fields)),
+                    "INVALID_INSTRUMENT_READING",
+                )
+            for key in ("target", "rate"):
+                value = raw_state.get(key)
+                if value is not None and (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                ):
+                    raise InstrumentError(
+                        f"Instrument control {control_id!r} {key} must be a finite number or null",
+                        "NONFINITE_INSTRUMENT_READING",
+                    )
+            for key in ("moving", "ready"):
+                value = raw_state.get(key)
+                if value is not None and not isinstance(value, bool):
+                    raise InstrumentError(
+                        f"Instrument control {control_id!r} {key} must be boolean or null",
+                        "INVALID_INSTRUMENT_READING",
+                    )
+            normalized_controls[control_id] = dict(raw_state)
+        result["controls"] = normalized_controls
     auxiliary = result.get("auxiliary", {})
     if not isinstance(auxiliary, dict):
         raise InstrumentError(
