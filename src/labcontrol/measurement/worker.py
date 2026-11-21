@@ -854,11 +854,21 @@ class ModuleWorkerClient:
                     action,
                 ) from exc
             event_error: Exception | None = None
-            paused_since: float | None = None
+            active_remaining = deadline - time.monotonic()
+            active_since = time.monotonic()
+            is_paused = False
+            pause_heartbeat_timeout = min(max(timeout, 2.0), 10.0)
+            pause_heartbeat_deadline = 0.0
             while True:
-                remaining = deadline - time.monotonic()
+                now = time.monotonic()
+                if is_paused:
+                    poll_timeout = pause_heartbeat_deadline - now
+                else:
+                    active_remaining -= max(0.0, now - active_since)
+                    active_since = now
+                    poll_timeout = active_remaining
                 try:
-                    ready = remaining > 0 and connection.poll(remaining)
+                    ready = poll_timeout > 0 and connection.poll(poll_timeout)
                 except (EOFError, OSError) as exc:
                     self._invalidate(connection, process, min(timeout, 1.0))
                     raise WorkerRequestError(
@@ -907,14 +917,16 @@ class ModuleWorkerClient:
                         )
                         now = time.monotonic()
                         if op_state == "paused":
-                            if paused_since is None:
-                                paused_since = now
-                            else:
-                                deadline += max(0.0, now - paused_since)
-                                paused_since = now
-                        elif paused_since is not None:
-                            deadline += max(0.0, now - paused_since)
-                            paused_since = None
+                            if not is_paused:
+                                active_remaining -= max(0.0, now - active_since)
+                            is_paused = True
+                            active_since = now
+                            pause_heartbeat_deadline = (
+                                now + pause_heartbeat_timeout
+                            )
+                        elif is_paused:
+                            is_paused = False
+                            active_since = now
                     if message.get("type") == "context_request":
                         # worker 在执行长测量时可同步询问新温场快照或 Pause/Stop 状态。
                         # 响应沿同一 Pipe 返回，仍由 request id 和子请求 id 双重关联。

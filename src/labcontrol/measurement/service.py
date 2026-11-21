@@ -348,36 +348,40 @@ class MeasurementModuleService:
             if timeout_seconds is None
             else timeout_seconds
         )
-        deadline = time.monotonic() + timeout
-        paused_since: float | None = None
+        active_remaining = timeout
+        active_since = time.monotonic()
+        is_paused = False
+        pause_event_timeout = min(max(timeout, 2.0), 10.0)
 
         def on_event(
             message: dict[str, Any],
         ) -> Mapping[str, Any] | None:
-            nonlocal deadline, paused_since
+            nonlocal active_remaining, active_since, is_paused
             now = time.monotonic()
             with self._operation_state_lock:
-                is_paused = self._operation_state == "paused"
-            if is_paused:
-                if paused_since is None:
-                    paused_since = now
-                else:
-                    deadline += max(0.0, now - paused_since)
-                    paused_since = now
-            elif paused_since is not None:
-                deadline += max(0.0, now - paused_since)
-                paused_since = None
+                currently_paused = self._operation_state == "paused"
+            if not is_paused:
+                active_remaining -= max(0.0, now - active_since)
+            is_paused = currently_paused
+            active_since = now
+            event_timeout = (
+                pause_event_timeout if is_paused else active_remaining
+            )
+            if event_timeout <= 0:
+                raise TimeoutError("Module event processing timed out")
             future = asyncio.run_coroutine_threadsafe(
                 self._worker_event(record.descriptor.id, message), loop
             )
             try:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Module event processing timed out")
-                return future.result(timeout=remaining)
+                return future.result(timeout=event_timeout)
             except Exception:
                 future.cancel()
                 raise
+            finally:
+                finished = time.monotonic()
+                if not is_paused:
+                    active_remaining -= max(0.0, finished - active_since)
+                active_since = finished
 
         request_payload = dict(payload or {})
         # 初始快照随每个请求发送；模块需要第二个时间点时再通过 context_request 获取
