@@ -103,19 +103,26 @@ class InstrumentMetricTests(unittest.TestCase):
                 self.poll_calls += 1
                 fresh = deepcopy(self._snapshots)
                 fresh["temperature"].current = 22.0
+                fresh["temperature"].target = None
+                fresh["temperature"].rate_per_minute = None
+                fresh["temperature"].controls = {}
                 fresh["temperature"].timestamp = time.monotonic()
                 return fresh
 
         class _Logger:
             def __init__(self) -> None:
                 self.current: float | None = None
+                self.target: float | None = None
 
             def write_system_row(self, snapshots, _sequence_step) -> None:
                 self.current = snapshots["temperature"].current
+                self.target = snapshots["temperature"].target
 
         async def scenario() -> None:
             instruments = _SplitCacheInstruments()
             instruments._snapshots["temperature"].current = 11.0
+            instruments._snapshots["temperature"].target = 50.0
+            instruments._snapshots["temperature"].rate_per_minute = 2.0
             service = MeasurementModuleService(
                 (),
                 EventManager(),
@@ -123,10 +130,13 @@ class InstrumentMetricTests(unittest.TestCase):
             )
             payload = await service._fresh_system_payload()
             self.assertEqual(payload["temperature"]["current"], 22.0)
+            self.assertEqual(payload["temperature"]["target"], 50.0)
+            self.assertEqual(payload["temperature"]["rate_per_minute"], 2.0)
 
             logger = _Logger()
             await service.measure_all(logger, "Measure")  # type: ignore[arg-type]
             self.assertEqual(logger.current, 22.0)
+            self.assertEqual(logger.target, 50.0)
 
         asyncio.run(scenario())
 

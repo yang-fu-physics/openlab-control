@@ -245,6 +245,32 @@ class MeasurementModuleService:
             }
         return payload
 
+    @staticmethod
+    def _merge_measurement_snapshot(
+        cached: InstrumentSnapshot | None,
+        measured: InstrumentSnapshot,
+    ) -> InstrumentSnapshot:
+        """保留缓存快照的控制/状态元数据，仅用即时采样结果更新新读数字段。"""
+
+        if cached is None:
+            return deepcopy(measured)
+        merged = deepcopy(cached)
+        merged.timestamp = measured.timestamp
+        merged.connection_state = measured.connection_state
+        merged.current = measured.current
+        merged.message = measured.message
+        if measured.metrics:
+            merged.metrics = deepcopy(measured.metrics)
+        if measured.target is not None:
+            merged.target = measured.target
+        if measured.rate_per_minute is not None:
+            merged.rate_per_minute = measured.rate_per_minute
+        if measured.ready is not None:
+            merged.ready = measured.ready
+        if measured.controls:
+            merged.controls = deepcopy(measured.controls)
+        return merged
+
     async def _fresh_system_snapshots_sample(
         self,
         *,
@@ -274,7 +300,11 @@ class MeasurementModuleService:
                 self._fresh_system_task = None
         merged = self.instruments.snapshots()
         if measured:
-            merged.update(measured)
+            for instrument_id, snapshot in measured.items():
+                merged[instrument_id] = self._merge_measurement_snapshot(
+                    merged.get(instrument_id),
+                    snapshot,
+                )
         self._fresh_system_snapshots = deepcopy(merged)
         self._fresh_system_completed_at = time.monotonic()
         return merged
