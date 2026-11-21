@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.20.6 - 2026-11-21
+
+- 合入核心、System Instrument 与 Measurement Module 三个仓库的 19 个审查修复 PR。
+  即时测量返回新鲜读数，并保留未参与本次采样的目标、控制状态和辅助指标；仪表多控制端点
+  的 IPC 校验与手动目标编辑也已修复。
+- 修复线性扫描浮点精度、判稳超时与 Pause 计时；扫描器重新扫描时保留已保存但暂时离线的
+  系统仪表。模块操作超时扣除已确认的暂停时间，正常通讯与调度耗时仍计入预算。
+- 应用关闭共用总时间预算，依次结束序列、关闭模块、断开仪表并关闭日志；修复活动轮询任务
+  取消时跳过后续清理的问题，超时清理失败明确报告。
+- 同步发布的 OE1022D 模块包含软件 Auto Range 与动态储备搜索：保持时间常数和滤波斜率，
+  设置 High Reserve 后等待稳定，按过载状态与幅值调整量程，再优化动态储备；保留仪表原生
+  Auto Range 实现，但正常流程不调用。通道 B 支持使用 Channel-A 参考，长时间 Pause 后
+  可继续搜索，不把暂停计入操作超时。
+- 独立驱动与模块还包含 Lake Shore 340 故障处理、Cryo-con 地址与响应解析、ZLAN 开机
+  失败即停、Delta 安全收尾与毫秒延时、6517B 响应解析，以及 372A/LR700 状态读回等修复。
+- 重写使用和开发文档。发布前软件回归共 539 项通过；本轮未追加真机验证。
+- 核心 Windows 包仍只附带内置模拟示例。真实仪表和测量模块分别下载
+  [System Instruments v0.20.6](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/instruments-v0.20.6)
+  与 [Measurement Modules v0.20.6](https://github.com/yang-fu-physics/openlab-control-Module/releases/tag/modules-v0.20.6)。
+  两个 ZIP 均保留安装目录，可解压到主程序目录；更新前备份已有模块的自定义 `routing.toml`。
+  新测量模块与核心 v0.20.6 一起更新，以使用暂停计时 API。
+
 ## 0.20.5 - 2026-11-13
 
 - LabVIEW DLL 接入、调试窗口及开发模板移到 `dev-labview-dll`，暂不进入主线。

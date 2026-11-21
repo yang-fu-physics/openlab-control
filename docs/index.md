@@ -6,7 +6,7 @@ hide:
 
 <section class="olc-hero">
   <div>
-    <div class="olc-eyebrow">OpenLab Control 0.20.5 · 中文使用与开发手册</div>
+    <div class="olc-eyebrow">OpenLab Control 0.20.6 · 中文使用与开发手册</div>
     <h1>像 MultiVu 一样编排你的低温与输运实验。</h1>
     <p class="olc-hero-copy">
       OpenLab Control 是一套开源的实验室自动化控制框架：用树状 SEQ 编排变温、扫场和定时步骤，

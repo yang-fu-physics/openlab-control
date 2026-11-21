@@ -7,7 +7,7 @@
 在 PowerShell 中运行：
 
 ```powershell
-git clone --branch v0.20.5 https://github.com/yang-fu-physics/openlab-control.git
+git clone --branch v0.20.6 https://github.com/yang-fu-physics/openlab-control.git
 cd openlab-control
 .\setup.bat
 .\run.bat

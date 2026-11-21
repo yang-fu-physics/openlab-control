@@ -7,16 +7,16 @@ Windows 发布包已内置 Python 及所有必需依赖（PySide6、PyVISA 等�
 
 ## 1. 下载与完整性校验
 
-当前稳定版本为 `v0.20.5`：
+当前稳定版本为 `v0.20.6`：
 
-- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.5/OpenLabControl-v0.20.5-windows-x64.zip)
-- [下载 SHA-256 校验文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.5/OpenLabControl-v0.20.5-windows-x64.zip.sha256)
+- [下载 Windows x64 ZIP](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.6/OpenLabControl-v0.20.6-windows-x64.zip)
+- [下载 SHA-256 校验文件](https://github.com/yang-fu-physics/openlab-control/releases/download/v0.20.6/OpenLabControl-v0.20.6-windows-x64.zip.sha256)
 
 下载后可在 PowerShell 中核对哈希值（两行结果一致即完整无损）：
 
 ```powershell
-Get-FileHash .\OpenLabControl-v0.20.5-windows-x64.zip -Algorithm SHA256
-Get-Content .\OpenLabControl-v0.20.5-windows-x64.zip.sha256
+Get-FileHash .\OpenLabControl-v0.20.6-windows-x64.zip -Algorithm SHA256
+Get-Content .\OpenLabControl-v0.20.6-windows-x64.zip.sha256
 ```
 
 将 ZIP **完整解压**到一个普通可写目录（例如 `D:\OpenLabControl\`），不要在压缩包里直接双击运行。
