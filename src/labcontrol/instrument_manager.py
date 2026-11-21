@@ -176,6 +176,13 @@ class InstrumentManager:
         self._load_instruments()
         self.events.subscribe(self._on_event_response)
 
+    def set_stability_paused(self, paused: bool) -> None:
+        """同步 SEQ 暂停态给所有控制回路的稳定性判定器，冻结暂停期间的超时计时。"""
+
+        now = time.monotonic()
+        for evaluator in self._stability.values():
+            evaluator.set_paused(paused, now)
+
     def _register_event_responses(
         self,
         source: str,
@@ -1484,6 +1491,7 @@ class InstrumentManager:
             connection_state=InstrumentConnectionState.CONNECTED,
             ready=reading.get("ready"),
             metrics=metrics,
+            sampled_metrics=frozenset(returned) if measurement else None,
         )
         if measurement:
             return snapshot

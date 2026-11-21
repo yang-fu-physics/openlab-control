@@ -109,7 +109,7 @@ input {
   padding-left: 1rem;
   background: linear-gradient(90deg, #14364b, #102d40);
   color: #7fb3c0;
-  content: "●  ●  ●   tutorial_resistance/backend.py";
+  content: "●  ●  ●   OpenLab Control";
   font: 0.68rem/2.25rem ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.05em;
 }

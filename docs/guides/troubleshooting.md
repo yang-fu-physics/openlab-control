@@ -1,85 +1,86 @@
 # 常见问题与排错
 
-先保留当前运行目录和脱敏日志。不要为了“再试一次”连续重放可能改变输出的命令。
+排查真实仪表故障前，先保留当次 `runs/` 目录和脱敏日志；**不要为了“再试一次”盲目重复下发可能改变输出的写命令**。
 
-## 模块一直停留在 Initializing
+## 找不到 VISA 驱动（VISA implementation）
 
-检查顺序：
+PyVISA 已经由软件自带，但连接 GPIB / USB / 串口仪表仍需要本机安装硬件厂商的底层 VISA Runtime。
 
-1. 查看 Modules 窗口底部的稳定错误码和 Context。
-2. 查看模块是否在导入、构造或 `open()` 中执行了无界等待。
-3. 确认所有 VISA/串口调用都有 timeout。
-4. 确认 `open()` 不等待用户界面，也不等待 SEQ 事件。
-5. 关闭应用后检查是否仍有模块 worker 进程。
+- 打开 `InstrumentScanner.exe` 时若弹出缺失提示，直接点击其中的 [NI-VISA 官方下载页](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)（或安装 Keysight IO Libraries）；
+- 装好后重开扫描器即可，不需要重新打包程序，也不要在模块里另装 PyVISA。
 
-首次 Enable 失败、重启后正常通常说明初始化时序、残留资源或 timeout 有问题，不应当把
-“重启可恢复”视为修复。
+## 模块一直卡在 `Initializing`
 
-## 找不到 VISA implementation
+按顺序排查：
 
-PyVISA 已由框架提供，但仍需要与 GPIB/USB 接口匹配的厂商 VISA Runtime。打开
-`InstrumentScanner.exe` 后会自动尝试扫描；若初始化失败，弹窗中的链接会打开
-[NI-VISA 官方下载页](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)。也可以安装
-Keysight VISA 或接口厂商指定的 Runtime。安装完成后重新打开扫描器，不需要重新打包程序，
-也不要在模块中安装另一套 PyVISA。扫描成功后的选择步骤见[扫描与配置仪表](instrument-scanner.md)。
+1. 查看 Modules 管理器底部的错误码和详细说明；
+2. 检查模块源码是否在文件顶层 import、`__init__` 或 `open()` 里做了无限等待或弹窗；
+3. 确认所有 VISA / 串口 / 网口调用都设置了有限超时；
+4. 确认 `open()` 没有去等 GUI 或 SEQ 事件；
+5. 关闭软件后在任务管理器检查是否有残留的模块子进程。
 
-## Enable 立即提示设置不合法
+> 如果“第一次 Enable 失败、重启就好”，通常意味着初始化时序、超时或资源释放有 bug，请排查根因，不要把重启当解决办法。
 
-Enable 只应打开模块安全初态，不应把保存设置自动写入仪表。若模块必须验证界面设置，应在
-用户点击 Apply Settings 时进行。对于旧保存值超出新量程的情况，Frontend 应显示并允许
-用户修正，不应在构造阶段崩溃。
+## 勾选 Enable 或加载 SEQ 后，参数没有发给仪表
 
-## Load SEQ 后模块参数没有作用
+这是刻意设计的安全行为。
 
-这是安全设计：`.seq` 的同名 `.modules.toml` 只导入界面值，不自动 Enable、连接或 Apply。
-逐个打开 Enabled 模块的 Settings，检查后点击 Apply Settings。
+- 勾选 Enable 只初始化连接并把上次保存的值填回界面；
+- 打开 `.seq` 及其配套 `.modules.toml` 也只更新界面参数；
+- 只有你核对完毕并点击 **Apply Settings**（或在点击 Run 时选 **Apply and Run**），设置才会发给仪表。
 
-## Measure 没有某个模块的数据
+## 刚勾选 Enable 就报错说旧设置不合法
 
-检查：
+模块在 `open()` 阶段不应自动把旧配置写给仪表；参数校验应放在 **Apply Settings** 时。若历史配置超出新版本范围，`Frontend.load()` 也应先原样显示让用户改，而不是在打开窗口时崩溃。
 
-- 模块是否 Enabled；
-- 是否在本次 Run 开始前已 Enabled；
-- 模块声明的 `slots` 是否包含当前行；
-- 模块是否返回了声明列；
-- Warning 是否使本槽位测量值留空；
-- DAT 是否使用旧列头打开了不兼容文件。
+## 跑完 `Measure` 却少了某个模块的数据
 
-## 模块指令标红或 Run 前被拒绝
+逐项核对：
 
-SEQ 可以保留缺失模块指令，但执行时必须满足：模块已安装、Enabled、仍声明相同稳定
-`command_id`，并且参数通过当前声明校验。框架不会自动 Enable 或跳过。
+1. 该模块是否在点击 **Run** 之前就已勾选 Enable；
+2. 多通道模块中，对应通道（slot）是否已勾选启用；
+3. 该测量点是否触发了 Warning（异常数据点会留空并写非零 `StatusCode`）；
+4. 如果使用 `Set Datafile open` 向旧文件追加，确认新旧列头是否一致。
 
-## Live Trend 打开后仪表超时
+## SEQ 里某条模块指令标红，点 Run 被拒绝
 
-Live Trend 只应消费已有仪表快照，不增加仪表轮询。若打开图表改变 timeout：
+为了防止丢失旧脚本，SEQ 允许打开引用了未安装/未启用模块的指令，但会在编辑器中标红并阻止运行。解决办法：
 
-1. 检查 GUI 是否直接查询仪表；
-2. 检查重绘是否阻塞 Runtime 消息处理；
-3. 限制绘制点数并合并刷新；
-4. 对比打开前后的 `instrument_status.dat` 采样间隔和事件日志。
+- 确认对应模块已安装并在 **Modules** 中勾选 Enable；
+- 确认模块升级后该指令的稳定 `command_id` 与参数格式未变更；
+- 如果确实不再需要该步骤，右键 **Disable** 或删除该行。
 
-## Data Browser 不自动刷新
+## 仪表一直显示 `Reconnecting`
 
-每个 Data Browser 窗口只追踪自己打开的 DAT。若要查看当前 Run，使用左侧数据区的
-**View** 重新打开一个窗口；若要查看其他文件，使用 **Graph → Data Browser → Open DAT**。
-确认目标文件仍存在，列头没有在写入过程中被外部程序改写。
+普通读取断线时，主程序会自动重启该仪表进程并按配置重连（默认每 2 秒一次、最长 60 秒）：
 
-## 停止后进程没有退出
+- 重连期间请检查网线/GPIB/USB 与仪表面板，不要反复点手动 Set/Hold；
+- 超过恢复时间仍连不上会自动转为 `Faulted`，不会无限死等或盲目猜测状态。
 
-`close`、worker shutdown 和进程回收都有界。如果厂商 C/COM 调用无界阻塞，核心最终只能
-终止本机进程，无法保证仪表输出。修复驱动 timeout，并测试重复 close；不要只增加核心总
-timeout。
+## 打开 Live Trend 后仪表变慢或超时
 
-## 4K 或弹窗出现横向滚动条
+Live Trend 只读取已有缓存，正常不会增加任何仪表查询。如果打开它后出现超时，排查：
 
-不要写死像素宽度。使用 Qt layout 和 sizeHint，让核心窗口尺寸工具计算“没有横向滚动条的
-最小宽度”。长地址和路径应使用可收缩控件或省略显示，而不是撑大整个窗口。
+1. 是否有自定义 UI 代码直接在界面线程查询仪表；
+2. 界面重绘是否卡死了主线程消息处理；
+3. 对比打开前后的 `instrument_status.dat` 时间间隔，确认瓶颈在通信还是绘图。
 
-使用者可在 **View → Appearance** 把整体大小设为 Automatic，并单独调整 70%–150% 的
-文字倍率。更换显示器后若窗口位置异常，点击 `Reset Window Positions`、保存并重启。
+## Data Browser 图表不自动更新
 
-## 报警 HTTP 失败
+- 每个 Data Browser 窗口只监听自己打开的那个文件；
+- 要看当前正在跑的新实验，请点左侧数据区的 **View** 重新开窗；
+- 确认文件没有被外部程序（如 Excel）独占锁定或改写表头。
 
-报警报告不是安全控制链。网络失败只形成去重的本地 Warning，不应阻塞 SEQ 或代替 Error
-后的停机流程。检查 endpoint、X-Token 和测试员/管理员目标配置时不要把 token 写入日志。
+## 停用模块或关软件后进程卡住
+
+框架对 `close()` 和进程退出都有时间上限，但无法强行打断已经卡死在厂商 C/DLL 里的无限阻塞 I/O，只能强杀本机进程——**这不代表仪表已经安全关断输出**。请缩短驱动自身的单次 I/O 超时并测试重复 `close()`，不要一味调大框架总超时。
+
+## 4K 高分屏字体不对或窗口跑到屏幕外
+
+- 打开 **View → Appearance**：整体大小保持 `Automatic`，再单独把 `Text size` 调到舒服的比例（70%–150%），保存并重启；
+- 拔掉外接显示器后如果找不到窗口，在同一对话框勾选 **Reset Window Positions**，保存并重启；
+- 开发模块前端时请使用 Qt Layout，避免写死像素宽高，防止出现横向滚动条。
+
+## 远程 HTTP 报警发不出去
+
+报警通道是独立的异步线程，网络不通只会记一条去重的本地 Warning，不影响实验运行。请排查 `[alarms.reporting]` 的 URL（非本机需 HTTPS）、`X-Token` 与接收端配置，排查时切勿把 Token 打进公开日志。

@@ -1,30 +1,32 @@
 # 运行第一条 SEQ
 
-这一页只使用仿真温度和磁场，不需要连接仪表。SEQ 是一棵可以缩进的命令树；扫描命令下面
-可以继续放扫描或 `Measure`。
+这一节带你用内置仿真跑通一条完整的“定温 → 扫场 → 测量”自动序列，全程不需要真实仪表。
 
-## 先启用仿真面板
+**什么是 SEQ？** 它是 OpenLab Control 的实验脚本文件（`.seq`），结构类似 MultiVu：每行一条指令，扫描指令（`Scan ...`）和对应的 `End Scan` 构成一层缩进，可以任意多层嵌套。
 
-全新安装不会自动启用 System Instrument。先关闭主程序并打开 Instrument Scanner，在最后
-一页勾选 **Simulated Temperature**、**Simulated Magnetic Field** 和 **Simulated 2nd Stage**，
-检查面板顺序后保存。然后再启动 OpenLab Control。这个操作只生成仿真配置，不连接真实仪表。
+## 1. 先打开三个内置仿真面板
 
-## 在界面中建立命令
+全新安装默认关闭所有仿真。请先关闭主程序，打开 **Instrument Scanner**：
 
-1. 启动程序，确认底部 Temperature、Magnetic Field 和 2nd Stage 都有仿真读数。
-2. 点击 **File → New**。编辑器中会保留最后一行 `End Sequence`。
-3. 选中 `End Sequence`，在右侧 **Sequence Command Bar** 依次双击并确认：
-   **Remark**、**Set Datafile**、**Set Temperature**、**Scan Field**。
-4. `Remark` 的文字填写 `First simulated run`。`Set Datafile` 的 Mode 选择 `create`，
-   Location 选择 `Run folder`，文件名填写
-   `experiment.dat`。
-5. `Set Temperature` 填 300 K、10 K/min、Settle。
-6. `Scan Field` 填 0 Oe 到 200 Oe、3 points、5000 Oe/min、Settle。
-7. 选中刚插入的 **Scan Field** 或它的 **End Scan**，双击 **Measure**。Measure 会缩进到
-   Scan Field 里面。
-8. 点击 **File → Save As**，把文件保存为 `first-run.seq`。
+1. 一直切到最后一页 **Review & Save**；
+2. 勾选 **Simulated Temperature**、**Simulated Magnetic Field** 和 **Simulated 2nd Stage**；
+3. 确认面板顺序无误后点击保存；
+4. 重新启动 OpenLab Control，确认底部三个面板都出现了仿真读数。
 
-界面中应看到与下面等价的内容；缩进和 `End Scan` 由编辑器自动维护：
+（可选）点击顶部工具栏 **Modules**，勾选自带的 **`Simulated Transport`**，这样待会儿就能看到真实的四通道模拟电阻数据写入文件。
+
+## 2. 编排一条扫描序列
+
+1. 点击 **File → New**，新建的序列会自动带有一行末尾的 `End Sequence`。
+2. 选中 `End Sequence`，在右侧 **Sequence Command Bar** 中依次双击以下指令并填好参数：
+   - **Remark**：填写备注 `First simulated run`
+   - **Set Datafile**：Mode 选 `create`，Location 选 `Run folder`，文件名填 `experiment.dat`
+   - **Set Temperature**：`300 K`，速率 `10 K/min`，模式 `Settle`
+   - **Scan Field**：从 `0 Oe` 到 `200 Oe`，共 `3` 个点，速率 `5000 Oe/min`，模式 `Settle`
+3. 选中刚插入的 **Scan Field**（或它的 **End Scan**），双击右侧的 **Measure**，它会自动缩进放进 `Scan Field` 内部。
+4. 点击 **File → Save As**，保存为 `first-run.seq`。
+
+完成后，序列编辑器里会显示类似下面的内容（缩进和 `End Scan` 由程序自动维护）：
 
 ```text
 T Remark First simulated run
@@ -36,45 +38,38 @@ T End Scan
 T End Sequence
 ```
 
-`T` 表示该命令启用；切换为 `F` 后该命令不会执行。`Settle` 表示到达目标并满足稳定条件后
-再继续。这里使用明确的 `create`，不是需要替换的占位文字；默认的 `open|create` 表示文件
-存在时追加、不存在时创建。
+> **几个小符号的含义**：
+> - 行首的 `T` 表示启用该行，改为 `F`（右键 Disable）则跳过执行；
+> - `Settle` 表示等温度/磁场稳定后再走下一步；`Sweep` 则下发目标后立即继续；
+> - `Set Datafile` 的三种模式：`create`（新建/覆盖）、`open`（向已有文件追加）、`open|create`（存在则追加、不存在则新建）。
 
-## 运行并检查结果
+## 3. 点击运行并查看产出文件
 
-1. 点击主窗口左侧或工具栏的 **Run**。
-2. 等待状态变为 **Completed**。
-3. 打开 `runs/<时间>_first-run/`，应看到：
+1. 点击左侧控制区的 **Run** 按钮；
+2. 观察左侧进度条和模块监视卡，直到状态变为 **Completed**；
+3. 打开项目目录下的 `runs/<时间戳>_first-run/`，每次实验都会自动保存一整套文件：
 
 ```text
-runs/<时间>_first-run/
-├─ sequence.seq
-├─ configuration/
-│  ├─ general.toml
-│  └─ instruments/
-├─ module_settings/
-├─ experiment.dat
-├─ instrument_status.dat
-└─ events.dat
+runs/<时间戳>_first-run/
+├─ experiment.dat            # 实验测量数据（可直接拖进 Data Browser 画图）
+├─ instrument_status.dat     # 运行期间每秒记录的完整温场/状态日志
+├─ events.dat                # Warning / Error / Remark 事件日志
+├─ sequence.seq              # 本次实际运行的 SEQ 快照
+├─ configuration/            # 当次使用的系统配置快照
+└─ module_settings/          # 已启用模块的参数与初始状态快照
 ```
 
-如果没有 Enable 任何 Measurement Module，`Measure` 仍会写系统温场快照，并产生一条
-“没有模块”的 Warning。这是正常的练习结果。若已 Enable 四通道教学模块，每个场点会按
-四个逻辑行键写四行模块数据。只有模块实际返回原始序列时，运行目录才会另外出现
-`rawdata/`。
+- 如果你启用了 `Simulated Transport`，`experiment.dat` 里每个磁场点会按 4 个通道写出 4 行数据（如果模块返回原始波形，还会多出一个 `rawdata/` 目录）。
+- 如果没有启用任何测量模块，`Measure` 仍会记录系统温场并弹出一条“无模块”的 Warning，实验继续跑完——这是正常的练习行为。
 
-`Measure` 执行时会先取得一次温场快照，再调用本次 Run 已冻结的 Enabled 模块。一次调用
-写一行还是多行，由这些模块声明的逻辑行键决定；初次操作不需要手工设置这个编号。
+## 4. 运行中途的 Pause 和 Stop 会做什么？
 
-## Pause、Stop 与模块收尾
+了解这两个按钮的行为对后续做真实实验非常重要：
 
-- Pause 冻结框架等待和 `ModuleAPI.sleep()` 计时，不主动关闭模块输出。
-- Stop 在安全检查点取消测量，但不向 System Instrument 发送 Set 或 Hold。
-- 正常完成、Stop 和 Error 都会向模块发送 `run_end`。真实模块默认在这里关闭本次 Run
-  的输出；明确选择连续偏置时，模块可读回确认后保持。它仍保持 Enabled，只有 Disable
-  或应用退出才调用 `close` 关闭输出并释放连接。
-- 厂商驱动中已经阻塞的 I/O 只能等待它自己的有限 timeout，所以真实仪表调用不能无限等。
+- **Pause（暂停）**：在下一个安全检查点暂停序列推进与等待计时；**不会**断开仪表，也**不会**主动关掉模块输出。点击 Resume 后从原位置继续。
+- **Stop（停止）**：取消后续序列步骤；**不会向温控仪或磁体发送新的 Set 或 Hold**（系统仪表维持自己当前目标继续运行），同时向所有测量模块发出 `run_end` 通知，模块默认在这里安全关闭自身输出，但仍保持 Enabled 状态，方便你改完参数后再次运行。
 
-只想使用软件，请继续阅读 [操作手册](../OPERATIONS.md) 和
-[Data Browser](../guides/data-browser.md)。准备编写 Measurement Module 或 System Instrument 时，再进入
-[第一个测量模块](../development/first-module.md)。
+## 下一步
+
+- 想全面掌握日常操作、看图和排错：阅读 [操作手册](../OPERATIONS.md) 和 [Data Browser](../guides/data-browser.md)。
+- 想开始写自己的测量模块：进入 [写第一个测量模块](../development/first-module.md)。

@@ -1,12 +1,10 @@
 # 读取、前面板与日志
 
-多数 System Instrument 只需写 `read_status()`。只有完整状态读取明显较慢时，才额外写
-`read_measurement()`。
+多数系统仪表只需要实现一个 `read_status()`。只有当完整状态查询很慢（例如要发十几条命令）、会影响实验采样速度时，才需要额外覆盖 `read_measurement()`。
 
-## `read_status()`：完整状态
+## 1. `read_status()`：完整状态轮询
 
-核心周期性调用它，用于前面板、温度/磁场判稳、Live Trend、报警和
-`instrument_status.dat`。返回一个普通字典：
+核心按周期调用它来刷新底部面板、判定温场稳定、绘制 Live Trend、触发报警以及写入 `instrument_status.dat`。返回值是一个普通 Python 字典：
 
 ```python
 return {
@@ -23,57 +21,46 @@ return {
 }
 ```
 
-字段很少：
-
-| 键 | 必需 | 含义 |
+| 键 | 必需 | 说明 |
 | --- | --- | --- |
-| `value` | 是 | 主读数；数值或 `None` |
-| `target` | 否 | 当前目标 |
-| `rate` | 否 | 每分钟速率 |
-| `moving` | 否 | 仪表是否正在改变值 |
-| `ready` | 否 | 仪表自己的就绪/稳定状态字 |
-| `auxiliary` | 否 | 选中的附加读数 |
+| `value` | 是 | 主读数（有限数值或 `None`） |
+| `target` | 否 | 当前目标值（单回路简写） |
+| `rate` | 否 | 当前每分钟变化速率 |
+| `moving` | 否 | 仪表是否正在升降温/升降场（bool） |
+| `ready` | 否 | 仪表自身的状态字是否就绪（bool，没有就省略或填 `None`） |
+| `auxiliary` | 否 | 清单中声明的附加读数字典（数值、短文本、布尔值或 `None`） |
 
-上表是单控制端点的简写。若同一实例启用了多个不同的 control，顶层仍返回 `value` 和
-`auxiliary`，但每个回路的 `target/rate/moving/ready` 必须放进
-`controls[control_id]`。完整示例见 [System Instrument 从这里开始](system-instrument.md#multiple-controls)。
+> **多回路控制器**：若同一物理实例启用了多个不同的 `control`，顶层仍返回 `value` 和 `auxiliary`，但每个回路各自的 `target / rate / moving / ready` 必须放进 `controls[control_id]` 返回，详见 [多个独立控制回路](system-instrument.md#multiple-controls)。
 
-核心从 `instrument.toml` 取得名称、单位和小数位，并负责时间戳、连接状态和内部快照。后端
-不要重复返回这些元数据。数值必须有限；附加值可以是有限数值、短文字、布尔值或 `None`。
+名称、单位和小数位统一来自 `instrument.toml`，后端不需要重复返回。即使操作员在界面上隐藏了某个辅助读数，`read_status()` 也仍应照常检查该仪表的关键安全状态。
 
-完整状态读取仍要检查所有安全状态，即使操作者没有勾选某个辅助读数。例如 TempA 未显示时，
-TempA 过温仍必须报错。
+## 2. `read_measurement()`：测量时刻的快速读取
 
-## `read_measurement()`：写 DAT 前的即时主值
+当测量模块调用 `api.instruments()` 或核心准备写一条实验 DAT 行时，框架会主动请求一次**测量专用即时读取**，而不直接拿前面板最多 1 秒前的旧缓存敷衍。同一时刻多个模块的请求会自动合并为一次查询。
 
-Measurement Module 调用 `api.instruments()` 时，核心请求一次即时仪表读数，不复用最多一秒前
-的前面板缓存。同一时刻多个模块的请求会合并。
-
-基类默认调用 `read_status()`。若完整查询需要很多命令，可只实现：
+默认基类直接调用 `read_status()`。如果完整状态太慢，可以只覆盖 `read_measurement()` 读最关键的主值：
 
 ```python
 def read_measurement(self):
     return {"value": read_sample_temperature(self._transport)}
 ```
 
-本次没有同步读取的辅助列会写空，不会沿用旧值。后台 `read_status()` 仍持续负责完整安全
-检查；`read_measurement()` 自己读到无效主值时也必须报错。
+本次没有同步查的附加列会干净地留空，不会混入旧缓存值；后台常规 `read_status()` 依然按周期运行并负责完整安全检查。
 
-## 同一连接不会被并发访问
+## 3. 核心如何保证同一连接绝不并发冲突？
 
-核心对每个 System Instrument 串行执行：
+每个物理仪表实例的所有操作都走同一个**带优先级的串行队列**，绝不会同时向同一串口/GPIB 发两条命令：
 
-1. 已经开始的一条仪表指令先完成；
-2. 等待中的控制和安全操作优先；
-3. `read_measurement()` 先于尚未开始的普通 `read_status()`；
-4. 后台 `read_status()` 最后执行。
+1. 已经发出的当前指令先跑完（不会被中途强行打断，因此底层必须设有限超时）；
+2. 等待中的**安全联动响应**与**控制写命令**最先执行；
+3. 等待中的 `read_measurement()` 排在尚未开始的普通轮询之前；
+4. 常规后台 `read_status()` 最后执行。
 
-“优先”不会中断已经发出的命令，所以底层 I/O 仍必须有有限超时。后端不要另开线程访问同一
-VISA Session。
+后端请保持纯同步，不要自己再另开后台线程去抢同一个 VISA 会话。
 
-## 一台仪表返回多个值
+## 4. 一台仪表展示多个面板
 
-在 API v4 清单中分别声明固定面板和读数：
+以温控仪为例，可以在同一份 `instrument.toml` 中声明一个 `controller` 面板加一个 `readout_grid` 面板，共用同一物理连接：
 
 ```toml
 [[controls]]
@@ -119,29 +106,18 @@ unit = "%FS"
 decimals = 2
 ```
 
-扫描器为实例列出这两个固定面板。操作者可以分别开启、关闭和排序它们，并给 controller
-选择 `temp_b` 与角色；不能临时创建作者未声明的面板。运行时会收集所有已开启面板引用的
-读数。`read_status()` 的 `auxiliary` 应返回这些附加键，键集合在运行中不能变化。
+请返回结构化的数字字典，不要把多个值拼成一长段字符串。
 
-`readout` 显示一个读数，`readout_grid` 显示一到四个，`switch` 把 0/1 状态显示为 Off/On
-并提供清单引用的指令按钮。多个面板仍共用同一物理实例和通讯会话。结构化字典保留数值
-类型、单位和精度；不要把多个值拼成一段字符串。
+## 5. 两份日志各自记什么？
 
-一个实例有多个 Controller 时，各面板分别保存目标、速率、动作、ready 和核心判定的
-稳定状态。标准温度或磁场角色对应的回路仍作为实验 DAT 的主控制值；所有已启用 Controller
-的完整独立状态都写入 `instrument_status.dat`。
-
-## 两类数据文件
-
-| 文件 | 何时写 | 内容 |
+| 文件 | 写入时机 | 记录内容 |
 | --- | --- | --- |
-| 实验 DAT | 每个 `Measure` 结果行 | 与模块测量同步的主值和本次即时辅助值 |
-| `instrument_status.dat` | Run 期间按独立周期 | 每个 Controller 的独立状态，以及每台物理仪表一次连接信息和辅助读数 |
+| 实验 DAT（如 `experiment.dat`） | 每条 `Measure` 结果行 | 测量时刻的同步主值与模块测量列 |
+| `instrument_status.dat` | Run 期间按独立周期（默认 1 秒） | 每个控制回路的当前值、目标、速率、动作、稳定性，以及每台物理仪表的连接状态与全部附加读数 |
 
-Data Browser 可打开多个独立窗口；数据区的 View 载入当前 Run DAT，其他窗口可打开任意
-DAT。Live Trend 使用已有快照，不会额外读取仪表。
+## 6. `ready` 与核心判稳的关系
 
-## `ready` 不能绕过核心判稳
+后端返回的 `ready` 只是必要条件而非充分条件：
 
-`ready = false` 会阻止稳定；`ready = true` 以后，核心仍要检查目标误差、斜率和 dwell。没有
-独立状态字时省略该键或返回 `None`。
+- `ready = False` 时，核心绝不判定为稳定；
+- `ready = True`（或省略）后，核心仍会独立检查误差容限、斜率和稳定驻留时间（dwell）。

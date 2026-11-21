@@ -1,495 +1,225 @@
 # 操作手册
 
-## 日常运行的最短流程
+这份手册面向日常使用 OpenLab Control 做实验的操作员，按实际实验顺序说明界面布局、模块管理、序列编辑、运行控制、画图和常见异常处理。
 
-1. 启动后检查已配置的 System 面板和实际状态；全新安装没有面板也是有效状态。
-2. 打开 SEQ；需要测量模块时再 Enable，并核对 Status 和 Settings。
-3. 有未 Apply 的设置时优先选择 **Apply and Run**；真机首跑不要跳过 Apply。
-4. 核对数据文件位置，点击 Run；结束后检查 DAT、`events.dat` 和 `instrument_status.dat`。
-5. 分享运行目录前检查 `configuration/`，其中可能含真实仪表地址、本机路径和现场 PID。
+## 日常实验 5 步速览
 
-下面各节再解释安装、模块管理、异常和维护操作。
+1. **检查底部仪表**：确认已配置的系统仪表面板连接正常、读数合理（全新安装没有任何面板也是正常的）。
+2. **加载或编写 SEQ**：打开 `.seq` 文件（如有配套 `.modules.toml`，参数会自动填进对应模块界面）。
+3. **启用并应用测量模块**：在 **Modules** 中勾选本次要用的模块，核对 **Settings** 后点击 **Apply Settings** 下发到仪表。
+4. **确认文件并运行**：核对左侧数据文件位置，点击 **Run**；实验进行中可随时打开 **Data Browser** 看实时曲线。
+5. **归档结果**：实验结束后，建议连同 `runs/<时间>_<序列名>/` 整个目录一起备份（对外分享前记得脱敏其中的 `configuration/`）。
 
-## 安装与启动
+---
+
+## 启动方式
 
 ### Windows 发布包
 
-解压整个 `OpenLabControl` 文件夹后运行：
+将整个发布文件夹解压到可写目录后，直接双击 `OpenLabControl.exe` 启动。请不要单独移动 EXE，需保持同级的 `configs/`、`docs/`、`modules/`、`system_instruments/`、`module_data/`、`runs/` 和 `_internal/` 完整。
 
-```text
-OpenLabControl.exe
+### 源码与命令行启动
+
+```powershell
+# 日常启动（自动使用 .venv 中的锁定依赖）
+.\setup.bat
+.\run.bat
+
+# 指定启动时打开某个 SEQ
+.\.venv\Scripts\python.exe run.py --sequence examples\nested_scan.seq
+
+# 直接以 Data Browser 打开一个 DAT 文件
+.\.venv\Scripts\python.exe run.py --data-file C:\Data\sample.dat
+
+# 无界面自动化验证（仅用于测试，正常 GUI 启动不会自动勾选模块）
+.\.venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
 ```
 
-不要只复制 EXE；`configs/`、`docs/`、`modules/`、`system_instruments/`、`module_data/` 和
-`runs/` 等目录应和它一起保留。首次启动所有测量模块都是 Disabled，这是固定安全行为，
-不会恢复上次 Enable 状态。
+> **安全约定**：每次重新启动程序，所有测量模块都默认恢复为 `Disabled`，需要操作员主动勾选启用。
 
-### 源码运行
+---
 
-```text
-setup.bat
-run.bat
-```
+## 主窗口布局
 
-`setup.bat` 默认安装 `requirements-lock.txt` 中经过发布验证的精确版本。需要评估依赖
-升级时，同时修改 `requirements.txt`、`pyproject.toml` 和核心共享依赖表，在隔离环境
-更新锁定文件，再完成全部测试和打包验收；不要在发布环境中临时升级单个包。
+主窗口按功能分为五个区域：
 
-或：
+- **左侧控制区（Sequence Control）**：显示当前数据文件与 SEQ 名称、运行进度、已启用模块的**实时监视卡**，以及底部的 `Run / Pause / Stop` 按钮。
+- **中央工作区**：放置浮动的 SEQ 编辑器，以及可同时打开多个文件的 **Data Browser** 绘图窗口。
+- **右侧指令栏（Sequence Command Bar）**：双击任意指令弹窗填参数并插入 SEQ；启用带自定义指令的模块后，这里会自动出现该模块的专属分组。
+- **底部系统仪表面板条**：按扫描器设定的全局顺序排列所有启用的固定面板（固定浅色配色，不随系统深色模式变色）：
+  - **控制面板（`controller`）**：显示当前值、目标值、速率和稳定状态；双击打开手动控制窗口。
+  - **只读面板（`readout` / `readout_grid`）**：显示 1 个或最多 4 个（2×2）只读读数，不可双击控制。
+  - **开关面板（`switch`）**：显示 `On/Off` 状态并提供无参数控制按钮（例如压缩机开关）。
+- **辅助工具与视图**：工具栏 **Modules**（模块管理器）、菜单 **View → Run Log**（完整运行与报警记录）、**Live Trend**（轻量实时趋势图，复用已有轮询缓存，最多每 250 ms 刷新一次显示，不增加额外仪表通讯）。
 
-```text
-.venv\Scripts\python.exe run.py
-```
-
-指定 SEQ：
-
-```text
-.venv\Scripts\python.exe run.py --sequence examples\nested_scan.seq
-```
-
-程序读取唯一通用配置 `configs/general.toml`。System Instrument 实例与现场限制由
-Instrument Scanner 写入 `configs/instruments/`；未分配 VISA 写入
-`configs/visa.resources.toml`。全新安装没有 System 面板也能启动，三个内置仿真默认关闭。
-
-单独打开 DAT Browser：
-
-```text
-.venv\Scripts\python.exe run.py --data-file C:\Data\sample.dat
-```
-
-无界面验证模块运行时，可显式重复使用 `--enable-module ID`：
-
-```text
-.venv\Scripts\python.exe run.py --headless-demo --enable-module simulated_transport --sequence examples\module_measurement.seq --timeout 30
-```
-
-这个参数只服务于自动验证；正常 GUI 启动不会恢复 Enabled 状态，仍需用户在 Modules
-Manager 手动启用。
-
-## 报警报告
-
-1. 在独立 NoneBot 接收服务中提供 `/alarm/report`，校验 `X-Token`，并按报警等级选择收件人。
-2. 在 NoneBot 环境文件配置随机 `alarm_token`、`alarm_admin_qqs` 和
-   `alarm_tester_qqs`；管理员与测试员列表可重叠，接收器会去重。
-3. 在运行 OpenLab Control 的账户环境中设置同一 Token，例如
-   `OPENLAB_ALARM_TOKEN`；或者创建独立 Token 文件并配置 `token_file`。
-4. 在 `configs/general.toml` 的 `[alarms.reporting]` 中核对地址后设置
-   `enabled = true`，重启程序。
-5. 先用仿真 `Inject Warning`、`Inject Error` 验证：Warning 只到测试员，
-   Error 同时到管理员和测试员，同一活动事件不会反复推送。
-
-接收端不再接受 `target_qq`，避免持有 Token 的发射端任意选择收件人。远程接收器必须
-使用 HTTPS。报警网络故障只产生本地 Warning，不会替代仪表互锁，也不会改变 Error
-中止 SEQ 或“SEQ 退出不控制 System Instrument”的行为。
-
-## 主窗口
-
-- 左侧 `Sequence Control`：数据文件、当前 SEQ、运行状态、Enabled 模块监视卡和
-  Run/Pause/Stop。
-- 中央：浮动 SEQ 和可同时打开多个文件的 Data Browser 窗口。
-- 右侧 `Sequence Command Bar`：双击命令后设置参数并插入。
-- 底部无外层标题的仪表面板条：按扫描器保存的全局顺序显示所有已启用固定面板；没有启用面板
-  时保持为空；
-  `controller` 保持当前值、目标、速率和稳定状态样式，`readout` 只显示一个主读数，
-  `readout_grid` 以 2×2 最多显示四个读数；需要更多读数时由作者声明另一个固定面板。
-  `switch` 显示 0/1 状态和简单系统指令按钮。面板使用
-  固定浅色配色，不跟随 Windows 深色主题变色；
-  不再显示测量 Transport 块。
-- 工具栏 `Modules`：测量模块管理。
-- `Run Log`：Warning、Error、步骤和模块手动动作记录，可从 View 菜单显示。
-- `Live Trend`：保留最近仪表快照，最多每 250 ms 合并一次可见重绘；只影响显示。
-
-### 外观、字号与窗口大小
+### 调整界面缩放与窗口位置
 
 打开 **View → Appearance**：
 
-- `Overall size` 同时调整按钮、图标、间距、窗口最低尺寸和文字，范围 75%–200%；
-- `Text size` 在整体缩放上再单独调整文字，范围 70%–150%；
-- `At startup` 可选择记住上次窗口尺寸与位置、始终最大化或始终使用默认布局；
-- `Reset Window Positions` 会在保存后清除主窗口、SEQ、Data Browser、Live Trend、
-  手动控制和 Measurement Module 窗口的旧位置。
+- **Overall size（75%–200% 或自动）**：同步缩放按钮、图标、间距、窗口最小尺寸和文字；
+- **Text size（70%–150%）**：在整体缩放基础上再单独放大或缩小文字；
+- **At startup**：选择记住上次窗口尺寸位置、始终最大化，或恢复默认布局；
+- **Reset Window Positions**：换显示器或窗口跑到屏幕外时，保存并重启即可复位全部窗口位置。
 
-保存后重启生效。程序不会在运行中重建模块窗口，因此不会因为改字号产生重复信号、重复
-worker 或短暂仪表连接。个人外观值保存在操作系统用户配置目录，不进入主 TOML、SEQ、
-DAT、模块设置或运行快照。源码版和 Windows 打包版使用相同规则。
+设置保存在本机 Windows 用户配置目录，不影响项目内的 `configs/*.toml`、SEQ 或实验数据；点击 **Save** 后重启软件生效。点击 **Restore Defaults** 会回到 `configs/general.toml` 中 `application.ui_scale` 的默认值与 100% 字号。
 
-若尚未保存过 Appearance，主配置的 `application.ui_scale` 仍是整体缩放默认值；在对话框
-中保存后，个人选择优先。点击 `Restore Defaults` 会恢复主配置默认缩放、100% 文字和窗口
-记忆模式，并清除旧窗口位置。
+---
 
-每个读数的小数位来自对应 System Instrument 清单。`controller` 面板双击打开手动控制；
-`readout` 和 `readout_grid` 不弹控制窗口。`sample_temp` 与 `field` 角色各自全局最多一个，
-供标准温场 SEQ 使用；角色为 `none` 的 controller 仍可手动控制，但不会被标准温场 SEQ
-选择。
+## 管理测量模块（Modules）
 
-## 测量模块
+点击工具栏 **Modules** 打开模块管理器，界面简洁，只有 `Enabled / Name / Version` 三列。
 
-### Enable
+### 启用（Enable）与隐藏窗口
 
-1. 点击工具栏或菜单 `Modules`。
-2. 管理器只有 `Enabled / Name / Version` 三列。
-3. 勾选所需模块。
-4. 程序直接加载所选目录中的模块代码，并显示 `Initializing <module>...`；初始化成功后才
-   真正勾选并打开模块窗口。
-5. 初始化失败会弹 Error，仍保持 Disabled。
+1. 勾选目标模块后，状态会显示 `Initializing <模块名>...`；初始化成功即弹出该模块的独立浮动窗口。如果初始化失败会弹 Error，保持未勾选状态。
+2. 只应将来源可信、已核对过代码的模块目录复制到 `modules/` 下；程序不在勾选时额外弹代码审核确认框。
+3. 勾选成功后，如果该模块声明了自己的 SEQ 指令，右侧指令栏会立刻出现以模块名称命名的分组；取消勾选或进程失效时立即移除。
+4. **窗口关闭与隐藏**：点击模块窗口右上角关闭、`Alt+F4` 或最小化都会**隐藏**该窗口（不会中断正在进行的测量，也不会在桌面留下最小化小条）。左侧 **Sequence Status** 下方的模块卡片会标出 `Hidden` 并继续显示最新通道结果（新一次 `Measure` 开始前会先清空旧值，空值显示 `—`）。点击卡片或在管理器里双击模块名即可重新打开原窗口。
 
-程序不维护模块信任状态，也不在 Enable 时弹出代码指纹确认。只把来源已经核对过的模块
-复制到 `modules/`；第三方模块是可执行代码，安装前应由操作者在框架外确认来源和内容。
+### Settings、Status 与 Apply Settings
 
-如果模块声明了自己的 SEQ 指令，完成第 5 步后，右侧 `Sequence Command Bar` 会新增一个
-直接以模块显示名称命名的顶层组。模块尚未 Enable 时不预先显示；Disable、初始化失败或
-worker 通信失效后立即移除，不会留下一个无法执行的菜单项。
+- 打开模块窗口默认停在 **Settings** 页，并自动载入上次保存的参数（位于 `module_data/<模块ID>/settings.toml`）。
+- **加载 ≠ 下发**：勾选 Enable 或加载历史 SEQ 只把数值填在界面上，**绝不会自动写给真实仪表**。确认参数无误后点击 **Apply Settings** 并确认，才会真正连接/配置仪表。
+- **Status** 页展示仪表回读的连接状态、输出开关与最近读数（仅在 Settings 页显示 Apply 按钮）。部分模块提供的 `Test Connection`、`Read Now`、`Measure Now` 仅在 SEQ 空闲时可用，结果不会写入实验 DAT。
 
-模块窗口是独立浮动 Windows 窗口：可移动，保持在主窗口之前但不全局置顶。
-关闭按钮、Alt+F4 和最小化按钮均隐藏窗口，不保留最小化小窗；模块仍保持 Enabled，
-正在进行的测量继续运行。双击管理器中的 Enabled 模块，或点击主窗口左侧的模块卡片，
-都可重新打开原窗口，设置和状态保留。Disable 才会结束模块生命周期。
+### SEQ 配套模块设置文件（`.modules.toml`）
 
-每个 Enabled 模块在 `Sequence Status` 下方有一张紧凑卡片。它显示 Enabled/Measuring、
-窗口隐藏状态（Hidden）和活动 Warning/Error；模块若选择了结果列，还会显示最近通道值。新一轮
-`Measure` 会先清空旧值，空值显示 `—`。这些内容来自已经返回的测量结果，不会额外访问
-仪表。模块较多时只出现纵向滚动条，Run/Pause/Stop 始终留在左栏底部。
+执行 **File → Save** 保存 `experiment.seq` 时，程序会自动在同目录生成 `experiment.modules.toml`，记录本次实验关联的模块参数。
 
-### Settings 与 Status
+执行 **File → Open** 打开该 SEQ 时，会自动把配套参数载入对应模块的 Settings 界面（打开历史 `runs/` 目录下的 `sequence.seq` 时，也会兼容读取其 `module_settings/*.settings.toml`）：
 
-- 默认打开 `Settings` 页。
-- Enable 会加载上次保存参数，但不会把这些值发送给仪表。
-- `Apply Settings` 只显示在 `Settings` 页；切换到 `Status` 后不会显示。
-- 检查参数后点击 `Apply Settings`，再次确认后才发送。
-- `Status` 页显示连接、实际状态、输出状态、读数等，布局由模块自己定义。
-- 模块可以提供 `Test Connection`、`Read Now`、`Measure Now`；仅 SEQ Idle 可用，结果不写实验 DAT。
+- 不会替你勾选或取消勾选模块；
+- 对已经 Enabled 的模块，只更新界面并标为“未 Apply”，需要核对后手动 Apply；
+- 若本机缺少对应模块或版本不同，会提示 Warning，原参数仍保留供参考；
+- 复制实验脚本给同事时，记得把 `.seq` 和同名 `.modules.toml` 一起复制。
 
-模块窗口设置了按 UI Scale 缩放的最小尺寸；缩小到完整显示页签、参数区和操作区的边界后不能继续缩小。
+### 点击 Run 时有未 Apply 的设置怎么办？
 
-Settings 在 Apply、Disable、关闭程序和 Run 前自动保存。设置保存在 `module_data/<id>/settings.toml`，不修改模块源码。
+如果某个已启用模块的界面有改动但尚未下发，点击 **Run** 会弹出三个选项：
 
-### SEQ 对应的模块设置
+- **Apply and Run（推荐）**：先将所有改动下发并等待仪表确认，全部成功后再开始跑序列；
+- **Run Without Applying（高级）**：不给仪表发设置，按仪表当前实际状态直接跑，但运行快照中仍会记录界面当前填写的期望值——仅当你已经人工确认仪表状态且清楚两者差异时再使用；
+- **Cancel**：取消本次启动。
 
-File → Save 同时保存 `<SEQ 文件名去掉 .seq>.modules.toml`。文件包含当前 SEQ 已导入的
-模块设置，以及保存时所有 Enabled 模块的 Settings 页当前值。File → Open 会自动导入
-同名伴随文件；旧 SEQ 没有该文件时继续使用 `module_data/<id>/settings.toml`。
+### 停用（Disable）与刷新（Refresh）
 
-导入不是 Apply：
+- **Disable**：取消勾选模块时，程序会先保存当前 Settings，再调用模块 `close()` 安全收尾，最后关闭子进程并隐藏窗口。如果 `close()` 报错，框架会在超时上限内强制回收本机进程并显示 Disabled——**强制结束进程不等于外部仪表已关断输出，此时务必人工检查仪表实体面板！**
+- **Refresh**：仅在 SEQ 空闲且**全部模块都已 Disable** 时可用，用于重新扫描 `modules/` 目录。所有模块共用核心锁定的 Python 依赖，界面不提供单独装包功能。
 
-- 启动默认 Disabled 的规则不变，Load 不会替用户勾选模块；
-- 已 Enabled 模块只更新界面并标为未 Apply；
-- 下一次 Run 会按既有流程询问 Apply and Run / Run Without Applying / Cancel；
-- 模块缺失或版本不同会显示 Warning；真实仪表参数必须重新核对；
-- Save As 会为新 SEQ 生成新的同名伴随文件，复制实验时应同时复制这两个文件。
+---
 
-打开运行目录中的 `sequence.seq` 时，程序还可直接读取该目录已经保存的
-`module_settings/*.settings.toml`，方便从历史运行快照恢复实验参数。
+## 编辑实验序列（SEQ）
 
-### Run 前未 Apply
+### 基本编辑
 
-如果 Settings 页面有修改但尚未 Apply，Run 会询问：
+- **新建 / 打开 / 保存**：通过 **File → New / Open / Save / Save As**（若不小心关掉了浮动 SEQ 窗口，再点 New/Open/Edit 即可唤回）。
+- **插入指令**：在右侧 **Sequence Command Bar** 双击指令，在弹窗中填好参数即可插入；选中 `Scan` 或 `End Scan` 行再插入时，新指令会自动缩进到该扫描块内部。
+- **修改已有指令**：直接双击 SEQ 里的任意一行。
+- **批量操作**：按住 `Ctrl` 或 `Shift` 选中多行，可通过右键菜单或快捷键执行 **Enable / Disable / Delete / Copy / Paste**（同时选中父 `Scan` 和内部子行时，操作自动只作用于外层块，避免误删或重复复制）。SEQ 运行中禁止修改，但仍允许复制。
 
-- `Apply and Run`：先等待所有修改成功 Apply，再启动。
-- `Run Without Applying`：仪表保持现状，但把当前界面值作为 desired settings 保存到运行目录。
-- `Cancel`：不运行。
+### 常用指令要点
 
-`Run Without Applying` 是高级选项：只有已经人工读回并确认仪表实际状态，而且理解快照中
-desired settings 可能与实际状态不同时才使用。真机首跑或状态不确定时选择 Cancel，核对后
-再 Apply；不要为了省去确认直接跳过。
+- **Set Datafile**：可点击 `Browse…` 用系统文件对话框选路径（`open` 选已有文件，`create` / `open|create` 可新建）。写到项目外的自定义目录时会自动加上 `external` 标记。
+- **温度 / 磁场控制与扫描**：参数弹窗直接读取扫描器中该控制器面板的上下限和最大速率。`Scan Field` 额外提供 **Choose nearer start or its negative** 选项（默认关闭）：勾选后，执行到该扫场步骤时会读取当前真实磁场，自动选择离当前场更近的起点极性（例如当前在 `-6 T` 时，把 `9 T → 3 T` 自动转为 `-9 T → -3 T`），结果记入 Run Log。
+- **Measure**：无参数指令 `T Measure`，自动对本次 Run 冻结的全部已启用模块按通道槽位测量。需要重复采集或定时采集时，把 `Measure` 放进 `Scan Time` 或其他 `Scan` 块内即可。
+- **模块自定义指令**：如 `Set Current`（单次动作）和 `Scan Current`（可像温场 Scan 一样嵌套子指令）。它们本身不写 DAT 行，需要采数据时在下方或循环内放置 `Measure`；修改的只是本次运行中的仪表状态，不会改写 Settings 页。如果打开的 SEQ 引用了未安装或未启用的模块指令，该行会标红并给 Warning，运行前会被阻止。
 
-### Disable
+### 参数精度说明
 
-取消勾选时：
+为避免软件悄悄把参数四舍五入（例如把极小步长舍成 0），界面输入、保存与执行使用统一精度：
 
-1. 先保存 Settings；
-2. 调用模块 `close(api)`；
-3. close 完成后取消勾选、关闭工作进程并隐藏窗口。
+- `Wait`、`Scan Time` 及可编辑等待/超时时间：秒，1 位小数（仪表滤波参数保持各自规定）；
+- 普通 NPLC：1 位小数（Delta PLC 和 372A 整秒参数仍为整数）；
+- 温度：常规 3 位小数（若仪表清单声明了低温加密精度，如 10 K 以下 4 位，则以仪表清单为准）；
+- 磁场：`Oe` 2 位小数，`T` 6 位小数；
+- 电流/电压支持 `1m`、`1p` 或科学计数法，缩短会丢精度时原样保留文本。
 
-close 失败时程序报告 Error，并在关闭总上限内强制回收模块工作进程、最终显示 Disabled。
-强制回收只保证本机进程/管道不残留，不代表外部仪表已经安全；此时必须按模块硬件说明
-人工检查输出。
+外部手写的 SEQ 或配置如果超出了控件允许的小数位，程序会提示修正，不会静默四舍五入。
 
-### Refresh
+---
 
-只有 SEQ Idle 且全部模块 Disabled 时可以 `Refresh`。它重新扫描 `modules/`，不做运行中的热替换。
+## 运行控制、手动控制与报警
 
-Refresh 仍要求全部模块 Disabled，因为它会重新建立整个发现列表。所有模块使用主框架
-锁定的同一组依赖，界面不提供单模块依赖安装；需要新 Python 包时必须更新核心依赖、
-重新测试并构建发布包。
+### 运行与暂停 / 停止
 
-## 编辑 SEQ
+点击 **Run** 后，SEQ 编辑器、模块启停与设置页面都会锁定，本次参与测量的模块和列结构即固定下来：
 
-### 新建/打开/保存
+- **Pause**：在检查点暂停推进和等待计时，不断开仪表、不关输出；点 **Resume** 继续。
+- **Stop**：取消后续步骤，向模块发出 `run_end("stopped")` 收尾，但**不向系统仪表发 Set 或 Hold**（温控与磁体保持当前仪表内目标）。
+- **主控读链路短时断线**：底部状态转为 `Reconnecting`，默认每 2 秒自动重连、最多尝试 60 秒（期间暂停 SEQ 判稳计时）；连回后会核对实际目标与速率再继续，超时则报错停机。写命令超时不会自动重发。
 
-- File → New/Open/Save/Save As。
-- 关闭浮动 SEQ 后，点击 New/Open/Edit 会重新显示现有编辑器。
-- 文件扩展名是 `.seq`。
-- 有模块设置的实验还会保存同名 `.modules.toml`；Load 时自动导入但不 Apply。
+### 手动控制温度或磁场
 
-### 插入与修改
+SEQ 空闲时，双击底部 `controller` 面板（例如 Temperature 或 Magnetic Field）即可弹出手动控制窗口，填写 **Target** 与 **Rate** 后点击 **Set**，或点击 **Hold Current** 将目标锁定为当前新鲜读数。
 
-- 右侧命令双击：弹参数窗口，确认后插入。
-- SEQ 行双击：编辑该行参数。
-- `Set Datafile` 的 `Browse…` 直接打开 Windows 文件窗口；`open` 选已有文件，
-  `create` / `open|create` 可选或新建文件。
-- 插入在 Scan/End Scan 上时会进入该 Scan；否则插在所选命令之后。
-- 所有温场弹窗直接显示配置中的上下限和最大速率。
-- `Scan Field` 可选 `Choose nearer start or its negative`。它在该命令实际执行时取得已通过
-  新鲜度检查的当前场读回，选择输入路径或整条反号路径；选择结果写入 Run Log。开关默认关闭。
+- 上下限和最大速率与扫描器配置完全一致，运行时会再次校验；
+- 只读面板（如 `2nd Stage`）不能双击控制；角色设为 `none` 的控制面板允许手动操作，但不会被标准温场 SEQ 选中。
 
-### 参数精度
+### Warning 与 Error 的区别
 
-参数精度：Wait、Scan Time 和可编辑的等待、超时时间使用秒并保留一位小数；滤波参数
-保持该仪表的规定。普通 NPLC 保留一位，Delta 的 PLC 仍只能为整数；372A 要求整秒的
-参数仍使用整数。温度输入为三位小数，磁场 Oe 为两位、T 为六位，手动输入与 SEQ 相同；
-实际读数的显示精度仍由 System Instrument 清单决定。
+| 等级 | 弹窗标题 | SEQ 是否继续 | 典型场景 |
+| --- | --- | --- | --- |
+| **Warning** | `Warning / Operation Continues` | **继续运行**（当前异常点留空，有效数据照常写） | 单点超量程、触发 compliance、无启用模块 |
+| **Error** | `Error / Operation Stopped` | **立即中止（Faulted）**，已写数据保留，模块收到 `run_end("error")` | 仪表掉线超时、互锁异常、传感器报警、协议错误 |
 
-输入、保存和重新打开后的数值必须一致。外部 SEQ 或保存设置若超过对应输入精度，程序
-会提示修正并拒绝执行或应用，不会悄悄舍入成零或改变速率。SI 电流/电压输入可以继续使用
-`1m`、`1p` 和科学计数法；缩短文本会改变数值时保留原文本。已有设置不会自动转换精度。
+同一来源、代码与上下文的持续告警只会弹一次窗并在日志里累加计数，恢复（`RESOLVED`）后若再次发生才会重新弹窗。
 
-### 模块自定义指令
+> **跨仪表联动响应**：系统仪表可以声明特定错误码触发的联动动作（例如某报警触发磁场归零），由核心按最高优先级独立执行并在解除前锁定目标。当前正式系统仪表默认不注册跨仪表联动。
 
-模块完成 Enable 后，可在右侧直接出现例如：
+### 可选远程 HTTP 报警通知（NoneBot 等）
+
+如需把 Warning / Error 异步推送到 QQ 或通知服务：
+
+1. 在独立接收服务中开启 `/alarm/report`，校验 `X-Token` 并配置 `alarm_admin_qqs`（管理员）与 `alarm_tester_qqs`（测试员）；
+2. 在本机环境变量中配置 `OPENLAB_ALARM_TOKEN`（或写进独立单行文件并在配置中指定 `token_file`）；
+3. 在 `configs/general.toml` 的 `[alarms.reporting]` 中核对地址（远程须用 HTTPS）后设置 `enabled = true` 并重启；
+4. 用仿真 `Inject Warning` / `Inject Error` 测试：Warning 只发测试员，Error 同时发管理员和测试员。
+
+报警网络失败只会产生本地 Warning，绝不会阻塞实验，也不能代替硬件联锁。
+
+---
+
+## 查看数据与运行归档
+
+### Data Browser
+
+- 点击左侧数据区 **View**：新建窗口并直接打开当前 Run 的实验 DAT；
+- 点击菜单 **Graph → Data Browser**（或直接把 `.dat` 拖进主窗口）：打开任意历史 DAT，可同时开多个窗口对比，文件继续写入时自动刷新；
+- 在图上右键可选 X 轴、一次性勾选多个 Y 轴、切换 **Overlay / Stacked**、开关对数坐标或 **Reset Zoom**；拖框放大，双击最近数据点查看该行完整原始字段，布局自动保存到同名 `.plt`。
+- 能确认时间基准的 `Timestamp(s)` / `Time Stamp (sec)` 在线性轴上会自动显示为真实日期时间（兼容 OpenLab 与 Quantum Design DAT）；无法确认基准时保留原始秒数，不盲目猜日期。
+
+详细画图说明见 [用 Data Browser 查看 DAT](guides/data-browser.md)。
+
+### 每次 Run 的归档目录
 
 ```text
-Keithley 2400
-├─ Set Current
-└─ Scan Current
+runs/<时间>_<序列名>/
+├─ experiment.dat                        # 实验主数据
+├─ instrument_status.dat                 # 每秒连续仪表状态（不随外部 Set Datafile 移走）
+├─ events.dat                            # 完整事件与报警记录
+├─ sequence.seq                          # 实际执行的 SEQ 快照
+├─ configuration/                        # general.toml、visa.resources.toml、instruments/、pid/ 快照
+├─ module_settings/*.settings.toml       # 模块期望参数快照
+├─ module_settings/*.status-at-start.json# 运行前读回的模块实际状态
+└─ rawdata/                              # 模块输出原始序列时生成
 ```
 
-- `Set Current` 一类普通指令完成模块动作后继续下一行，不产生 DAT 行。
-- `Scan Current` 一类扫描指令与温场 Scan 一样可任意嵌套；每个点先由该模块设置成功，
-  再执行该点下面的全部子命令。
-- 子命令是 `Measure` 时，仍按当前所有 Enabled 模块和逻辑槽位规则测量；模块扫描不会
-  暗中替用户增加一次测量。
-- 同一模块的自定义指令、`measure`、`run_start/run_end` 共用一个串行 worker，不会
-  同时访问同一 VISA/GPIB session；不同模块在 `Measure` 中仍可并行。
-- 自定义指令对仪表的改变只属于本次运行状态，不修改 Settings 页或持久设置。
+实验结束后建议整文件夹打包备份，复现实验时直接打开其中的 `sequence.seq` 即可恢复参数视图。对外分享前务必检查 `configuration/` 并删除本机地址或隐私路径。
 
-SEQ 使用通用 `Module Command/Module Scan` 文本，因此即使相关模块未安装也不会丢失
-原始行。此时行显示红色；Load 只给 Warning，Run 则要求对应模块已 Enable 且仍声明同一
-稳定指令 ID。框架不会自动 Enable、Apply、安装模块或把未知指令当成其他指令执行。
+### 关闭程序
 
-### 多行操作
+运行中关闭主窗口会先弹出确认。确认后程序依次：停止 SEQ → 保存已启用模块的 Settings → 对每个模块调用 `close()` → 断开系统仪表 → 关闭日志并退出。下次启动时所有模块仍恢复 `Disabled`。
 
-可 Ctrl/Shift 选择多行，然后右键或键盘：
+---
 
-- Disable / Enable
-- Delete
-- Copy / Paste
+## 常见问题速查
 
-选中完整 Scan 的父/子混合范围时，结构操作只处理最外层节点，避免重复。Running 时禁止修改，Copy 仍可用。
+- **模块勾选不了**：在 Modules 窗口选中该行看底部报错，通常是 `module.toml` 或 `backend.py` 有语法/字段问题；修好后先 Disable 全部模块再点 **Refresh**。
+- **Enable 后参数没生效**：这是安全设计，必须人工核对后点 **Apply Settings** 才会发给仪表。
+- **模块窗口关不掉**：点关闭只会隐藏窗口并保持运行；要彻底关闭模块，请在 Modules 管理器取消勾选。
+- **Disable 时报错但变成了 Disabled**：框架已强制回收工作进程，但不代表真实仪表输出已关断，请立即到实体面板检查。
+- **Measure 没写某模块的数据**：检查 Run 前是否已勾选该模块、该通道是否已启用，或该点是否触发 Warning 留空。
+- **仪表一直显示 Reconnecting**：恢复窗口（默认 60 秒）内请先检查物理线缆与仪表面板，不要反复点击 Set/Hold。
+- **想更换温控仪或磁体电源**：把新驱动完整目录复制到 `system_instruments/`，运行 **Instrument Scanner** 重新配置并检查完整保存预览，再重启主程序。
 
-### Measure
-
-Measurement Command 只有：
-
-```text
-T Measure
-```
-
-不在命令中写模块名、重复次数或间隔。模块选择由 Run 前的 Enabled 状态决定；重复/间隔用 Scan Time 或嵌套 Scan 表达。
-
-## 运行
-
-运行前建议：
-
-1. 检查全部已启用 System 面板；含温场命令时确认 `sample_temp` / `field` 面板已连接。
-2. Enable 所需模块并检查 Status。
-3. 确认需 Apply 的 Settings 已发送。
-4. 保存或核对 SEQ；Run 会另外保存实际执行快照。
-5. 确认数据文件位置和磁盘空间。
-6. 点击 Run。
-
-Run 开始后：
-
-- SEQ、模块 Enable/Disable/Refresh、Settings/Apply 和手动动作锁定；
-- 所有 Enabled 模块成为本次固定 Schema；
-- 第一条指令前发送模块 `run_start` 事件并冻结 `slots`；
-- 模块自定义指令在同一冻结模块集合和同一串行 IPC 中执行；
-- 每个 Measure 按逻辑槽位并行调用参与模块的 `measure(slot, api)`；
-- 最终按 completed/stopped/error 发送每个模块的 `run_end` 事件。
-
-### Pause
-
-Pause 在安全检查点暂停 SEQ 调度；不会主动关闭模块输出，也不会断开仪表。模块自定义
-长循环须调用 `api.checkpoint()` 或 `api.sleep()` 才能在循环中响应；已经进入厂商驱动的
-阻塞调用只能等待其有限 I/O timeout。Resume 从原位置继续。
-
-### Stop
-
-Stop 后：
-
-- 温度和磁场保持仪表原有目标、速率和动作，框架不发送 Set 或 Hold；
-- 模块收到 `run_end`，reason 为 `stopped`；
-- 不执行模块 close，模块仍 Enabled，窗口保持可用。
-
-如果主温度或磁场仪表读链路中断，状态显示 `Reconnecting`。默认每 2 秒重连，最长
-1 分钟；SEQ 在这段时间冻结当前 Wait/Settle 计时。成功后核对仪表实际 target/rate 再
-继续；超时或核对失败进入 Error。写操作超时不会自动重发。
-
-## 手动温场控制
-
-双击底部 Temperature 或 Magnetic Field：
-
-- Target；
-- Rate；
-- Settle/Sweep；
-- `Set`；
-- `Hold Current`。
-
-弹窗使用对应 controller 面板的配置上下限和最大速率。`2nd Stage` 等只读面板没有手动
-控制。角色为 `none` 的 controller 仍可从自己的面板手动控制，但标准温场 SEQ 不会选择
-它。运行时仍会再次检查控制端点、连接状态、Target 和 Rate，因此不能通过脚本绕过参数
-窗口限制。
-
-## Warning 与 Error
-
-### Warning
-
-- 弹窗标题 `Warning / Operation Continues`；
-- SEQ 继续；
-- 有效温场和模块数据照常写 DAT；
-- 详细 code/context 写 events.dat；
-- 同一 Source+Code+Context 活动期间只弹一次。
-
-典型：测量超量程、接近范围、某一点无效。
-
-### Error
-
-- 弹窗标题 `Error / Operation Stopped`；
-- Running/Paused SEQ 进入 Faulted；
-- 未注册特殊响应时，不向 System Instrument 发送控制指令；
-- 模块收到 reason 为 `error` 的 `run_end`，不调用 close；
-- 已写数据保留。
-
-典型：仪表掉线、互锁、二级冷头过温、源表硬件报警、模块 Schema 违规。
-
-如果同一故障被轮询/多次测量反复报告，只会更新计数，不会连续弹窗轰炸。恢复后事件 RESOLVED；再次发生才重新弹。
-
-System Instrument 可以为自己的稳定事件代码注册响应。命中后核心会独立执行该动作；例如
-`zero` 会按目标磁场的默认速率把目标设为零。同一活动事件只执行一次，并锁定目标，直到
-源事件解除并人工复位。当前正式 System Instrument 没有注册任何响应，因此默认不会发生
-跨仪表联动。
-
-## Data Browser
-
-每个 Data Browser 窗口独立保存自己的 DAT：
-
-1. 左侧数据区的 View 会新建窗口并直接载入当前 Run DAT。
-2. Graph → Data Browser 新建空白窗口，随后可打开任意 DAT；把 `.dat` 拖入主窗口也会
-   新建窗口。
-3. 多个窗口可以同时显示不同数据；文件追加后各自自动刷新图。
-
-右键图区域可：
-
-- 选择 X；
-- 一次勾选多个 Y，再统一确认；
-- Overlay（一个图多个 Y）或 Stacked（多图共享 X）；
-- X Axis Log / Y Axis Log；
-- Reset Zoom 等。
-
-鼠标框选放大；双击最近数据点弹出该原始行完整字段。显示布局保存在 DAT 同目录同名 `.plt`，下次打开自动恢复。
-
-`Timestamp(s)`、`Time Stamp (sec)` 等绝对时间列在线性坐标下会显示实际日期时间。
-Quantum Design 文件优先按 `FILEOPENTIME` 校准；OpenLab 文件按
-`TIMESTAMP_EPOCH` 和 `Started` 换算。若文件没有足够证据确认 epoch，则保留原始
-秒值，避免显示一个看似精确但错误的日期。双击详情的摘要显示完整实际时间，下面的
-原始字段仍显示文件内秒值。
-
-普通线性坐标采用 `1/2/5 × 10ⁿ` 主刻度；时间坐标按整毫秒、秒、分钟、小时或日期
-对齐。缩放后会重新选择适合当前范围的刻度，不会改变数据本身。
-
-## 输出与备份
-
-一次 Run 至少保留：
-
-```text
-sequence.seq
-configuration/
-module_settings/*.settings.toml
-module_settings/*.status-at-start.json
-experiment.dat
-instrument_status.dat
-events.dat
-```
-
-建议实验结束后整体复制整个运行目录，而不是只复制 DAT。模块 desired 设置和实际 Status 对复现实验同样重要。
-Load 运行目录中的 `sequence.seq` 会导入这些 desired settings，但不会自动发送到
-仪表。
-
-运行目录中的 `configuration/` 按原结构保存本次使用的 `general.toml`、存在时的
-`visa.resources.toml`、`instruments/*.toml` 和 `pid/*.toml`。它可能含真实仪表地址、本机
-路径和现场 PID。内部备份可以整体保留；对外分享或提交 Git 前必须检查并脱敏。
-
-`instrument_status.dat` 默认每秒保存温度、磁场和 Monitor 的当前值、目标、速率、动作、
-稳定性、连接状态和读数年龄。它只在 Run 期间写入，且不会因打开 Live Trend 而改变
-记录频率或增加仪表查询。
-
-## 关闭程序
-
-SEQ 运行中关闭主窗口会确认；确认后请求 Stop/End。随后：
-
-1. 保存所有 Enabled 模块 Settings；
-2. 对每个 Enabled 模块调用 `close(api)`；
-3. 断开温场/Monitor；
-4. 关闭日志与应用。
-
-下次启动所有模块仍是 Disabled，但 Settings 值会在下次 Enable 时自动载入且不自动 Apply。
-
-## 常见问题
-
-### 模块无法勾选
-
-选中行查看底部说明。常见原因是 `module.toml`/`backend.py` 缺失或清单字段无效。修正后
-先 Disable 全部模块，再 Refresh。缺少 Python 包属于发布包依赖问题，不能在模块管理器中
-临时安装。
-
-### Enable 后参数没有作用
-
-这是设计行为。Enable 只初始化并加载保存值，必须点击 `Apply Settings` 并确认才发送。
-
-### 模块窗口关不掉
-
-这是安全设计。先在 Modules Manager 取消 Enable；close 完成后窗口自动隐藏。
-
-### Disable 报错但已显示 Disabled
-
-close 没有确认完成，但框架已为资源释放强制关闭工作进程。不要把 Disabled 当作输出已
-关闭；查看 Error，并按该模块硬件操作说明人工退出输出、检查仪表状态后再重新 Enable。
-
-### Measure 没有模块数据
-
-检查 Run 前是否 Enable 模块。没有模块时程序会写一行温场/Monitor 系统状态并 Warning，不会中止。
-
-### Measure 没有参数怎样选择模块
-
-当前 SEQ 使用无参数 `T Measure`。要参与测量的方案在 Modules Manager 中 Enable；Run
-开始时程序冻结模块集合、列和槽位。
-
-### 更换温控仪或磁体电源
-
-取得并审查与目标仪表匹配的 System Instrument 后，把完整目录复制到
-`system_instruments/`，再打开 Instrument Scanner。在该型号页面添加物理实例、选择 VISA
-地址或填写模板声明的专用连接字段，并确认固定面板、角色、读数、上下限、速率和稳定参数。
-最后一页检查全部面板的顺序和完整写入预览后保存，再重启。分配给 System Instrument 的
-VISA 地址不会保留在 Measurement 资源清单；核心自带内容只作为实现示例。
-
-### 仪表一直 Reconnecting
-
-不要在恢复窗内反复点击 Set/Hold。检查物理链路和仪表面板；程序会自动重建独立仪表
-进程并读取实际状态。1 分钟仍失败时会 Fault，不会无限重试或猜测安全状态。
-
-### 左栏被长文件名撑宽
-
-文件名标签会中间省略并在悬停时显示完整路径，不应再改变左栏最小宽度。若仍异常，请记录分辨率、UI Scale 和截图。
-
-### 4K 字体不合适
-
-先使用 **View → Appearance**：整体大小保持 `Automatic`，再单独选择 70%–150% 的
-`Text size`。如果个人外观文件尚未建立，也可以在 `configs/general.toml` 中用
-`ui_scale = "auto"` 或 0.75–2.0 设定现场默认值后重启。
-
-多显示器更换后若窗口落在不可见区域，选择 `Reset Window Positions` 并保存；下次启动会
-使用当前屏幕的默认布局。
-
-### DAT 图不刷新
-
-确认 Data Browser 窗口标题对应目标文件。查看当前 Run 时点击左侧数据区的 **View**；
-查看其他文件时使用 **Graph → Data Browser → Open DAT**，或把 DAT 拖入主窗口。
+更多排错步骤见 [常见问题与排错](guides/troubleshooting.md)。

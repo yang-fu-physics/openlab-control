@@ -130,6 +130,39 @@ class StabilityTests(unittest.TestCase):
         self.assertEqual(first_allowed.state, StabilityState.SETTLING)
         self.assertEqual(stable.state, StabilityState.STABLE)
 
+    def test_disturbance_after_stabilizing_does_not_immediately_time_out(self) -> None:
+        evaluator = StabilityEvaluator(StabilityConfig(
+            tolerance=0.01,
+            max_slope_per_minute=0.05,
+            dwell_seconds=1.0,
+            timeout_seconds=5.0,
+            window_seconds=1.0,
+        ))
+        for moment in (0.0, 0.5, 1.0, 1.5, 2.0):
+            last = evaluator.update(2.0, 2.0, moment)
+        self.assertEqual(last.state, StabilityState.STABLE)
+
+        disturbed = evaluator.update(2.02, 2.0, 10.0)
+        self.assertEqual(disturbed.state, StabilityState.MOVING)
+
+    def test_pause_freezes_stability_timeout_clock(self) -> None:
+        evaluator = StabilityEvaluator(StabilityConfig(
+            tolerance=0.01,
+            max_slope_per_minute=0.01,
+            dwell_seconds=1.0,
+            timeout_seconds=2.0,
+            window_seconds=1.0,
+        ))
+        evaluator.update(0.0, 10.0, 0.0)
+        evaluator.set_paused(True, 1.0)
+        paused_result = evaluator.update(0.1, 10.0, 10.0)
+        self.assertEqual(paused_result.state, StabilityState.MOVING)
+        evaluator.set_paused(False, 10.0)
+        resumed = evaluator.update(0.1, 10.0, 10.5)
+        self.assertEqual(resumed.state, StabilityState.MOVING)
+        timed_out = evaluator.update(0.1, 10.0, 11.2)
+        self.assertEqual(timed_out.state, StabilityState.TIMED_OUT)
+
 
 if __name__ == "__main__":
     unittest.main()

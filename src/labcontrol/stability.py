@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import math
 
 from .config import StabilityConfig
 from .models import StabilityState
@@ -33,6 +34,9 @@ class StabilityEvaluator:
         self._target_started_at: float | None = None
         self._qualified_at: float | None = None
         self._last_sample_at: float | None = None
+        self._stabilized = False
+        self._paused_at: float | None = None
+        self._paused_total = 0.0
         self._history: deque[tuple[float, float]] = deque()
         self._last_result = StabilityResult(
             StabilityState.MOVING, float("inf"), None, 0.0, 0.0
@@ -45,7 +49,22 @@ class StabilityEvaluator:
         self._target_started_at = now
         self._qualified_at = None
         self._last_sample_at = None
+        self._stabilized = False
+        self._paused_total = 0.0
+        if self._paused_at is not None:
+            self._paused_at = now
         self._history.clear()
+
+    def set_paused(self, paused: bool, now: float) -> None:
+        """在 SEQ 暂停期间冻结判稳超时计时，恢复后扣除暂停时长。"""
+
+        if paused:
+            if self._paused_at is None:
+                self._paused_at = now
+            return
+        if self._paused_at is not None:
+            self._paused_total += max(0.0, now - self._paused_at)
+            self._paused_at = None
 
     def update(
         self,
@@ -62,7 +81,12 @@ class StabilityEvaluator:
         状态位的仪表原有行为。
         """
 
-        if self._target is None or target != self._target:
+        if self._target is None or not math.isclose(
+            target,
+            self._target,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
             self.reset(target, now)
         self._last_sample_at = now
         self._history.append((now, current))
@@ -76,7 +100,14 @@ class StabilityEvaluator:
         enough_history = len(self._history) >= 3 and span >= min(0.5, self.config.window_seconds / 2.0)
         within = error <= self.config.tolerance
         slope_ok = slope is not None and abs(slope) <= self.config.max_slope_per_minute
-        elapsed = now - self._target_started_at if self._target_started_at is not None else 0.0
+        paused_elapsed = self._paused_total + (
+            max(0.0, now - self._paused_at) if self._paused_at is not None else 0.0
+        )
+        elapsed = (
+            max(0.0, (now - self._target_started_at) - paused_elapsed)
+            if self._target_started_at is not None
+            else 0.0
+        )
 
         # 仪表状态只作附加门槛，不能绕过软件独立计算的误差、历史和斜率条件。
         qualified_by_instrument = ready is not False
@@ -89,12 +120,21 @@ class StabilityEvaluator:
                 if qualified >= self.config.dwell_seconds
                 else StabilityState.SETTLING
             )
+            if state is StabilityState.STABLE:
+                self._stabilized = True
         else:
             self._qualified_at = None
             qualified = 0.0
             state = StabilityState.SETTLING if within else StabilityState.MOVING
 
-        if elapsed >= self.config.timeout_seconds and state is not StabilityState.STABLE:
+        # 仅在当前目标尚未成功达到过 STABLE 且非暂停状态下触发超时；
+        # 已稳定后的轻微扰动退回 SETTLING/MOVING，避免长时间恒温恒场实验误中止。
+        if (
+            not self._stabilized
+            and self._paused_at is None
+            and elapsed >= self.config.timeout_seconds
+            and state is not StabilityState.STABLE
+        ):
             state = StabilityState.TIMED_OUT
 
         self._last_result = StabilityResult(state, error, slope, qualified, elapsed)
