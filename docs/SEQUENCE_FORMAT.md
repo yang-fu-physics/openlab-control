@@ -129,8 +129,8 @@ T Compressor Off
 ### Measurement Module 自定义指令与扫描
 
 ```text
-T Module Command "keithley_2400" "set_current" {"current":0.001,"output":true}
-T Module Scan "keithley_2400" "scan_current" {"points":["1 mA","2 mA"],"settle_seconds":0}
+T Module Command "oe1022d_lockin" "auto_range" {"auto_reserve":true}
+T Module Scan "keithley_6221_ac" "scan_current" {"points":["100u","200u","500u"],"settle_seconds":3.0}
 T     Measure
 T End Scan
 ```
