@@ -74,6 +74,21 @@ class ModuleAPI:
     _instrument_resources: Mapping[str, Mapping[str, Any]] = field(
         default_factory=dict
     )
+    _paused_seconds: float = field(default=0.0, init=False, repr=False)
+
+    @property
+    def paused_seconds(self) -> float:
+        """返回本次调用在核心确认的 Pause 检查点中累计暂停的秒数。"""
+
+        return self._paused_seconds
+
+    def active_monotonic(self) -> float:
+        """返回扣除核心已确认 Pause 时长后的活动单调时钟。
+
+        正常 I/O、IPC 与调度开销仍按实际经过时间计入，绝不把非 Pause 延迟当作暂停扣除。
+        """
+
+        return time.monotonic() - self._paused_seconds
 
     @property
     def timeout(self) -> float:
@@ -111,7 +126,7 @@ class ModuleAPI:
         )
         self._checkpoint(request_timeout)
         remaining = duration
-        while remaining > 0:
+        while remaining > 1e-9:
             chunk = min(remaining, interval)
             started = time.monotonic()
             time.sleep(chunk)
@@ -266,12 +281,23 @@ class ModuleAPI:
     def _checkpoint(self, timeout: float) -> None:
         if self._operation_state is None:
             return
+        paused_at: float | None = None
         while True:
+            checked_at = time.monotonic()
             state = str(self._operation_state(timeout)).strip().casefold()
             if state in {"stopping", "cancelled"}:
+                if paused_at is not None:
+                    self._paused_seconds += max(
+                        0.0,
+                        time.monotonic() - paused_at,
+                    )
                 raise _ModuleOperationCancelled("Module operation was cancelled")
             if state != "paused":
+                if paused_at is not None:
+                    self._paused_seconds += max(0.0, checked_at - paused_at)
                 return
+            if paused_at is None:
+                paused_at = checked_at
             time.sleep(0.05)
 
     @staticmethod

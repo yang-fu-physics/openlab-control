@@ -898,6 +898,7 @@ class ModuleWorkerClient:
                     # 正常串行协议不应出现其他 id。忽略它并继续受同一 deadline 约束，
                     # 不允许异常消息延长请求。
                     continue
+                received_at = time.monotonic()
                 if message.get("type") != "response":
                     event_result: Mapping[str, Any] | None = None
                     if event_handler is not None:
@@ -918,7 +919,12 @@ class ModuleWorkerClient:
                         now = time.monotonic()
                         if op_state == "paused":
                             if not is_paused:
-                                active_remaining -= max(0.0, now - active_since)
+                                # 首次确认已处于 Pause 时，只结算消息到达前的活动耗时，
+                                # 不把暂停态下事件回调/调度的延迟算进活动预算。
+                                active_remaining -= max(
+                                    0.0,
+                                    received_at - active_since,
+                                )
                             is_paused = True
                             active_since = now
                             pause_heartbeat_deadline = (
