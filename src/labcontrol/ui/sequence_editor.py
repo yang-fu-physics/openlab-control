@@ -118,6 +118,7 @@ class SequenceEditorWidget(QWidget):
         """切换当前文档并清除旧选择。"""
 
         self.document = document
+        self._running_command_id = ""
         self.rebuild(preserve_selection=False)
 
     def set_available_module_commands(
@@ -148,16 +149,23 @@ class SequenceEditorWidget(QWidget):
 
         return None if row is None else (row.command_id, row.is_end, row.is_sequence_end)
 
-    def set_running_command(self, command_id: str) -> None:
+    def set_running_command(
+        self,
+        command_id: str,
+        *,
+        scroll: bool | None = None,
+    ) -> None:
         """Mark the executing command without changing the user's selection."""
 
+        changed = command_id != self._running_command_id
+        should_scroll = changed if scroll is None else scroll
         self._running_command_id = command_id
         for index in range(self.list.count()):
             item = self.list.item(index)
             row = item.data(Qt.ItemDataRole.UserRole)
             running = bool(command_id) and row.command_id == command_id and not row.is_end
             item.setData(Qt.ItemDataRole.UserRole + 1, running)
-            if running:
+            if running and should_scroll:
                 horizontal = self.list.horizontalScrollBar().value()
                 self.list.scrollToItem(item)
                 self.list.horizontalScrollBar().setValue(horizontal)
@@ -259,7 +267,7 @@ class SequenceEditorWidget(QWidget):
         # 添加或选中长命令时 QListWidget 可能自动滚到文本右端；总是回到最左侧，让命令前缀
         # 在大字体和 4K 缩放下仍然可见。
         self.list.horizontalScrollBar().setValue(0)
-        self.set_running_command(self._running_command_id)
+        self.set_running_command(self._running_command_id, scroll=False)
         self._update_action_states()
 
     def selected_row(self) -> FlatRow | None:

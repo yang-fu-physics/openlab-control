@@ -964,6 +964,51 @@ class SequenceEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(scenario(self._fast_config(Path(temp))))
 
+    def test_progress_command_id_tracks_scan_points_and_keeps_call_sequence_highlighted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = self._fast_config(temp_root)
+            measure = Command(CommandType.MEASURE)
+            scan = Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 0.0, "steps": 2},
+                [measure],
+            )
+            child_file = temp_root / "sub.seq"
+            child_file.write_text(
+                "T Wait For 0.0 secs\n"
+                "T Scan Time 0.0 secs in 2 steps\n"
+                "T     Measure\n"
+                "T End Scan\n"
+                "T End Sequence\n",
+                encoding="utf-8",
+            )
+            call_cmd = Command(CommandType.CALL_SEQUENCE, {"path": "sub.seq"})
+            document = SequenceDocument(
+                [scan, call_cmd],
+                "highlight.seq",
+                temp_root / "highlight.seq",
+            )
+            notices = []
+            progresses = []
+            state, _, _ = asyncio.run(
+                self._run(config, document, notices, progresses)
+            )
+            self.assertEqual(state, RunState.COMPLETED)
+            scan_and_child_ids = [
+                p.command_id for p in progresses if p.command_id in {scan.id, measure.id}
+            ]
+            # Must return to scan.id before point 2 executes measure.id.
+            first_measure = scan_and_child_ids.index(measure.id)
+            second_scan = scan_and_child_ids.index(scan.id, first_measure)
+            second_measure = scan_and_child_ids.index(measure.id, second_scan)
+            self.assertLess(first_measure, second_scan)
+            self.assertLess(second_scan, second_measure)
+            # While inside Call Sequence, command_id must never leak subsequence UUIDs.
+            known_ids = {"", scan.id, measure.id, call_cmd.id}
+            self.assertTrue(all(p.command_id in known_ids for p in progresses))
+            self.assertIn(call_cmd.id, [p.command_id for p in progresses])
+
 
 if __name__ == "__main__":
     unittest.main()

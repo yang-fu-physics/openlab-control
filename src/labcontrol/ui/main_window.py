@@ -1023,18 +1023,37 @@ class MainWindow(QMainWindow):
         visit(document.commands, True)
         return list(dict.fromkeys(issues))
 
+    def _first_effective_datafile_command(
+        self,
+        commands: list[Command] | None = None,
+        parent_enabled: bool = True,
+    ) -> Command | None:
+        for command in self.document.commands if commands is None else commands:
+            effective_enabled = parent_enabled and command.enabled
+            if not effective_enabled:
+                continue
+            if command.type is CommandType.SET_DATAFILE:
+                return command
+            nested = self._first_effective_datafile_command(
+                command.children,
+                effective_enabled,
+            )
+            if nested is not None:
+                return nested
+        return None
+
     def _sync_datafile_label(self) -> None:
         if not self._datafile_selected:
             self.data_file_label.setFullText("")
             return
-        for command in self.document.commands:
-            if command.type is CommandType.SET_DATAFILE and command.enabled:
-                path_text = str(command.params.get("path", "experiment.dat"))
-                self.data_file_label.setFullText(path_text)
-                path = Path(path_text)
-                if path.is_absolute():
-                    self._last_data_directory = path.parent
-                return
+        command = self._first_effective_datafile_command()
+        if command is not None:
+            path_text = str(command.params.get("path", "experiment.dat"))
+            self.data_file_label.setFullText(path_text)
+            path = Path(path_text)
+            if path.is_absolute():
+                self._last_data_directory = path.parent
+            return
         self._datafile_selected = False
         self.current_data_file = None
         self.data_file_label.setFullText("")
@@ -1533,6 +1552,7 @@ class MainWindow(QMainWindow):
         self._start_sequence(module_settings)
 
     def _start_sequence(self, module_settings: dict[str, dict[str, object]]) -> None:
+        self._close_after_stop = False
         self.run_directory = None
         self.runtime.run_sequence(self.document, module_settings)
         self._set_runtime_editable(False)
@@ -1793,7 +1813,12 @@ class MainWindow(QMainWindow):
             "" if progress.state in self.TERMINAL_STATES else progress.command_id
         )
         self.run_status_label.setText(f"Sequence {progress.state.value.title()}")
-        self.run_detail_label.setText(progress.message)
+        if self._close_after_stop and progress.state not in self.TERMINAL_STATES:
+            self.run_detail_label.setText(
+                "Stopping sequence and waiting for module cleanup before closing"
+            )
+        else:
+            self.run_detail_label.setText(progress.message)
         if progress.total_steps:
             self.progress_bar.setValue(min(100, int(progress.completed_steps / progress.total_steps * 100)))
         self.statusBar().showMessage(progress.step_path or progress.message)
@@ -2414,11 +2439,17 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-            self._close_after_stop = True
-            self.runtime.stop_sequence()
-            self.run_detail_label.setText("Stopping sequence and waiting for module cleanup before closing")
-            event.ignore()
-            return
+            if self.current_run_state in self.TERMINAL_STATES:
+                # Sequence finished while the confirmation dialog was open.
+                if self.current_run_state is RunState.FAULTED:
+                    event.ignore()
+                    return
+            else:
+                self._close_after_stop = True
+                self.runtime.stop_sequence()
+                self.run_detail_label.setText("Stopping sequence and waiting for module cleanup before closing")
+                event.ignore()
+                return
         for module_id in tuple(self.enabled_modules):
             try:
                 self._save_module_window(module_id)

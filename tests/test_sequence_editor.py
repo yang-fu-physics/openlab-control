@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -250,6 +251,30 @@ class SequenceEditorTests(unittest.TestCase):
             ),
         )
         editor.close()
+
+    def test_set_running_command_only_scrolls_when_active_command_changes(self) -> None:
+        commands = [
+            Command(CommandType.REMARK, {"text": f"step {index}"})
+            for index in range(10)
+        ]
+        editor = SequenceEditorWidget(SequenceDocument(commands))
+        try:
+            with patch.object(editor.list, "scrollToItem") as scroll_to_item:
+                editor.set_running_command(commands[0].id)
+                editor.set_running_command(commands[0].id)
+                self.assertEqual(scroll_to_item.call_count, 1)
+                editor.set_running_command(commands[1].id)
+                self.assertEqual(scroll_to_item.call_count, 2)
+                editor.set_running_command("")
+                self.assertEqual(scroll_to_item.call_count, 2)
+                self.assertFalse(
+                    any(
+                        editor.list.item(index).data(Qt.ItemDataRole.UserRole + 1)
+                        for index in range(editor.list.count())
+                    )
+                )
+        finally:
+            editor.close()
 
 
 if __name__ == "__main__":

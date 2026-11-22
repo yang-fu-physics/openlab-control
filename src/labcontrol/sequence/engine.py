@@ -86,6 +86,7 @@ class SequenceEngine:
         self._total_steps = 0
         self._current_path = ""
         self._current_command_id = ""
+        self._call_depth = 0
         self._call_stack: list[Path] = []
         self.events.subscribe_occurrences(self._on_event)
 
@@ -125,6 +126,7 @@ class SequenceEngine:
         self._waiting_for_instruments = False
         self._completed_steps = 0
         self._call_stack.clear()
+        self._call_depth = 0
         self._current_command_id = ""
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
@@ -444,11 +446,17 @@ class SequenceEngine:
         self._pause_gate.set()
         self._publish(message)
 
+    def _set_current_command(self, command_id: str) -> None:
+        """只在主文档层级更新执行行 ID，避免 Call Sequence 子序列覆盖主界面高亮。"""
+
+        if self._call_depth == 0:
+            self._current_command_id = command_id
+
     async def _execute_commands(self, commands: list[Command], prefix: list[str]) -> None:
         for index, command in enumerate(commands, start=1):
             # 每条命令（包括嵌套 Scan 子命令）前都有统一 Pause/Stop/仪表恢复检查点。
             await self._checkpoint()
-            self._current_command_id = command.id
+            self._set_current_command(command.id)
             parameter_issues = validate_command_parameters(command)
             if parameter_issues:
                 self._current_path = " / ".join(
@@ -481,7 +489,8 @@ class SequenceEngine:
                 self._current_path,
             )
             await self._execute_command(command, path)
-            self._current_command_id = command.id
+            self._set_current_command(command.id)
+            self._current_path = " / ".join(path)
             self._completed_steps += 1
             self.events.report(
                 Severity.INFO,
@@ -728,8 +737,18 @@ class SequenceEngine:
                 rate,
                 control=panel.control_id,
             )
+        scan_label = format_command(command)
+        decimals = control_decimals(kind, instrument_unit)
         for point_index, point in enumerate(points, start=1):
             await self._checkpoint()
+            point_label = (
+                f"point {point_index}/{steps}="
+                f"{fixed_number(point, decimals)} {instrument_unit}"
+            )
+            point_path = path + [point_label]
+            self._set_current_command(command.id)
+            self._current_path = " / ".join(point_path)
+            self._publish(f"{scan_label} ({point_label})")
             applied = await self.instruments.set_target(
                 instrument_id,
                 point,
@@ -743,10 +762,6 @@ class SequenceEngine:
                 await self._wait_for_stability(instrument_id, panel)
             else:
                 await self._wait_for_target(instrument_id, panel)
-            decimals = control_decimals(kind, instrument_unit)
-            point_path = path + [
-                f"point {point_index}/{steps}={fixed_number(point, decimals)} {instrument_unit}"
-            ]
             await self._execute_commands(command.children, point_path)
 
     async def _scan_time(self, command: Command, path: list[str]) -> None:
@@ -754,9 +769,14 @@ class SequenceEngine:
         steps = int(command.params.get("steps", 1))
         offsets = self._linspace(0.0, duration, steps)
         started = self._active_time()
+        scan_label = format_command(command)
         for index, offset in enumerate(offsets, start=1):
+            point_label = f"time {index}/{steps}={offset:g} s"
+            point_path = path + [point_label]
+            self._set_current_command(command.id)
+            self._current_path = " / ".join(point_path)
+            self._publish(f"{scan_label} ({point_label})")
             await self._sleep_until(started + offset)
-            point_path = path + [f"time {index}/{steps}={offset:g} s"]
             await self._execute_commands(command.children, point_path)
 
     async def _execute_module_command(self, command: Command) -> bool:
@@ -788,8 +808,20 @@ class SequenceEngine:
                 f"{command.module_id}.{command.module_command_id}",
             )
         total = len(points)
+        scan_label = format_command(command)
         for index, point in enumerate(points, start=1):
             await self._checkpoint()
+            point_text = json.dumps(
+                point,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
+            point_label = f"point {index}/{total}={point_text}"
+            point_path = path + [point_label]
+            self._set_current_command(command.id)
+            self._current_path = " / ".join(point_path)
+            self._publish(f"{scan_label} ({point_label})")
             parameters = dict(command.params)
             parameters[spec.point_parameter] = point
             completed = await self.modules.execute_sequence_command(
@@ -799,15 +831,9 @@ class SequenceEngine:
             await self._checkpoint()
             if not completed:
                 continue
-            point_text = json.dumps(
-                point,
-                ensure_ascii=False,
-                allow_nan=False,
-                separators=(",", ":"),
-            )
             await self._execute_commands(
                 command.children,
-                path + [f"point {index}/{total}={point_text}"],
+                point_path,
             )
 
     async def _measure(self) -> None:
@@ -834,9 +860,11 @@ class SequenceEngine:
             details = "; ".join(issue.message for issue in result.issues if issue.level == "error")
             raise InstrumentError(f"Subsequence parsing failed: {details}", "SEQUENCE_PARSE_ERROR", str(source))
         self._call_stack.append(source)
+        self._call_depth += 1
         try:
             await self._execute_commands(result.document.commands, path + [f"call {source.name}"])
         finally:
+            self._call_depth -= 1
             self._call_stack.pop()
 
     def _estimate_execution_steps(
