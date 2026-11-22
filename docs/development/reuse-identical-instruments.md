@@ -20,7 +20,7 @@
 打开主窗口工具栏 **Modules**，点击底部 **Add Instance…**（**无需先 Disable 其他已启用的模块**，只要当前没有运行 SEQ 即可）：
 
 1. **Source module**：选择基础模块（如 `Keithley 2400 (keithley_2400)`）；
-2. **Instance ID**：输入唯一实例 ID（小写字母开头，只含小写字母、数字和下划线，例如 `keithley_2400_gate`；默认自动建议 `keithley_2400_2`）；
+2. **Instance ID**：输入唯一实例 ID（小写字母开头，只含小写字母、数字和下划线，最多 64 个字符，例如 `keithley_2400_gate`；默认自动建议 `keithley_2400_2`）；
 3. **Display name**：输入方便区分的显示名称（例如 `Keithley 2400 - Gate`）。
 
 确认后，实例会立即出现在 Modules 列表中，并持久化保存到 `configs/module_instances.toml`：
@@ -37,7 +37,7 @@ module = "keithley_2400"
 name = "Keithley 2400 - Sample"
 ```
 
-如需删除不再使用的额外实例：先取消勾选使其处于 Disabled 状态，选中该行后点击 **Remove Instance** 即可（不会删除 `modules/` 下的源码或历史数据；基础目录项不可删除）。
+如需删除不再使用的额外实例：先取消勾选使其处于 Disabled 状态，选中该行后点击 **Remove Instance** 即可（不会删除 `modules/` 下的源码或历史数据；基础目录项不可删除；若实例曾停用失败且仍保留 VISA 资源占用锁，需先确认仪表安全并正常 Disable 释放占用后才能删除）。
 
 ### 3. 分别启用并绑定不同资源
 

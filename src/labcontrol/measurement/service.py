@@ -28,7 +28,7 @@ from ..module_commands import (
 )
 from ..instrument_manager import InstrumentManager
 from ..sequence.model import Command, CommandType
-from .manifest import ModuleDescriptor
+from .manifest import MAX_MODULE_ID_LENGTH, ModuleDescriptor, is_valid_module_id
 from .worker import ModuleWorkerClient, WorkerRequestError
 
 
@@ -116,7 +116,7 @@ class MeasurementModuleService:
         self,
         descriptor: ModuleDescriptor,
     ) -> None:
-        """在每次 Enable 前拒绝发现阶段已经判定无效的模块。"""
+        """在每次 Enable/注册前拒绝发现阶段判定无效或 ID 越界的模块。"""
 
         if not descriptor.can_enable:
             raise InstrumentError(
@@ -124,14 +124,26 @@ class MeasurementModuleService:
                 "MODULE_NOT_ENABLEABLE",
                 descriptor.id,
             )
+        if not is_valid_module_id(descriptor.id):
+            raise InstrumentError(
+                f"Module ID {descriptor.id!r} must match [a-z][a-z0-9_]* and be at most {MAX_MODULE_ID_LENGTH} characters",
+                "MODULE_NOT_ENABLEABLE",
+                descriptor.id,
+            )
 
     def replace_descriptors(self, descriptors: tuple[ModuleDescriptor, ...]) -> None:
-        """在 SEQ Idle 且全部模块 Disabled 时替换发现列表，不做热加载。"""
+        """在 SEQ Idle 且全部模块安全 Disabled（无残留资源锁）时替换发现列表，不做热加载。"""
 
         self._ensure_sequence_idle()
         if any(record.enabled or record.client is not None for record in self.records.values()):
             raise InstrumentError(
                 "Disable every module before refreshing module sources",
+                "MODULE_REFRESH_BLOCKED",
+            )
+        if any(record.resource_addresses for record in self.records.values()):
+            raise InstrumentError(
+                "Cannot refresh module sources while a failed module still retains VISA resource locks. "
+                "Confirm instrument safety and cleanly disable the affected module first.",
                 "MODULE_REFRESH_BLOCKED",
             )
         self.records = {
@@ -154,7 +166,7 @@ class MeasurementModuleService:
         self.records[descriptor.id] = ModuleRuntimeRecord(descriptor)
 
     def remove_descriptor(self, module_id: str) -> None:
-        """在 SEQ Idle 时注销一个已停用的模块实例，不影响其他已启用模块。"""
+        """在 SEQ Idle 时注销一个已安全停用的模块实例，不影响其他已启用模块。"""
 
         self._ensure_sequence_idle()
         record = self.records.get(module_id)
@@ -163,6 +175,14 @@ class MeasurementModuleService:
         if record.enabled or record.client is not None:
             raise InstrumentError(
                 f"Disable {module_id} before removing this instance",
+                "MODULE_INSTANCE_REMOVE_BLOCKED",
+                module_id,
+            )
+        if record.resource_addresses:
+            addresses = ", ".join(sorted(record.resource_addresses))
+            raise InstrumentError(
+                f"Cannot remove {record.descriptor.name} while VISA resource lock is retained ({addresses}). "
+                "Confirm the instrument is safe and cleanly disable the module before removing.",
                 "MODULE_INSTANCE_REMOVE_BLOCKED",
                 module_id,
             )
@@ -175,6 +195,7 @@ class MeasurementModuleService:
             "state": record.state,
             "status": deepcopy(record.status),
             "message": message,
+            "resources_retained": bool(record.resource_addresses),
             "display_columns": (
                 list(record.descriptor.display_columns)
                 if record.enabled

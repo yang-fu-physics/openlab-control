@@ -20,8 +20,19 @@ from packaging.version import InvalidVersion, Version
 from ..config import AppConfig
 
 
+MAX_MODULE_ID_LENGTH = 64
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 MODULE_INSTANCES_FILENAME = "module_instances.toml"
+
+
+def is_valid_module_id(value: str) -> bool:
+    """校验模块/实例 ID：小写字母开头，仅含小写字母/数字/下划线，且不超过 64 字符。"""
+
+    return (
+        bool(value)
+        and len(value) <= MAX_MODULE_ID_LENGTH
+        and _IDENTIFIER.fullmatch(value) is not None
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +121,10 @@ def load_manifest(path: Path) -> ModuleDescriptor:
         )
     if path.name != module_id or not _IDENTIFIER.fullmatch(module_id):
         errors.append("module directory name must match [a-z][a-z0-9_]*")
+    elif len(module_id) > MAX_MODULE_ID_LENGTH:
+        errors.append(
+            f"module directory name must be at most {MAX_MODULE_ID_LENGTH} characters"
+        )
     if not name:
         errors.append("name must not be empty")
     try:
@@ -134,8 +149,16 @@ def _validate_instance_fields(instance: ModuleInstanceConfig) -> list[str]:
     errors: list[str] = []
     if not _IDENTIFIER.fullmatch(instance.id):
         errors.append("instance id must match [a-z][a-z0-9_]*")
+    elif len(instance.id) > MAX_MODULE_ID_LENGTH:
+        errors.append(
+            f"instance id must be at most {MAX_MODULE_ID_LENGTH} characters"
+        )
     if not _IDENTIFIER.fullmatch(instance.module):
         errors.append("source module id must match [a-z][a-z0-9_]*")
+    elif len(instance.module) > MAX_MODULE_ID_LENGTH:
+        errors.append(
+            f"source module id must be at most {MAX_MODULE_ID_LENGTH} characters"
+        )
     name = instance.name.strip()
     if not name or len(name) > 100 or any(ch in name for ch in "\r\n\0"):
         errors.append("display name must be a single line of 1–100 characters")
@@ -305,12 +328,14 @@ def discover_modules(config: AppConfig) -> tuple[ModuleDescriptor, ...]:
 
 
 __all__ = [
+    "MAX_MODULE_ID_LENGTH",
     "MODULE_INSTANCES_FILENAME",
     "ModuleColumn",
     "ModuleDescriptor",
     "ModuleInstanceConfig",
     "build_instance_descriptor",
     "discover_modules",
+    "is_valid_module_id",
     "load_manifest",
     "load_module_instances",
     "module_instances_path",

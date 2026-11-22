@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 import json
-import re
 from typing import Any
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
@@ -36,7 +35,11 @@ from PySide6.QtWidgets import (
 
 from ..package_support.loading import load_source_object
 from ..measurement.frontend_api import ModuleUIAPI
-from ..measurement.manifest import ModuleDescriptor
+from ..measurement.manifest import (
+    MAX_MODULE_ID_LENGTH,
+    ModuleDescriptor,
+    is_valid_module_id,
+)
 from .scaling import scaled
 from .window_sizing import fit_initial_window_width
 
@@ -283,17 +286,19 @@ class ModuleWindow(QDialog):
             self.hide()
 
 
-_INSTANCE_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-
-
 def _suggest_instance_identity(
     template: ModuleDescriptor,
     existing_ids: set[str],
 ) -> tuple[str, str]:
     suffix = 2
-    while f"{template.id}_{suffix}" in existing_ids:
+    while True:
+        tail = f"_{suffix}"
+        max_prefix = MAX_MODULE_ID_LENGTH - len(tail)
+        prefix = template.id[:max_prefix].rstrip("_") or "m"
+        candidate = f"{prefix}{tail}"
+        if candidate not in existing_ids:
+            return candidate, f"{template.name} #{suffix}"
         suffix += 1
-    return f"{template.id}_{suffix}", f"{template.name} #{suffix}"
 
 
 class AddModuleInstanceDialog(QDialog):
@@ -378,11 +383,12 @@ class AddModuleInstanceDialog(QDialog):
     def accept(self) -> None:
         instance_id = self.id_input.text().strip().casefold()
         display_name = self.name_input.text().strip()
-        if not _INSTANCE_ID_RE.fullmatch(instance_id):
+        if not is_valid_module_id(instance_id):
             QMessageBox.warning(
                 self,
                 "Invalid Instance ID",
-                "Instance ID must start with a lowercase letter and use only lowercase letters, digits, and underscores.",
+                "Instance ID must start with a lowercase letter, use only lowercase letters, "
+                f"digits, and underscores, and be at most {MAX_MODULE_ID_LENGTH} characters.",
             )
             self.id_input.setFocus()
             self.id_input.selectAll()
@@ -585,14 +591,22 @@ class ModuleManagerDialog(QDialog):
         module_id = self._selected_id()
         descriptor = next((item for item in self.descriptors if item.id == module_id), None)
         state = self._states.get(descriptor.id, {}) if descriptor is not None else {}
+        resources_retained = bool(state.get("resources_retained", False))
         can_remove = (
             table_enabled
             and descriptor is not None
             and descriptor.is_instance
             and not bool(state.get("enabled", False))
+            and not resources_retained
             and str(state.get("state", "disabled")) not in {"initializing", "disabling"}
         )
         self.remove_instance_button.setEnabled(can_remove)
+        self.remove_instance_button.setToolTip(
+            "Cannot remove while a VISA resource lock is retained after a failed disable or fault. "
+            "Confirm instrument safety and cleanly disable the module first."
+            if resources_retained and descriptor is not None and descriptor.is_instance
+            else ""
+        )
 
     def _toggle(self, module_id: str, enabled: bool) -> None:
         checkbox = self._checkboxes[module_id]
@@ -605,11 +619,21 @@ class ModuleManagerDialog(QDialog):
         enabled: bool,
         state: str,
         message: str = "",
+        *,
+        resources_retained: bool | None = None,
     ) -> None:
+        previous_retained = bool(
+            self._states.get(module_id, {}).get("resources_retained", False)
+        )
         self._states[module_id] = {
             "enabled": enabled,
             "state": state,
             "message": message,
+            "resources_retained": (
+                previous_retained
+                if resources_retained is None
+                else bool(resources_retained)
+            ),
         }
         checkbox = self._checkboxes.get(module_id)
         descriptor = next((item for item in self.descriptors if item.id == module_id), None)

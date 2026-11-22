@@ -2194,7 +2194,13 @@ class MainWindow(QMainWindow):
             self.enabled_modules.add(module_id)
         else:
             self.enabled_modules.discard(module_id)
-        self.module_manager.update_state(module_id, enabled, state, message)
+        self.module_manager.update_state(
+            module_id,
+            enabled,
+            state,
+            message,
+            resources_retained=bool(payload.get("resources_retained", False)),
+        )
         window = self.module_windows.get(module_id)
         if enabled:
             try:

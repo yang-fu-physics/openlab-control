@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import sys
@@ -18,18 +19,24 @@ from labcontrol.config import load_config  # noqa: E402
 from labcontrol.dat_reader import read_dat  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
+from labcontrol.instrument_manager import InstrumentManager  # noqa: E402
+from labcontrol.instrument_resources import InstrumentResource  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
 from labcontrol.measurement.manifest import (  # noqa: E402
+    MAX_MODULE_ID_LENGTH,
     ModuleColumn,
     ModuleDescriptor,
     ModuleInstanceConfig,
     build_instance_descriptor,
     discover_modules,
+    is_valid_module_id,
+    load_manifest,
     load_module_instances,
     module_instances_path,
     save_module_instances,
 )
 from labcontrol.measurement.service import MeasurementModuleService  # noqa: E402
+from labcontrol.measurement.worker import WorkerRequestError  # noqa: E402
 from tests.configuration_fixtures import write_simulated_configuration  # noqa: E402
 
 
@@ -140,6 +147,169 @@ class ModuleInstanceManifestAndServiceTests(unittest.TestCase):
                 service.add_descriptor(extra)
             self.assertEqual(active_exc.exception.code, "MODULE_OPERATION_DURING_SEQUENCE")
 
+    def test_instance_id_length_limit_enforced_across_manifest_and_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = _copied_project(temp_root)
+            instances_file = module_instances_path(config)
+            ok_id = "a" * MAX_MODULE_ID_LENGTH
+            too_long_id = "a" * (MAX_MODULE_ID_LENGTH + 1)
+
+            self.assertTrue(is_valid_module_id(ok_id))
+            self.assertFalse(is_valid_module_id(too_long_id))
+
+            # 64 characters is accepted when saving and discovering.
+            save_module_instances(
+                instances_file,
+                (ModuleInstanceConfig(ok_id, "simulated_transport", "Max Length"),),
+            )
+            discovered = {item.id: item for item in discover_modules(config)}
+            self.assertTrue(discovered[ok_id].valid)
+
+            # 65 characters is rejected on save.
+            with self.assertRaisesRegex(ValueError, "at most 64 characters"):
+                save_module_instances(
+                    instances_file,
+                    (ModuleInstanceConfig(too_long_id, "simulated_transport", "Too Long"),),
+                )
+
+            # Hand-edited 65-character instance in module_instances.toml is flagged invalid on load.
+            instances_file.write_text(
+                f'[[instances]]\nid = "{too_long_id}"\nmodule = "simulated_transport"\nname = "Too Long"\n',
+                encoding="utf-8",
+            )
+            discovered_bad = {item.id: item for item in discover_modules(config)}
+            self.assertFalse(discovered_bad[too_long_id].valid)
+            self.assertIn("at most 64 characters", discovered_bad[too_long_id].error)
+
+            # Base module directory > 64 chars is also flagged invalid by load_manifest.
+            long_dir = temp_root / "modules" / too_long_id
+            long_dir.mkdir(parents=True)
+            (long_dir / "module.toml").write_text('name = "Long"\nversion = "1.0.0"\n', encoding="utf-8")
+            (long_dir / "backend.py").write_text("class Module:\n    pass\n", encoding="utf-8")
+            long_manifest = load_manifest(long_dir)
+            self.assertFalse(long_manifest.valid)
+            self.assertIn("at most 64 characters", long_manifest.error)
+
+            # Runtime service also refuses registering a 65-char descriptor directly.
+            class _Instruments:
+                def __init__(self) -> None:
+                    self.config = config
+
+            service = MeasurementModuleService((), EventManager(), _Instruments())  # type: ignore[arg-type]
+            service.add_descriptor(discovered[ok_id])
+            self.assertIn(ok_id, service.records)
+            with self.assertRaises(InstrumentError) as exc:
+                service.add_descriptor(
+                    ModuleDescriptor(
+                        too_long_id,
+                        "Too Long",
+                        "1.0.0",
+                        discovered["simulated_transport"].path,
+                        template_id="simulated_transport",
+                    )
+                )
+            self.assertEqual(exc.exception.code, "MODULE_NOT_ENABLEABLE")
+
+    def test_failed_disable_retains_resource_lock_and_blocks_instance_removal(self) -> None:
+        class _FakeClient:
+            def __init__(self, *, fail_close: bool = False) -> None:
+                self.fail_close = fail_close
+                self.actions: list[str] = []
+
+            def request(self, action, payload=None, event_handler=None, timeout_seconds=120.0):
+                del payload, event_handler, timeout_seconds
+                self.actions.append(action)
+                if action == "module_close" and self.fail_close:
+                    raise WorkerRequestError("close failed", "MODULE_CLOSE_FAILED", "test")
+                return {}
+
+            def close(self, timeout_seconds=3.0) -> None:
+                del timeout_seconds
+                self.actions.append("close")
+
+        async def scenario(root: Path) -> None:
+            config = replace(
+                _copied_project(root),
+                instrument_resources=(
+                    InstrumentResource("k2400_gate", "GPIB0::24::INSTR"),
+                    InstrumentResource("k2400_alias", "gpib0::24::instr"),
+                ),
+            )
+            events = EventManager()
+            instruments = InstrumentManager(config, events, isolate_processes=False)
+            base = next(item for item in discover_modules(config) if item.id == "simulated_transport")
+            gate = build_instance_descriptor(
+                base,
+                ModuleInstanceConfig("simulated_transport_gate", "simulated_transport", "Gate"),
+                fallback_path=module_instances_path(config),
+            )
+            published: list[tuple[str, dict[str, object]]] = []
+            service = MeasurementModuleService(
+                (base, gate),
+                events,
+                instruments,
+                message_callback=lambda kind, payload: published.append((kind, payload)),
+            )
+            gate_client = _FakeClient(fail_close=True)
+            base_client = _FakeClient(fail_close=False)
+            service.records[gate.id].enabled = True
+            service.records[gate.id].client = gate_client  # type: ignore[assignment]
+            service.records[base.id].enabled = True
+            service.records[base.id].client = base_client  # type: ignore[assignment]
+
+            await service.apply_settings(gate.id, {"resource": "k2400_gate"})
+            with self.assertRaises(InstrumentError) as first_conflict:
+                await service.apply_settings(base.id, {"resource": "k2400_alias"})
+            self.assertEqual(first_conflict.exception.code, "MODULE_RESOURCE_IN_USE")
+
+            # Disable fails: local worker is closed, but VISA resource lock stays retained.
+            with self.assertRaises(InstrumentError):
+                await service.disable(gate.id)
+            self.assertFalse(service.records[gate.id].enabled)
+            self.assertIsNone(service.records[gate.id].client)
+            self.assertEqual(service.records[gate.id].resource_addresses, frozenset({"GPIB0::24::INSTR"}))
+            last_gate_state = next(
+                payload
+                for kind, payload in reversed(published)
+                if kind == "module_state" and payload.get("module_id") == gate.id
+            )
+            self.assertTrue(last_gate_state["resources_retained"])
+
+            # Removing the instance must be blocked while the VISA lock is retained.
+            with self.assertRaises(InstrumentError) as remove_blocked:
+                service.remove_descriptor(gate.id)
+            self.assertEqual(remove_blocked.exception.code, "MODULE_INSTANCE_REMOVE_BLOCKED")
+            self.assertIn(gate.id, service.records)
+
+            # Other modules are still blocked from configuring the locked VISA address.
+            with self.assertRaises(InstrumentError) as still_conflict:
+                await service.apply_settings(base.id, {"resource": "k2400_alias"})
+            self.assertEqual(still_conflict.exception.code, "MODULE_RESOURCE_IN_USE")
+            self.assertEqual(base_client.actions, [])
+
+            # Even when base is cleanly disabled, Refresh (replace_descriptors) cannot drop the lock.
+            await service.disable(base.id)
+            with self.assertRaises(InstrumentError) as refresh_blocked:
+                service.replace_descriptors((base, gate))
+            self.assertEqual(refresh_blocked.exception.code, "MODULE_REFRESH_BLOCKED")
+
+            # Once gate is re-enabled and cleanly disabled, the lock releases and removal succeeds.
+            service.records[gate.id].enabled = True
+            service.records[gate.id].client = _FakeClient(fail_close=False)  # type: ignore[assignment]
+            await service.disable(gate.id)
+            self.assertEqual(service.records[gate.id].resource_addresses, frozenset())
+            service.remove_descriptor(gate.id)
+            self.assertNotIn(gate.id, service.records)
+
+            service.records[base.id].enabled = True
+            service.records[base.id].client = base_client  # type: ignore[assignment]
+            await service.apply_settings(base.id, {"resource": "k2400_alias"})
+            self.assertEqual(base_client.actions, ["module_close", "close", "configure"])
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(Path(temp)))
+
     def test_datafile_snapshots_module_instances_and_disambiguates_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = _copied_project(Path(temp))
@@ -228,7 +398,7 @@ class ModuleInstanceUITests(unittest.TestCase):
             self.assertEqual(dialog.id_input.text(), "keithley_2400_3")
             self.assertEqual(dialog.name_input.text(), "Keithley 2400 #3")
 
-            for bad_id in ("Bad-ID", "keithley_2400_2", ""):
+            for bad_id in ("Bad-ID", "keithley_2400_2", "", "a" * (MAX_MODULE_ID_LENGTH + 1)):
                 dialog.reject()
                 dialog.id_input.setText(bad_id)
                 with patch("labcontrol.ui.measurement_modules.QMessageBox.warning") as warn:
@@ -236,6 +406,15 @@ class ModuleInstanceUITests(unittest.TestCase):
                 warn.assert_called_once()
                 self.assertEqual(dialog.result(), QDialog.DialogCode.Rejected)
 
+            # 64-char instance ID is accepted; 64-char template ID still suggests <=64-char ID.
+            max_id = "k" * MAX_MODULE_ID_LENGTH
+            dialog.reject()
+            dialog.id_input.setText(max_id)
+            dialog.name_input.setText("Keithley 2400 - Max")
+            dialog.accept()
+            self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
+
+            dialog.reject()
             dialog.id_input.setText("keithley_2400_gate")
             dialog.name_input.setText("Keithley 2400 - Gate")
             dialog.accept()
@@ -246,6 +425,15 @@ class ModuleInstanceUITests(unittest.TestCase):
             )
         finally:
             dialog.close()
+
+        long_template = ModuleDescriptor("t" * MAX_MODULE_ID_LENGTH, "Long Template", "1.0.0", Path("."))
+        long_dialog = AddModuleInstanceDialog((long_template,), {long_template.id})
+        try:
+            suggested = long_dialog.id_input.text()
+            self.assertTrue(is_valid_module_id(suggested))
+            self.assertLessEqual(len(suggested), MAX_MODULE_ID_LENGTH)
+        finally:
+            long_dialog.close()
 
     def test_module_manager_preserves_enabled_state_and_controls_remove_button(self) -> None:
         from PySide6.QtWidgets import QWidget
@@ -276,7 +464,26 @@ class ModuleInstanceUITests(unittest.TestCase):
             manager.update_state("keithley_2400_gate", True, "enabled", "Ready")
             self.assertFalse(manager.remove_instance_button.isEnabled())
 
-            manager.update_state("keithley_2400_gate", False, "disabled", "Disabled")
+            manager.update_state(
+                "keithley_2400_gate",
+                False,
+                "disabled",
+                "Forced closed: close failed",
+                resources_retained=True,
+            )
+            self.assertFalse(manager.remove_instance_button.isEnabled())
+
+            # Error-detail updates without resources_retained must preserve the retained lock.
+            manager.update_state("keithley_2400_gate", False, "disabled", "close failed")
+            self.assertFalse(manager.remove_instance_button.isEnabled())
+
+            manager.update_state(
+                "keithley_2400_gate",
+                False,
+                "disabled",
+                "Disabled",
+                resources_retained=False,
+            )
             self.assertTrue(manager.remove_instance_button.isEnabled())
 
             manager.set_operations_enabled(False)
