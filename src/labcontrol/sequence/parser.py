@@ -69,6 +69,12 @@ _SCAN_TEMPERATURE = re.compile(
     rf"(?P<rate>{NUMBER})\s*K/min\s*,?\s*(?P<mode>Settle|Sweep)$",
     re.IGNORECASE,
 )
+_SCAN_TEMPERATURE_LOG = re.compile(
+    rf"^Scan\s+Temperature\s+Log\s+(?:from\s+)?(?P<start>{NUMBER})\s*K\s+(?:to|through)\s+"
+    rf"(?P<stop>{NUMBER})\s*K\s+in\s+(?P<steps>\d+)\s+steps\s+at\s+"
+    rf"(?P<rate>{NUMBER})\s*K/min\s*,?\s*(?P<mode>Settle|Sweep)$",
+    re.IGNORECASE,
+)
 _SCAN_TEMPERATURE_LIST = re.compile(
     rf"^Scan\s+Temperature\s+List\s+(?P<points>.+?)\s*K\s+at\s+"
     rf"(?P<rate>{NUMBER})\s*K/min\s*,?\s*(?P<mode>Settle|Sweep)$",
@@ -334,6 +340,22 @@ def _parse_base_command(
             source_line=line_number,
         ), None
 
+    match = _SCAN_TEMPERATURE_LOG.match(text)
+    if match:
+        return Command(
+            CommandType.SCAN_TEMPERATURE,
+            {
+                "point_mode": "Log",
+                "start": float(match.group("start")),
+                "stop": float(match.group("stop")),
+                "steps": int(match.group("steps")),
+                "rate": float(match.group("rate")),
+                "mode": match.group("mode").title(),
+            },
+            raw_text=text,
+            source_line=line_number,
+        ), None
+
     match = _SCAN_TEMPERATURE.match(text)
     if match:
         return Command(
@@ -349,6 +371,19 @@ def _parse_base_command(
             raw_text=text,
             source_line=line_number,
         ), None
+
+    if lowered.startswith("scan temperature log"):
+        return Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        ), SequenceIssue(
+            line_number,
+            "error",
+            "Invalid temperature log scan; expected Scan Temperature Log <start> K to <stop> K in <steps> steps at <rate> K/min, Settle or Sweep",
+            text,
+        )
 
     if lowered.startswith("scan temperature list"):
         return Command(
@@ -684,7 +719,8 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
             f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min in {p.get('mode', 'Settle')} mode"
         )
     if command.type is CommandType.SCAN_TEMPERATURE:
-        if str(p.get("point_mode", "Linear")).casefold() == "list":
+        point_mode = str(p.get("point_mode", "Linear")).casefold()
+        if point_mode == "list":
             try:
                 points = format_temperature_points(p.get("points", ""))
             except ValueError:
@@ -693,8 +729,9 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
                 f"Scan Temperature List {points} K at "
                 f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
             )
+        prefix = "Scan Temperature Log" if point_mode == "log" else "Scan Temperature"
         return (
-            f"Scan Temperature {_format_number(p.get('start', 300.0))} K to "
+            f"{prefix} {_format_number(p.get('start', 300.0))} K to "
             f"{_format_number(p.get('stop', 10.0))} K in {int(p.get('steps', 10))} steps at "
             f"{_format_number(p.get('rate', 5.0))} K/min, {p.get('mode', 'Settle')}"
         )

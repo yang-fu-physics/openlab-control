@@ -312,7 +312,7 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         ),
     )),
     CommandSpec(CommandType.SCAN_TEMPERATURE, "Scan Temperature", "System Commands", (
-        FieldSpec("point_mode", "Point definition", "choice", "Linear", choices=("Linear", "List")),
+        FieldSpec("point_mode", "Point definition", "choice", "Linear", choices=("Linear", "Log", "List")),
         FieldSpec("start", "Start (K)", "float", 300.0),
         FieldSpec("stop", "Stop (K)", "float", 10.0),
         FieldSpec("steps", "Points", "int", 10, 1, 100000),
@@ -428,4 +428,16 @@ def validate_command_parameters(command: Command) -> tuple[str, ...]:
                 )
         elif field_spec.field_type == "bool" and not isinstance(value, bool):
             issues.append(f"{field_spec.label} must be true or false")
+    if (
+        command.type is CommandType.SCAN_TEMPERATURE
+        and str(command.params.get("point_mode", "Linear")).casefold() == "log"
+    ):
+        try:
+            start = float(command.params.get("start", 0.0))
+            stop = float(command.params.get("stop", 0.0))
+        except (TypeError, ValueError):
+            pass
+        else:
+            if math.isfinite(start) and math.isfinite(stop) and (start <= 0.0 or stop <= 0.0):
+                issues.append("Scan Temperature Log mode requires positive Start and Stop temperatures")
     return tuple(issues)

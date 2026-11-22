@@ -20,7 +20,13 @@ from labcontrol.measurement.service import MeasurementModuleService  # noqa: E40
 from labcontrol.measurement.worker import ModuleWorkerClient, WorkerRequestError  # noqa: E402
 from labcontrol.models import RunState  # noqa: E402
 from labcontrol.module_commands import (  # noqa: E402
+    estimate_module_scan_points,
+    generate_scan_points,
+    linear_points_from_step,
+    log_points_from_per_decade,
     normalize_module_commands,
+    resolve_module_point_bounds,
+    resolve_module_scan_points,
     validate_module_command_parameters,
 )
 from labcontrol.sequence.engine import SequenceEngine  # noqa: E402
@@ -130,6 +136,94 @@ class ModuleCommandDeclarationTests(unittest.TestCase):
                 )
             ),
         )
+
+    def test_scan_modes_payload_roundtrip_generation_step_sync_and_limits(self) -> None:
+        raw = [
+            {
+                "id": "scan_current",
+                "label": "Scan Current",
+                "kind": "scan",
+                "points_field": "points",
+                "point_parameter": "current",
+                "scan_modes": ["Linear", "Log", "List"],
+                "point_unit": "A",
+                "point_limits": {
+                    "setting": "max_current",
+                    "symmetric": True,
+                    "minimum": -0.07071,
+                    "maximum": 0.07071,
+                },
+                "fields": [
+                    {"name": "points", "label": "RMS points (A)", "type": "list", "default": ["100u", "200u", "500u"]},
+                    {"name": "settle_seconds", "label": "Settle time", "type": "float", "default": 3.0, "minimum": 0.0, "unit": "s"},
+                ],
+            },
+            {
+                "id": "scan_voltage",
+                "label": "Scan Voltage",
+                "kind": "scan",
+                "points_field": "points",
+                "point_parameter": "voltage",
+                "scan_modes": ["Linear", "Log", "List"],
+                "point_unit": "V",
+                "point_decimals": 3,
+                "point_limits": {
+                    "setting": "max_voltage",
+                    "symmetric": False,
+                    "minimum": 0.0,
+                    "maximum": 5.0,
+                },
+                "fields": [
+                    {"name": "points", "label": "RMS points (V)", "type": "list", "default": ["10m", "20m", "50m"]},
+                    {"name": "settle_seconds", "label": "Settle time", "type": "float", "default": 3.0, "minimum": 0.0, "unit": "s"},
+                ],
+            },
+        ]
+        specs = normalize_module_commands("src", raw)
+        # Payload round-trip over worker IPC must preserve all scan metadata identically.
+        reloaded = normalize_module_commands("src", [spec.to_payload() for spec in specs])
+        self.assertEqual(specs, reloaded)
+        current_spec, voltage_spec = specs
+
+        # Legacy List SEQ without point_mode remains valid and executable.
+        legacy = {"points": ["100u", "200u", "500u"], "settle_seconds": 3.0}
+        self.assertEqual(validate_module_command_parameters(current_spec, legacy), ())
+        self.assertEqual(resolve_module_scan_points(current_spec, legacy), ["100u", "200u", "500u"])
+
+        # Linear & Log modes validate, resolve points, and estimate step counts.
+        linear = {"point_mode": "Linear", "start": "-200u", "stop": "200u", "steps": 5, "settle_seconds": 1.0}
+        self.assertEqual(validate_module_command_parameters(current_spec, linear), ())
+        self.assertEqual(resolve_module_scan_points(current_spec, linear), ["-200u", "-100u", "0", "100u", "200u"])
+        self.assertEqual(estimate_module_scan_points(current_spec, linear), 5)
+
+        log_curr = {"point_mode": "Log", "start": "10u", "stop": "1m", "steps": 3, "settle_seconds": 1.0}
+        self.assertEqual(validate_module_command_parameters(current_spec, log_curr), ())
+        self.assertEqual(resolve_module_scan_points(current_spec, log_curr), ["10u", "100u", "1m"])
+        bad_log = {"point_mode": "Log", "start": "-10u", "stop": "10u", "steps": 3, "settle_seconds": 1.0}
+        self.assertIn("same sign", " ".join(validate_module_command_parameters(current_spec, bad_log)))
+
+        # OE1022D point_decimals=3 quantizes generated Log/Linear points to 1 mV resolution.
+        self.assertEqual(
+            generate_scan_points("Log", "10m", "100m", 5, unit="V", decimals=3),
+            ["10m", "18m", "32m", "56m", "100m"],
+        )
+
+        # Step <-> Points integer rounding & snapped step calculation.
+        steps, actual_step = linear_points_from_step(0, 0.001, 0.0003)
+        self.assertEqual(steps, 4)
+        self.assertAlmostEqual(float(actual_step), 0.001 / 3)
+        log_steps, actual_ppd = log_points_from_per_decade(1e-5, 1e-3, 5.2)
+        self.assertEqual(log_steps, 11)
+        self.assertAlmostEqual(actual_ppd, 5.0)
+
+        # Settings limit sync resolves symmetric and unipolar bounds.
+        low, high, summary = resolve_module_point_bounds(current_spec, {"max_current": "1m"})
+        self.assertAlmostEqual(low or 0.0, -1e-3)
+        self.assertAlmostEqual(high or 0.0, 1e-3)
+        self.assertIn("max_current", summary)
+        v_low, v_high, _ = resolve_module_point_bounds(voltage_spec, {"max_voltage": "100m"})
+        self.assertEqual(v_low, 0.0)
+        self.assertAlmostEqual(v_high or 0.0, 0.1)
 
 
 class ModuleCommandParserTests(unittest.TestCase):
@@ -372,6 +466,71 @@ class ModuleCommandUITests(unittest.TestCase):
             self.assertEqual(command_dialog.inputs["current"].maximum(), 0.01)
         finally:
             command_dialog.close()
+
+    def test_module_scan_dialog_syncs_step_points_and_module_limits(self) -> None:
+        from unittest.mock import patch
+
+        scan_spec = normalize_module_commands("test_source", [{
+            "id": "scan_current",
+            "label": "Scan Current",
+            "kind": "scan",
+            "points_field": "points",
+            "point_parameter": "current",
+            "scan_modes": ["Linear", "Log", "List"],
+            "point_unit": "A",
+            "point_limits": {
+                "setting": "max_current",
+                "symmetric": True,
+                "minimum": -0.07071,
+                "maximum": 0.07071,
+            },
+            "fields": [
+                {"name": "points", "label": "RMS points (A)", "type": "list", "default": ["100u", "200u", "500u"]},
+                {"name": "settle_seconds", "label": "Settle time", "type": "float", "default": 3.0, "minimum": 0.0, "unit": "s"},
+            ],
+        }])[0]
+        dialog = CommandDialog(
+            scan_spec.create(),
+            scan_spec,
+            module_settings={"max_current": "1m"},
+        )
+        try:
+            self.assertEqual(dialog.inputs["point_mode"].currentText(), "Linear")
+            self.assertIn("-1mA to 1mA", dialog.limit_label.text())
+            dialog.inputs["start"].setText("0")
+            dialog.inputs["stop"].setText("1m")
+            dialog.step_input.setText("300u")
+            dialog._on_step_editing_finished()
+            self.assertEqual(dialog.inputs["steps"].value(), 4)
+            self.assertEqual(dialog.step_input.text(), "333.333333u")
+            dialog.accept()
+            self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
+            self.assertEqual(
+                dialog.values(),
+                {"point_mode": "Linear", "start": "0", "stop": "1m", "steps": 4, "settle_seconds": 3.0},
+            )
+            # Exceeding synced max_current=1m is rejected before accept.
+            dialog.reject()
+            dialog.inputs["stop"].setText("2m")
+            with patch("labcontrol.ui.dialogs.QMessageBox.warning") as warn:
+                dialog.accept()
+            warn.assert_called_once()
+            self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
+            # Log mode switches Step to Points / decade and rounds to integer points.
+            dialog.inputs["point_mode"].setCurrentText("Log")
+            dialog.inputs["start"].setText("10u")
+            dialog.inputs["stop"].setText("1m")
+            dialog.step_input.setText("5")
+            dialog._on_step_editing_finished()
+            self.assertEqual(dialog.inputs["steps"].value(), 11)
+            self.assertEqual(dialog.step_input.text(), "5")
+            dialog.accept()
+            self.assertEqual(
+                dialog.values(),
+                {"point_mode": "Log", "start": "10u", "stop": "1m", "steps": 11, "settle_seconds": 3.0},
+            )
+        finally:
+            dialog.close()
 
     def test_unavailable_line_is_red_until_matching_command_is_registered(self) -> None:
         command = normalize_module_commands("test_meter", DECLARATIONS)[0].create()
