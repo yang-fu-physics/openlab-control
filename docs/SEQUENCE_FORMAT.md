@@ -72,11 +72,16 @@ T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
 - `Settle`：发目标后等待核心判定稳定再继续；`Sweep`：发目标后立即进入下一条指令；
 - 磁场支持 `Oe`（2 位小数）或 `T`（6 位小数），同一条指令内目标与速率须用相同单位。
 
-### Scan Temperature（线性扫温 / 列表扫温）
+### Scan Temperature（线性 / 对数 / 列表扫温）
 
 ```text
 # 线性扫温（steps 为包含起点与终点的总点数，范围 1–100,000）
 T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
+T     Measure
+T End Scan
+
+# 对数扫温（起止温度须为正值，中间点按控制面板目标精度量化）
+T Scan Temperature Log 300.000 K to 2.000 K in 21 steps at 5.000 K/min, Settle
 T     Measure
 T End Scan
 
@@ -88,6 +93,7 @@ T End Scan
 
 - `Settle`：每点等待核心判定完全稳定后再执行子指令；
 - `Sweep`：每点进入目标容差即执行子指令，不额外等斜率/驻留判稳；
+- 弹窗支持直接输入步长（`Log` 模式下为 `Points / decade`），失焦或确认时自动取整同步 `Points` 并回写实际步长；
 - 执行前会整表校验所有点是否在温度上下限内，任意一点越界都会在启动移动前报错。
 
 ### Scan Field（扫场）
@@ -130,12 +136,20 @@ T Compressor Off
 
 ```text
 T Module Command "oe1022d_lockin" "auto_range" {"auto_reserve":true}
-T Module Scan "keithley_6221_ac" "scan_current" {"points":["100u","200u","500u"],"settle_seconds":3.0}
+T Module Scan "keithley_6221_ac" "scan_current" {"point_mode":"Linear","start":"100u","stop":"500u","steps":5,"settle_seconds":3.0}
+T     Measure
+T End Scan
+T Module Scan "keithley_6221_ac" "scan_current" {"point_mode":"Log","start":"10u","stop":"1m","steps":11,"settle_seconds":3.0}
+T     Measure
+T End Scan
+T Module Scan "keithley_6221_ac" "scan_current" {"point_mode":"List","points":["100u","200u","500u"],"settle_seconds":3.0}
 T     Measure
 T End Scan
 ```
 
 - 依次为：模块目录 ID、稳定指令 ID、标准 JSON 参数对象（禁止 `NaN`/`Infinity`）；
+- 声明了 `scan_modes` 的扫描指令须显式携带 `point_mode`（`Linear`、`Log` 或 `List`）；纯列表扫描指令（如 `scan_frequency`）仅携带列表字段；
+- 声明了 `point_limits` 的指令会在参数窗口自动同步模块 Settings 上限（如 `max_current`、`max_voltage`）；
 - 本身不写 DAT 行，需要在循环内显式放 `Measure`；
 - 普通命令 Warning 继续下一条，扫描点 Warning 跳过该点子树继续下一点，Error 中止整个 SEQ；
 - 对应模块未安装或未启用时，行在编辑器里标红并保留原文本，运行预检阻止执行。

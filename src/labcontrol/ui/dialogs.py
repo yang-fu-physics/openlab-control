@@ -191,12 +191,7 @@ class CommandDialog(QDialog):
             if isinstance(unit_input, QComboBox):
                 self._field_unit = unit_input.currentText()
                 unit_input.currentTextChanged.connect(self._change_field_unit)
-        if command.type is CommandType.SCAN_TEMPERATURE:
-            point_mode = self.inputs.get("point_mode")
-            if isinstance(point_mode, QComboBox):
-                point_mode.currentTextChanged.connect(self._update_scan_point_mode)
-                self._update_scan_point_mode(point_mode.currentText())
-        elif self._is_module_scan_modes:
+        if command.type is CommandType.SCAN_TEMPERATURE or self._is_module_scan_modes:
             point_mode = self.inputs.get("point_mode")
             if isinstance(point_mode, QComboBox):
                 point_mode.currentTextChanged.connect(self._update_scan_point_mode)
@@ -235,12 +230,7 @@ class CommandDialog(QDialog):
 
     def _build_module_scan_controls(self, spec: ModuleCommandSpec) -> None:
         params = self.command.params
-        if "point_mode" in params:
-            initial_mode = str(params["point_mode"])
-        elif spec.points_field in params and "List" in spec.scan_modes:
-            initial_mode = "List"
-        else:
-            initial_mode = spec.scan_modes[0]
+        initial_mode = str(params.get("point_mode", spec.scan_modes[0]))
         default_start, default_stop, default_steps = spec.default_scan_bounds()
         raw_points = params.get(spec.points_field)
         if isinstance(raw_points, list) and raw_points:

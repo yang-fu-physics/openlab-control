@@ -38,8 +38,16 @@ class Module:
     "id": "scan_current",
     "label": "Scan Current",
     "kind": "scan",
-    "points_field": "points",       # 保存扫描点列表的字段名
+    "points_field": "points",       # 保存列表模式扫描点的字段名
     "point_parameter": "current",   # 每次调用时把当前点放进这个参数键里
+    "scan_modes": ["Linear", "Log", "List"],  # 可选：开启多模式扫描及步长↔点数联动
+    "point_unit": "A",              # 可选：SI 单位解析与校验后缀
+    "point_limits": {               # 可选：同步模块 Settings 上限与硬件范围
+        "setting": "max_current",
+        "symmetric": True,
+        "minimum": -0.07071,
+        "maximum": 0.07071,
+    },
     "fields": [
         {
             "name": "points",
@@ -51,15 +59,15 @@ class Module:
 }
 ```
 
-生成的 SEQ 就像温场扫描一样支持任意嵌套：
+生成的 SEQ 就像温场扫描一样支持任意嵌套（声明 `scan_modes` 时显式携带 `point_mode`；未声明时仅保留列表字段）：
 
 ```text
-T Module Scan "tutorial_resistance" "scan_current" {"points":["100 uA","200 uA"]}
+T Module Scan "tutorial_resistance" "scan_current" {"point_mode":"Linear","start":"100u","stop":"500u","steps":5}
 T     Measure
 T End Scan
 ```
 
-运行时，核心会按列表原顺序逐点调用 `execute_sequence_command()`，该点执行成功后再运行缩进在它下面的所有子指令。
+运行时，核心会按选定模式生成或读取点列表并逐点调用 `execute_sequence_command()`，该点执行成功后再运行缩进在它下面的所有子指令。若硬件对生成点有固定基础单位分辨率要求（例如 1 mV），还可声明 `point_decimals = 3` 自动量化中间点。
 
 ## 3. 在 `backend.py` 中执行指令
 

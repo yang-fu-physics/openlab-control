@@ -120,9 +120,9 @@
 ### 常用指令要点
 
 - **Set Datafile**：可点击 `Browse…` 用系统文件对话框选路径（`open` 选已有文件，`create` / `open|create` 可新建）。写到项目外的自定义目录时会自动加上 `external` 标记。
-- **温度 / 磁场控制与扫描**：参数弹窗直接读取扫描器中该控制器面板的上下限和最大速率。`Scan Field` 额外提供 **Choose nearer start or its negative** 选项（默认关闭）：勾选后，执行到该扫场步骤时会读取当前真实磁场，自动选择离当前场更近的起点极性（例如当前在 `-6 T` 时，把 `9 T → 3 T` 自动转为 `-9 T → -3 T`），结果记入 Run Log。
+- **温度 / 磁场控制与扫描**：参数弹窗直接读取扫描器中该控制器面板的上下限和最大速率。`Scan Temperature` 支持 `Linear`、`Log`、`List` 三种点定义；`Scan Temperature` 与 `Scan Field` 均支持直接输入 `Step`（`Log` 模式下为 `Points / decade`）与 `Points` 双向联动（输入步长后取整同步点数并回写实际步长，非法步长会保留原文并在确认时拦截提示）。`Scan Field` 额外提供 **Choose nearer start or its negative** 选项（默认关闭）：勾选后，执行到该扫场步骤时会读取当前真实磁场，自动选择离当前场更近的起点极性（例如当前在 `-6 T` 时，把 `9 T → 3 T` 自动转为 `-9 T → -3 T`），结果记入 Run Log。
 - **Measure**：无参数指令 `T Measure`，自动对本次 Run 冻结的全部已启用模块按通道槽位测量。需要重复采集或定时采集时，把 `Measure` 放进 `Scan Time` 或其他 `Scan` 块内即可。
-- **模块自定义指令**：如 `Set Current`（单次动作）和 `Scan Current`（可像温场 Scan 一样嵌套子指令）。它们本身不写 DAT 行，需要采数据时在下方或循环内放置 `Measure`；修改的只是本次运行中的仪表状态，不会改写 Settings 页。如果打开的 SEQ 引用了未安装或未启用的模块指令，该行会标红并给 Warning，运行前会被阻止。
+- **模块自定义指令**：如 `Set Current`（单次动作）和 `Scan Current` / `Scan Voltage`（可像温场 Scan 一样嵌套子指令，并支持 `Linear / Log / List`、`Step ↔ Points` 双向联动及自动同步模块 Settings 上限）。它们本身不写 DAT 行，需要采数据时在下方或循环内放置 `Measure`；修改的只是本次运行中的仪表状态，不会改写 Settings 页。如果打开的 SEQ 引用了未安装或未启用的模块指令，该行会标红并给 Warning，运行前会被阻止。
 
 ### 参数精度说明
 

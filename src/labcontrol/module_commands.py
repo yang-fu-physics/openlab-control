@@ -831,14 +831,12 @@ def resolve_module_point_bounds(
 def _effective_scan_mode(spec: ModuleCommandSpec, parameters: Mapping[str, Any]) -> str:
     if not spec.scan_modes:
         return "List"
-    if "point_mode" in parameters:
-        raw = str(parameters["point_mode"]).strip().casefold()
-        for mode in spec.scan_modes:
-            if mode.casefold() == raw:
-                return mode
+    if "point_mode" not in parameters:
         return ""
-    if spec.points_field in parameters and "List" in spec.scan_modes:
-        return "List"
+    raw = str(parameters["point_mode"]).strip().casefold()
+    for mode in spec.scan_modes:
+        if mode.casefold() == raw:
+            return mode
     return ""
 
 
@@ -992,10 +990,9 @@ def validate_module_command_parameters(
             else:
                 issues.append("Missing parameters: point_mode")
         elif mode == "List":
-            required = base_fields | {spec.points_field}
-            allowed = required | {"point_mode"}
+            required = base_fields | {"point_mode", spec.points_field}
             missing = sorted(required - supplied)
-            unknown = sorted(supplied - allowed)
+            unknown = sorted(supplied - required)
             if missing:
                 issues.append("Missing parameters: " + ", ".join(missing))
             if unknown:

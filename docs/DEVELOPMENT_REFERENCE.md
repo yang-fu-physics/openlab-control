@@ -68,7 +68,7 @@ sequence_commands = [
 
 - 字段类型仅支持：`text`、`int`、`float`、`choice`（需配 `choices`）、`bool`、`list`（最多 100,000 项 JSON 标量）。
 - 数值字段可配 `minimum`、`maximum`、`unit`、`decimals`；若需自定义编辑弹窗可设 `custom_editor = True` 并在前端实现 `edit_sequence_command(command_id, parameters)`。
-- 扫描指令（`kind = "scan"`）还可声明 `scan_modes`（如 `["Linear", "Log", "List"]`）、`point_unit`（如 `"A"`、`"V"`）、`point_decimals`（生成点按基础单位量化的小数位）与 `point_limits`（如 `{"setting": "max_current", "symmetric": True, "minimum": ..., "maximum": ...}`，在通用参数窗口中自动同步模块 Settings 上限；非扫描命令也可通过 `point_limits.field` 绑定单个文本字段）；既有仅含 `points` 的旧 `.seq` 自动按 `List` 模式兼容。
+- 扫描指令（`kind = "scan"`）还可声明 `scan_modes`（如 `["Linear", "Log", "List"]`）、`point_unit`（如 `"A"`、`"V"`）、`point_decimals`（生成点按基础单位量化的小数位）与 `point_limits`（如 `{"setting": "max_current", "symmetric": True, "minimum": ..., "maximum": ...}`，在通用参数窗口中自动同步模块 Settings 上限；非扫描命令也可通过 `point_limits.field` 绑定单个文本字段）；声明 `scan_modes` 的扫描在 SEQ 中显式携带 `point_mode`。
 - 禁止提供“任意 SCPI 透传”指令。
 
 ### `ModuleAPI` 常用方法

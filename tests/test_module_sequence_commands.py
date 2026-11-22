@@ -185,10 +185,12 @@ class ModuleCommandDeclarationTests(unittest.TestCase):
         self.assertEqual(specs, reloaded)
         current_spec, voltage_spec = specs
 
-        # Legacy List SEQ without point_mode remains valid and executable.
-        legacy = {"points": ["100u", "200u", "500u"], "settle_seconds": 3.0}
-        self.assertEqual(validate_module_command_parameters(current_spec, legacy), ())
-        self.assertEqual(resolve_module_scan_points(current_spec, legacy), ["100u", "200u", "500u"])
+        # Multi-mode scans require explicit point_mode for List as well as Linear/Log.
+        missing_mode = {"points": ["100u", "200u", "500u"], "settle_seconds": 3.0}
+        self.assertIn("Missing parameters: point_mode", validate_module_command_parameters(current_spec, missing_mode))
+        explicit_list = {"point_mode": "List", "points": ["100u", "200u", "500u"], "settle_seconds": 3.0}
+        self.assertEqual(validate_module_command_parameters(current_spec, explicit_list), ())
+        self.assertEqual(resolve_module_scan_points(current_spec, explicit_list), ["100u", "200u", "500u"])
 
         # Linear & Log modes validate, resolve points, and estimate step counts.
         linear = {"point_mode": "Linear", "start": "-200u", "stop": "200u", "steps": 5, "settle_seconds": 1.0}
