@@ -874,7 +874,7 @@
   <a href="#enable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        启用（Enable）与隐藏窗口
+        启用（Enable）、多实例与隐藏窗口
       
     </span>
   </a>
@@ -2181,7 +2181,7 @@
   <a href="#enable" class="md-nav__link">
     <span class="md-ellipsis">
       
-        启用（Enable）与隐藏窗口
+        启用（Enable）、多实例与隐藏窗口
       
     </span>
   </a>
@@ -2485,9 +2485,10 @@
 <hr />
 <h2 id="modules">管理测量模块（Modules）<a class="headerlink" href="#modules" title="Permanent link">&para;</a></h2>
 <p>点击工具栏 <strong>Modules</strong> 打开模块管理器，界面简洁，只有 <code>Enabled / Name / Version</code> 三列。</p>
-<h3 id="enable">启用（Enable）与隐藏窗口<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h3>
+<h3 id="enable">启用（Enable）、多实例与隐藏窗口<a class="headerlink" href="#enable" title="Permanent link">&para;</a></h3>
 <ol>
 <li>勾选目标模块后，状态会显示 <code>Initializing &lt;模块名&gt;...</code>；初始化成功即弹出该模块的独立浮动窗口。如果初始化失败会弹 Error，保持未勾选状态。</li>
+<li><strong>多台相同测量仪表（Add / Remove Instance）</strong>：如需同时使用多台同型号仪表（如两台 Keithley 2400 或两台 OE1022D），在 SEQ 空闲时点击底部 <strong>Add Instance…</strong> 选择基础模块并指定唯一实例 ID 与显示名即可，<strong>无需复制模块文件夹，也不需要先 Disable 其他已启用模块</strong>；配置保存在 <code>configs/module_instances.toml</code>。停用后的额外实例可选中点击 <strong>Remove Instance</strong> 移除（详见 <a href="../development/reuse-identical-instruments/">多台相同仪表复用一个模块</a>）。</li>
 <li>只应将来源可信、已核对过代码的模块目录复制到 <code>modules/</code> 下；程序不在勾选时额外弹代码审核确认框。</li>
 <li>勾选成功后，如果该模块声明了自己的 SEQ 指令，右侧指令栏会立刻出现以模块名称命名的分组；取消勾选或进程失效时立即移除。</li>
 <li><strong>窗口关闭与隐藏</strong>：点击模块窗口右上角关闭、<code>Alt+F4</code> 或最小化都会<strong>隐藏</strong>该窗口（不会中断正在进行的测量，也不会在桌面留下最小化小条）。左侧 <strong>Sequence Status</strong> 下方的模块卡片会标出 <code>Hidden</code> 并继续显示最新通道结果（新一次 <code>Measure</code> 开始前会先清空旧值，空值显示 <code>—</code>）。点击卡片或在管理器里双击模块名即可重新打开原窗口。</li>

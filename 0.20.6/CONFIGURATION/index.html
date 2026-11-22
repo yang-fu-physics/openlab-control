@@ -2018,12 +2018,13 @@
 
 
 <h1 id="_1">配置参考<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<p>OpenLab Control 的配置按用途拆成四类，彼此清晰隔离：</p>
+<p>OpenLab Control 的配置按用途拆成五类，彼此清晰隔离：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>configs/
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├─ general.toml                         # 通用配置（手工维护，随仓库提供）
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├─ visa.resources.toml                  # 留给测量模块的 VISA 清单（扫描器生成）
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├─ instruments/&lt;仪表ID&gt;.toml            # 系统仪表实例、面板顺序与限值（扫描器生成）
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>└─ pid/&lt;实例ID&gt;.toml                    # 单台温控实例自己的 PID 表（首次复制，后续保留）
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├─ module_instances.toml                # 可选的测量模块多实例配置（Modules 窗口管理）
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├─ instruments/&lt;仪表ID&gt;.toml            # 系统仪表实例、面板顺序与限值（扫描器生成）
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└─ pid/&lt;实例ID&gt;.toml                    # 单台温控实例自己的 PID 表（首次复制，后续保留）
 </span></code></pre></div>
 <blockquote>
 <p>全新安装时只需有 <code>configs/general.toml</code> 即可正常启动（此时没有系统仪表面板，三个内置仿真默认关闭）。
