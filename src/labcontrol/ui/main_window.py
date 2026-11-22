@@ -60,7 +60,12 @@ from ..module_commands import (
 )
 from ..measurement.manifest import (
     ModuleDescriptor,
+    ModuleInstanceConfig,
+    build_instance_descriptor,
     discover_modules,
+    load_module_instances,
+    module_instances_path,
+    save_module_instances,
 )
 from ..measurement.settings import load_settings, save_settings
 from ..runtime import RuntimeService
@@ -537,6 +542,8 @@ class MainWindow(QMainWindow):
         self.module_manager.enableRequested.connect(self._set_module_enabled)
         self.module_manager.refreshRequested.connect(self._refresh_modules)
         self.module_manager.openRequested.connect(self._show_module_window)
+        self.module_manager.addInstanceRequested.connect(self._add_module_instance)
+        self.module_manager.removeInstanceRequested.connect(self._remove_module_instance)
         self.new_action = QAction(qta.icon("fa5s.file"), "New", self)
         self.open_action = QAction(qta.icon("fa5s.folder-open"), "Open", self)
         self.save_action = QAction(qta.icon("fa5s.save"), "Save", self)
@@ -2317,6 +2324,151 @@ class MainWindow(QMainWindow):
             f"0 of {len(descriptors)} measurement modules enabled"
         )
         self.statusBar().showMessage(f"Found {len(descriptors)} measurement modules", 3000)
+
+    def _add_module_instance(
+        self,
+        template_id: str,
+        instance_id: str,
+        display_name: str,
+    ) -> None:
+        if self.current_run_state not in self.TERMINAL_STATES or self._pending_run is not None:
+            QMessageBox.warning(
+                self,
+                "Add Instance Unavailable",
+                "Stop the SEQ before adding a measurement module instance.",
+            )
+            return
+        template = next(
+            (
+                item
+                for item in self.module_descriptors
+                if item.id == template_id and not item.is_instance and item.valid
+            ),
+            None,
+        )
+        if template is None:
+            QMessageBox.warning(
+                self,
+                "Source Module Unavailable",
+                f"Source module {template_id!r} is not installed or is invalid.",
+            )
+            return
+        if any(item.id == instance_id for item in self.module_descriptors):
+            QMessageBox.warning(
+                self,
+                "Duplicate Instance ID",
+                f"Module ID {instance_id!r} already exists.",
+            )
+            return
+        instances_file = module_instances_path(self.config)
+        try:
+            existing_instances = load_module_instances(instances_file)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Invalid Module Instances File",
+                f"Fix {instances_file.name} before adding a new instance: {exc}",
+            )
+            return
+        entry = ModuleInstanceConfig(
+            id=instance_id,
+            module=template.id,
+            name=display_name,
+        )
+        descriptor = build_instance_descriptor(
+            template,
+            entry,
+            fallback_path=instances_file,
+        )
+        if not descriptor.valid:
+            QMessageBox.warning(self, "Invalid Module Instance", descriptor.error)
+            return
+        try:
+            self.runtime.add_module_descriptor(descriptor).result(timeout=5.0)
+        except Exception as exc:
+            QMessageBox.warning(self, "Add Instance Failed", str(exc))
+            return
+        try:
+            save_module_instances(instances_file, (*existing_instances, entry))
+        except Exception as exc:
+            try:
+                self.runtime.remove_module_descriptor(descriptor.id).result(timeout=5.0)
+            except Exception:
+                pass
+            QMessageBox.warning(self, "Save Module Instances Failed", str(exc))
+            return
+        self.module_descriptors = (*self.module_descriptors, descriptor)
+        self.module_manager.set_descriptors(
+            self.module_descriptors,
+            select_id=descriptor.id,
+        )
+        self.measure_status_label.setText(
+            f"{len(self.enabled_modules)} of {len(self.module_descriptors)} measurement modules enabled"
+        )
+        self.statusBar().showMessage(f"Added module instance {descriptor.name}", 3000)
+
+    def _remove_module_instance(self, module_id: str) -> None:
+        if self.current_run_state not in self.TERMINAL_STATES or self._pending_run is not None:
+            QMessageBox.warning(
+                self,
+                "Remove Instance Unavailable",
+                "Stop the SEQ before removing a measurement module instance.",
+            )
+            return
+        descriptor = next(
+            (item for item in self.module_descriptors if item.id == module_id),
+            None,
+        )
+        if descriptor is None or not descriptor.is_instance:
+            return
+        if (
+            module_id in self.enabled_modules
+            or self.module_manager.runtime_state(module_id) in {"initializing", "disabling"}
+        ):
+            QMessageBox.warning(
+                self,
+                "Instance Still Enabled",
+                f"Disable {descriptor.name} before removing this instance.",
+            )
+            return
+        instances_file = module_instances_path(self.config)
+        try:
+            existing_instances = load_module_instances(instances_file)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Invalid Module Instances File",
+                f"Cannot update {instances_file.name}: {exc}",
+            )
+            return
+        try:
+            self.runtime.remove_module_descriptor(module_id).result(timeout=5.0)
+        except Exception as exc:
+            QMessageBox.warning(self, "Remove Instance Failed", str(exc))
+            return
+        remaining = tuple(item for item in existing_instances if item.id != module_id)
+        try:
+            save_module_instances(instances_file, remaining)
+        except Exception as exc:
+            if descriptor.valid:
+                try:
+                    self.runtime.add_module_descriptor(descriptor).result(timeout=5.0)
+                except Exception:
+                    pass
+            QMessageBox.warning(self, "Save Module Instances Failed", str(exc))
+            return
+        window = self.module_windows.pop(module_id, None)
+        if window is not None:
+            window.allow_application_close()
+            window.close()
+        self.module_descriptors = tuple(
+            item for item in self.module_descriptors if item.id != module_id
+        )
+        self.module_manager.set_descriptors(self.module_descriptors)
+        self.measure_status_label.setText(
+            f"{len(self.enabled_modules)} of {len(self.module_descriptors)} measurement modules enabled"
+        )
+        self.statusBar().showMessage(f"Removed module instance {descriptor.name}", 3000)
 
     def _open_manual_control(
         self,

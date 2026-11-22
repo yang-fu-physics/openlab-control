@@ -140,6 +140,34 @@ class MeasurementModuleService:
             if item.valid
         }
 
+    def add_descriptor(self, descriptor: ModuleDescriptor) -> None:
+        """在 SEQ Idle 时动态注册一个新的模块实例，不影响其他已启用模块。"""
+
+        self._ensure_sequence_idle()
+        self._ensure_descriptor_ready(descriptor)
+        if descriptor.id in self.records:
+            raise InstrumentError(
+                f"Module ID already exists: {descriptor.id}",
+                "MODULE_INSTANCE_DUPLICATE",
+                descriptor.id,
+            )
+        self.records[descriptor.id] = ModuleRuntimeRecord(descriptor)
+
+    def remove_descriptor(self, module_id: str) -> None:
+        """在 SEQ Idle 时注销一个已停用的模块实例，不影响其他已启用模块。"""
+
+        self._ensure_sequence_idle()
+        record = self.records.get(module_id)
+        if record is None:
+            return
+        if record.enabled or record.client is not None:
+            raise InstrumentError(
+                f"Disable {module_id} before removing this instance",
+                "MODULE_INSTANCE_REMOVE_BLOCKED",
+                module_id,
+            )
+        del self.records[module_id]
+
     def _publish(self, record: ModuleRuntimeRecord, message: str = "") -> None:
         self.message_callback("module_state", {
             "module_id": record.descriptor.id,

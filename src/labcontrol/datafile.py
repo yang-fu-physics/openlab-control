@@ -121,9 +121,10 @@ class DatRunLogger:
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot / "general.toml")
         source_configs = self.config.source_path.parent
-        visa_resources = source_configs / "visa.resources.toml"
-        if visa_resources.is_file():
-            shutil.copy2(visa_resources, config_snapshot / visa_resources.name)
+        for filename in ("visa.resources.toml", "module_instances.toml"):
+            config_file = source_configs / filename
+            if config_file.is_file():
+                shutil.copy2(config_file, config_snapshot / config_file.name)
         for name in ("instruments", "pid"):
             source_directory = source_configs / name
             if not source_directory.is_dir():

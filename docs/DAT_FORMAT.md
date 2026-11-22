@@ -10,7 +10,7 @@ runs/20260723_120000_nested_scan/
 ├─ instrument_status.dat                 # 每秒连续仪表状态记录
 ├─ events.dat                            # Warning / Error / Remark 事件日志
 ├─ sequence.seq                          # 本次运行的 SEQ 快照（含 T/F 状态）
-├─ configuration/                        # 当次使用的 general.toml、visa、instruments、pid 快照
+├─ configuration/                        # 当次使用的 general.toml、visa、module_instances、instruments、pid 快照
 ├─ module_settings/
 │  ├─ simulated_transport.settings.toml       # 本次模块界面期望值
 │  └─ simulated_transport.status-at-start.json# Run 开始前读回的模块实际状态

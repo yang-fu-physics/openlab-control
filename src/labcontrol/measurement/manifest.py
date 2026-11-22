@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+import json
 import re
 import tomllib
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ from ..config import AppConfig
 
 
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
+MODULE_INSTANCES_FILENAME = "module_instances.toml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +32,15 @@ class ModuleColumn:
     @property
     def label(self) -> str:
         return f"{self.name}({self.unit})" if self.unit else self.name
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleInstanceConfig:
+    """``configs/module_instances.toml`` 中声明的同源码复用实例。"""
+
+    id: str
+    module: str
+    name: str
 
 
 @dataclass(slots=True)
@@ -43,10 +55,15 @@ class ModuleDescriptor:
     display_columns: tuple[str, ...] = ()
     valid: bool = True
     error: str = ""
+    template_id: str = ""
 
     @property
     def can_enable(self) -> bool:
         return self.valid
+
+    @property
+    def is_instance(self) -> bool:
+        return bool(self.template_id)
 
 
 def _invalid(path: Path, message: str) -> ModuleDescriptor:
@@ -107,6 +124,139 @@ def load_manifest(path: Path) -> ModuleDescriptor:
     return descriptor
 
 
+def module_instances_path(config: AppConfig) -> Path:
+    """返回同源码多实例配置文件路径（与 ``general.toml`` 同目录）。"""
+
+    return config.source_path.parent / MODULE_INSTANCES_FILENAME
+
+
+def _validate_instance_fields(instance: ModuleInstanceConfig) -> list[str]:
+    errors: list[str] = []
+    if not _IDENTIFIER.fullmatch(instance.id):
+        errors.append("instance id must match [a-z][a-z0-9_]*")
+    if not _IDENTIFIER.fullmatch(instance.module):
+        errors.append("source module id must match [a-z][a-z0-9_]*")
+    name = instance.name.strip()
+    if not name or len(name) > 100 or any(ch in name for ch in "\r\n\0"):
+        errors.append("display name must be a single line of 1–100 characters")
+    return errors
+
+
+def load_module_instances(path: Path) -> tuple[ModuleInstanceConfig, ...]:
+    """读取用户配置的测量模块额外实例。文件不存在时返回空元组。"""
+
+    if not path.is_file():
+        return ()
+    with path.open("rb") as handle:
+        raw = tomllib.load(handle)
+    unknown_root = sorted(set(raw) - {"instances"})
+    if unknown_root:
+        raise ValueError(
+            "unknown module_instances.toml fields: " + ", ".join(unknown_root)
+        )
+    entries = raw.get("instances", [])
+    if not isinstance(entries, list):
+        raise ValueError("instances must be an array of tables")
+    result: list[ModuleInstanceConfig] = []
+    for index, item in enumerate(entries, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"instances[{index}] must be a table")
+        unknown = sorted(set(item) - {"id", "module", "name"})
+        if unknown:
+            raise ValueError(
+                f"instances[{index}] has unknown fields: " + ", ".join(unknown)
+            )
+        result.append(
+            ModuleInstanceConfig(
+                id=str(item.get("id", "")).strip().casefold(),
+                module=str(item.get("module", "")).strip().casefold(),
+                name=str(item.get("name", "")).strip(),
+            )
+        )
+    return tuple(result)
+
+
+def save_module_instances(
+    path: Path,
+    instances: Sequence[ModuleInstanceConfig],
+) -> Path:
+    """校验并原子写入 ``configs/module_instances.toml``；列表为空时删除空文件。"""
+
+    seen: set[str] = set()
+    normalized: list[ModuleInstanceConfig] = []
+    for raw in instances:
+        entry = ModuleInstanceConfig(
+            id=str(raw.id).strip().casefold(),
+            module=str(raw.module).strip().casefold(),
+            name=str(raw.name).strip(),
+        )
+        errors = _validate_instance_fields(entry)
+        if errors:
+            raise ValueError("; ".join(errors))
+        if entry.id in seen:
+            raise ValueError(f"Duplicate instance id: {entry.id}")
+        seen.add(entry.id)
+        normalized.append(entry)
+
+    if not normalized:
+        path.unlink(missing_ok=True)
+        return path
+
+    lines = [
+        "# Extra measurement module instances sharing source code under modules/.",
+        "# Managed via Measurement Modules -> Add Instance / Remove Instance.",
+        "",
+    ]
+    for entry in normalized:
+        lines.extend((
+            "[[instances]]",
+            f"id = {json.dumps(entry.id, ensure_ascii=False)}",
+            f"module = {json.dumps(entry.module, ensure_ascii=False)}",
+            f"name = {json.dumps(entry.name, ensure_ascii=False)}",
+            "",
+        ))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    temporary.replace(path)
+    return path
+
+
+def build_instance_descriptor(
+    template: ModuleDescriptor | None,
+    instance: ModuleInstanceConfig,
+    *,
+    fallback_path: Path,
+) -> ModuleDescriptor:
+    """从基础目录模块构造一个共享源码但独立运行与命名的实例描述符。"""
+
+    errors = _validate_instance_fields(instance)
+    if template is None:
+        errors.append(f"Source module {instance.module!r} is not installed")
+        return ModuleDescriptor(
+            id=instance.id or "invalid_instance",
+            name=instance.name or f"{instance.id or 'instance'} (Invalid)",
+            version="—",
+            path=fallback_path.resolve(),
+            valid=False,
+            error="; ".join(dict.fromkeys(errors)),
+            template_id=instance.module or "unknown",
+        )
+    if not template.valid:
+        errors.append(f"Source module {template.id!r} is invalid: {template.error}")
+    descriptor = ModuleDescriptor(
+        id=instance.id,
+        name=instance.name or instance.id,
+        version=template.version,
+        path=template.path,
+        template_id=template.id,
+    )
+    if errors:
+        descriptor.valid = False
+        descriptor.error = "; ".join(dict.fromkeys(errors))
+    return descriptor
+
+
 def discover_modules(config: AppConfig) -> tuple[ModuleDescriptor, ...]:
     root = config.resolve_project_path(config.modules.directory)
     root.mkdir(parents=True, exist_ok=True)
@@ -115,6 +265,32 @@ def discover_modules(config: AppConfig) -> tuple[ModuleDescriptor, ...]:
         for path in sorted(root.iterdir(), key=lambda item: item.name.casefold())
         if path.is_dir() and (path / "module.toml").exists()
     ]
+    base_by_id = {descriptor.id: descriptor for descriptor in descriptors}
+
+    instances_file = module_instances_path(config)
+    try:
+        instances = load_module_instances(instances_file)
+    except (OSError, TypeError, ValueError, tomllib.TOMLDecodeError) as exc:
+        descriptors.append(
+            ModuleDescriptor(
+                id="module_instances",
+                name="module_instances.toml (Invalid)",
+                version="—",
+                path=instances_file.resolve(),
+                valid=False,
+                error=f"Cannot read {MODULE_INSTANCES_FILENAME}: {exc}",
+            )
+        )
+    else:
+        for instance in instances:
+            descriptors.append(
+                build_instance_descriptor(
+                    base_by_id.get(instance.module),
+                    instance,
+                    fallback_path=instances_file,
+                )
+            )
+
     seen: dict[str, ModuleDescriptor] = {}
     for descriptor in descriptors:
         duplicate = seen.get(descriptor.id)
@@ -126,9 +302,17 @@ def discover_modules(config: AppConfig) -> tuple[ModuleDescriptor, ...]:
             item.valid = False
             item.error = "; ".join(part for part in (item.error, message) if part)
     return tuple(descriptors)
+
+
 __all__ = [
+    "MODULE_INSTANCES_FILENAME",
     "ModuleColumn",
     "ModuleDescriptor",
+    "ModuleInstanceConfig",
+    "build_instance_descriptor",
     "discover_modules",
     "load_manifest",
+    "load_module_instances",
+    "module_instances_path",
+    "save_module_instances",
 ]

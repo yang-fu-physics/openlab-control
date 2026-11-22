@@ -1,11 +1,12 @@
 # 配置参考
 
-OpenLab Control 的配置按用途拆成四类，彼此清晰隔离：
+OpenLab Control 的配置按用途拆成五类，彼此清晰隔离：
 
 ```text
 configs/
 ├─ general.toml                         # 通用配置（手工维护，随仓库提供）
 ├─ visa.resources.toml                  # 留给测量模块的 VISA 清单（扫描器生成）
+├─ module_instances.toml                # 可选的测量模块多实例配置（Modules 窗口管理）
 ├─ instruments/<仪表ID>.toml            # 系统仪表实例、面板顺序与限值（扫描器生成）
 └─ pid/<实例ID>.toml                    # 单台温控实例自己的 PID 表（首次复制，后续保留）
 ```
