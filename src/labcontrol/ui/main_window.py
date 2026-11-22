@@ -165,9 +165,11 @@ class MainWindow(QMainWindow):
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
+        self._datafile_selected = False
         self.current_snapshots: dict[str, InstrumentSnapshot] = {}
         self._runtime_connection_summary: tuple[int, int] | None = None
         self.current_run_state = RunState.IDLE
+        self._close_after_stop = False
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
@@ -274,7 +276,7 @@ class MainWindow(QMainWindow):
 
         data_group = QGroupBox("Data File Name")
         data_layout = QVBoxLayout(data_group)
-        self.data_file_label = ElidedLabel("<created automatically>")
+        self.data_file_label = ElidedLabel("")
         data_layout.addWidget(self.data_file_label)
         data_buttons = QHBoxLayout()
         self.view_data_button = QPushButton("View")
@@ -866,6 +868,8 @@ class MainWindow(QMainWindow):
         ) = None,
     ) -> None:
         self.document = document
+        self.current_data_file = None
+        self._datafile_selected = False
         self.sequence_path = document.path
         imported = module_settings or (
             SequenceModuleSettings({}, {})
@@ -1020,15 +1024,20 @@ class MainWindow(QMainWindow):
         return list(dict.fromkeys(issues))
 
     def _sync_datafile_label(self) -> None:
+        if not self._datafile_selected:
+            self.data_file_label.setFullText("")
+            return
         for command in self.document.commands:
-            if command.type is CommandType.SET_DATAFILE:
+            if command.type is CommandType.SET_DATAFILE and command.enabled:
                 path_text = str(command.params.get("path", "experiment.dat"))
                 self.data_file_label.setFullText(path_text)
                 path = Path(path_text)
                 if path.is_absolute():
                     self._last_data_directory = path.parent
                 return
-        self.data_file_label.setFullText("<create experiment.dat automatically>")
+        self._datafile_selected = False
+        self.current_data_file = None
+        self.data_file_label.setFullText("")
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -1363,6 +1372,9 @@ class MainWindow(QMainWindow):
     def _remember_datafile_directory(self, command: Command) -> None:
         """记住参数窗口明确选择的目录，供下一次系统文件窗口使用。"""
 
+        if command.type is CommandType.SET_DATAFILE:
+            self._datafile_selected = bool(str(command.params["path"]).strip())
+            self.current_data_file = None
         if (
             command.type is not CommandType.SET_DATAFILE
             or command.params.get("path_scope") != "Custom folder"
@@ -1375,9 +1387,10 @@ class MainWindow(QMainWindow):
     def _change_datafile(self) -> None:
         selected, _ = QFileDialog.getSaveFileName(
             self,
-            "Select DAT File",
-            str(self._last_data_directory / "experiment.dat"),
+            "Select DAT File (append or create)",
+            str(self._last_data_directory),
             "Data (*.dat)",
+            options=QFileDialog.Option.DontConfirmOverwrite,
         )
         if not selected:
             return
@@ -1400,7 +1413,10 @@ class MainWindow(QMainWindow):
                 "path_scope": "Custom folder",
                 "path": selected,
             })
+        command.enabled = True
         self.editor.rebuild(command.id)
+        self._datafile_selected = True
+        self.current_data_file = None
         self._mark_dirty()
 
     def _view_data(self) -> None:
@@ -1451,6 +1467,13 @@ class MainWindow(QMainWindow):
                 "\n".join(
                     f"Line {item.line_number}: {item.message}" for item in errors[:12]
                 ),
+            )
+            return
+        if not self._datafile_selected or not self.data_file_label.fullText().strip():
+            QMessageBox.warning(
+                self,
+                "Select Data File",
+                "Select a DAT file before Run. Existing files will be appended; a new path creates a file.",
             )
             return
         try:
@@ -1745,12 +1768,6 @@ class MainWindow(QMainWindow):
         self._handle_module_alert(notice)
         if event.code == "RUN_DIRECTORY" and not notice.is_resolution:
             self.run_directory = Path(event.message)
-            self.current_data_file = Path(
-                event.context or event.message
-            )
-            self.data_file_label.setFullText(
-                str(self.current_data_file)
-            )
         elif event.code == "DATAFILE_SELECTED" and not notice.is_resolution:
             self.current_data_file = Path(event.message)
             self.data_file_label.setFullText(
@@ -1772,6 +1789,9 @@ class MainWindow(QMainWindow):
 
     def _handle_progress(self, progress: RunProgress) -> None:
         self.current_run_state = progress.state
+        self.editor.set_running_command(
+            "" if progress.state in self.TERMINAL_STATES else progress.command_id
+        )
         self.run_status_label.setText(f"Sequence {progress.state.value.title()}")
         self.run_detail_label.setText(progress.message)
         if progress.total_steps:
@@ -1785,6 +1805,10 @@ class MainWindow(QMainWindow):
             self.pause_button.setText("Pause")
             if progress.state is RunState.COMPLETED:
                 self.progress_bar.setValue(100)
+            if self._close_after_stop:
+                self._close_after_stop = False
+                if progress.state is not RunState.FAULTED:
+                    QTimer.singleShot(0, self.close)
         elif progress.state is RunState.PAUSED:
             self.pause_button.setText("Resume")
         else:
@@ -2376,6 +2400,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.current_run_state not in self.TERMINAL_STATES:
+            if self._close_after_stop:
+                event.ignore()
+                return
             answer = QMessageBox.question(
                 self,
                 "Sequence Is Running",
@@ -2387,6 +2414,11 @@ class MainWindow(QMainWindow):
             if answer == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
+            self._close_after_stop = True
+            self.runtime.stop_sequence()
+            self.run_detail_label.setText("Stopping sequence and waiting for module cleanup before closing")
+            event.ignore()
+            return
         for module_id in tuple(self.enabled_modules):
             try:
                 self._save_module_window(module_id)

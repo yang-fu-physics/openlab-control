@@ -85,6 +85,7 @@ class SequenceEngine:
         self._completed_steps = 0
         self._total_steps = 0
         self._current_path = ""
+        self._current_command_id = ""
         self._call_stack: list[Path] = []
         self.events.subscribe_occurrences(self._on_event)
 
@@ -124,6 +125,7 @@ class SequenceEngine:
         self._waiting_for_instruments = False
         self._completed_steps = 0
         self._call_stack.clear()
+        self._current_command_id = ""
         if document.path is not None:
             self._call_stack.append(document.path.resolve())
         # 在连接仪表、创建运行目录或移动第一个设定点之前递归验证全部参数，防止后段的
@@ -446,6 +448,7 @@ class SequenceEngine:
         for index, command in enumerate(commands, start=1):
             # 每条命令（包括嵌套 Scan 子命令）前都有统一 Pause/Stop/仪表恢复检查点。
             await self._checkpoint()
+            self._current_command_id = command.id
             parameter_issues = validate_command_parameters(command)
             if parameter_issues:
                 self._current_path = " / ".join(
@@ -478,6 +481,7 @@ class SequenceEngine:
                 self._current_path,
             )
             await self._execute_command(command, path)
+            self._current_command_id = command.id
             self._completed_steps += 1
             self.events.report(
                 Severity.INFO,
@@ -1194,6 +1198,7 @@ class SequenceEngine:
             message=message,
             completed_steps=self._completed_steps,
             total_steps=self._total_steps,
+            command_id=self._current_command_id,
         ))
 
     @staticmethod
