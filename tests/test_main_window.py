@@ -1116,6 +1116,59 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_set_datafile_after_measure_blocks_run_and_change_inserts_before_measure(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            nested_datafile = Command(
+                CommandType.SET_DATAFILE,
+                {
+                    "mode": "open|create",
+                    "path_scope": "Run folder",
+                    "path": "chosen.dat",
+                },
+            )
+            scan = Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 0.0, "steps": 1},
+                [Command(CommandType.MEASURE), nested_datafile],
+            )
+            window._set_document(SequenceDocument([scan], "measure-first.seq"))
+            window._remember_datafile_directory(nested_datafile)
+            window._mark_dirty()
+
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+            with (
+                patch.object(window.runtime, "run_sequence") as run_sequence,
+                patch("labcontrol.ui.main_window.QMessageBox.warning") as warning,
+            ):
+                window._run_sequence()
+            run_sequence.assert_not_called()
+            warning.assert_called_once()
+            self.assertIn("before the first Measure", warning.call_args.args[2])
+
+            # Top-level Measure followed by Set Datafile: Change must insert a new
+            # Set Datafile at the start instead of updating the later one in place.
+            late_datafile = Command(
+                CommandType.SET_DATAFILE,
+                {"mode": "open|create", "path_scope": "Run folder", "path": "late.dat"},
+            )
+            window._set_document(
+                SequenceDocument([Command(CommandType.MEASURE), late_datafile], "late-dat.seq")
+            )
+            chosen_path = ROOT / "chosen_first.dat"
+            with patch(
+                "labcontrol.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(chosen_path), "Data (*.dat)"),
+            ):
+                window._change_datafile()
+            self.assertEqual(window.document.commands[0].type, CommandType.SET_DATAFILE)
+            self.assertEqual(window.document.commands[0].params["path"], str(chosen_path.resolve()))
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), str(chosen_path.resolve()))
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()
