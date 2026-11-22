@@ -381,7 +381,7 @@ class CommandDialog(QDialog):
 
     def _on_step_editing_finished(self) -> None:
         if self._step_edited:
-            self._apply_step_input(restore_on_error=True)
+            self._apply_step_input()
 
     def _step_label_text(self, mode: str) -> str:
         if mode == "log":
@@ -426,6 +426,8 @@ class CommandDialog(QDialog):
         if isinstance(label, QLabel):
             label.setText(self._step_label_text(mode))
         if mode == "list":
+            self._step_edited = False
+            self.step_input.setToolTip("")
             return
         endpoints = self._read_scan_endpoints()
         text = ""
@@ -442,12 +444,16 @@ class CommandDialog(QDialog):
         self._syncing_step = True
         try:
             self.step_input.setText(text)
+            self.step_input.setToolTip("")
             self._step_edited = False
         finally:
             self._syncing_step = False
 
-    def _apply_step_input(self, *, restore_on_error: bool = False) -> str | None:
-        """把用户输入的步长/每十倍频点数取整到整数点数，并回写同步后的实际步长。"""
+    def _apply_step_input(self) -> str | None:
+        """把用户输入的步长/每十倍频点数取整到整数点数，并回写同步后的实际步长。
+
+        非法输入不会被静默恢复为旧步长，而是保留原文并在确认时拦截提示。
+        """
 
         if self.step_input is None or self.step_input.isHidden():
             self._step_edited = False
@@ -459,17 +465,22 @@ class CommandDialog(QDialog):
         raw = self.step_input.text().strip()
         endpoints = self._read_scan_endpoints()
         if endpoints is None:
-            if restore_on_error:
-                self._refresh_step_from_points()
-            return "Enter valid Start and Stop before setting Step"
+            error = "Enter valid Start and Stop before setting Step"
+            self.step_input.setToolTip(error)
+            return error
         start_dec, stop_dec, steps_widget = endpoints
         if not raw:
             if steps_widget.value() == 1:
+                self.step_input.setToolTip("")
                 self._step_edited = False
                 return None
-            if restore_on_error:
-                self._refresh_step_from_points()
-            return "Points per decade must be a positive number" if mode == "log" else "Step must be a non-zero finite number"
+            error = (
+                "Points per decade must be a positive number"
+                if mode == "log"
+                else "Step must be a non-zero finite number"
+            )
+            self.step_input.setToolTip(error)
+            return error
         try:
             if mode == "log":
                 per_decade = float(raw)
@@ -495,14 +506,15 @@ class CommandDialog(QDialog):
                 )
                 formatted = self._format_step_value(actual_step if new_steps > 1 else None)
         except (InvalidOperation, ValueError) as exc:
-            if restore_on_error:
-                self._refresh_step_from_points()
-            return str(exc) or "Invalid step value"
+            error = str(exc) or "Invalid step value"
+            self.step_input.setToolTip(error)
+            return error
 
         self._syncing_step = True
         try:
             steps_widget.setValue(new_steps)
             self.step_input.setText(formatted)
+            self.step_input.setToolTip("")
             self._step_edited = False
         finally:
             self._syncing_step = False
@@ -536,7 +548,7 @@ class CommandDialog(QDialog):
         """关闭前同步步长并验证列表语法、Log 约束及仪表/模块范围。"""
 
         if self._has_step_sync and self._step_edited:
-            step_error = self._apply_step_input(restore_on_error=False)
+            step_error = self._apply_step_input()
             if step_error is not None:
                 QMessageBox.warning(self, "Invalid Step", step_error)
                 if self.step_input is not None:

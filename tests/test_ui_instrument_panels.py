@@ -941,6 +941,19 @@ class InstrumentPanelTests(unittest.TestCase):
             self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
             self.assertEqual(dialog.values()["point_mode"], "Log")
             self.assertEqual(dialog.values()["steps"], 11)
+
+            # Focus-out on an invalid step must not silently restore the old step or allow accept.
+            dialog.inputs["point_mode"].setCurrentText("Linear")
+            dialog.inputs["steps"].setValue(10)
+            for bad_step in ("0", "abc", ""):
+                dialog.reject()
+                dialog.step_input.setText(bad_step)
+                dialog._on_step_editing_finished()
+                self.assertEqual(dialog.step_input.text(), bad_step)
+                with patch("labcontrol.ui.dialogs.QMessageBox.warning") as warn:
+                    dialog.accept()
+                warn.assert_called_once()
+                self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
         finally:
             dialog.close()
 

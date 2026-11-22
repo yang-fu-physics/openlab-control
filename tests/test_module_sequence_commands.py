@@ -529,6 +529,21 @@ class ModuleCommandUITests(unittest.TestCase):
                 dialog.values(),
                 {"point_mode": "Log", "start": "10u", "stop": "1m", "steps": 11, "settle_seconds": 3.0},
             )
+            # Invalid step input (0, text, blank) must be kept after focus-out and block accept.
+            dialog.inputs["point_mode"].setCurrentText("Linear")
+            dialog.inputs["start"].setText("0")
+            dialog.inputs["stop"].setText("1m")
+            dialog.inputs["steps"].setValue(5)
+            for bad_step in ("0", "abc", ""):
+                dialog.reject()
+                dialog.step_input.setText(bad_step)
+                dialog._on_step_editing_finished()
+                self.assertEqual(dialog.step_input.text(), bad_step)
+                with patch("labcontrol.ui.dialogs.QMessageBox.warning") as warn:
+                    dialog.accept()
+                warn.assert_called_once()
+                self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
+                self.assertEqual(dialog.step_input.text(), bad_step)
         finally:
             dialog.close()
 

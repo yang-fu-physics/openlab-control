@@ -884,7 +884,7 @@ class SequenceEngineTests(unittest.TestCase):
                     "start": 300.0,
                     "stop": 3.0,
                     "steps": 3,
-                    "rate": 50.0,
+                    "rate": 30.0,
                     "mode": "Settle",
                 },
                 [measure],
