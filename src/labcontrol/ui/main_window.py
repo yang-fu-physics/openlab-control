@@ -2308,7 +2308,12 @@ class MainWindow(QMainWindow):
             self.runtime.refresh_module_status(module_id)
 
     def _refresh_modules(self) -> None:
-        if self.enabled_modules or self.current_run_state not in self.TERMINAL_STATES:
+        if (
+            self.enabled_modules
+            or self._pending_module_operations
+            or self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        ):
             QMessageBox.warning(
                 self,
                 "Refresh Unavailable",
@@ -2316,7 +2321,11 @@ class MainWindow(QMainWindow):
             )
             return
         descriptors = self._discover_module_descriptors()
-        self.runtime.replace_module_descriptors(descriptors)
+        try:
+            self.runtime.replace_module_descriptors(descriptors).result(timeout=5.0)
+        except Exception as exc:
+            QMessageBox.warning(self, "Refresh Modules Failed", str(exc))
+            return
         for window in self.module_windows.values():
             window.allow_application_close()
             window.close()

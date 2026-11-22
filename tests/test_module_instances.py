@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import Future
 import os
 import shutil
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -489,6 +491,93 @@ class ModuleInstanceUITests(unittest.TestCase):
             manager.set_operations_enabled(False)
             self.assertFalse(manager.add_instance_button.isEnabled())
             self.assertFalse(manager.remove_instance_button.isEnabled())
+        finally:
+            manager.close()
+            owner.close()
+
+    def test_refresh_modules_preserves_ui_when_backend_rejects_refresh(self) -> None:
+        from PySide6.QtWidgets import QLabel, QWidget
+
+        from labcontrol.models import RunState
+        from labcontrol.ui.main_window import MainWindow
+        from labcontrol.ui.measurement_modules import ModuleManagerDialog
+
+        owner = QWidget()
+        base = ModuleDescriptor("keithley_2400", "Keithley 2400", "1.0.0", Path("."))
+        extra = ModuleDescriptor(
+            "keithley_2400_gate",
+            "Keithley 2400 - Gate",
+            "1.0.0",
+            Path("."),
+            template_id="keithley_2400",
+        )
+        manager = ModuleManagerDialog((base,), owner)
+        status_messages: list[str] = []
+        monitor_clears: list[bool] = []
+        closed_windows: list[str] = []
+        palette_updates: list[tuple[str, list[object]]] = []
+
+        class _FakeModuleWindow:
+            def allow_application_close(self) -> None:
+                closed_windows.append("allow")
+
+            def close(self) -> None:
+                closed_windows.append("close")
+
+        rejected_future: Future[None] = Future()
+        rejected_future.set_exception(
+            InstrumentError("VISA lock retained", "MODULE_REFRESH_BLOCKED")
+        )
+        ok_future: Future[None] = Future()
+        ok_future.set_result(None)
+        futures = [rejected_future, ok_future]
+
+        fake_window = SimpleNamespace(
+            TERMINAL_STATES=MainWindow.TERMINAL_STATES,
+            enabled_modules=set(),
+            _pending_module_operations={},
+            current_run_state=RunState.IDLE,
+            _pending_run=None,
+            _discover_module_descriptors=lambda: (base, extra),
+            runtime=SimpleNamespace(replace_module_descriptors=lambda _d: futures.pop(0)),
+            module_windows={"keithley_2400": _FakeModuleWindow()},
+            module_monitor_group=SimpleNamespace(clear=lambda: monitor_clears.append(True)),
+            _module_command_groups={"keithley_2400": object()},
+            _set_module_command_palette=lambda mid, cmds: palette_updates.append((mid, cmds)),
+            module_descriptors=(base,),
+            module_manager=manager,
+            measure_status_label=QLabel("0 of 1 measurement modules enabled"),
+            statusBar=lambda: SimpleNamespace(
+                showMessage=lambda text, _ms=0: status_messages.append(text)
+            ),
+        )
+        try:
+            # Backend rejects Refresh (e.g. retained VISA resource lock): UI must remain intact.
+            with patch("labcontrol.ui.main_window.QMessageBox.warning") as warn:
+                MainWindow._refresh_modules(fake_window)  # type: ignore[arg-type]
+            warn.assert_called_once()
+            self.assertIn("VISA lock retained", str(warn.call_args))
+            self.assertEqual(fake_window.module_descriptors, (base,))
+            self.assertEqual(manager.descriptors, (base,))
+            self.assertIn("keithley_2400", fake_window.module_windows)
+            self.assertEqual(closed_windows, [])
+            self.assertEqual(monitor_clears, [])
+            self.assertEqual(palette_updates, [])
+            self.assertEqual(fake_window.measure_status_label.text(), "0 of 1 measurement modules enabled")
+            self.assertEqual(status_messages, [])
+
+            # Once backend accepts Refresh, UI updates cleanly to the newly discovered descriptors.
+            with patch("labcontrol.ui.main_window.QMessageBox.warning") as warn:
+                MainWindow._refresh_modules(fake_window)  # type: ignore[arg-type]
+            warn.assert_not_called()
+            self.assertEqual(fake_window.module_descriptors, (base, extra))
+            self.assertEqual(manager.descriptors, (base, extra))
+            self.assertEqual(fake_window.module_windows, {})
+            self.assertEqual(closed_windows, ["allow", "close"])
+            self.assertEqual(monitor_clears, [True])
+            self.assertEqual(palette_updates, [("keithley_2400", [])])
+            self.assertEqual(fake_window.measure_status_label.text(), "0 of 2 measurement modules enabled")
+            self.assertEqual(status_messages, ["Found 2 measurement modules"])
         finally:
             manager.close()
             owner.close()
