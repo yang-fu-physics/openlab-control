@@ -2436,7 +2436,7 @@
 <li><strong>检查底部仪表</strong>：确认已配置的系统仪表面板连接正常、读数合理（全新安装没有任何面板也是正常的）。</li>
 <li><strong>加载或编写 SEQ</strong>：打开 <code>.seq</code> 文件（如有配套 <code>.modules.toml</code>，参数会自动填进对应模块界面）。</li>
 <li><strong>启用并应用测量模块</strong>：在 <strong>Modules</strong> 中勾选本次要用的模块，核对 <strong>Settings</strong> 后点击 <strong>Apply Settings</strong> 下发到仪表。</li>
-<li><strong>确认文件并运行</strong>：核对左侧数据文件位置，点击 <strong>Run</strong>；实验进行中可随时打开 <strong>Data Browser</strong> 看实时曲线。</li>
+<li><strong>选择输出文件并运行</strong>：启动程序或切换 SEQ 后，左侧数据文件栏默认为空；先点击 <strong>Change</strong>（或编辑 <code>Set Datafile</code>）明确选定输出 DAT（已有文件默认续写并校验列结构，新路径自动创建），再点击 <strong>Run</strong>；实验进行中可随时打开 <strong>Data Browser</strong> 看实时曲线。</li>
 <li><strong>归档结果</strong>：实验结束后，建议连同 <code>runs/&lt;时间&gt;_&lt;序列名&gt;/</code> 整个目录一起备份（对外分享前记得脱敏其中的 <code>configuration/</code>）。</li>
 </ol>
 <hr />
@@ -2548,7 +2548,7 @@
 <hr />
 <h2 id="_9">运行控制、手动控制与报警<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h2>
 <h3 id="_10">运行与暂停 / 停止<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
-<p>点击 <strong>Run</strong> 后，SEQ 编辑器、模块启停与设置页面都会锁定，本次参与测量的模块和列结构即固定下来：</p>
+<p>点击 <strong>Run</strong> 后，SEQ 编辑器、模块启停与设置页面都会锁定，本次参与测量的模块和列结构即固定下来；编辑器会以琥珀黄色高亮并自动定位当前执行行（暂停时保留，停止或结束后清除，不改变手动选中项）：</p>
 <ul>
 <li><strong>Pause</strong>：在检查点暂停推进和等待计时，不断开仪表、不关输出；点 <strong>Resume</strong> 继续。</li>
 <li><strong>Stop</strong>：取消后续步骤，向模块发出 <code>run_end("stopped")</code> 收尾，但<strong>不向系统仪表发 Set 或 Hold</strong>（温控与磁体保持当前仪表内目标）。</li>
@@ -2621,7 +2621,7 @@
 </span></code></pre></div>
 <p>实验结束后建议整文件夹打包备份，复现实验时直接打开其中的 <code>sequence.seq</code> 即可恢复参数视图。对外分享前务必检查 <code>configuration/</code> 并删除本机地址或隐私路径。</p>
 <h3 id="_13">关闭程序<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h3>
-<p>运行中关闭主窗口会先弹出确认。确认后程序依次：停止 SEQ → 保存已启用模块的 Settings → 对每个模块调用 <code>close()</code> → 断开系统仪表 → 关闭日志并退出。下次启动时所有模块仍恢复 <code>Disabled</code>。</p>
+<p>运行中关闭主窗口会先弹出确认。确认后程序先请求停止 SEQ 并等待模块完成收尾（例如源表降流与关断）；若收尾失败（<code>Faulted</code>）会保持窗口打开以展示错误，收尾完成后再依次保存已启用模块的 Settings → 对每个模块调用 <code>close()</code> → 断开系统仪表 → 关闭日志并退出。下次启动时所有模块仍恢复 <code>Disabled</code>。</p>
 <hr />
 <h2 id="_14">常见问题速查<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h2>
 <ul>
