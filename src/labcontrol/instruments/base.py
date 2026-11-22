@@ -159,6 +159,20 @@ class SystemInstrument(ABC):
             command_id,
         )
 
+    def execute_action(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """执行自定义卡片或 Instrument Setup 窗口请求的同步后台动作；默认明确拒绝。"""
+
+        del payload
+        raise InstrumentError(
+            f"Instrument {self.config.id} does not support action {action!r}",
+            "UNSUPPORTED_INSTRUMENT_ACTION",
+            action,
+        )
+
     def event_responses(self) -> tuple[EventResponseSpec, ...]:
         """声明由核心执行的事件响应；默认不注册任何响应。"""
 

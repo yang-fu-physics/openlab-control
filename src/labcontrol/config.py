@@ -96,6 +96,7 @@ class InstrumentPanelConfig:
     setpoint_decimals: int | None = None
     fine_setpoint_below: float | None = None
     rate_decimals: int | None = None
+    widget: str = ""
 
     def target_precision(self, target: float) -> int | None:
         if self.fine_setpoint_below is not None and target < self.fine_setpoint_below:

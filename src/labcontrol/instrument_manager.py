@@ -16,11 +16,12 @@ import inspect
 import math
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from copy import deepcopy
-from typing import TypeVar
+from typing import Any, TypeVar
 
-from .config import AppConfig, InstrumentConfig, InstrumentPanelConfig
+from .config import AppConfig, ConfigurationError, InstrumentConfig, InstrumentPanelConfig
+from .instrument_configuration import update_instrument_instance_config
 from .instruments.base import (
     EventResponseSpec,
     InstrumentError,
@@ -922,7 +923,7 @@ class InstrumentManager:
             await gate.acquire(priority)
             try:
                 if operation in {"set_target", "hold"} or operation.startswith(
-                    "sequence_command:"
+                    ("sequence_command:", "action:")
                 ):
                     self._ensure_event_response_control(
                         instrument_id,
@@ -2131,6 +2132,146 @@ class InstrumentManager:
             )
             raise
         return True
+
+    async def execute_action(
+        self,
+        instrument_id: str,
+        action: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        read_only: bool = False,
+    ) -> dict[str, Any]:
+        """串行执行系统仪表自定义前端动作；写动作仅限 SEQ Idle，支持受控配置持久化。"""
+
+        if instrument_id not in self.instruments:
+            raise InstrumentError(
+                f"Unknown system instrument: {instrument_id}",
+                "UNKNOWN_INSTRUMENT",
+                instrument_id,
+            )
+        action_name = str(action).strip()
+        if not action_name:
+            raise InstrumentError(
+                "Instrument action name must not be empty",
+                "INVALID_INSTRUMENT_ACTION",
+                instrument_id,
+            )
+        request_payload = dict(payload or {})
+        config = self.instrument_configs[instrument_id]
+        operation = (
+            f"read_action:{action_name}"
+            if read_only
+            else f"action:{action_name}"
+        )
+        try:
+            if not read_only:
+                self._ensure_event_response_control(instrument_id, "manual")
+            raw_result = await self._operate(
+                instrument_id,
+                operation,
+                lambda: self.instruments[instrument_id].execute_action(
+                    action_name,
+                    request_payload,
+                ),
+                origin=None if read_only else "manual",
+                priority=(
+                    _INSTRUMENT_MEASUREMENT_PRIORITY
+                    if read_only
+                    else _INSTRUMENT_CONTROL_PRIORITY
+                ),
+            )
+        except InstrumentWarning as exc:
+            self.events.report(
+                Severity.WARNING,
+                instrument_id,
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            raise
+        except InstrumentError as exc:
+            if not read_only and self._uncertain_write_error(exc):
+                await self._fault_uncertain_write(
+                    instrument_id,
+                    operation,
+                    exc,
+                )
+                raise InstrumentError(
+                    f"{config.display_name} action {action_name!r} could not be "
+                    "confirmed and was not replayed",
+                    "INSTRUMENT_WRITE_RESULT_UNKNOWN",
+                    instrument_id,
+                ) from exc
+            self.events.report(
+                Severity.ERROR,
+                instrument_id,
+                exc.code,
+                str(exc),
+                exc.context,
+            )
+            raise
+
+        result = dict(raw_result) if isinstance(raw_result, Mapping) else {}
+        if "config_updates" in result:
+            raw_updates = result.pop("config_updates")
+            if read_only:
+                raise InstrumentError(
+                    "Read-only instrument action cannot persist configuration updates",
+                    "INVALID_INSTRUMENT_ACTION_RESULT",
+                    instrument_id,
+                )
+            if raw_updates:
+                if not isinstance(raw_updates, Mapping):
+                    raise InstrumentError(
+                        "Instrument config_updates must be a mapping",
+                        "INVALID_INSTRUMENT_ACTION_RESULT",
+                        instrument_id,
+                    )
+                descriptor = self.descriptors.get(config.backend)
+                if descriptor is None:
+                    raise InstrumentError(
+                        f"Instrument {instrument_id} cannot persist config_updates without an external manifest",
+                        "INSTRUMENT_CONFIG_SAVE_FAILED",
+                        instrument_id,
+                    )
+                try:
+                    normalized = update_instrument_instance_config(
+                        self.config.source_path.parent,
+                        self.config.project_root,
+                        descriptor,
+                        instrument_id,
+                        raw_updates,
+                    )
+                except (ConfigurationError, OSError, ValueError) as exc:
+                    self.events.report(
+                        Severity.ERROR,
+                        instrument_id,
+                        "INSTRUMENT_CONFIG_SAVE_FAILED",
+                        str(exc),
+                        instrument_id,
+                    )
+                    raise InstrumentError(
+                        f"Failed to persist configuration for {config.display_name}: {exc}",
+                        "INSTRUMENT_CONFIG_SAVE_FAILED",
+                        instrument_id,
+                    ) from exc
+                config.extras.update(normalized)
+                result["persisted_config"] = deepcopy(normalized)
+
+        if not read_only:
+            summary = str(result.get("summary", "")).strip()
+            self.events.report(
+                Severity.INFO,
+                instrument_id,
+                "INSTRUMENT_ACTION_COMPLETED",
+                summary or f"{config.display_name} action {action_name} completed",
+                action_name,
+            )
+            try:
+                await self._poll_one(instrument_id)
+            except Exception:
+                pass
+        return result
 
     def _record_confirmed_hold(
         self,

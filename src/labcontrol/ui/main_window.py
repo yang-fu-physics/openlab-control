@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 import qtawesome as qta
-from PySide6.QtCore import QEvent, QSize, QTimer, Qt
+from PySide6.QtCore import QEvent, QObject, QSize, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -39,7 +39,8 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..config import AppConfig
+from ..config import AppConfig, InstrumentConfig
+from ..instruments.frontend_api import InstrumentUIAPI
 from ..instruments.manifest import SystemInstrumentDescriptor
 from ..formatting import control_decimals, fixed_number
 from ..models import (
@@ -94,6 +95,7 @@ from .measurement_modules import (
 )
 from .module_monitor import ModuleMonitorPanel
 from .instrument_panels import InstrumentPanelHost
+from .instrument_setup import InstrumentSetupDialog
 from .preferences import UiPreferences, UiPreferenceStore
 from .scaling import (
     current_font_scale,
@@ -176,6 +178,7 @@ class MainWindow(QMainWindow):
         self.current_run_state = RunState.IDLE
         self._close_after_stop = False
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
+        self.instrument_setup_dialog: InstrumentSetupDialog | None = None
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
         # 这份注册表只包含 open 已成功的 Enabled 模块。Disable 或 worker 故障会立即
@@ -507,9 +510,12 @@ class MainWindow(QMainWindow):
             self.config.instrument_instances,
             self.config.panels,
             self._instrument_sequence_commands,
+            descriptors=self.runtime.instrument_descriptors,
+            ui_api_factory=self._create_instrument_ui_api,
         )
         panel.controlRequested.connect(self._open_manual_control)
         panel.actionRequested.connect(self._manual_instrument_action)
+        panel.setupRequested.connect(self._open_instrument_setup)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -604,9 +610,11 @@ class MainWindow(QMainWindow):
         graph_menu = menu.addMenu("Graph")
         graph_menu.addActions([self.graph_action, self.data_browser_action])
         instrument_menu = menu.addMenu("Instrument")
+        has_controller_menu = False
         for panel in self.config.panels:
             if panel.template != "controller":
                 continue
+            has_controller_menu = True
             instrument = self.config.instrument(panel.instrument_id)
             action = instrument_menu.addAction(
                 f"{instrument.display_name} — {panel.display_name}"
@@ -616,6 +624,14 @@ class MainWindow(QMainWindow):
                     self._open_manual_control(instrument_id, panel_id)
                 )
             )
+        setup_entries = self._setup_capable_instruments()
+        if has_controller_menu:
+            instrument_menu.addSeparator()
+        self.instrument_setup_action = instrument_menu.addAction("Instrument Setup…")
+        self.instrument_setup_action.setEnabled(bool(setup_entries))
+        self.instrument_setup_action.triggered.connect(
+            lambda checked=False: self._open_instrument_setup()
+        )
         modules_menu = menu.addMenu("Modules")
         modules_menu.addAction(self.modules_action)
         simulation_menu = menu.addMenu("Simulation")
@@ -732,6 +748,11 @@ class MainWindow(QMainWindow):
             store.set_geometry(
                 f"manual/{instrument_id}",
                 dialog.saveGeometry(),
+            )
+        if self.instrument_setup_dialog is not None:
+            store.set_geometry(
+                "instrument_setup",
+                self.instrument_setup_dialog.saveGeometry(),
             )
         for module_id, window in self.module_windows.items():
             store.set_geometry(
@@ -1717,6 +1738,8 @@ class MainWindow(QMainWindow):
             window.set_sequence_running(not editable)
         for dialog in self.manual_dialogs.values():
             dialog.set_runtime_editable(editable)
+        if self.instrument_setup_dialog is not None:
+            self.instrument_setup_dialog.set_runtime_editable(editable)
         self.status_panel.set_actions_enabled(editable)
 
     def _drain_runtime_messages(self) -> None:
@@ -1878,6 +1901,8 @@ class MainWindow(QMainWindow):
             for dialog in self.manual_dialogs.values():
                 if dialog.config.id == instrument_id:
                     dialog.update_snapshot(snapshot)
+            if self.instrument_setup_dialog is not None:
+                self.instrument_setup_dialog.update_snapshot(snapshot)
         self.trend_dialog.add_snapshots(snapshots)
         self._update_run_availability()
 
@@ -2514,6 +2539,69 @@ class MainWindow(QMainWindow):
         dialog.raise_()
         dialog.activateWindow()
 
+    def _setup_capable_instruments(
+        self,
+    ) -> tuple[tuple[InstrumentConfig, SystemInstrumentDescriptor], ...]:
+        descriptors_by_id = {
+            descriptor.id: descriptor
+            for descriptor in self.runtime.instrument_descriptors
+            if descriptor.can_load and descriptor.setup_widget
+        }
+        result: list[tuple[InstrumentConfig, SystemInstrumentDescriptor]] = []
+        for instrument in self.config.instrument_instances:
+            descriptor = descriptors_by_id.get(instrument.backend)
+            if descriptor is not None:
+                result.append((instrument, descriptor))
+        return tuple(result)
+
+    def _create_instrument_ui_api(
+        self,
+        config: InstrumentConfig,
+        parent: QObject | None = None,
+    ) -> InstrumentUIAPI:
+        editable = (
+            self.current_run_state in self.TERMINAL_STATES
+            and self._pending_run is None
+        )
+        return InstrumentUIAPI(
+            config,
+            lambda inst_id, action, payload, read_only: self.runtime.execute_instrument_action(
+                inst_id,
+                action,
+                payload,
+                read_only=read_only,
+            ),
+            parent,
+            runtime_editable=editable,
+            snapshot=self.current_snapshots.get(config.id),
+        )
+
+    def _open_instrument_setup(self, instrument_id: str | None = None) -> None:
+        entries = self._setup_capable_instruments()
+        if not entries:
+            QMessageBox.information(
+                self,
+                "Instrument Setup Unavailable",
+                "No configured System Instruments declare an Instrument Setup interface.",
+            )
+            return
+        if self.instrument_setup_dialog is None:
+            dialog = InstrumentSetupDialog(
+                entries,
+                self._create_instrument_ui_api,
+                self,
+            )
+            self._restore_dialog_geometry(dialog, "instrument_setup")
+            self.instrument_setup_dialog = dialog
+        editable = (
+            self.current_run_state in self.TERMINAL_STATES
+            and self._pending_run is None
+        )
+        self.instrument_setup_dialog.set_runtime_editable(editable)
+        for snapshot in self.current_snapshots.values():
+            self.instrument_setup_dialog.update_snapshot(snapshot)
+        self.instrument_setup_dialog.open_for(instrument_id)
+
     def _manual_set_target(
         self,
         instrument_id: str,
@@ -2765,6 +2853,9 @@ class MainWindow(QMainWindow):
                 "Window Layout Save Failed",
                 f"The application will continue closing.\n\n{exc}",
             )
+        if self.instrument_setup_dialog is not None:
+            self.instrument_setup_dialog.allow_application_close()
+            self.instrument_setup_dialog.close()
         for window in self.module_windows.values():
             window.allow_application_close()
             window.close()

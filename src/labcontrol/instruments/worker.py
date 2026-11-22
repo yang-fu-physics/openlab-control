@@ -376,6 +376,34 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
                 value = backend.execute_sequence_command(
                     str(payload["command_id"])
                 )
+            elif action == "execute_action":
+                action_name = str(payload.get("name", "")).strip()
+                action_payload = payload.get("payload", {})
+                if not action_name:
+                    raise InstrumentError(
+                        "Instrument action name must not be empty",
+                        "INVALID_INSTRUMENT_ACTION",
+                    )
+                if not isinstance(action_payload, dict):
+                    raise InstrumentError(
+                        "Instrument action payload must be a dictionary",
+                        "INVALID_INSTRUMENT_ACTION",
+                        action_name,
+                    )
+                raw_result = backend.execute_action(
+                    action_name,
+                    dict(action_payload),
+                )
+                if raw_result is None:
+                    value = {}
+                elif isinstance(raw_result, dict):
+                    value = raw_result
+                else:
+                    raise InstrumentError(
+                        "Instrument execute_action() must return a dictionary",
+                        "INVALID_INSTRUMENT_ACTION_RESULT",
+                        action_name,
+                    )
             elif action == "event_responses":
                 try:
                     value = _event_response_payload(
@@ -867,6 +895,16 @@ class IsolatedInstrumentClient:
             {"command_id": command_id},
         )
 
+    async def execute_action(
+        self,
+        name: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "execute_action",
+            {"name": str(name).strip(), "payload": dict(payload or {})},
+        )
+
     async def shutdown(
         self,
         timeout_seconds: float | None = None,
@@ -945,6 +983,42 @@ class InProcessInstrumentClient:
             self.backend.execute_sequence_command,
             command_id,
         )
+
+    async def execute_action(
+        self,
+        name: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        action_name = str(name).strip()
+        if not action_name:
+            raise InstrumentError(
+                "Instrument action name must not be empty",
+                "INVALID_INSTRUMENT_ACTION",
+            )
+        raw_result = await asyncio.to_thread(
+            self.backend.execute_action,
+            action_name,
+            dict(payload or {}),
+        )
+        if raw_result is None:
+            result: dict[str, Any] = {}
+        elif isinstance(raw_result, dict):
+            result = dict(raw_result)
+        else:
+            raise InstrumentError(
+                "Instrument execute_action() must return a dictionary",
+                "INVALID_INSTRUMENT_ACTION_RESULT",
+                action_name,
+            )
+        try:
+            json.dumps(result, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise InstrumentError(
+                f"Instrument action result is not JSON serializable: {exc}",
+                "INVALID_INSTRUMENT_ACTION_RESULT",
+                action_name,
+            ) from exc
+        return result
 
     async def shutdown(
         self,
