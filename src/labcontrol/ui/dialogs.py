@@ -216,6 +216,11 @@ class CommandDialog(QDialog):
                 "Select or Create DAT File",
                 str(initial),
                 "Data (*.dat);;All Files (*)",
+                options=(
+                    QFileDialog.Option.DontConfirmOverwrite
+                    if mode == "open|create"
+                    else QFileDialog.Option(0)
+                ),
             )
         if not selected:
             return

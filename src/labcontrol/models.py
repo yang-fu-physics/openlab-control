@@ -174,3 +174,4 @@ class RunProgress:
     message: str = ""
     completed_steps: int = 0
     total_steps: int = 0
+    command_id: str = ""

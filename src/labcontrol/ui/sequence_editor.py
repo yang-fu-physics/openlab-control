@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QItemSelectionModel, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence
-from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMenu, QVBoxLayout, QWidget
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
+from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMenu, QStyledItemDelegate, QVBoxLayout, QWidget
 
 from ..sequence.model import Command, CommandType, FlatRow, SequenceDocument
 from ..sequence.parser import format_command
@@ -29,6 +29,19 @@ def _display_command(command: Command) -> str:
     return format_command(command, preserve_raw=not is_temperature_list)
 
 
+class RunningCommandDelegate(QStyledItemDelegate):
+    """Keep the execution marker visible even when the row is selected."""
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        if index.data(Qt.ItemDataRole.UserRole + 1):
+            option.backgroundBrush = QColor("#ffe082")
+            option.palette.setColor(QPalette.ColorRole.Highlight, QColor("#ffe082"))
+            option.palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#332600"))
+            option.palette.setColor(QPalette.ColorRole.Text, QColor("#332600"))
+            option.font.setBold(True)
+
+
 class SequenceEditorWidget(QWidget):
     """支持任意嵌套、批量启停、复制粘贴和键盘快捷键的 SEQ 编辑控件。"""
 
@@ -43,9 +56,11 @@ class SequenceEditorWidget(QWidget):
         ] = set()
         self._clipboard: tuple[Command, ...] = ()
         self._editable = True
+        self._running_command_id = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         self.list = QListWidget()
+        self.list.setItemDelegate(RunningCommandDelegate(self.list))
         self.list.setAlternatingRowColors(True)
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.list.itemDoubleClicked.connect(self._on_double_clicked)
@@ -103,6 +118,7 @@ class SequenceEditorWidget(QWidget):
         """切换当前文档并清除旧选择。"""
 
         self.document = document
+        self._running_command_id = ""
         self.rebuild(preserve_selection=False)
 
     def set_available_module_commands(
@@ -132,6 +148,27 @@ class SequenceEditorWidget(QWidget):
         """构造重建列表前后可比较的稳定行键。"""
 
         return None if row is None else (row.command_id, row.is_end, row.is_sequence_end)
+
+    def set_running_command(
+        self,
+        command_id: str,
+        *,
+        scroll: bool | None = None,
+    ) -> None:
+        """Mark the executing command without changing the user's selection."""
+
+        changed = command_id != self._running_command_id
+        should_scroll = changed if scroll is None else scroll
+        self._running_command_id = command_id
+        for index in range(self.list.count()):
+            item = self.list.item(index)
+            row = item.data(Qt.ItemDataRole.UserRole)
+            running = bool(command_id) and row.command_id == command_id and not row.is_end
+            item.setData(Qt.ItemDataRole.UserRole + 1, running)
+            if running and should_scroll:
+                horizontal = self.list.horizontalScrollBar().value()
+                self.list.scrollToItem(item)
+                self.list.horizontalScrollBar().setValue(horizontal)
 
     def rebuild(
         self,
@@ -230,6 +267,7 @@ class SequenceEditorWidget(QWidget):
         # 添加或选中长命令时 QListWidget 可能自动滚到文本右端；总是回到最左侧，让命令前缀
         # 在大字体和 4K 缩放下仍然可见。
         self.list.horizontalScrollBar().setValue(0)
+        self.set_running_command(self._running_command_id, scroll=False)
         self._update_action_states()
 
     def selected_row(self) -> FlatRow | None:

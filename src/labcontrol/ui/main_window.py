@@ -165,9 +165,11 @@ class MainWindow(QMainWindow):
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
+        self._datafile_selected = False
         self.current_snapshots: dict[str, InstrumentSnapshot] = {}
         self._runtime_connection_summary: tuple[int, int] | None = None
         self.current_run_state = RunState.IDLE
+        self._close_after_stop = False
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
@@ -274,7 +276,7 @@ class MainWindow(QMainWindow):
 
         data_group = QGroupBox("Data File Name")
         data_layout = QVBoxLayout(data_group)
-        self.data_file_label = ElidedLabel("<created automatically>")
+        self.data_file_label = ElidedLabel("")
         data_layout.addWidget(self.data_file_label)
         data_buttons = QHBoxLayout()
         self.view_data_button = QPushButton("View")
@@ -866,6 +868,8 @@ class MainWindow(QMainWindow):
         ) = None,
     ) -> None:
         self.document = document
+        self.current_data_file = None
+        self._datafile_selected = False
         self.sequence_path = document.path
         imported = module_settings or (
             SequenceModuleSettings({}, {})
@@ -1019,16 +1023,141 @@ class MainWindow(QMainWindow):
         visit(document.commands, True)
         return list(dict.fromkeys(issues))
 
-    def _sync_datafile_label(self) -> None:
+    def _datafile_outcome(
+        self,
+        commands: list[Command],
+        parent_enabled: bool,
+        current_base: Path,
+        stack: set[Path],
+        *,
+        in_main: bool,
+    ) -> tuple[str, Command | None]:
+        """按执行顺序检查首次有效 Measure 之前是否已执行有效 Set Datafile。"""
+
+        instrument_commands = getattr(self, "_instrument_sequence_commands", ())
+        for command in commands:
+            effective = parent_enabled and command.enabled
+            if not effective:
+                continue
+            if command.type is CommandType.SET_DATAFILE:
+                return ("datafile", command if in_main else None)
+            if command.type is CommandType.MEASURE:
+                return ("measure", None)
+            if command.type is CommandType.CALL_SEQUENCE:
+                requested = str(command.params.get("path", "")).strip()
+                if requested:
+                    source = Path(requested)
+                    if not source.is_absolute():
+                        source = (current_base / source).resolve()
+                    if source not in stack and source.is_file():
+                        try:
+                            parsed = load_sequence(
+                                source,
+                                instrument_commands=instrument_commands,
+                            )
+                        except OSError:
+                            parsed = None
+                        if parsed is not None and not parsed.has_errors:
+                            outcome, _ = self._datafile_outcome(
+                                parsed.document.commands,
+                                True,
+                                source.parent,
+                                stack | {source},
+                                in_main=False,
+                            )
+                            if outcome == "measure":
+                                return ("measure", None)
+                            if outcome == "datafile":
+                                continue
+            if command.children:
+                outcome, found = self._datafile_outcome(
+                    command.children,
+                    effective,
+                    current_base,
+                    stack,
+                    in_main=in_main,
+                )
+                if outcome != "none":
+                    return (outcome, found)
+        return ("none", None)
+
+    def _first_effective_datafile_command(self) -> Command | None:
+        sequence_path = getattr(self, "sequence_path", None)
+        base_directory = (
+            sequence_path.resolve().parent
+            if sequence_path is not None
+            else self.config.project_root
+        )
+        call_stack: set[Path] = (
+            {sequence_path.resolve()} if sequence_path is not None else set()
+        )
+        outcome, found = self._datafile_outcome(
+            self.document.commands,
+            True,
+            base_directory,
+            call_stack,
+            in_main=True,
+        )
+        return found if outcome == "datafile" else None
+
+    def _has_any_effective_datafile_command(
+        self,
+        commands: list[Command] | None = None,
+        parent_enabled: bool = True,
+    ) -> bool:
+        for command in self.document.commands if commands is None else commands:
+            effective = parent_enabled and command.enabled
+            if not effective:
+                continue
+            if command.type is CommandType.SET_DATAFILE:
+                return True
+            if self._has_any_effective_datafile_command(command.children, effective):
+                return True
+        return False
+
+    def _top_level_datafile_before_measure(self) -> Command | None:
+        """返回位于首次有效 Measure 之前的首个顶层 Set Datafile（含禁用态以便 Change 启用）。"""
+
+        sequence_path = getattr(self, "sequence_path", None)
+        base_directory = (
+            sequence_path.resolve().parent
+            if sequence_path is not None
+            else self.config.project_root
+        )
+        call_stack: set[Path] = (
+            {sequence_path.resolve()} if sequence_path is not None else set()
+        )
         for command in self.document.commands:
             if command.type is CommandType.SET_DATAFILE:
-                path_text = str(command.params.get("path", "experiment.dat"))
-                self.data_file_label.setFullText(path_text)
-                path = Path(path_text)
-                if path.is_absolute():
-                    self._last_data_directory = path.parent
-                return
-        self.data_file_label.setFullText("<create experiment.dat automatically>")
+                return command
+            if not command.enabled:
+                continue
+            outcome, _ = self._datafile_outcome(
+                [command],
+                True,
+                base_directory,
+                call_stack,
+                in_main=True,
+            )
+            if outcome == "measure":
+                return None
+        return None
+
+    def _sync_datafile_label(self) -> None:
+        if not self._datafile_selected:
+            self.data_file_label.setFullText("")
+            return
+        command = self._first_effective_datafile_command()
+        if command is not None:
+            path_text = str(command.params.get("path", "experiment.dat"))
+            self.data_file_label.setFullText(path_text)
+            path = Path(path_text)
+            if path.is_absolute():
+                self._last_data_directory = path.parent
+            return
+        self._datafile_selected = False
+        self.current_data_file = None
+        self.data_file_label.setFullText("")
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -1363,6 +1492,9 @@ class MainWindow(QMainWindow):
     def _remember_datafile_directory(self, command: Command) -> None:
         """记住参数窗口明确选择的目录，供下一次系统文件窗口使用。"""
 
+        if command.type is CommandType.SET_DATAFILE:
+            self._datafile_selected = bool(str(command.params["path"]).strip())
+            self.current_data_file = None
         if (
             command.type is not CommandType.SET_DATAFILE
             or command.params.get("path_scope") != "Custom folder"
@@ -1375,9 +1507,10 @@ class MainWindow(QMainWindow):
     def _change_datafile(self) -> None:
         selected, _ = QFileDialog.getSaveFileName(
             self,
-            "Select DAT File",
-            str(self._last_data_directory / "experiment.dat"),
+            "Select DAT File (append or create)",
+            str(self._last_data_directory),
             "Data (*.dat)",
+            options=QFileDialog.Option.DontConfirmOverwrite,
         )
         if not selected:
             return
@@ -1386,7 +1519,7 @@ class MainWindow(QMainWindow):
             selected_path = selected_path.with_suffix(".dat")
         selected = str(selected_path.resolve())
         self._last_data_directory = selected_path.resolve().parent
-        command = next((item for item in self.document.commands if item.type is CommandType.SET_DATAFILE), None)
+        command = self._top_level_datafile_before_measure()
         if command is None:
             command = Command(CommandType.SET_DATAFILE, {
                 "mode": "open|create",
@@ -1400,7 +1533,10 @@ class MainWindow(QMainWindow):
                 "path_scope": "Custom folder",
                 "path": selected,
             })
+        command.enabled = True
         self.editor.rebuild(command.id)
+        self._datafile_selected = True
+        self.current_data_file = None
         self._mark_dirty()
 
     def _view_data(self) -> None:
@@ -1451,6 +1587,24 @@ class MainWindow(QMainWindow):
                 "\n".join(
                     f"Line {item.line_number}: {item.message}" for item in errors[:12]
                 ),
+            )
+            return
+        if (
+            not self._datafile_selected
+            or self._first_effective_datafile_command() is None
+            or not self.data_file_label.fullText().strip()
+        ):
+            has_later_datafile = self._has_any_effective_datafile_command()
+            message = (
+                "Move an enabled Set Datafile before the first Measure "
+                "(or click Change to set one at the start of the sequence)."
+                if has_later_datafile
+                else "Select a DAT file before Run. Existing files will be appended; a new path creates a file."
+            )
+            QMessageBox.warning(
+                self,
+                "Select Data File",
+                message,
             )
             return
         try:
@@ -1510,6 +1664,7 @@ class MainWindow(QMainWindow):
         self._start_sequence(module_settings)
 
     def _start_sequence(self, module_settings: dict[str, dict[str, object]]) -> None:
+        self._close_after_stop = False
         self.run_directory = None
         self.runtime.run_sequence(self.document, module_settings)
         self._set_runtime_editable(False)
@@ -1745,12 +1900,6 @@ class MainWindow(QMainWindow):
         self._handle_module_alert(notice)
         if event.code == "RUN_DIRECTORY" and not notice.is_resolution:
             self.run_directory = Path(event.message)
-            self.current_data_file = Path(
-                event.context or event.message
-            )
-            self.data_file_label.setFullText(
-                str(self.current_data_file)
-            )
         elif event.code == "DATAFILE_SELECTED" and not notice.is_resolution:
             self.current_data_file = Path(event.message)
             self.data_file_label.setFullText(
@@ -1772,8 +1921,16 @@ class MainWindow(QMainWindow):
 
     def _handle_progress(self, progress: RunProgress) -> None:
         self.current_run_state = progress.state
+        self.editor.set_running_command(
+            "" if progress.state in self.TERMINAL_STATES else progress.command_id
+        )
         self.run_status_label.setText(f"Sequence {progress.state.value.title()}")
-        self.run_detail_label.setText(progress.message)
+        if self._close_after_stop and progress.state not in self.TERMINAL_STATES:
+            self.run_detail_label.setText(
+                "Stopping sequence and waiting for module cleanup before closing"
+            )
+        else:
+            self.run_detail_label.setText(progress.message)
         if progress.total_steps:
             self.progress_bar.setValue(min(100, int(progress.completed_steps / progress.total_steps * 100)))
         self.statusBar().showMessage(progress.step_path or progress.message)
@@ -1785,6 +1942,10 @@ class MainWindow(QMainWindow):
             self.pause_button.setText("Pause")
             if progress.state is RunState.COMPLETED:
                 self.progress_bar.setValue(100)
+            if self._close_after_stop:
+                self._close_after_stop = False
+                if progress.state is not RunState.FAULTED:
+                    QTimer.singleShot(0, self.close)
         elif progress.state is RunState.PAUSED:
             self.pause_button.setText("Resume")
         else:
@@ -2376,6 +2537,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.current_run_state not in self.TERMINAL_STATES:
+            if self._close_after_stop:
+                event.ignore()
+                return
             answer = QMessageBox.question(
                 self,
                 "Sequence Is Running",
@@ -2385,6 +2549,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.No,
             )
             if answer == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+            if self.current_run_state in self.TERMINAL_STATES:
+                # Sequence finished while the confirmation dialog was open.
+                if self.current_run_state is RunState.FAULTED:
+                    event.ignore()
+                    return
+            else:
+                self._close_after_stop = True
+                self.runtime.stop_sequence()
+                self.run_detail_label.setText("Stopping sequence and waiting for module cleanup before closing")
                 event.ignore()
                 return
         for module_id in tuple(self.enabled_modules):

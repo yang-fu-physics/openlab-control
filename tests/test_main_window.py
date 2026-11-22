@@ -33,10 +33,15 @@ from labcontrol.models import (  # noqa: E402
     InstrumentControlState,
     InstrumentSnapshot,
     LabEvent,
+    RunProgress,
     RunState,
     Severity,
 )
-from labcontrol.sequence.model import CommandType  # noqa: E402
+from labcontrol.sequence.model import (  # noqa: E402
+    Command,
+    CommandType,
+    SequenceDocument,
+)
 from labcontrol.sequence.module_settings import (  # noqa: E402
     SequenceModuleSettings,
     load_sequence_module_settings,
@@ -1033,6 +1038,134 @@ class MainWindowLayoutTests(unittest.TestCase):
             run_sequence.assert_not_called()
             critical.assert_called_once()
             self.assertIn("Measure has no parameters", critical.call_args.args[2])
+        finally:
+            window.close()
+
+    def test_close_while_running_finishes_immediately_if_sequence_completes_during_prompt(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.current_run_state = RunState.RUNNING
+
+            def complete_then_accept(*_args, **_kwargs):
+                window._handle_progress(RunProgress(state=RunState.COMPLETED, message="completed"))
+                return QMessageBox.StandardButton.Yes
+
+            with (
+                patch("labcontrol.ui.main_window.QMessageBox.question", side_effect=complete_then_accept),
+                patch.object(window.runtime, "stop_sequence") as stop_sequence,
+                patch.object(window.runtime, "shutdown") as shutdown,
+            ):
+                self.assertTrue(window.close())
+
+            stop_sequence.assert_not_called()
+            shutdown.assert_called_once()
+            self.assertFalse(window._close_after_stop)
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.close()
+
+    def test_close_while_running_stays_open_without_leaking_flag_if_faulted_during_prompt(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.current_run_state = RunState.RUNNING
+
+            def fault_then_accept(*_args, **_kwargs):
+                window._handle_progress(RunProgress(state=RunState.FAULTED, message="cleanup failed"))
+                return QMessageBox.StandardButton.Yes
+
+            with (
+                patch("labcontrol.ui.main_window.QMessageBox.question", side_effect=fault_then_accept),
+                patch.object(window.runtime, "stop_sequence") as stop_sequence,
+                patch.object(window.runtime, "shutdown") as shutdown,
+            ):
+                self.assertFalse(window.close())
+
+            stop_sequence.assert_not_called()
+            shutdown.assert_not_called()
+            self.assertFalse(window._close_after_stop)
+            self.assertEqual(window.run_detail_label.text(), "cleanup failed")
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.close()
+
+    def test_nested_set_datafile_keeps_datafile_selection_for_run(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            nested_datafile = Command(
+                CommandType.SET_DATAFILE,
+                {
+                    "mode": "open|create",
+                    "path_scope": "Run folder",
+                    "path": "nested.dat",
+                },
+            )
+            scan = Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 0.0, "steps": 1},
+                [nested_datafile],
+            )
+            window._set_document(SequenceDocument([scan], "nested-dat.seq"))
+            self.assertEqual(window.data_file_label.fullText(), "")
+            self.assertFalse(window._datafile_selected)
+
+            window._remember_datafile_directory(nested_datafile)
+            window._mark_dirty()
+
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "nested.dat")
+        finally:
+            window.close()
+
+    def test_set_datafile_after_measure_blocks_run_and_change_inserts_before_measure(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            nested_datafile = Command(
+                CommandType.SET_DATAFILE,
+                {
+                    "mode": "open|create",
+                    "path_scope": "Run folder",
+                    "path": "chosen.dat",
+                },
+            )
+            scan = Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 0.0, "steps": 1},
+                [Command(CommandType.MEASURE), nested_datafile],
+            )
+            window._set_document(SequenceDocument([scan], "measure-first.seq"))
+            window._remember_datafile_directory(nested_datafile)
+            window._mark_dirty()
+
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+            with (
+                patch.object(window.runtime, "run_sequence") as run_sequence,
+                patch("labcontrol.ui.main_window.QMessageBox.warning") as warning,
+            ):
+                window._run_sequence()
+            run_sequence.assert_not_called()
+            warning.assert_called_once()
+            self.assertIn("before the first Measure", warning.call_args.args[2])
+
+            # Top-level Measure followed by Set Datafile: Change must insert a new
+            # Set Datafile at the start instead of updating the later one in place.
+            late_datafile = Command(
+                CommandType.SET_DATAFILE,
+                {"mode": "open|create", "path_scope": "Run folder", "path": "late.dat"},
+            )
+            window._set_document(
+                SequenceDocument([Command(CommandType.MEASURE), late_datafile], "late-dat.seq")
+            )
+            chosen_path = ROOT / "chosen_first.dat"
+            with patch(
+                "labcontrol.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(chosen_path), "Data (*.dat)"),
+            ):
+                window._change_datafile()
+            self.assertEqual(window.document.commands[0].type, CommandType.SET_DATAFILE)
+            self.assertEqual(window.document.commands[0].params["path"], str(chosen_path.resolve()))
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), str(chosen_path.resolve()))
         finally:
             window.close()
 
