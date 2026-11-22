@@ -397,6 +397,28 @@ class RuntimeService:
         self.modules.replace_descriptors(descriptors)
         self.module_descriptors = descriptors
 
+    def add_module_descriptor(
+        self, descriptor: ModuleDescriptor
+    ) -> Future[Any]:
+        return self._submit(self._add_module_descriptor(descriptor))
+
+    async def _add_module_descriptor(
+        self, descriptor: ModuleDescriptor
+    ) -> None:
+        assert self.modules is not None
+        self.modules.add_descriptor(descriptor)
+        self.module_descriptors = (*self.module_descriptors, descriptor)
+
+    def remove_module_descriptor(self, module_id: str) -> Future[Any]:
+        return self._submit(self._remove_module_descriptor(module_id))
+
+    async def _remove_module_descriptor(self, module_id: str) -> None:
+        assert self.modules is not None
+        self.modules.remove_descriptor(module_id)
+        self.module_descriptors = tuple(
+            item for item in self.module_descriptors if item.id != module_id
+        )
+
     def inject_event(self, severity: Severity, code: str, message: str) -> None:
         if self._loop is None or self.events is None:
             return

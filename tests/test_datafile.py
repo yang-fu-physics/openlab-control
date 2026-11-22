@@ -179,7 +179,7 @@ class DatafileTests(unittest.TestCase):
                 "8",
             )
 
-    def test_compact_duplicate_module_columns_use_instance_letters(
+    def test_compact_duplicate_module_columns_use_instance_names(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -240,18 +240,152 @@ class DatafileTests(unittest.TestCase):
                 [
                     "Timestamp",
                     "Temp",
-                    "DeltaA_R1(ohm)",
-                    "DeltaA_Current",
-                    "DeltaA_StatusCode",
-                    "DeltaB_R1(ohm)",
-                    "DeltaB_Current",
-                    "DeltaB_StatusCode",
+                    "delta_first.Delta_R1(ohm)",
+                    "delta_first.Delta_Current",
+                    "delta_first.Delta_StatusCode",
+                    "delta_second.Delta_R1(ohm)",
+                    "delta_second.Delta_Current",
+                    "delta_second.Delta_StatusCode",
                 ],
             )
-            self.assertEqual(rows[0]["DeltaA_R1(ohm)"], "1.1")
-            self.assertEqual(rows[0]["DeltaA_StatusCode"], "0")
-            self.assertEqual(rows[0]["DeltaB_R1(ohm)"], "2.2")
-            self.assertEqual(rows[0]["DeltaB_StatusCode"], "1")
+            self.assertEqual(rows[0]["delta_first.Delta_R1(ohm)"], "1.1")
+            self.assertEqual(rows[0]["delta_first.Delta_StatusCode"], "0")
+            self.assertEqual(rows[0]["delta_second.Delta_R1(ohm)"], "2.2")
+            self.assertEqual(rows[0]["delta_second.Delta_StatusCode"], "1")
+
+    def test_compact_module_instances_prefix_columns_with_instance_tags(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            config = load_config(write_simulated_configuration(temp_root))
+            config = replace(
+                config,
+                logging=replace(config.logging, compact_measurement_data=True),
+            )
+            k2400_cols = (
+                ModuleColumn("Resistance", "Ohm"),
+                ModuleColumn("Voltage", "V"),
+                ModuleColumn("StatusCode"),
+            )
+
+            def _make(
+                module_id: str,
+                *,
+                template_id: str = "",
+                columns: tuple[ModuleColumn, ...] = k2400_cols,
+            ):
+                descriptor = load_manifest(SIMULATED_MODULE)
+                descriptor.id = module_id
+                descriptor.template_id = template_id
+                descriptor.columns = columns
+                return descriptor
+
+            # 1) Two named instances of the same template: keithley_2400_sample & keithley_2400_gate
+            logger = DatRunLogger(config, EventManager())
+            logger._module_descriptors = (
+                _make("keithley_2400_sample", template_id="keithley_2400"),
+                _make("keithley_2400_gate", template_id="keithley_2400"),
+            )
+            self.assertEqual(
+                logger._build_columns(),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "sample.Resistance(Ohm)",
+                    "sample.Voltage(V)",
+                    "sample.StatusCode",
+                    "gate.Resistance(Ohm)",
+                    "gate.Voltage(V)",
+                    "gate.StatusCode",
+                ],
+            )
+
+            # 2) Base module + named instance + numeric default instance
+            logger._module_descriptors = (
+                _make("keithley_2400"),
+                _make("keithley_2400_gate", template_id="keithley_2400"),
+                _make("keithley_2400_2", template_id="keithley_2400"),
+            )
+            self.assertEqual(
+                logger._build_columns(),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "Resistance(Ohm)",
+                    "Voltage(V)",
+                    "StatusCode",
+                    "gate.Resistance(Ohm)",
+                    "gate.Voltage(V)",
+                    "gate.StatusCode",
+                    "keithley_2400_2.Resistance(Ohm)",
+                    "keithley_2400_2.Voltage(V)",
+                    "keithley_2400_2.StatusCode",
+                ],
+            )
+
+            # 3) Colliding stripped tags across templates fall back to full instance IDs
+            logger._module_descriptors = (
+                _make("keithley_2400_gate", template_id="keithley_2400"),
+                _make("keithley_6517b_gate", template_id="keithley_6517b"),
+            )
+            self.assertEqual(
+                logger._build_columns(),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "keithley_2400_gate.Resistance(Ohm)",
+                    "keithley_2400_gate.Voltage(V)",
+                    "keithley_2400_gate.StatusCode",
+                    "keithley_6517b_gate.Resistance(Ohm)",
+                    "keithley_6517b_gate.Voltage(V)",
+                    "keithley_6517b_gate.StatusCode",
+                ],
+            )
+
+            # 4) Stripped instance tag matching another enabled base module ID falls back cleanly
+            logger._module_descriptors = (
+                _make("gate"),
+                _make("keithley_2400_gate", template_id="keithley_2400"),
+                _make("keithley_6517b"),
+            )
+            self.assertEqual(
+                logger._build_columns(),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "gate.Resistance(Ohm)",
+                    "gate.Voltage(V)",
+                    "gate.StatusCode",
+                    "keithley_2400_gate.Resistance(Ohm)",
+                    "keithley_2400_gate.Voltage(V)",
+                    "keithley_2400_gate.StatusCode",
+                    "keithley_6517b.Resistance(Ohm)",
+                    "keithley_6517b.Voltage(V)",
+                    "keithley_6517b.StatusCode",
+                ],
+            )
+
+            # 5) Two distinct base modules sharing only StatusCode disambiguate only StatusCode
+            logger._module_descriptors = (
+                _make("keithley_2400"),
+                _make(
+                    "lakeshore_372a",
+                    columns=(ModuleColumn("R1", "Ohm"), ModuleColumn("StatusCode")),
+                ),
+            )
+            self.assertEqual(
+                logger._build_columns(),
+                [
+                    "Timestamp",
+                    "Temp",
+                    "Resistance(Ohm)",
+                    "Voltage(V)",
+                    "keithley_2400.StatusCode",
+                    "R1(Ohm)",
+                    "lakeshore_372a.StatusCode",
+                ],
+            )
 
     def test_run_snapshot_copies_complete_site_configuration_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

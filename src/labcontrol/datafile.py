@@ -17,7 +17,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from string import ascii_uppercase
 from typing import Any, Mapping, TextIO
 
 from . import __version__
@@ -121,9 +120,10 @@ class DatRunLogger:
         sequence_snapshot.write_text(sequence_text, encoding="utf-8", newline="\n")
         shutil.copy2(self.config.source_path, config_snapshot / "general.toml")
         source_configs = self.config.source_path.parent
-        visa_resources = source_configs / "visa.resources.toml"
-        if visa_resources.is_file():
-            shutil.copy2(visa_resources, config_snapshot / visa_resources.name)
+        for filename in ("visa.resources.toml", "module_instances.toml"):
+            config_file = source_configs / filename
+            if config_file.is_file():
+                shutil.copy2(config_file, config_snapshot / config_file.name)
         for name in ("instruments", "pid"):
             source_directory = source_configs / name
             if not source_directory.is_dir():
@@ -343,9 +343,14 @@ class DatRunLogger:
                     f"backend={instrument.backend}",
                 ])
             for module in self._module_descriptors:
+                template_part = (
+                    f"; template={module.template_id}"
+                    if module.is_instance
+                    else ""
+                )
                 self._data_writer.writerow([
                     "INFO",
-                    f"Module {module.id}: {module.name}; version={module.version}",
+                    f"Module {module.id}: {module.name}; version={module.version}{template_part}",
                 ])
             self._data_handle.write("\n[Data]\n")
             self._data_writer.writerow(self._columns)
@@ -421,6 +426,70 @@ class DatRunLogger:
             handle.seek(-1, 2)
             return handle.read(1) in {b"\n", b"\r"}
 
+    @staticmethod
+    def _compact_instance_tag(module: ModuleDescriptor) -> str:
+        """为复用实例提取简短且安全的紧凑 DAT 列前缀（如 keithley_2400_gate -> gate）。"""
+
+        if module.template_id:
+            template_prefix = f"{module.template_id}_"
+            if module.id.startswith(template_prefix):
+                suffix = module.id[len(template_prefix) :].lstrip("_")
+                if suffix and suffix[0].isalpha():
+                    return suffix
+        return module.id
+
+    def _build_compact_module_columns(
+        self,
+        reserved: frozenset[str],
+    ) -> list[str]:
+        """构造紧凑 DAT 模块列：复用实例带实例名前缀，其余仅在冲突时用模块 ID 消歧。"""
+
+        enabled_ids = {module.id for module in self._module_descriptors}
+        raw_tags = {
+            module.id: self._compact_instance_tag(module)
+            for module in self._module_descriptors
+            if module.is_instance
+        }
+        tag_counts: dict[str, int] = {}
+        for tag in raw_tags.values():
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+        instance_tags = {
+            module_id: (
+                module_id
+                if tag_counts[tag] > 1
+                or (tag in enabled_ids and tag != module_id)
+                else tag
+            )
+            for module_id, tag in raw_tags.items()
+        }
+
+        entries: list[tuple[str, str, str]] = []
+        for module in self._module_descriptors:
+            tag = instance_tags.get(module.id)
+            for column in module.columns:
+                raw_label = column.label
+                label = f"{tag}.{raw_label}" if tag else raw_label
+                entries.append((module.id, raw_label, label))
+
+        while True:
+            counts: dict[str, int] = {}
+            for _, _, label in entries:
+                counts[label] = counts.get(label, 0) + 1
+            changed = False
+            updated: list[tuple[str, str, str]] = []
+            for module_id, raw_label, label in entries:
+                if counts[label] > 1 or label in reserved:
+                    full_label = f"{module_id}.{raw_label}"
+                    if full_label != label:
+                        label = full_label
+                        changed = True
+                updated.append((module_id, raw_label, label))
+            entries = updated
+            if not changed:
+                break
+
+        return [label for _, _, label in entries]
+
     def _build_columns(self) -> list[str]:
         """按仪表配置和模块清单确定本次运行固定的 DAT 列顺序。"""
 
@@ -432,51 +501,9 @@ class DatRunLogger:
                 for panel in instrument.panels
                 if panel.enabled and panel.role == "sample_temp"
             )
-            module_columns = [
-                (module.id, column)
-                for module in self._module_descriptors
-                for column in module.columns
-            ]
-            owners: dict[str, list[str]] = {}
-            for module_id, column in module_columns:
-                owners.setdefault(column.label, []).append(
-                    module_id
-                )
-            colliding_prefixes: dict[str, list[str]] = {}
-            for module_id, column in module_columns:
-                if len(owners[column.label]) < 2:
-                    continue
-                prefix = column.name.partition("_")[0]
-                modules = colliding_prefixes.setdefault(
-                    prefix,
-                    [],
-                )
-                if module_id not in modules:
-                    modules.append(module_id)
-            instance_suffixes = {
-                (module_id, prefix): ascii_uppercase[index]
-                for prefix, module_ids in colliding_prefixes.items()
-                for index, module_id in enumerate(module_ids)
-            }
-            for module in self._module_descriptors:
-                for column in module.columns:
-                    prefix, separator, remainder = (
-                        column.name.partition("_")
-                    )
-                    suffix = instance_suffixes.get(
-                        (module.id, prefix)
-                    )
-                    if suffix is None:
-                        columns.append(column.label)
-                        continue
-                    name = (
-                        f"{prefix}{suffix}{separator}{remainder}"
-                    )
-                    columns.append(
-                        f"{name}({column.unit})"
-                        if column.unit
-                        else name
-                    )
+            columns.extend(
+                self._build_compact_module_columns(frozenset(columns))
+            )
             return columns
 
         columns = ["Timestamp(s)", "Time(s)", "SequenceStep"]

@@ -39,6 +39,7 @@ system_instruments/<id>/instrument.toml  作者模板（字段、控制端点、
         ▼ Instrument Scanner
 configs/instruments/<id>.toml        现场实例（[[instances]]、面板顺序、角色与限值）
 configs/visa.resources.toml          未分配给系统仪表的 Measurement VISA（[[resources]]）
+configs/module_instances.toml        可选的测量模块同源码多实例（[[instances]]）
 configs/pid/<instance-id>.toml       首次复制、后续保留的独立现场 PID 文件
 ```
 

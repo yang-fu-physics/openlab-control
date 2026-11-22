@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 import json
 from typing import Any
@@ -17,9 +17,14 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -30,7 +35,11 @@ from PySide6.QtWidgets import (
 
 from ..package_support.loading import load_source_object
 from ..measurement.frontend_api import ModuleUIAPI
-from ..measurement.manifest import ModuleDescriptor
+from ..measurement.manifest import (
+    MAX_MODULE_ID_LENGTH,
+    ModuleDescriptor,
+    is_valid_module_id,
+)
 from .scaling import scaled
 from .window_sizing import fit_initial_window_width
 
@@ -277,10 +286,149 @@ class ModuleWindow(QDialog):
             self.hide()
 
 
+def _suggest_instance_identity(
+    template: ModuleDescriptor,
+    existing_ids: set[str],
+) -> tuple[str, str]:
+    suffix = 2
+    while True:
+        tail = f"_{suffix}"
+        max_prefix = MAX_MODULE_ID_LENGTH - len(tail)
+        prefix = template.id[:max_prefix].rstrip("_") or "m"
+        candidate = f"{prefix}{tail}"
+        if candidate not in existing_ids:
+            return candidate, f"{template.name} #{suffix}"
+        suffix += 1
+
+
+class AddModuleInstanceDialog(QDialog):
+    """基于现有测量模块源码创建独立复用实例的参数窗口。"""
+
+    def __init__(
+        self,
+        templates: Sequence[ModuleDescriptor],
+        existing_ids: set[str],
+        parent: QWidget | None = None,
+        *,
+        initial_template_id: str | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._templates = tuple(templates)
+        self._existing_ids = set(existing_ids)
+        self._last_suggested_id = ""
+        self._last_suggested_name = ""
+
+        self.setWindowTitle("Add Module Instance")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        hint = QLabel(
+            "Share the selected module's source code with an independent window, "
+            "settings, worker process, and instance-prefixed DAT columns "
+            "(for example, keithley_2400_gate -> gate.Voltage(V))."
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
+
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self.template_combo = QComboBox()
+        for template in self._templates:
+            self.template_combo.addItem(f"{template.name} ({template.id})", template.id)
+        if initial_template_id:
+            index = self.template_combo.findData(initial_template_id)
+            if index >= 0:
+                self.template_combo.setCurrentIndex(index)
+        form.addRow("Source module", self.template_combo)
+
+        self.id_input = QLineEdit()
+        self.id_input.setPlaceholderText("e.g. keithley_2400_gate")
+        form.addRow("Instance ID", self.id_input)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g. Keithley 2400 - Gate")
+        form.addRow("Display name", self.name_input)
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.template_combo.currentIndexChanged.connect(self._update_suggestions)
+        self._update_suggestions()
+        fit_initial_window_width(self)
+
+    def _selected_template(self) -> ModuleDescriptor:
+        index = max(0, self.template_combo.currentIndex())
+        return self._templates[index]
+
+    def _update_suggestions(self, *_args: object) -> None:
+        if not self._templates:
+            return
+        suggested_id, suggested_name = _suggest_instance_identity(
+            self._selected_template(),
+            self._existing_ids,
+        )
+        if not self.id_input.text().strip() or self.id_input.text().strip() == self._last_suggested_id:
+            self.id_input.setText(suggested_id)
+        if not self.name_input.text().strip() or self.name_input.text().strip() == self._last_suggested_name:
+            self.name_input.setText(suggested_name)
+        self._last_suggested_id = suggested_id
+        self._last_suggested_name = suggested_name
+
+    def accept(self) -> None:
+        instance_id = self.id_input.text().strip().casefold()
+        display_name = self.name_input.text().strip()
+        if not is_valid_module_id(instance_id):
+            QMessageBox.warning(
+                self,
+                "Invalid Instance ID",
+                "Instance ID must start with a lowercase letter, use only lowercase letters, "
+                f"digits, and underscores, and be at most {MAX_MODULE_ID_LENGTH} characters.",
+            )
+            self.id_input.setFocus()
+            self.id_input.selectAll()
+            return
+        if instance_id in self._existing_ids:
+            QMessageBox.warning(
+                self,
+                "Duplicate Instance ID",
+                f"Module ID {instance_id!r} already exists.",
+            )
+            self.id_input.setFocus()
+            self.id_input.selectAll()
+            return
+        if not display_name or len(display_name) > 100 or any(ch in display_name for ch in "\r\n\0"):
+            QMessageBox.warning(
+                self,
+                "Invalid Display Name",
+                "Enter a single-line display name (1–100 characters).",
+            )
+            self.name_input.setFocus()
+            self.name_input.selectAll()
+            return
+        self.id_input.setText(instance_id)
+        self.name_input.setText(display_name)
+        super().accept()
+
+    def values(self) -> tuple[str, str, str]:
+        return (
+            self._selected_template().id,
+            self.id_input.text().strip().casefold(),
+            self.name_input.text().strip(),
+        )
+
+
 class ModuleManagerDialog(QDialog):
     enableRequested = Signal(str, bool)
     refreshRequested = Signal()
     openRequested = Signal(str)
+    addInstanceRequested = Signal(str, str, str)
+    removeInstanceRequested = Signal(str)
 
     def __init__(
         self,
@@ -298,7 +446,8 @@ class ModuleManagerDialog(QDialog):
 
         layout = QVBoxLayout(self)
         hint = QLabel(
-            "Modules start Disabled. Enable initializes the module and opens its window."
+            "Modules start Disabled. Enable initializes the module and opens its window. "
+            "Use Add Instance to run multiple instruments from the same module code."
         )
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
@@ -325,10 +474,16 @@ class ModuleManagerDialog(QDialog):
         self.detail_label.setObjectName("mutedLabel")
         layout.addWidget(self.detail_label)
         buttons = QHBoxLayout()
+        self.add_instance_button = QPushButton("Add Instance…")
+        self.remove_instance_button = QPushButton("Remove Instance")
         self.refresh_button = QPushButton("Refresh")
         close_button = QPushButton("Close")
+        self.add_instance_button.clicked.connect(self._open_add_instance_dialog)
+        self.remove_instance_button.clicked.connect(self._request_remove_selected)
         self.refresh_button.clicked.connect(self.refreshRequested)
         close_button.clicked.connect(self.hide)
+        buttons.addWidget(self.add_instance_button)
+        buttons.addWidget(self.remove_instance_button)
         buttons.addWidget(self.refresh_button)
         buttons.addStretch(1)
         buttons.addWidget(close_button)
@@ -340,21 +495,42 @@ class ModuleManagerDialog(QDialog):
             preferred_height=scaled(390),
         )
 
-    def set_descriptors(self, descriptors: tuple[ModuleDescriptor, ...]) -> None:
+    def set_descriptors(
+        self,
+        descriptors: tuple[ModuleDescriptor, ...],
+        *,
+        select_id: str | None = None,
+    ) -> None:
+        previous_selected = select_id or self._selected_id()
         self.descriptors = descriptors
+        known_ids = {item.id for item in descriptors}
+        self._states = {
+            module_id: state
+            for module_id, state in self._states.items()
+            if module_id in known_ids
+        }
         self.table.setRowCount(0)
         self._rows.clear()
         self._checkboxes.clear()
+        table_enabled = self.table.isEnabled()
         for descriptor in descriptors:
             row = self.table.rowCount()
             self.table.insertRow(row)
             self._rows[descriptor.id] = row
+            state = self._states.get(descriptor.id, {})
+            enabled = bool(state.get("enabled", False))
+            runtime_state = str(state.get("state", "disabled"))
             checkbox = QCheckBox()
             descriptor_detail = descriptor.error
             checkbox.setToolTip(descriptor_detail)
-            checkbox.setEnabled(descriptor.can_enable)
+            checkbox.setChecked(enabled)
+            checkbox.setEnabled(
+                table_enabled
+                and descriptor.can_enable
+                and runtime_state not in {"initializing", "disabling"}
+            )
             checkbox.toggled.connect(
-                lambda enabled, module_id=descriptor.id: self._toggle(module_id, enabled)
+                lambda checked, module_id=descriptor.id: self._toggle(module_id, checked)
             )
             holder = QWidget()
             holder_layout = QHBoxLayout(holder)
@@ -368,9 +544,69 @@ class ModuleManagerDialog(QDialog):
             self.table.setItem(row, 1, name_item)
             self.table.setItem(row, 2, QTableWidgetItem(descriptor.version))
             self._checkboxes[descriptor.id] = checkbox
-        if descriptors:
+        if previous_selected and previous_selected in self._rows:
+            self.table.selectRow(self._rows[previous_selected])
+        elif descriptors:
             self.table.selectRow(0)
         self._selection_changed()
+
+    def _template_descriptors(self) -> tuple[ModuleDescriptor, ...]:
+        return tuple(
+            item for item in self.descriptors if not item.is_instance and item.valid
+        )
+
+    def _open_add_instance_dialog(self) -> None:
+        templates = self._template_descriptors()
+        if not templates:
+            return
+        selected = next(
+            (item for item in self.descriptors if item.id == self._selected_id()),
+            None,
+        )
+        initial_template = None
+        if selected is not None:
+            initial_template = selected.template_id or (selected.id if selected.valid else None)
+        dialog = AddModuleInstanceDialog(
+            templates,
+            {item.id for item in self.descriptors},
+            self,
+            initial_template_id=initial_template,
+        )
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.addInstanceRequested.emit(*dialog.values())
+        finally:
+            dialog.deleteLater()
+
+    def _request_remove_selected(self) -> None:
+        module_id = self._selected_id()
+        if module_id is not None:
+            self.removeInstanceRequested.emit(module_id)
+
+    def _update_instance_buttons(self) -> None:
+        table_enabled = self.table.isEnabled()
+        self.add_instance_button.setEnabled(
+            table_enabled and bool(self._template_descriptors())
+        )
+        module_id = self._selected_id()
+        descriptor = next((item for item in self.descriptors if item.id == module_id), None)
+        state = self._states.get(descriptor.id, {}) if descriptor is not None else {}
+        resources_retained = bool(state.get("resources_retained", False))
+        can_remove = (
+            table_enabled
+            and descriptor is not None
+            and descriptor.is_instance
+            and not bool(state.get("enabled", False))
+            and not resources_retained
+            and str(state.get("state", "disabled")) not in {"initializing", "disabling"}
+        )
+        self.remove_instance_button.setEnabled(can_remove)
+        self.remove_instance_button.setToolTip(
+            "Cannot remove while a VISA resource lock is retained after a failed disable or fault. "
+            "Confirm instrument safety and cleanly disable the module first."
+            if resources_retained and descriptor is not None and descriptor.is_instance
+            else ""
+        )
 
     def _toggle(self, module_id: str, enabled: bool) -> None:
         checkbox = self._checkboxes[module_id]
@@ -383,11 +619,21 @@ class ModuleManagerDialog(QDialog):
         enabled: bool,
         state: str,
         message: str = "",
+        *,
+        resources_retained: bool | None = None,
     ) -> None:
+        previous_retained = bool(
+            self._states.get(module_id, {}).get("resources_retained", False)
+        )
         self._states[module_id] = {
             "enabled": enabled,
             "state": state,
             "message": message,
+            "resources_retained": (
+                previous_retained
+                if resources_retained is None
+                else bool(resources_retained)
+            ),
         }
         checkbox = self._checkboxes.get(module_id)
         descriptor = next((item for item in self.descriptors if item.id == module_id), None)
@@ -401,10 +647,11 @@ class ModuleManagerDialog(QDialog):
                 and bool(descriptor and descriptor.can_enable)
             )
         if descriptor is not None and self._selected_id() == module_id:
-            self.detail_label.setText(
-                message
-                or state.replace("_", " ").title()
-            )
+            status_text = message or state.replace("_", " ").title()
+            if descriptor.is_instance:
+                status_text = f"Instance of {descriptor.template_id} ({descriptor.id}) — {status_text}"
+            self.detail_label.setText(status_text)
+        self._update_instance_buttons()
 
     def set_operations_enabled(self, enabled: bool) -> None:
         self.table.setEnabled(enabled)
@@ -418,6 +665,7 @@ class ModuleManagerDialog(QDialog):
                     and descriptor.can_enable
                     and state not in {"initializing", "disabling"}
                 )
+        self._update_instance_buttons()
 
     def runtime_state(self, module_id: str) -> str:
         """返回管理器最后收到的运行状态；尚无消息时按 Disabled 处理。"""
@@ -439,13 +687,18 @@ class ModuleManagerDialog(QDialog):
         descriptor = next((item for item in self.descriptors if item.id == module_id), None)
         if descriptor is None:
             self.detail_label.clear()
+            self._update_instance_buttons()
             return
         state = self._states.get(descriptor.id, {})
         detail = (
             descriptor.error
             or str(state.get("message", ""))
+            or "Ready to enable"
         )
-        self.detail_label.setText(detail or "Ready to enable")
+        if descriptor.is_instance:
+            detail = f"Instance of {descriptor.template_id} ({descriptor.id}) — {detail}"
+        self.detail_label.setText(detail)
+        self._update_instance_buttons()
 
     def _double_clicked(self, row: int, column: int) -> None:
         del column
