@@ -1682,7 +1682,7 @@
   <a href="#scan-temperature" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Scan Temperature（线性扫温 / 列表扫温）
+        Scan Temperature（线性 / 对数 / 列表扫温）
       
     </span>
   </a>
@@ -1985,7 +1985,7 @@
   <a href="#scan-temperature" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Scan Temperature（线性扫温 / 列表扫温）
+        Scan Temperature（线性 / 对数 / 列表扫温）
       
     </span>
   </a>
@@ -2138,20 +2138,26 @@
 <li><code>Settle</code>：发目标后等待核心判定稳定再继续；<code>Sweep</code>：发目标后立即进入下一条指令；</li>
 <li>磁场支持 <code>Oe</code>（2 位小数）或 <code>T</code>（6 位小数），同一条指令内目标与速率须用相同单位。</li>
 </ul>
-<h3 id="scan-temperature">Scan Temperature（线性扫温 / 列表扫温）<a class="headerlink" href="#scan-temperature" title="Permanent link">&para;</a></h3>
+<h3 id="scan-temperature">Scan Temperature（线性 / 对数 / 列表扫温）<a class="headerlink" href="#scan-temperature" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a># 线性扫温（steps 为包含起点与终点的总点数，范围 1–100,000）
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>T Scan Temperature 300.000 K to 10.000 K in 10 steps at 5.000 K/min, Settle
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>T     Measure
 </span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>T End Scan
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a># 列表扫温（保留原顺序和重复点，不排序不去重，最多 100,000 点）
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>T Scan Temperature List [300, 100, 20, 20, 4.2] K at 5.000 K/min, Settle
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a># 对数扫温（起止温度须为正值，中间点按控制面板目标精度量化）
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>T Scan Temperature Log 300.000 K to 2.000 K in 21 steps at 5.000 K/min, Settle
 </span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>T     Measure
 </span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>T End Scan
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a># 列表扫温（保留原顺序和重复点，不排序不去重，最多 100,000 点）
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>T Scan Temperature List [300, 100, 20, 20, 4.2] K at 5.000 K/min, Settle
+</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>T     Measure
+</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>T End Scan
 </span></code></pre></div>
 <ul>
 <li><code>Settle</code>：每点等待核心判定完全稳定后再执行子指令；</li>
 <li><code>Sweep</code>：每点进入目标容差即执行子指令，不额外等斜率/驻留判稳；</li>
+<li>弹窗支持直接输入步长（<code>Log</code> 模式下为 <code>Points / decade</code>），失焦或确认时自动取整同步 <code>Points</code> 并回写实际步长；</li>
 <li>执行前会整表校验所有点是否在温度上下限内，任意一点越界都会在启动移动前报错。</li>
 </ul>
 <h3 id="scan-field">Scan Field（扫场）<a class="headerlink" href="#scan-field" title="Permanent link">&para;</a></h3>
@@ -2179,12 +2185,20 @@
 <p>这类指令不产生 DAT 行；对应系统仪表未配置时，加载会保留原文并提示 Warning，运行前拦截。</p>
 <h3 id="measurement-module">Measurement Module 自定义指令与扫描<a class="headerlink" href="#measurement-module" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>T Module Command "oe1022d_lockin" "auto_range" {"auto_reserve":true}
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>T Module Scan "keithley_6221_ac" "scan_current" {"points":["100u","200u","500u"],"settle_seconds":3.0}
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>T Module Scan "keithley_6221_ac" "scan_current" {"point_mode":"Linear","start":"100u","stop":"500u","steps":5,"settle_seconds":3.0}
 </span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>T     Measure
 </span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>T End Scan
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>T Module Scan "keithley_6221_ac" "scan_current" {"point_mode":"Log","start":"10u","stop":"1m","steps":11,"settle_seconds":3.0}
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>T     Measure
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>T End Scan
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>T Module Scan "keithley_6221_ac" "scan_current" {"point_mode":"List","points":["100u","200u","500u"],"settle_seconds":3.0}
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>T     Measure
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>T End Scan
 </span></code></pre></div>
 <ul>
 <li>依次为：模块目录 ID、稳定指令 ID、标准 JSON 参数对象（禁止 <code>NaN</code>/<code>Infinity</code>）；</li>
+<li>声明了 <code>scan_modes</code> 的扫描指令须显式携带 <code>point_mode</code>（<code>Linear</code>、<code>Log</code> 或 <code>List</code>）；纯列表扫描指令（如 <code>scan_frequency</code>）仅携带列表字段；</li>
+<li>声明了 <code>point_limits</code> 的指令会在参数窗口自动同步模块 Settings 上限（如 <code>max_current</code>、<code>max_voltage</code>）；</li>
 <li>本身不写 DAT 行，需要在循环内显式放 <code>Measure</code>；</li>
 <li>普通命令 Warning 继续下一条，扫描点 Warning 跳过该点子树继续下一点，Error 中止整个 SEQ；</li>
 <li>对应模块未安装或未启用时，行在编辑器里标红并保留原文本，运行预检阻止执行。</li>

@@ -1906,24 +1906,32 @@
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="s2">"id"</span><span class="p">:</span> <span class="s2">"scan_current"</span><span class="p">,</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="s2">"label"</span><span class="p">:</span> <span class="s2">"Scan Current"</span><span class="p">,</span>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="s2">"kind"</span><span class="p">:</span> <span class="s2">"scan"</span><span class="p">,</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="s2">"points_field"</span><span class="p">:</span> <span class="s2">"points"</span><span class="p">,</span>       <span class="c1"># 保存扫描点列表的字段名</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="s2">"points_field"</span><span class="p">:</span> <span class="s2">"points"</span><span class="p">,</span>       <span class="c1"># 保存列表模式扫描点的字段名</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="s2">"point_parameter"</span><span class="p">:</span> <span class="s2">"current"</span><span class="p">,</span>   <span class="c1"># 每次调用时把当前点放进这个参数键里</span>
-</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="s2">"fields"</span><span class="p">:</span> <span class="p">[</span>
-</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        <span class="p">{</span>
-</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>            <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"points"</span><span class="p">,</span>
-</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>            <span class="s2">"label"</span><span class="p">:</span> <span class="s2">"Current points"</span><span class="p">,</span>
-</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>            <span class="s2">"type"</span><span class="p">:</span> <span class="s2">"list"</span><span class="p">,</span>
-</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>            <span class="s2">"default"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"100 uA"</span><span class="p">,</span> <span class="s2">"200 uA"</span><span class="p">,</span> <span class="s2">"500 uA"</span><span class="p">],</span>
-</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="p">}</span>
-</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="p">],</span>
-</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="p">}</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="s2">"scan_modes"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"Linear"</span><span class="p">,</span> <span class="s2">"Log"</span><span class="p">,</span> <span class="s2">"List"</span><span class="p">],</span>  <span class="c1"># 可选：开启多模式扫描及步长↔点数联动</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="s2">"point_unit"</span><span class="p">:</span> <span class="s2">"A"</span><span class="p">,</span>              <span class="c1"># 可选：SI 单位解析与校验后缀</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="s2">"point_limits"</span><span class="p">:</span> <span class="p">{</span>               <span class="c1"># 可选：同步模块 Settings 上限与硬件范围</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>        <span class="s2">"setting"</span><span class="p">:</span> <span class="s2">"max_current"</span><span class="p">,</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="s2">"symmetric"</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="s2">"minimum"</span><span class="p">:</span> <span class="o">-</span><span class="mf">0.07071</span><span class="p">,</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="s2">"maximum"</span><span class="p">:</span> <span class="mf">0.07071</span><span class="p">,</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="p">},</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="s2">"fields"</span><span class="p">:</span> <span class="p">[</span>
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>        <span class="p">{</span>
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>            <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"points"</span><span class="p">,</span>
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>            <span class="s2">"label"</span><span class="p">:</span> <span class="s2">"Current points"</span><span class="p">,</span>
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>            <span class="s2">"type"</span><span class="p">:</span> <span class="s2">"list"</span><span class="p">,</span>
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>            <span class="s2">"default"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"100 uA"</span><span class="p">,</span> <span class="s2">"200 uA"</span><span class="p">,</span> <span class="s2">"500 uA"</span><span class="p">],</span>
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>        <span class="p">}</span>
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>    <span class="p">],</span>
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="p">}</span>
 </span></code></pre></div>
-<p>生成的 SEQ 就像温场扫描一样支持任意嵌套：</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>T Module Scan "tutorial_resistance" "scan_current" {"points":["100 uA","200 uA"]}
+<p>生成的 SEQ 就像温场扫描一样支持任意嵌套（声明 <code>scan_modes</code> 时显式携带 <code>point_mode</code>；未声明时仅保留列表字段）：</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>T Module Scan "tutorial_resistance" "scan_current" {"point_mode":"Linear","start":"100u","stop":"500u","steps":5}
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>T     Measure
 </span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>T End Scan
 </span></code></pre></div>
-<p>运行时，核心会按列表原顺序逐点调用 <code>execute_sequence_command()</code>，该点执行成功后再运行缩进在它下面的所有子指令。</p>
+<p>运行时，核心会按选定模式生成或读取点列表并逐点调用 <code>execute_sequence_command()</code>，该点执行成功后再运行缩进在它下面的所有子指令。若硬件对生成点有固定基础单位分辨率要求（例如 1 mV），还可声明 <code>point_decimals = 3</code> 自动量化中间点。</p>
 <h2 id="3-backendpy">3. 在 <code>backend.py</code> 中执行指令<a class="headerlink" href="#3-backendpy" title="Permanent link">&para;</a></h2>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">labcontrol.module_api</span><span class="w"> </span><span class="kn">import</span> <span class="n">ModuleError</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>

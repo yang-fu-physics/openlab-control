@@ -2099,7 +2099,7 @@
 <ul>
 <li>字段类型仅支持：<code>text</code>、<code>int</code>、<code>float</code>、<code>choice</code>（需配 <code>choices</code>）、<code>bool</code>、<code>list</code>（最多 100,000 项 JSON 标量）。</li>
 <li>数值字段可配 <code>minimum</code>、<code>maximum</code>、<code>unit</code>、<code>decimals</code>；若需自定义编辑弹窗可设 <code>custom_editor = True</code> 并在前端实现 <code>edit_sequence_command(command_id, parameters)</code>。</li>
-<li>扫描指令（<code>kind = "scan"</code>）还可声明 <code>scan_modes</code>（如 <code>["Linear", "Log", "List"]</code>）、<code>point_unit</code>（如 <code>"A"</code>、<code>"V"</code>）、<code>point_decimals</code>（生成点按基础单位量化的小数位）与 <code>point_limits</code>（如 <code>{"setting": "max_current", "symmetric": True, "minimum": ..., "maximum": ...}</code>，在通用参数窗口中自动同步模块 Settings 上限；非扫描命令也可通过 <code>point_limits.field</code> 绑定单个文本字段）；既有仅含 <code>points</code> 的旧 <code>.seq</code> 自动按 <code>List</code> 模式兼容。</li>
+<li>扫描指令（<code>kind = "scan"</code>）还可声明 <code>scan_modes</code>（如 <code>["Linear", "Log", "List"]</code>）、<code>point_unit</code>（如 <code>"A"</code>、<code>"V"</code>）、<code>point_decimals</code>（生成点按基础单位量化的小数位）与 <code>point_limits</code>（如 <code>{"setting": "max_current", "symmetric": True, "minimum": ..., "maximum": ...}</code>，在通用参数窗口中自动同步模块 Settings 上限；非扫描命令也可通过 <code>point_limits.field</code> 绑定单个文本字段）；声明 <code>scan_modes</code> 的扫描在 SEQ 中显式携带 <code>point_mode</code>。</li>
 <li>禁止提供“任意 SCPI 透传”指令。</li>
 </ul>
 <h3 id="moduleapi"><code>ModuleAPI</code> 常用方法<a class="headerlink" href="#moduleapi" title="Permanent link">&para;</a></h3>

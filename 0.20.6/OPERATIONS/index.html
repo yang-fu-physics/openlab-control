@@ -2531,9 +2531,9 @@
 <h3 id="_7">常用指令要点<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Set Datafile</strong>：可点击 <code>Browse…</code> 用系统文件对话框选路径（<code>open</code> 选已有文件，<code>create</code> / <code>open|create</code> 可新建）。写到项目外的自定义目录时会自动加上 <code>external</code> 标记。</li>
-<li><strong>温度 / 磁场控制与扫描</strong>：参数弹窗直接读取扫描器中该控制器面板的上下限和最大速率。<code>Scan Field</code> 额外提供 <strong>Choose nearer start or its negative</strong> 选项（默认关闭）：勾选后，执行到该扫场步骤时会读取当前真实磁场，自动选择离当前场更近的起点极性（例如当前在 <code>-6 T</code> 时，把 <code>9 T → 3 T</code> 自动转为 <code>-9 T → -3 T</code>），结果记入 Run Log。</li>
+<li><strong>温度 / 磁场控制与扫描</strong>：参数弹窗直接读取扫描器中该控制器面板的上下限和最大速率。<code>Scan Temperature</code> 支持 <code>Linear</code>、<code>Log</code>、<code>List</code> 三种点定义；<code>Scan Temperature</code> 与 <code>Scan Field</code> 均支持直接输入 <code>Step</code>（<code>Log</code> 模式下为 <code>Points / decade</code>）与 <code>Points</code> 双向联动（输入步长后取整同步点数并回写实际步长，非法步长会保留原文并在确认时拦截提示）。<code>Scan Field</code> 额外提供 <strong>Choose nearer start or its negative</strong> 选项（默认关闭）：勾选后，执行到该扫场步骤时会读取当前真实磁场，自动选择离当前场更近的起点极性（例如当前在 <code>-6 T</code> 时，把 <code>9 T → 3 T</code> 自动转为 <code>-9 T → -3 T</code>），结果记入 Run Log。</li>
 <li><strong>Measure</strong>：无参数指令 <code>T Measure</code>，自动对本次 Run 冻结的全部已启用模块按通道槽位测量。需要重复采集或定时采集时，把 <code>Measure</code> 放进 <code>Scan Time</code> 或其他 <code>Scan</code> 块内即可。</li>
-<li><strong>模块自定义指令</strong>：如 <code>Set Current</code>（单次动作）和 <code>Scan Current</code>（可像温场 Scan 一样嵌套子指令）。它们本身不写 DAT 行，需要采数据时在下方或循环内放置 <code>Measure</code>；修改的只是本次运行中的仪表状态，不会改写 Settings 页。如果打开的 SEQ 引用了未安装或未启用的模块指令，该行会标红并给 Warning，运行前会被阻止。</li>
+<li><strong>模块自定义指令</strong>：如 <code>Set Current</code>（单次动作）和 <code>Scan Current</code> / <code>Scan Voltage</code>（可像温场 Scan 一样嵌套子指令，并支持 <code>Linear / Log / List</code>、<code>Step ↔ Points</code> 双向联动及自动同步模块 Settings 上限）。它们本身不写 DAT 行，需要采数据时在下方或循环内放置 <code>Measure</code>；修改的只是本次运行中的仪表状态，不会改写 Settings 页。如果打开的 SEQ 引用了未安装或未启用的模块指令，该行会标红并给 Warning，运行前会被阻止。</li>
 </ul>
 <h3 id="_8">参数精度说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
 <p>为避免软件悄悄把参数四舍五入（例如把极小步长舍成 0），界面输入、保存与执行使用统一精度：</p>
