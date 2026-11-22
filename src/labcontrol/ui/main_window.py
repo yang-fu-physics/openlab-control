@@ -1364,6 +1364,11 @@ class MainWindow(QMainWindow):
             self,
             instrument_configs=self.config.instrument_instances,
             data_directory=self._last_data_directory,
+            module_settings=(
+                self._module_settings(spec.module_id)
+                if isinstance(spec, ModuleCommandSpec)
+                else None
+            ),
         )
         try:
             if dialog.exec() == CommandDialog.DialogCode.Accepted:
@@ -1421,6 +1426,11 @@ class MainWindow(QMainWindow):
                 self,
                 instrument_configs=self.config.instrument_instances,
                 data_directory=self._last_data_directory,
+                module_settings=(
+                    self._module_settings(spec.module_id)
+                    if isinstance(spec, ModuleCommandSpec)
+                    else None
+                ),
             )
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid Command Parameters", str(exc))
@@ -1446,6 +1456,15 @@ class MainWindow(QMainWindow):
                 self._mark_dirty()
         finally:
             dialog.deleteLater()
+
+    def _module_settings(self, module_id: str) -> dict[str, object] | None:
+        window = self.module_windows.get(module_id)
+        if window is None:
+            return None
+        try:
+            return window.settings()
+        except Exception:
+            return None
 
     def _edit_custom_module_command(
         self,

@@ -159,6 +159,30 @@ class SequenceParserTests(unittest.TestCase):
         self.assertEqual(command.children[0].type, CommandType.MEASURE)
         self.assertEqual(serialize_sequence(result.document), source)
 
+    def test_temperature_log_scan_round_trips(self) -> None:
+        source = (
+            "T Scan Temperature Log 300.000 K to 3.000 K in 5 steps at 5.000 K/min, Settle\n"
+            "T     Measure\n"
+            "T End Scan\n"
+            "T End Sequence\n"
+        )
+        result = parse_sequence(source, "temperature-log.seq")
+        self.assertEqual(result.issues, ())
+        command = result.document.commands[0]
+        self.assertEqual(command.type, CommandType.SCAN_TEMPERATURE)
+        self.assertEqual(command.params["point_mode"], "Log")
+        self.assertEqual(command.params["start"], 300.0)
+        self.assertEqual(command.params["stop"], 3.0)
+        self.assertEqual(command.params["steps"], 5)
+        self.assertEqual(serialize_sequence(result.document), source)
+        command.update_params(command.params)
+        self.assertEqual(
+            format_command(command),
+            "Scan Temperature Log 300.000 K to 3.000 K in 5 steps at 5.000 K/min, Settle",
+        )
+        bad = parse_sequence("T Scan Temperature Log bad K\nT End Sequence\n")
+        self.assertTrue(bad.has_errors)
+
     def test_measure_parameters_are_rejected(self) -> None:
         result = parse_sequence("T Measure instruments=transport\nT End Sequence\n")
         self.assertTrue(result.has_errors)

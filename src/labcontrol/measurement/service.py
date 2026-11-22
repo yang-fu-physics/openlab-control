@@ -852,7 +852,8 @@ class MeasurementModuleService:
                 f"{module_id}.{command_id}",
             )
         values = dict(command.params if parameters is None else parameters)
-        allowed_names = {field.name for field in spec.fields}
+        declared_names = spec.allowed_parameter_names()
+        allowed_names = set(declared_names)
         if spec.kind == "scan":
             allowed_names.add(spec.point_parameter)
         extra_names = sorted(
@@ -879,9 +880,9 @@ class MeasurementModuleService:
             )
         # 扫描执行时会额外注入 point_parameter；先只验证 SEQ 中作者声明的字段。
         declared_values = {
-            field.name: values[field.name]
-            for field in spec.fields
-            if field.name in values
+            name: values[name]
+            for name in values
+            if name in declared_names
         }
         issues = validate_module_command_parameters(spec, declared_values)
         if issues:

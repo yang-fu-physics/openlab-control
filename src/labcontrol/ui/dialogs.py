@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 import json
 import math
 from pathlib import Path
@@ -35,7 +37,18 @@ from PySide6.QtWidgets import (
 from ..config import InstrumentConfig, InstrumentPanelConfig
 from ..formatting import control_decimals, field_decimals, fixed_number, require_precision
 from ..models import InstrumentKind, InstrumentSnapshot, LabEvent, Severity
-from ..module_commands import ModuleCommandSpec
+from ..module_commands import (
+    MAX_MODULE_SCAN_POINTS,
+    ModuleCommandSpec,
+    format_si_quantity,
+    format_si_with_unit,
+    linear_points_from_step,
+    linear_step_from_points,
+    log_points_from_per_decade,
+    log_points_per_decade,
+    parse_si_quantity,
+    resolve_module_point_bounds,
+)
 from ..sequence.model import Command, CommandSpec, CommandType, command_decimals
 from ..sequence.parser import format_temperature_points, parse_temperature_points
 from ..units import UnitConversionError, convert_value
@@ -59,12 +72,23 @@ class CommandDialog(QDialog):
         *,
         instrument_configs: tuple[InstrumentConfig, ...] = (),
         data_directory: str | Path | None = None,
+        module_settings: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(parent)
         self.command = command
         self.spec = spec
         self._instrument_configs = {item.id: item for item in instrument_configs}
         self._data_directory = Path(data_directory or Path.cwd()).resolve()
+        self._module_settings = dict(module_settings) if module_settings is not None else None
+        self._module_bounds: tuple[float | None, float | None, str] = (None, None, "")
+        self._is_module_scan_modes = isinstance(spec, ModuleCommandSpec) and bool(spec.scan_modes)
+        self._has_step_sync = (
+            self._is_module_scan_modes
+            or command.type in {CommandType.SCAN_TEMPERATURE, CommandType.SCAN_FIELD}
+        )
+        self._syncing_step = False
+        self._step_edited = False
+        self.step_input: QLineEdit | None = None
         self.inputs: dict[str, QWidget] = {}
         self.limit_label: QLabel | None = None
         self.datafile_browse_button: QPushButton | None = None
@@ -80,6 +104,9 @@ class CommandDialog(QDialog):
         self.form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         selected = self._selected_control() if command.type in TEMPERATURE_COMMANDS else None
         panel = selected[1] if selected is not None else None
+        if self._is_module_scan_modes:
+            assert isinstance(spec, ModuleCommandSpec)
+            self._build_module_scan_controls(spec)
         for field in spec.fields:
             value = command.params.get(field.name, field.default)
             if field.field_type == "choice":
@@ -152,6 +179,12 @@ class CommandDialog(QDialog):
                 self.form.addRow(field.label, path_row)
             else:
                 self.form.addRow(field.label, widget)
+            if (
+                command.type in {CommandType.SCAN_TEMPERATURE, CommandType.SCAN_FIELD}
+                and field.name == "steps"
+            ):
+                self.step_input = QLineEdit()
+                self.form.addRow("Step", self.step_input)
         self._field_unit = ""
         if command.type in FIELD_COMMANDS:
             unit_input = self.inputs.get("unit")
@@ -161,8 +194,13 @@ class CommandDialog(QDialog):
         if command.type is CommandType.SCAN_TEMPERATURE:
             point_mode = self.inputs.get("point_mode")
             if isinstance(point_mode, QComboBox):
-                point_mode.currentTextChanged.connect(self._update_temperature_point_mode)
-                self._update_temperature_point_mode(point_mode.currentText())
+                point_mode.currentTextChanged.connect(self._update_scan_point_mode)
+                self._update_scan_point_mode(point_mode.currentText())
+        elif self._is_module_scan_modes:
+            point_mode = self.inputs.get("point_mode")
+            if isinstance(point_mode, QComboBox):
+                point_mode.currentTextChanged.connect(self._update_scan_point_mode)
+                self._update_scan_point_mode(point_mode.currentText())
         layout.addLayout(self.form)
         if command.type in FIELD_COMMANDS | TEMPERATURE_COMMANDS:
             self.limit_label = QLabel()
@@ -171,6 +209,17 @@ class CommandDialog(QDialog):
             self.limit_label.setStyleSheet("color: #59636e;")
             layout.addWidget(self.limit_label)
             self._apply_instrument_limits()
+        elif isinstance(spec, ModuleCommandSpec) and spec.point_limits is not None:
+            self._module_bounds = resolve_module_point_bounds(spec, self._module_settings)
+            if self._module_bounds[2]:
+                self.limit_label = QLabel(self._module_bounds[2])
+                self.limit_label.setObjectName("configuredLimits")
+                self.limit_label.setWordWrap(True)
+                self.limit_label.setStyleSheet("color: #59636e;")
+                layout.addWidget(self.limit_label)
+        if self._has_step_sync:
+            self._connect_step_sync()
+            self._refresh_step_from_points()
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -183,6 +232,51 @@ class CommandDialog(QDialog):
             self.resize(self.minimumSizeHint().width() * 2, self.sizeHint().height())
         else:
             fit_initial_window_width(self)
+
+    def _build_module_scan_controls(self, spec: ModuleCommandSpec) -> None:
+        params = self.command.params
+        if "point_mode" in params:
+            initial_mode = str(params["point_mode"])
+        elif spec.points_field in params and "List" in spec.scan_modes:
+            initial_mode = "List"
+        else:
+            initial_mode = spec.scan_modes[0]
+        default_start, default_stop, default_steps = spec.default_scan_bounds()
+        raw_points = params.get(spec.points_field)
+        if isinstance(raw_points, list) and raw_points:
+            default_start = str(raw_points[0])
+            default_stop = str(raw_points[-1])
+            default_steps = max(1, min(MAX_MODULE_SCAN_POINTS, len(raw_points)))
+        start_text = str(params.get("start", default_start))
+        stop_text = str(params.get("stop", default_stop))
+        steps_val = params.get("steps", default_steps)
+        try:
+            steps_int = max(1, min(MAX_MODULE_SCAN_POINTS, int(steps_val)))
+        except (TypeError, ValueError):
+            steps_int = default_steps
+
+        mode_box = QComboBox()
+        mode_box.addItems(spec.scan_modes)
+        idx = mode_box.findText(initial_mode, Qt.MatchFlag.MatchFixedString)
+        mode_box.setCurrentIndex(max(0, idx))
+        self.inputs["point_mode"] = mode_box
+        self.form.addRow("Point definition", mode_box)
+
+        unit_suffix = f" ({spec.point_unit})" if spec.point_unit else ""
+        start_input = QLineEdit(start_text)
+        stop_input = QLineEdit(stop_text)
+        steps_input = QSpinBox()
+        steps_input.setRange(1, MAX_MODULE_SCAN_POINTS)
+        steps_input.setValue(steps_int)
+        self.step_input = QLineEdit()
+
+        self.inputs["start"] = start_input
+        self.inputs["stop"] = stop_input
+        self.inputs["steps"] = steps_input
+        self.form.addRow(f"Start{unit_suffix}", start_input)
+        self.form.addRow(f"Stop{unit_suffix}", stop_input)
+        self.form.addRow("Points", steps_input)
+        self.form.addRow(f"Step{unit_suffix}", self.step_input)
 
     def _browse_datafile(self) -> None:
         """按当前 Mode 调用 Windows 文件窗口并回填绝对 DAT 路径。"""
@@ -233,8 +327,7 @@ class CommandDialog(QDialog):
         if isinstance(scope_input, QComboBox):
             scope_input.setCurrentText("Custom folder")
 
-    def _set_field_visible(self, field_name: str, visible: bool) -> None:
-        widget = self.inputs.get(field_name)
+    def _set_widget_visible(self, widget: QWidget | None, visible: bool) -> None:
         if widget is None:
             return
         widget.setVisible(visible)
@@ -242,22 +335,232 @@ class CommandDialog(QDialog):
         if label is not None:
             label.setVisible(visible)
 
-    def _update_temperature_point_mode(self, point_mode: str) -> None:
-        """在线性起止点和显式温度列表两种扫描输入间切换。"""
+    def _set_field_visible(self, field_name: str, visible: bool) -> None:
+        self._set_widget_visible(self.inputs.get(field_name), visible)
+
+    def _active_scan_mode(self) -> str:
+        point_mode = self.inputs.get("point_mode")
+        if isinstance(point_mode, QComboBox):
+            return point_mode.currentText().strip().casefold()
+        return "linear"
+
+    def _update_scan_point_mode(self, point_mode: str) -> None:
+        """在 Linear、Log 与显式 List 扫描输入间切换。"""
 
         is_list = point_mode.casefold() == "list"
         for name in ("start", "stop", "steps"):
             self._set_field_visible(name, not is_list)
-        self._set_field_visible("points", is_list)
+        self._set_widget_visible(self.step_input, not is_list)
+        points_field = (
+            self.spec.points_field
+            if isinstance(self.spec, ModuleCommandSpec) and self.spec.points_field
+            else "points"
+        )
+        self._set_field_visible(points_field, is_list)
+        if self._has_step_sync:
+            self._refresh_step_from_points()
+
+    def _connect_step_sync(self) -> None:
+        start_widget = self.inputs.get("start")
+        stop_widget = self.inputs.get("stop")
+        steps_widget = self.inputs.get("steps")
+        for widget in (start_widget, stop_widget):
+            if isinstance(widget, QDoubleSpinBox):
+                widget.valueChanged.connect(self._refresh_step_from_points)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self._refresh_step_from_points)
+        if isinstance(steps_widget, QSpinBox):
+            steps_widget.valueChanged.connect(self._refresh_step_from_points)
+        if self.step_input is not None:
+            self.step_input.textChanged.connect(self._on_step_text_changed)
+            self.step_input.editingFinished.connect(self._on_step_editing_finished)
+
+    def _on_step_text_changed(self, _text: str) -> None:
+        if not self._syncing_step:
+            self._step_edited = True
+
+    def _on_step_editing_finished(self) -> None:
+        if self._step_edited:
+            self._apply_step_input()
+
+    def _step_label_text(self, mode: str) -> str:
+        if mode == "log":
+            return "Points / decade"
+        if isinstance(self.spec, ModuleCommandSpec):
+            return f"Step ({self.spec.point_unit})" if self.spec.point_unit else "Step"
+        unit = self._command_unit()
+        return f"Step ({unit})" if unit else "Step"
+
+    def _read_scan_endpoints(self) -> tuple[Decimal, Decimal, QSpinBox] | None:
+        start_widget = self.inputs.get("start")
+        stop_widget = self.inputs.get("stop")
+        steps_widget = self.inputs.get("steps")
+        if not isinstance(steps_widget, QSpinBox):
+            return None
+        if isinstance(start_widget, QDoubleSpinBox) and isinstance(stop_widget, QDoubleSpinBox):
+            start_widget.interpretText()
+            stop_widget.interpretText()
+            return Decimal(str(start_widget.value())), Decimal(str(stop_widget.value())), steps_widget
+        if isinstance(start_widget, QLineEdit) and isinstance(stop_widget, QLineEdit):
+            unit = self.spec.point_unit if isinstance(self.spec, ModuleCommandSpec) else ""
+            try:
+                start_dec = parse_si_quantity(start_widget.text(), unit, "Start")
+                stop_dec = parse_si_quantity(stop_widget.text(), unit, "Stop")
+            except ValueError:
+                return None
+            return start_dec, stop_dec, steps_widget
+        return None
+
+    def _format_step_value(self, value: Decimal | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(self.spec, ModuleCommandSpec):
+            return format_si_quantity(value, sig_figs=9)
+        return f"{float(value):.6g}"
+
+    def _refresh_step_from_points(self, *_args: object) -> None:
+        if self._syncing_step or self.step_input is None:
+            return
+        mode = self._active_scan_mode()
+        label = self.form.labelForField(self.step_input)
+        if isinstance(label, QLabel):
+            label.setText(self._step_label_text(mode))
+        if mode == "list":
+            self._step_edited = False
+            self.step_input.setToolTip("")
+            return
+        endpoints = self._read_scan_endpoints()
+        text = ""
+        if endpoints is not None:
+            start_dec, stop_dec, steps_widget = endpoints
+            steps = steps_widget.value()
+            if mode == "log":
+                ppd = log_points_per_decade(start_dec, stop_dec, steps)
+                text = "" if ppd is None else f"{ppd:.6g}"
+            else:
+                text = self._format_step_value(
+                    linear_step_from_points(start_dec, stop_dec, steps)
+                )
+        self._syncing_step = True
+        try:
+            self.step_input.setText(text)
+            self.step_input.setToolTip("")
+            self._step_edited = False
+        finally:
+            self._syncing_step = False
+
+    def _apply_step_input(self) -> str | None:
+        """把用户输入的步长/每十倍频点数取整到整数点数，并回写同步后的实际步长。
+
+        非法输入不会被静默恢复为旧步长，而是保留原文并在确认时拦截提示。
+        """
+
+        if self.step_input is None or self.step_input.isHidden():
+            self._step_edited = False
+            return None
+        mode = self._active_scan_mode()
+        if mode == "list":
+            self._step_edited = False
+            return None
+        raw = self.step_input.text().strip()
+        endpoints = self._read_scan_endpoints()
+        if endpoints is None:
+            error = "Enter valid Start and Stop before setting Step"
+            self.step_input.setToolTip(error)
+            return error
+        start_dec, stop_dec, steps_widget = endpoints
+        if not raw:
+            if steps_widget.value() == 1:
+                self.step_input.setToolTip("")
+                self._step_edited = False
+                return None
+            error = (
+                "Points per decade must be a positive number"
+                if mode == "log"
+                else "Step must be a non-zero finite number"
+            )
+            self.step_input.setToolTip(error)
+            return error
+        try:
+            if mode == "log":
+                per_decade = float(raw)
+                new_steps, actual_ppd = log_points_from_per_decade(
+                    start_dec,
+                    stop_dec,
+                    per_decade,
+                    maximum=steps_widget.maximum(),
+                )
+                formatted = f"{actual_ppd:.6g}" if new_steps > 1 else ""
+            else:
+                if isinstance(self.spec, ModuleCommandSpec):
+                    entered_step = parse_si_quantity(raw, self.spec.point_unit, "Step")
+                else:
+                    entered_step = Decimal(raw)
+                    if not entered_step.is_finite():
+                        raise ValueError("Step must be a non-zero finite number")
+                new_steps, actual_step = linear_points_from_step(
+                    start_dec,
+                    stop_dec,
+                    entered_step,
+                    maximum=steps_widget.maximum(),
+                )
+                formatted = self._format_step_value(actual_step if new_steps > 1 else None)
+        except (InvalidOperation, ValueError) as exc:
+            error = str(exc) or "Invalid step value"
+            self.step_input.setToolTip(error)
+            return error
+
+        self._syncing_step = True
+        try:
+            steps_widget.setValue(new_steps)
+            self.step_input.setText(formatted)
+            self.step_input.setToolTip("")
+            self._step_edited = False
+        finally:
+            self._syncing_step = False
+        return None
+
+    def _validate_module_quantity(
+        self,
+        value: object,
+        label: str,
+    ) -> Decimal:
+        assert isinstance(self.spec, ModuleCommandSpec)
+        unit = self.spec.point_unit
+        dec = parse_si_quantity(value, unit, label)
+        numeric = float(dec)
+        if self.spec.point_decimals is not None:
+            require_precision(numeric, self.spec.point_decimals, label)
+        low, high, _ = self._module_bounds
+        if low is not None and numeric < low:
+            raise ValueError(
+                f"{label} ({format_si_with_unit(dec, unit)}) is below the configured limit "
+                f"{format_si_with_unit(low, unit)}."
+            )
+        if high is not None and numeric > high:
+            raise ValueError(
+                f"{label} ({format_si_with_unit(dec, unit)}) exceeds the configured limit "
+                f"{format_si_with_unit(high, unit)}."
+            )
+        return dec
 
     def accept(self) -> None:
-        """关闭前验证列表语法，以及温度列表的仪表范围。"""
+        """关闭前同步步长并验证列表语法、Log 约束及仪表/模块范围。"""
+
+        if self._has_step_sync and self._step_edited:
+            step_error = self._apply_step_input()
+            if step_error is not None:
+                QMessageBox.warning(self, "Invalid Step", step_error)
+                if self.step_input is not None:
+                    self.step_input.setFocus()
+                    self.step_input.selectAll()
+                return
 
         for field in self.spec.fields:
             if field.field_type != "list":
                 continue
             list_input = self.inputs.get(field.name)
-            if not isinstance(list_input, QLineEdit):
+            if not isinstance(list_input, QLineEdit) or list_input.isHidden():
                 continue
             try:
                 value = json.loads(list_input.text())
@@ -281,23 +584,83 @@ class CommandDialog(QDialog):
                 return
             list_input.setText(canonical)
 
+        if self._is_module_scan_modes:
+            assert isinstance(self.spec, ModuleCommandSpec)
+            mode = self._active_scan_mode()
+            if mode == "list":
+                points_input = self.inputs.get(self.spec.points_field)
+                if isinstance(points_input, QLineEdit):
+                    try:
+                        items = json.loads(points_input.text())
+                        if not items:
+                            raise ValueError(f"{self.spec.points_field} must contain at least one point")
+                        if self.spec.point_unit or self.spec.point_limits is not None:
+                            for index, item in enumerate(items, start=1):
+                                self._validate_module_quantity(item, f"Point {index}")
+                    except ValueError as exc:
+                        QMessageBox.warning(self, "Invalid Scan List", str(exc))
+                        points_input.setFocus()
+                        points_input.selectAll()
+                        return
+            else:
+                start_input = self.inputs.get("start")
+                stop_input = self.inputs.get("stop")
+                if isinstance(start_input, QLineEdit) and isinstance(stop_input, QLineEdit):
+                    try:
+                        start_dec = self._validate_module_quantity(start_input.text(), "Start")
+                        stop_dec = self._validate_module_quantity(stop_input.text(), "Stop")
+                        if mode == "log" and (
+                            start_dec == 0 or stop_dec == 0 or (start_dec > 0) != (stop_dec > 0)
+                        ):
+                            raise ValueError("Log scan requires non-zero Start and Stop with the same sign.")
+                    except ValueError as exc:
+                        QMessageBox.warning(self, "Invalid Module Scan", str(exc))
+                        start_input.setFocus()
+                        return
+        elif isinstance(self.spec, ModuleCommandSpec) and self.spec.point_limits is not None:
+            target_widget = self.inputs.get(self.spec.point_limits.field)
+            if isinstance(target_widget, QLineEdit):
+                try:
+                    self._validate_module_quantity(
+                        target_widget.text(),
+                        self.spec.point_limits.field.replace("_", " ").title(),
+                    )
+                except ValueError as exc:
+                    QMessageBox.warning(self, "Invalid Module Command", str(exc))
+                    target_widget.setFocus()
+                    target_widget.selectAll()
+                    return
+
         if self.command.type is CommandType.SCAN_TEMPERATURE:
             point_mode = self.inputs.get("point_mode")
             points_input = self.inputs.get("points")
-            if (
-                isinstance(point_mode, QComboBox)
-                and point_mode.currentText().casefold() == "list"
-                and isinstance(points_input, QLineEdit)
-            ):
-                try:
-                    points = parse_temperature_points(points_input.text())
-                    self._validate_temperature_points(points)
-                    points_input.setText(format_temperature_points(points_input.text()))
-                except ValueError as exc:
-                    QMessageBox.warning(self, "Invalid Temperature List", str(exc))
-                    points_input.setFocus()
-                    points_input.selectAll()
-                    return
+            if isinstance(point_mode, QComboBox):
+                mode = point_mode.currentText().casefold()
+                if mode == "list" and isinstance(points_input, QLineEdit):
+                    try:
+                        points = parse_temperature_points(points_input.text())
+                        self._validate_temperature_points(points)
+                        points_input.setText(format_temperature_points(points_input.text()))
+                    except ValueError as exc:
+                        QMessageBox.warning(self, "Invalid Temperature List", str(exc))
+                        points_input.setFocus()
+                        points_input.selectAll()
+                        return
+                elif mode == "log":
+                    start_w = self.inputs.get("start")
+                    stop_w = self.inputs.get("stop")
+                    if (
+                        isinstance(start_w, QDoubleSpinBox)
+                        and isinstance(stop_w, QDoubleSpinBox)
+                        and (start_w.value() <= 0.0 or stop_w.value() <= 0.0)
+                    ):
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Temperature Scan",
+                            "Log scan requires positive Start and Stop temperatures.",
+                        )
+                        start_w.setFocus()
+                        return
         if self.command.type in TEMPERATURE_COMMANDS:
             selected = self._selected_control()
             if selected is not None:
@@ -467,11 +830,49 @@ class CommandDialog(QDialog):
             widget = self.inputs.get(name)
             if isinstance(widget, QDoubleSpinBox):
                 widget.setValue(value)
+        if self._has_step_sync:
+            self._refresh_step_from_points()
 
     def values(self) -> dict[str, Any]:
         """提取控件值供命令模型更新；本方法本身不执行仪表操作。"""
 
         result: dict[str, Any] = {}
+        if self._is_module_scan_modes:
+            assert isinstance(self.spec, ModuleCommandSpec)
+            mode = self.inputs["point_mode"].currentText()  # type: ignore[union-attr]
+            result["point_mode"] = mode
+            if mode.casefold() == "list":
+                points_widget = self.inputs[self.spec.points_field]
+                assert isinstance(points_widget, QLineEdit)
+                result[self.spec.points_field] = json.loads(points_widget.text())
+            else:
+                start_widget = self.inputs["start"]
+                stop_widget = self.inputs["stop"]
+                steps_widget = self.inputs["steps"]
+                assert isinstance(start_widget, QLineEdit)
+                assert isinstance(stop_widget, QLineEdit)
+                assert isinstance(steps_widget, QSpinBox)
+                result["start"] = start_widget.text().strip()
+                result["stop"] = stop_widget.text().strip()
+                result["steps"] = steps_widget.value()
+            for field in self.spec.fields:
+                if field.name == self.spec.points_field:
+                    continue
+                widget = self.inputs[field.name]
+                if isinstance(widget, QComboBox):
+                    result[field.name] = widget.currentText()
+                elif isinstance(widget, QSpinBox):
+                    result[field.name] = widget.value()
+                elif isinstance(widget, QDoubleSpinBox):
+                    result[field.name] = widget.value()
+                elif isinstance(widget, QCheckBox):
+                    result[field.name] = widget.isChecked()
+                elif isinstance(widget, QLineEdit):
+                    if field.field_type == "list":
+                        result[field.name] = json.loads(widget.text())
+                    else:
+                        result[field.name] = widget.text().strip()
+            return result
         for field in self.spec.fields:
             widget = self.inputs[field.name]
             if isinstance(widget, QComboBox):

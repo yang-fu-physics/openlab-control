@@ -873,6 +873,34 @@ class SequenceEngineTests(unittest.TestCase):
             self.assertLess(first, second)
             self.assertLess(second, third)
 
+    def test_temperature_log_scan_executes_logarithmic_points(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = self._fast_config(Path(temp))
+            measure = Command(CommandType.MEASURE)
+            temperature_scan = Command(
+                CommandType.SCAN_TEMPERATURE,
+                {
+                    "point_mode": "Log",
+                    "start": 300.0,
+                    "stop": 3.0,
+                    "steps": 3,
+                    "rate": 30.0,
+                    "mode": "Settle",
+                },
+                [measure],
+            )
+            notices = []
+            state, _, paths = asyncio.run(
+                self._run(config, SequenceDocument([temperature_scan], "temperature-log.seq"), notices)
+            )
+            self.assertEqual(state, RunState.COMPLETED)
+            data = paths.data_file.read_text(encoding="utf-8")
+            p1 = data.index("point 1/3=300.000 K")
+            p2 = data.index("point 2/3=30.000 K", p1)
+            p3 = data.index("point 3/3=3.000 K", p2)
+            self.assertLess(p1, p2)
+            self.assertLess(p2, p3)
+
     def test_temperature_list_is_fully_validated_before_first_move(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))

@@ -25,6 +25,7 @@ from ..events import EventManager
 from ..formatting import control_decimals, fixed_number
 from ..models import InstrumentKind, EventNotice, RunProgress, RunState, Severity, StabilityState
 from ..measurement.service import MeasurementModuleService
+from ..module_commands import estimate_module_scan_points, resolve_module_scan_points
 from ..instrument_manager import InstrumentManager
 from ..units import convert_value
 from .model import (
@@ -637,10 +638,12 @@ class SequenceEngine:
         source_unit = "K" if kind is InstrumentKind.TEMPERATURE else str(p.get("unit", instrument_unit))
         rate = convert_value(float(p.get("rate", panel.default_rate_per_minute)), source_unit, instrument_unit)
         mode = str(p.get("mode", "Settle"))
-        is_list_mode = (
-            kind is InstrumentKind.TEMPERATURE
-            and str(p.get("point_mode", "Linear")).casefold() == "list"
+        point_mode = (
+            str(p.get("point_mode", "Linear")).casefold()
+            if kind is InstrumentKind.TEMPERATURE
+            else "linear"
         )
+        is_list_mode = point_mode == "list"
         if is_list_mode:
             try:
                 source_points = parse_temperature_points(p.get("points", ""))
@@ -652,6 +655,18 @@ class SequenceEngine:
                 ) from exc
             points = [convert_value(point, source_unit, instrument_unit) for point in source_points]
             steps = len(points)
+        elif point_mode == "log":
+            start = convert_value(float(p.get("start", 0.0)), source_unit, instrument_unit)
+            stop = convert_value(float(p.get("stop", 0.0)), source_unit, instrument_unit)
+            steps = int(p.get("steps", 1))
+            try:
+                points = self._logspace(start, stop, steps)
+            except ValueError as exc:
+                raise InstrumentError(
+                    f"Invalid Scan Temperature log range: {exc}",
+                    "INVALID_TEMPERATURE_LOG_SCAN",
+                    instrument_id,
+                ) from exc
         else:
             start = convert_value(float(p.get("start", 0.0)), source_unit, instrument_unit)
             stop = convert_value(float(p.get("stop", 0.0)), source_unit, instrument_unit)
@@ -800,13 +815,14 @@ class SequenceEngine:
                 "MODULE_SEQUENCE_COMMAND_UNAVAILABLE",
                 f"{command.module_id}.{command.module_command_id}",
             )
-        points = command.params.get(spec.points_field)
-        if not isinstance(points, list) or not points:
+        try:
+            points = resolve_module_scan_points(spec, command.params)
+        except ValueError as exc:
             raise InstrumentError(
-                f"Module scan field {spec.points_field!r} must contain at least one point",
+                str(exc),
                 "MODULE_SEQUENCE_COMMAND_INVALID",
                 f"{command.module_id}.{command.module_command_id}",
-            )
+            ) from exc
         total = len(points)
         scan_label = format_command(command)
         for index, point in enumerate(points, start=1):
@@ -888,7 +904,7 @@ class SequenceEngine:
                         iterations = (
                             0
                             if spec is None
-                            else len(command.params.get(spec.points_field, []))
+                            else estimate_module_scan_points(spec, command.params)
                         )
                     elif (
                         command.type is CommandType.SCAN_TEMPERATURE
@@ -1245,4 +1261,24 @@ class SequenceEngine:
                 if abs(value) <= 1e-14 * scale:
                     value = 0.0
             points.append(0.0 if value == 0.0 else value)
+        return points
+
+    @staticmethod
+    def _logspace(start: float, stop: float, steps: int) -> list[float]:
+        if start == 0.0 or stop == 0.0 or (start > 0.0) != (stop > 0.0):
+            raise ValueError("Log scan requires non-zero Start and Stop with the same sign")
+        if steps <= 1:
+            return [start]
+        sign = -1.0 if start < 0.0 else 1.0
+        log_a = math.log(abs(start))
+        log_b = math.log(abs(stop))
+        points: list[float] = []
+        for index in range(steps):
+            if index == 0:
+                value = start
+            elif index == steps - 1:
+                value = stop
+            else:
+                value = sign * math.exp(log_a + (log_b - log_a) * index / (steps - 1))
+            points.append(value)
         return points
