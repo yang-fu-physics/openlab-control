@@ -43,7 +43,10 @@ Timestamp,Temp,Delta_R1(ohm),Delta_R1_StdDev(ohm),...,Delta_Current,Delta_Status
 
 1. **`Timestamp`**：绝对时间戳（默认 `labview_1904`，可在 `general.toml` 改为 `unix`）；
 2. **`Temp`**：角色为 `sample_temp` 的主控当前温度（未配置主温控时省略此列）；
-3. **所有已启用测量模块声明的列**：直接使用模块声明名（不强行加冗长模块 ID 前缀）。如果同时启用了两份声明了相同列名的模块（例如两个 Delta），核心会自动在前缀后加字母消歧，如 `DeltaA_R1(ohm)`、`DeltaB_R1(ohm)`。
+3. **所有已启用测量模块声明的列**：
+   - 单个基础模块直接使用模块声明名（如 `Resistance(Ohm)`、`Delta_R1(ohm)`），不加冗长前缀；
+   - 通过 **Add Instance…** 创建的复用实例自动带上简短实例名前缀 `<实例标签>.`：若实例 ID 形如 `<模板ID>_<名称>` 且后缀以字母开头，则直接取后缀作为标签（如 `keithley_2400_gate` → `gate.Resistance(Ohm)`、`gate.Voltage(V)`；`keithley_2400_sample` → `sample.Resistance(Ohm)`），否则使用完整实例 ID（如 `keithley_2400_2.Resistance(Ohm)`）；
+   - 若多个基础模块或不同模板实例仍出现同名列（或标签冲突），核心自动回退为 `<模块ID>.<列名>`（如 `keithley_2400.StatusCode`、`lakeshore_372a.StatusCode`），确保每列唯一且来源明确。
 
 目标温度、加热功率、磁场目标、二级冷头温度等完整系统状态统一保存在旁边的 `instrument_status.dat`。
 

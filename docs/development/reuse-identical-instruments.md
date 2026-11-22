@@ -57,9 +57,9 @@ name = "Keithley 2400 - Sample"
 
 - **`T Measure` 不用改**：所有已启用实例会在同一轮 `Measure` 中由各自独立子进程并行测量。
 - **自定义 SEQ 指令与限幅自动区分**：右侧指令栏会按各自的 `Display name` 分组列出命令（如各自的 `Scan Current` / `Scan Voltage`），参数窗口的限幅同步（如 `max_current` / `max_voltage`）也各自绑定对应实例的 Settings。
-- **DAT 列名自动消歧**：
-  - 在默认的紧凑 DAT 模式下，若多个实例声明了相同列名，核心会自动加字母区分（例如 `DeltaA_R1(ohm)` / `DeltaB_R1(ohm)` 或 `X1pA(V)` / `X1pB(V)`）；
-  - 在兼容宽表模式下，列名自动带实例 ID 前缀（如 `keithley_2400_gate.Resistance(Ohm)`）。
+- **DAT 列名自动带实例名**：
+  - 在默认的紧凑 DAT 模式下，通过 **Add Instance…** 创建的实例会自动加上实例名前缀 `<实例标签>.`：实例 ID 若为 `<模板ID>_<名称>` 且后缀以字母开头，直接取后缀（例如 `keithley_2400_gate` 生成 `gate.Resistance(Ohm)`、`gate.Voltage(V)`，`keithley_2400_sample` 生成 `sample.Resistance(Ohm)`、`sample.Voltage(V)`）；若是纯数字后缀（如 `keithley_2400_2`）或与其他模块标签冲突，则使用完整实例 ID（如 `keithley_2400_2.Resistance(Ohm)`）；基础模块在不冲突时保持原始列名（如 `Resistance(Ohm)`）；
+  - 在兼容宽表模式下，所有模块列均带完整 `<实例ID>.` 前缀（如 `keithley_2400_gate.Resistance(Ohm)`）。
 - 每次 Run 的配置快照会自动包含 `configs/module_instances.toml`；若模块输出 `rawdata`，每个实例各自写独立的 rawdata 文件。
 
 ## 首次上机检查顺序

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from labcontrol.config import load_config  # noqa: E402
+from labcontrol.dat_reader import read_dat  # noqa: E402
 from labcontrol.datafile import DatRunLogger  # noqa: E402
 from labcontrol.events import EventManager  # noqa: E402
 from labcontrol.instruments.base import InstrumentError  # noqa: E402
@@ -149,26 +150,63 @@ class ModuleInstanceManifestAndServiceTests(unittest.TestCase):
             instances_file = module_instances_path(config)
             save_module_instances(
                 instances_file,
-                (ModuleInstanceConfig("sim_2", "simulated_transport", "Sim #2"),),
+                (
+                    ModuleInstanceConfig(
+                        "simulated_transport_gate",
+                        "simulated_transport",
+                        "Simulated Transport - Gate",
+                    ),
+                    ModuleInstanceConfig(
+                        "simulated_transport_sample",
+                        "simulated_transport",
+                        "Simulated Transport - Sample",
+                    ),
+                ),
             )
             descriptors = {item.id: item for item in discover_modules(config)}
-            first = descriptors["simulated_transport"]
-            second = descriptors["sim_2"]
-            first.columns = (ModuleColumn("R1", "Ohm"),)
-            second.columns = (ModuleColumn("R1", "Ohm"),)
+            base = descriptors["simulated_transport"]
+            gate = descriptors["simulated_transport_gate"]
+            sample = descriptors["simulated_transport_sample"]
+            for descriptor in (base, gate, sample):
+                descriptor.columns = (ModuleColumn("R1", "Ohm"), ModuleColumn("Voltage", "V"))
 
             logger = DatRunLogger(config, EventManager())
             paths = logger.open_run(
                 "multi-instance.seq",
                 "T Measure\nT End Sequence\n",
-                module_descriptors=(first, second),
+                module_descriptors=(base, gate, sample),
+            )
+            logger.write_measurement_row(
+                {},
+                {
+                    base.id: {"R1": 100.0, "Voltage": 0.1},
+                    gate.id: {"R1": 200.0, "Voltage": 5.0},
+                    sample.id: {"R1": 300.0, "Voltage": 0.2},
+                },
+                "Measure",
             )
             logger.close()
             snapshot = paths.directory / "configuration" / "module_instances.toml"
             self.assertTrue(snapshot.is_file())
-            self.assertIn('id = "sim_2"', snapshot.read_text(encoding="utf-8"))
-            header = paths.data_file.read_text(encoding="utf-8")
-            self.assertIn("R1A(Ohm),R1B(Ohm)", header)
+            self.assertIn('id = "simulated_transport_gate"', snapshot.read_text(encoding="utf-8"))
+            raw_dat = paths.data_file.read_text(encoding="utf-8")
+            self.assertIn("template=simulated_transport", raw_dat)
+            document = read_dat(paths.data_file)
+            self.assertEqual(
+                document.columns,
+                (
+                    "Timestamp",
+                    "Temp",
+                    "R1(Ohm)",
+                    "Voltage(V)",
+                    "gate.R1(Ohm)",
+                    "gate.Voltage(V)",
+                    "sample.R1(Ohm)",
+                    "sample.Voltage(V)",
+                ),
+            )
+            self.assertEqual(document.numeric_points("gate.Voltage(V)")[0].y, 5.0)
+            self.assertEqual(document.numeric_points("sample.R1(Ohm)")[0].y, 300.0)
 
 
 class ModuleInstanceUITests(unittest.TestCase):

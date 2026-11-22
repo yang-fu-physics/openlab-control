@@ -319,7 +319,8 @@ class AddModuleInstanceDialog(QDialog):
         layout = QVBoxLayout(self)
         hint = QLabel(
             "Share the selected module's source code with an independent window, "
-            "settings, worker process, and DAT columns."
+            "settings, worker process, and instance-prefixed DAT columns "
+            "(for example, keithley_2400_gate -> gate.Voltage(V))."
         )
         hint.setWordWrap(True)
         hint.setObjectName("mutedLabel")
