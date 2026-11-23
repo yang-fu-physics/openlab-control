@@ -210,7 +210,14 @@ class SequenceEngineTests(unittest.TestCase):
                             "target": -6.0,
                             "unit": "T",
                             "rate": 1.0,
-                            "mode": "Settle",
+                        },
+                    ),
+                    Command(
+                        CommandType.WAIT,
+                        {
+                            "wait_temperature": False,
+                            "wait_field": True,
+                            "seconds": 0.0,
                         },
                     ),
                     Command(
@@ -363,7 +370,7 @@ class SequenceEngineTests(unittest.TestCase):
             config = self._fast_config(Path(temp))
             document = SequenceDocument([
                 Command(CommandType.SET_FIELD, {
-                    "target": 1.0, "unit": "T", "rate": 0.5, "mode": "Sweep",
+                    "target": 1.0, "unit": "T", "rate": 0.5,
                 }),
                 Command(CommandType.WAIT, {"seconds": 0.1}),
                 Command(CommandType.INJECT_ERROR, {"code": "FATAL", "message": "fatal"}),
@@ -623,6 +630,7 @@ class SequenceEngineTests(unittest.TestCase):
     def test_runtime_rejects_programmatic_parameter_limit_bypasses(self) -> None:
         cases = (
             Command(CommandType.WAIT, {"seconds": -1.0}),
+            Command(CommandType.WAIT, {"wait_temperature": "yes", "seconds": 0.0}),
             Command(
                 CommandType.SCAN_TIME,
                 {"duration_seconds": 1.0, "steps": 1_000_001},
@@ -1036,6 +1044,282 @@ class SequenceEngineTests(unittest.TestCase):
             known_ids = {"", scan.id, measure.id, call_cmd.id}
             self.assertTrue(all(p.command_id in known_ids for p in progresses))
             self.assertIn(call_cmd.id, [p.command_id for p in progresses])
+
+    def test_set_temperature_and_field_are_nonblocking_and_wait_settles_both_then_delays(
+        self,
+    ) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            logger = DatRunLogger(config, events)
+            modules = MeasurementModuleService((), events, manager)
+            engine = SequenceEngine(config, manager, events, logger, modules)
+            await manager.connect_all()
+            await manager.poll_all()
+
+            original_set_target = manager.set_target
+            temp_stability_when_field_started: list[StabilityState | None] = []
+
+            async def observing_set_target(
+                instrument_id: str,
+                value: float,
+                rate_per_minute: float,
+                mode: str = "Settle",
+                *,
+                control: str,
+                origin: str = "sequence",
+            ) -> bool:
+                if instrument_id == "field":
+                    temp_snap = manager.latest.get("temperature")
+                    temp_stability_when_field_started.append(
+                        None if temp_snap is None else temp_snap.controls["main"].stability
+                    )
+                return await original_set_target(
+                    instrument_id,
+                    value,
+                    rate_per_minute,
+                    mode,
+                    control=control,
+                    origin=origin,
+                )
+
+            manager.set_target = observing_set_target  # type: ignore[method-assign]
+
+            async def poll():
+                while True:
+                    await manager.poll_all()
+                    await asyncio.sleep(config.poll_interval_seconds)
+
+            document = SequenceDocument(
+                [
+                    Command(CommandType.SET_TEMPERATURE, {"target": 299.5, "rate": 10.0}),
+                    Command(CommandType.SET_FIELD, {"target": 5000.0, "unit": "Oe", "rate": 5000.0}),
+                    Command(
+                        CommandType.WAIT,
+                        {"wait_temperature": True, "wait_field": True, "seconds": 0.2},
+                    ),
+                ],
+                "parallel-ramp-wait.seq",
+            )
+            poll_task = asyncio.create_task(poll())
+            started = time.monotonic()
+            try:
+                state = await engine.run(document)
+                elapsed = time.monotonic() - started
+                snapshots = manager.snapshots()
+            finally:
+                poll_task.cancel()
+                await asyncio.gather(poll_task, return_exceptions=True)
+                await modules.shutdown()
+                await manager.disconnect_all()
+
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertEqual(temp_stability_when_field_started, [StabilityState.MOVING])
+            self.assertEqual(snapshots["temperature"].controls["main"].stability, StabilityState.STABLE)
+            self.assertEqual(snapshots["field"].controls["main"].stability, StabilityState.STABLE)
+            self.assertAlmostEqual(snapshots["temperature"].current or 0.0, 299.5, places=2)
+            self.assertAlmostEqual(snapshots["field"].current or 0.0, 5000.0, places=1)
+            self.assertGreaterEqual(elapsed, 0.18)
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
+
+    def test_wait_requires_simultaneous_stability_after_disturbance(self) -> None:
+        async def scenario(config) -> None:
+            config = replace(config, control_poll_interval_seconds=0.01)
+            events = EventManager()
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+            )
+            engine.state = RunState.RUNNING
+
+            def set_stability(instrument_id: str, state: StabilityState) -> None:
+                snap = manager.latest[instrument_id]
+                snap.controls["main"].stability = state
+                snap.stability = state
+
+            # T stable, H moving -> must keep waiting
+            set_stability("temperature", StabilityState.STABLE)
+            set_stability("field", StabilityState.MOVING)
+
+            temp_panel = manager.resolve_control_panel(InstrumentKind.TEMPERATURE)
+            field_panel = manager.resolve_control_panel(InstrumentKind.FIELD)
+            wait_task = asyncio.create_task(
+                engine._wait_for_all_stability(
+                    (("temperature", temp_panel), ("field", field_panel))
+                )
+            )
+            await asyncio.sleep(0.03)
+            self.assertFalse(wait_task.done())
+
+            # Eddy heating knocks T back to SETTLING, then H reaches STABLE -> still must wait!
+            set_stability("temperature", StabilityState.SETTLING)
+            set_stability("field", StabilityState.STABLE)
+            await asyncio.sleep(0.03)
+            self.assertFalse(wait_task.done())
+
+            # Both STABLE simultaneously -> wait completes!
+            set_stability("temperature", StabilityState.STABLE)
+            await asyncio.wait_for(wait_task, timeout=0.3)
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
+
+    def test_wait_does_not_spuriously_timeout_already_stable_controller(self) -> None:
+        async def scenario(config) -> None:
+            temperature = config.instrument("temperature")
+            temperature = replace(
+                temperature,
+                panels=tuple(
+                    replace(panel, stability=replace(panel.stability, timeout_seconds=0.04))
+                    if panel.role == "sample_temp"
+                    else panel
+                    for panel in temperature.panels
+                ),
+            )
+            config = replace(
+                config,
+                control_poll_interval_seconds=0.01,
+                instrument_instances=tuple(
+                    temperature if inst.id == "temperature" else inst
+                    for inst in config.instrument_instances
+                ),
+            )
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+            )
+            engine.state = RunState.RUNNING
+
+            manager.latest["temperature"].controls["main"].stability = StabilityState.STABLE
+            manager.latest["field"].controls["main"].stability = StabilityState.MOVING
+
+            temp_panel = manager.resolve_control_panel(InstrumentKind.TEMPERATURE)
+            field_panel = manager.resolve_control_panel(InstrumentKind.FIELD)
+            wait_task = asyncio.create_task(
+                engine._wait_for_all_stability(
+                    (("temperature", temp_panel), ("field", field_panel))
+                )
+            )
+            await asyncio.sleep(0.09)
+            self.assertFalse(wait_task.done())
+            manager.latest["field"].controls["main"].stability = StabilityState.STABLE
+            await asyncio.wait_for(wait_task, timeout=0.3)
+            timeout_events = [
+                notice for notice in notices if notice.event.code == "STABILITY_TIMEOUT"
+            ]
+            self.assertEqual(timeout_events, [])
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
+
+    def test_wait_warning_timeout_on_one_controller_still_waits_for_other(self) -> None:
+        async def scenario(config) -> None:
+            temperature = config.instrument("temperature")
+            temperature = replace(
+                temperature,
+                panels=tuple(
+                    replace(panel, stability=replace(panel.stability, timeout_seconds=0.04))
+                    if panel.role == "sample_temp"
+                    else panel
+                    for panel in temperature.panels
+                ),
+            )
+            config = replace(
+                config,
+                control_poll_interval_seconds=0.01,
+                alarms=replace(config.alarms, stability_timeout=Severity.WARNING),
+                instrument_instances=tuple(
+                    temperature if inst.id == "temperature" else inst
+                    for inst in config.instrument_instances
+                ),
+            )
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                object(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+            )
+            engine.state = RunState.RUNNING
+
+            manager.latest["temperature"].controls["main"].stability = StabilityState.MOVING
+            manager.latest["field"].controls["main"].stability = StabilityState.MOVING
+
+            temp_panel = manager.resolve_control_panel(InstrumentKind.TEMPERATURE)
+            field_panel = manager.resolve_control_panel(InstrumentKind.FIELD)
+            wait_task = asyncio.create_task(
+                engine._wait_for_all_stability(
+                    (("temperature", temp_panel), ("field", field_panel))
+                )
+            )
+            await asyncio.sleep(0.09)
+            self.assertFalse(wait_task.done())
+            manager.latest["field"].controls["main"].stability = StabilityState.STABLE
+            await asyncio.wait_for(wait_task, timeout=0.3)
+            timeout_events = [
+                notice
+                for notice in notices
+                if notice.event.code == "STABILITY_TIMEOUT" and not notice.is_resolution
+            ]
+            self.assertEqual(len(timeout_events), 1)
+            self.assertEqual(timeout_events[0].event.severity, Severity.WARNING)
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
+
+    def test_wait_for_unconfigured_controller_faults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = self._fast_config(Path(temp))
+            no_field = replace(
+                base,
+                instrument_instances=tuple(
+                    inst for inst in base.instrument_instances if inst.id != "field"
+                ),
+            )
+            notices = []
+            state, _, _ = asyncio.run(
+                self._run(
+                    no_field,
+                    SequenceDocument(
+                        [Command(CommandType.WAIT, {"wait_field": True, "seconds": 0.0})],
+                        "wait-no-field.seq",
+                    ),
+                    notices,
+                )
+            )
+            self.assertEqual(state, RunState.FAULTED)
+            self.assertIn(
+                "INSTRUMENT_NOT_CONFIGURED",
+                [notice.event.code for notice in notices if not notice.is_resolution],
+            )
 
 
 if __name__ == "__main__":

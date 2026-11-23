@@ -123,18 +123,109 @@ class SequenceParserTests(unittest.TestCase):
 
     def test_temperature_and_legacy_t_command_precision(self) -> None:
         temperature = SPECS_BY_TYPE[CommandType.SET_TEMPERATURE].create()
+        self.assertNotIn("mode", temperature.params)
         self.assertEqual(
             format_command(temperature),
-            "Set Temperature 300.000 K at 5.000 K/min in Settle mode",
+            "Set Temperature 300.000 K at 5.000 K/min",
         )
         legacy_t = Command(
             CommandType.SET_FIELD,
-            {"target": 0.001234, "unit": "T", "rate": 0.000567, "mode": "Sweep"},
+            {"target": 0.001234, "unit": "T", "rate": 0.000567},
         )
         self.assertEqual(
             format_command(legacy_t),
-            "Set Field 0.001234 T at 0.000567 T/min in Sweep mode",
+            "Set Field 0.001234 T at 0.000567 T/min",
         )
+
+    def test_wait_conditions_and_delay_parse_and_round_trip(self) -> None:
+        cases = (
+            (
+                "T Wait For 10.0 secs\nT End Sequence\n",
+                {"wait_temperature": False, "wait_field": False, "seconds": 10.0},
+                "Wait For 10.0 secs",
+            ),
+            (
+                "T Wait For Temperature\nT End Sequence\n",
+                {"wait_temperature": True, "wait_field": False, "seconds": 0.0},
+                "Wait For Temperature",
+            ),
+            (
+                "T Wait For Field\nT End Sequence\n",
+                {"wait_temperature": False, "wait_field": True, "seconds": 0.0},
+                "Wait For Field",
+            ),
+            (
+                "T Wait For Temperature, Field\nT End Sequence\n",
+                {"wait_temperature": True, "wait_field": True, "seconds": 0.0},
+                "Wait For Temperature, Field",
+            ),
+            (
+                "T Wait For Temperature, Delay 30.0 secs\nT End Sequence\n",
+                {"wait_temperature": True, "wait_field": False, "seconds": 30.0},
+                "Wait For Temperature, Delay 30.0 secs",
+            ),
+            (
+                "T Wait For Field, Delay 5.5 secs\nT End Sequence\n",
+                {"wait_temperature": False, "wait_field": True, "seconds": 5.5},
+                "Wait For Field, Delay 5.5 secs",
+            ),
+            (
+                "T Wait For Temperature, Field, Delay 60.0 secs\nT End Sequence\n",
+                {"wait_temperature": True, "wait_field": True, "seconds": 60.0},
+                "Wait For Temperature, Field, Delay 60.0 secs",
+            ),
+        )
+        for source, expected_params, expected_formatted in cases:
+            with self.subTest(expected=expected_formatted):
+                result = parse_sequence(source)
+                self.assertEqual(result.issues, ())
+                command = result.document.commands[0]
+                self.assertEqual(command.type, CommandType.WAIT)
+                self.assertEqual(command.params, expected_params)
+                self.assertEqual(serialize_sequence(result.document), source)
+                command.update_params(dict(command.params))
+                self.assertEqual(format_command(command), expected_formatted)
+
+        reordered = parse_sequence(
+            "T Wait For Field, Temperature, 12.5 seconds\nT End Sequence\n"
+        )
+        self.assertEqual(reordered.issues, ())
+        command = reordered.document.commands[0]
+        self.assertEqual(
+            command.params,
+            {"wait_temperature": True, "wait_field": True, "seconds": 12.5},
+        )
+        command.update_params(dict(command.params))
+        self.assertEqual(
+            format_command(command),
+            "Wait For Temperature, Field, Delay 12.5 secs",
+        )
+
+        zero_delay = parse_sequence(
+            "T Wait For Temperature, Delay 0.0 secs\nT End Sequence\n"
+        )
+        self.assertEqual(zero_delay.issues, ())
+        zero_cmd = zero_delay.document.commands[0]
+        zero_cmd.update_params(dict(zero_cmd.params))
+        self.assertEqual(format_command(zero_cmd), "Wait For Temperature")
+
+    def test_invalid_wait_syntax_is_a_parse_error(self) -> None:
+        cases = (
+            ("T Wait\nT End Sequence\n", "Invalid Wait command"),
+            ("T Wait For\nT End Sequence\n", "Invalid Wait command"),
+            ("T Wait For Banana\nT End Sequence\n", "Invalid Wait condition"),
+            ("T Wait For Temperature, \nT End Sequence\n", "empty wait condition"),
+            ("T Wait For Temperature, Temperature\nT End Sequence\n", "Duplicate Wait condition"),
+            ("T Wait For Field, Field\nT End Sequence\n", "Duplicate Wait condition"),
+            ("T Wait For Temperature, Delay 5 secs, Delay 10 secs\nT End Sequence\n", "Duplicate Wait delay"),
+            ("T Wait For Temperature, Delay -1 secs\nT End Sequence\n", "at least 0"),
+            ("T Wait For Temperature, Delay 0.04 secs\nT End Sequence\n", "decimal places"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source.splitlines()[0]):
+                result = parse_sequence(source)
+                self.assertTrue(result.has_errors)
+                self.assertIn(expected, result.issues[0].message)
 
     def test_temperature_list_scan_parses_and_round_trips(self) -> None:
         source = (
@@ -265,7 +356,7 @@ class SequenceParserTests(unittest.TestCase):
 
     def test_nonfinite_control_number_is_a_parse_error(self) -> None:
         result = parse_sequence(
-            "T Set Temperature 1e999 K at 5 K/min in Settle mode\n"
+            "T Set Temperature 1e999 K at 5 K/min\n"
             "T End Sequence\n"
         )
         self.assertTrue(result.has_errors)
@@ -284,7 +375,7 @@ class SequenceParserTests(unittest.TestCase):
                 "no more than 100000",
             ),
             (
-                "T Set Temperature 20 K at 0 K/min in Settle mode\n"
+                "T Set Temperature 20 K at 0 K/min\n"
                 "T End Sequence\n",
                 "at least 1e-06",
             ),
@@ -297,7 +388,7 @@ class SequenceParserTests(unittest.TestCase):
 
     def test_instrument_suffix_is_rejected_but_remark_text_is_unchanged(self) -> None:
         for line in (
-            "T Set Temperature 20.000 K at 5.000 K/min in Settle mode "
+            "T Set Temperature 20.000 K at 5.000 K/min "
             'using instrument "cryostat temperature"',
             "T Scan Field 0.00 Oe to 100.00 Oe in 2 steps at "
             "50.00 Oe/min, Sweep using instrument magnet_primary",
@@ -321,13 +412,27 @@ class SequenceParserTests(unittest.TestCase):
             "calibrated using instrument field",
         )
 
-    def test_invalid_control_mode_is_a_parse_error(self) -> None:
-        result = parse_sequence(
-            "T Set Temperature 20 K at 5 K/min in Unsafe mode\n"
+    def test_removed_set_mode_and_invalid_scan_mode_are_parse_errors(self) -> None:
+        for line in (
+            "T Set Temperature 20 K at 5 K/min in Settle mode",
+            "T Set Temperature 20 K at 5 K/min in Sweep mode",
+            "T Set Temperature 20 K at 5 K/min in Unsafe mode",
+            "T Set Field 1000 Oe at 500 Oe/min in Settle mode",
+            "T Set Field 1 T at 0.5 T/min in Sweep mode",
+        ):
+            with self.subTest(line=line):
+                result = parse_sequence(line + "\nT End Sequence\n")
+                self.assertTrue(result.has_errors)
+                self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
+                self.assertIn("no longer accept a mode", result.issues[0].message)
+
+        bad_scan = parse_sequence(
+            "T Scan Temperature 300 K to 20 K in 5 steps at 5 K/min, Unsafe\n"
+            "T End Scan\n"
             "T End Sequence\n"
         )
-        self.assertTrue(result.has_errors)
-        self.assertIn("mode", result.issues[0].message)
+        self.assertTrue(bad_scan.has_errors)
+        self.assertIn("mode", bad_scan.issues[0].message)
 
 
 if __name__ == "__main__":

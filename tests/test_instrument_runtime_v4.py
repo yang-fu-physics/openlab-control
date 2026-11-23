@@ -518,7 +518,7 @@ class InstrumentRuntimeV4Tests(unittest.TestCase):
 
     def test_removed_sequence_instrument_suffix_is_an_error(self) -> None:
         result = parse_sequence(
-            "T Set Temperature 10.000 K at 1.000 K/min in Settle mode "
+            "T Set Temperature 10.000 K at 1.000 K/min "
             'using instrument "other"\nEnd Sequence\n'
         )
         self.assertEqual(result.document.commands[0].type, CommandType.UNKNOWN)
