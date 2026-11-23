@@ -1270,6 +1270,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="5. 后台只需要写普通同步 Python">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#instrument-setup-frontendpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        可选自定义卡片与 Instrument Setup 前端（frontend.py）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1940,6 +1957,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="5. 后台只需要写普通同步 Python">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#instrument-setup-frontendpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        可选自定义卡片与 Instrument Setup 前端（frontend.py）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2051,11 +2085,13 @@
 <li><strong><code>[[config_fields]]</code></strong>：需要操作员在扫描器里填写的型号专用字段（如超时、网络 <code>host</code>/<code>port</code>、通道顺序、PID 文件等），后台通过 <code>config.extras["字段ID"]</code> 读取。支持类型：<code>string</code>、<code>integer</code>、<code>number</code>、<code>boolean</code>、<code>choice</code>、<code>ordered_choices</code>（可选 <code>allow_empty = true</code> 和 <code>option_count_from</code>）、<code>pid_file</code>。</li>
 <li><strong><code>[discovery]</code></strong>：VISA 仪表可声明 <code>identity_pattern</code> 正则，扫描器会用它标出匹配地址（正式 <code>open()</code> 仍须重新核对型号）；非 VISA 网口仪表不写此块，直接用 <code>config_fields</code> 声明 <code>host</code>/<code>port</code>。</li>
 <li><strong><code>[[controls]]</code></strong>：这台仪表有几个可控制回路（例如单回路 <code>main</code>，或双回路 <code>loop_1</code> / <code>loop_2</code>）。</li>
-<li><strong><code>[[panels]]</code></strong>：驱动提供的固定面板模板，共有四种：</li>
+<li><strong><code>[[panels]]</code></strong>：驱动提供的固定面板模板，共有五种：</li>
 <li><code>controller</code>：绑定一个控制端点、主读数、默认上下限、默认/最大速率与判稳参数；</li>
 <li><code>readout</code>：显示 1 个只读读数；</li>
 <li><code>readout_grid</code>：以 2×2 网格显示 1–4 个只读读数；</li>
-<li><code>switch</code>：显示 1 个状态值（0/1 → Off/On）并绑定无参数控制按钮。</li>
+<li><code>switch</code>：显示 1 个状态值（0/1 → Off/On）并绑定无参数控制按钮；</li>
+<li><code>custom</code>：可选自定义底部卡片，通过 <code>widget = "frontend:ClassName"</code>（以及可选 <code>readings = [...]</code>）加载驱动目录下的自定义 <code>QWidget</code>（在扫描器中同样可自由勾选启用与排序）。</li>
+<li><strong><code>setup_widget</code></strong>（顶层可选字段）：指向驱动目录下的自定义配置界面（如 <code>setup_widget = "frontend:SetupWidget"</code>），由主菜单 <strong>Instrument → Instrument Setup…</strong> 及仪表卡片右键菜单打开，适合曲线切换、软件 PID 表切换等低频配置，不占用底部卡片位且不在后台周期轮询。</li>
 <li><strong><code>[readings.&lt;id&gt;]</code></strong>：集中声明每个读数的名称、单位和小数位。</li>
 <li><strong><code>[[sequence_commands]]</code></strong>：可选的无参数系统指令（如 <code>Compressor On</code> / <code>Compressor Off</code>），会自动出现在 <code>switch</code> 面板和右侧 <strong>System Commands</strong> 中。</li>
 </ul>
@@ -2091,8 +2127,15 @@
 <li><code>set_target(value, rate_per_minute, mode="Settle", *, control)</code>：校验限值后下发目标并回读确认；</li>
 <li><code>hold(*, control)</code>：用同一次操作里现读的新鲜值保持当前状态；</li>
 <li><code>execute_sequence_command(command_id)</code>（可选）：执行无参数系统指令；</li>
+<li><code>execute_action(action, payload=None)</code>（可选）：响应自定义卡片或 <code>setup_widget</code> 通过 <code>InstrumentUIAPI.call_action(...)</code> 发起的异步 JSON 请求；写动作（<code>read_only=False</code>）仅在 SEQ Idle 时允许执行并记入 <code>events.dat</code>。若返回 <code>{"config_updates": {...}}</code>，核心会在同一仪表串行锁内先校验键属于 <code>config_fields</code> 并原子写回 <code>configs/instruments/&lt;id&gt;.toml</code>，落盘成功后再调用后端的 <code>apply_config_updates(updates)</code> 使运行期配置生效；驱动不应在落盘前提前切换运行期配置，以避免保存失败时内存与磁盘不一致；</li>
 <li><code>event_responses()</code>（可选）：声明由核心执行的跨仪表安全联动；</li>
 <li><code>close()</code>：幂等释放通讯句柄（不擅自改写仪表设定）。</li>
+</ul>
+<h3 id="instrument-setup-frontendpy">可选自定义卡片与 Instrument Setup 前端（<code>frontend.py</code>）<a class="headerlink" href="#instrument-setup-frontendpy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>自定义 <code>QWidget</code> 的 <code>__init__(self, api: InstrumentUIAPI)</code> 只通过受限的 <code>InstrumentUIAPI</code>（<code>call_action</code>、<code>config</code>、<code>snapshot</code>、<code>editable</code>、<code>open_setup</code>）与后台通信，绝不直接触碰 VISA/串口句柄；</li>
+<li><code>template = "custom"</code> 的卡片需实现 <code>update_snapshot(snapshot)</code>（可选实现 <code>set_actions_enabled(enabled)</code>）；</li>
+<li><code>setup_widget</code> 可选实现 <code>on_activated()</code>（仅在打开窗口或切到该 Tab 时按需向仪表查询）、<code>update_snapshot(snapshot)</code> 和 <code>set_editable(editable)</code>。</li>
 </ul>
 <h2 id="_1">推荐学习顺序<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
 <ol>

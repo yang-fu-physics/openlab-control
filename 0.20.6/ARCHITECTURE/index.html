@@ -1976,7 +1976,7 @@
 </ul>
 <h2 id="2">2. 两类扩展与共享依赖<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>System Instrument（<code>system_instruments/</code>）</strong>：管理主温控、主磁场、开关和常驻监视表。后端继承同步的 <code>SystemInstrument</code>，返回普通字典，核心负责子进程、串行队列、限值校验、判稳与断线恢复。</li>
+<li><strong>System Instrument（<code>system_instruments/</code>）</strong>：管理主温控、主磁场、开关和常驻监视表。后端继承同步的 <code>SystemInstrument</code>，返回普通字典，核心负责子进程、串行队列、限值校验、判稳与断线恢复；驱动还可按需通过 <code>frontend.py</code> 提供自定义底部卡片（<code>template = "custom"</code>）或按需加载的 <strong>Instrument Setup</strong> 弹窗界面（<code>setup_widget</code>），所有硬件读写仍经 <code>InstrumentUIAPI</code> 走子进程串行队列。</li>
 <li><strong>Measurement Module（<code>modules/</code>）</strong>：管理按需加载的测量方案。最小目录只需 <code>module.toml</code> + <code>backend.py</code>（无需继承基类），扫描发现时不导入源码，Enable 后在子进程实例化。</li>
 <li><strong>框架共享依赖</strong>：<code>PySide6</code>、<code>QtAwesome</code>、<code>packaging</code>、<code>PyVISA</code> 和 <code>typing_extensions</code> 由框架统一锁定和打包，扩展不重复声明或维护第二套 Python 环境。</li>
 </ul>
