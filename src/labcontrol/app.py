@@ -60,21 +60,16 @@ def configure_qt_appearance(
     requested_scale: float | None = None,
     font_scale: float = 1.0,
 ) -> float:
-    """为正式 GUI 和视觉回归工具应用同一套主题、字体与缩放系数。"""
-    from PySide6.QtGui import QColor, QPalette
+    """为正式 GUI 和视觉回归工具应用同一套固定浅色主题、字体与缩放系数。"""
     from .ui.scaling import screen_ui_scale
+    from .ui.theme import apply_light_theme
 
     scale = requested_scale if requested_scale is not None else screen_ui_scale(application.primaryScreen())
     application.setProperty("openlabUiScale", scale)
     application.setProperty("openlabUiScaleMode", "manual" if requested_scale is not None else "auto")
     application.setProperty("openlabFontScale", float(font_scale))
 
-    application.setStyle("Fusion")
-    palette = application.palette()
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#5c6b79"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f7f9fa"))
-    application.setPalette(palette)
+    apply_light_theme(application)
     configure_qt_font(
         application,
         10.0 * scale * float(font_scale),
