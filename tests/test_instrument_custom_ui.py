@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -119,9 +120,8 @@ class DemoCryo(SystemInstrument):
             if "curve" in data:
                 self.curve = str(data["curve"])
             updates = {}
-            if "pid_file" in data:
-                self.pid_file = str(data["pid_file"])
-                updates["pid_file"] = self.pid_file
+            if "pid_file" in data and str(data["pid_file"]) != self.pid_file:
+                updates["pid_file"] = str(data["pid_file"])
             return {
                 "curve": self.curve,
                 "pid_file": self.pid_file,
@@ -131,6 +131,12 @@ class DemoCryo(SystemInstrument):
         if action == "uncertain_write":
             raise InstrumentError("timeout after write", "INSTRUMENT_WRITE_RESULT_UNKNOWN", self.config.id)
         return super().execute_action(action, payload)
+
+    def apply_config_updates(self, updates: dict[str, object]) -> dict[str, object]:
+        if "pid_file" in updates:
+            self.pid_file = str(updates["pid_file"])
+            self.config.extras["pid_file"] = self.pid_file
+        return {"pid_file": self.pid_file}
 """
 
 _CUSTOM_FRONTEND_PY = """from __future__ import annotations
@@ -333,14 +339,41 @@ class InstrumentCustomManifestAndRuntimeTests(unittest.TestCase):
             self.assertEqual(blocked.exception.code, "MANUAL_CONTROL_BLOCKED")
             manager.release_sequence_control()
 
-            # Write action succeeds when Idle, persists pid_file, updates extras, and logs audit event.
+            # Simulated disk persistence failure must NOT mutate backend or config.extras,
+            # and retrying apply_setup once disk recovers must succeed.
+            default_pid = str((root / "configs" / "pid" / "default.toml").resolve())
             rod_b = str((root / "configs" / "pid" / "rod_b.toml").resolve())
+            with patch(
+                "labcontrol.instrument_manager.update_instrument_instance_config",
+                side_effect=PermissionError("disk read-only"),
+            ):
+                with self.assertRaises(InstrumentError) as save_failed:
+                    await manager.execute_action(
+                        "cryo_main",
+                        "apply_setup",
+                        {"pid_file": rod_b},
+                    )
+            self.assertEqual(save_failed.exception.code, "INSTRUMENT_CONFIG_SAVE_FAILED")
+            self.assertIs(
+                manager._connection_states["cryo_main"],
+                InstrumentConnectionState.CONNECTED,
+            )
+            after_failure = await manager.execute_action("cryo_main", "read_setup", read_only=True)
+            self.assertEqual(after_failure["pid_file"], default_pid)
+            self.assertEqual(manager.instrument_configs["cryo_main"].extras["pid_file"], default_pid)
+            self.assertIn(
+                'pid_file = "configs/pid/default.toml"',
+                (root / "configs" / "instruments" / "demo_cryo.toml").read_text(encoding="utf-8"),
+            )
+
+            # Write action succeeds when Idle, persists pid_file, activates backend config, updates extras, and logs audit event.
             result = await manager.execute_action(
                 "cryo_main",
                 "apply_setup",
                 {"curve": "DT-670", "pid_file": rod_b},
             )
             self.assertEqual(result["curve"], "DT-670")
+            self.assertEqual(result["pid_file"], rod_b)
             self.assertEqual(result["persisted_config"]["pid_file"], rod_b)
             self.assertEqual(manager.instrument_configs["cryo_main"].extras["pid_file"], rod_b)
             self.assertIn(

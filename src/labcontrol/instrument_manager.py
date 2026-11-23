@@ -2163,16 +2163,66 @@ class InstrumentManager:
             if read_only
             else f"action:{action_name}"
         )
+        async def _run_action() -> dict[str, Any]:
+            raw_result = await self.instruments[instrument_id].execute_action(
+                action_name,
+                request_payload,
+            )
+            result = dict(raw_result) if isinstance(raw_result, Mapping) else {}
+            if "config_updates" in result:
+                raw_updates = result.pop("config_updates")
+                if read_only:
+                    raise InstrumentError(
+                        "Read-only instrument action cannot persist configuration updates",
+                        "INVALID_INSTRUMENT_ACTION_RESULT",
+                        instrument_id,
+                    )
+                if raw_updates:
+                    if not isinstance(raw_updates, Mapping):
+                        raise InstrumentError(
+                            "Instrument config_updates must be a mapping",
+                            "INVALID_INSTRUMENT_ACTION_RESULT",
+                            instrument_id,
+                        )
+                    descriptor = self.descriptors.get(config.backend)
+                    if descriptor is None:
+                        raise InstrumentError(
+                            f"Instrument {instrument_id} cannot persist config_updates without an external manifest",
+                            "INSTRUMENT_CONFIG_SAVE_FAILED",
+                            instrument_id,
+                        )
+                    try:
+                        normalized = update_instrument_instance_config(
+                            self.config.source_path.parent,
+                            self.config.project_root,
+                            descriptor,
+                            instrument_id,
+                            raw_updates,
+                        )
+                    except (ConfigurationError, OSError, ValueError) as exc:
+                        raise InstrumentError(
+                            f"Failed to persist configuration for {config.display_name}: {exc}",
+                            "INSTRUMENT_CONFIG_SAVE_FAILED",
+                            instrument_id,
+                        ) from exc
+                    config.extras.update(normalized)
+                    committed = await self.instruments[
+                        instrument_id
+                    ].apply_config_updates(dict(normalized))
+                    if isinstance(committed, Mapping):
+                        for key, value in committed.items():
+                            if key != "config_updates":
+                                result[key] = value
+                    result["persisted_config"] = deepcopy(normalized)
+            return result
+
         try:
             if not read_only:
                 self._ensure_event_response_control(instrument_id, "manual")
-            raw_result = await self._operate(
+            result = await self._operate(
                 instrument_id,
                 operation,
-                lambda: self.instruments[instrument_id].execute_action(
-                    action_name,
-                    request_payload,
-                ),
+                _run_action,
                 origin=None if read_only else "manual",
                 priority=(
                     _INSTRUMENT_MEASUREMENT_PRIORITY
@@ -2210,53 +2260,6 @@ class InstrumentManager:
                 exc.context,
             )
             raise
-
-        result = dict(raw_result) if isinstance(raw_result, Mapping) else {}
-        if "config_updates" in result:
-            raw_updates = result.pop("config_updates")
-            if read_only:
-                raise InstrumentError(
-                    "Read-only instrument action cannot persist configuration updates",
-                    "INVALID_INSTRUMENT_ACTION_RESULT",
-                    instrument_id,
-                )
-            if raw_updates:
-                if not isinstance(raw_updates, Mapping):
-                    raise InstrumentError(
-                        "Instrument config_updates must be a mapping",
-                        "INVALID_INSTRUMENT_ACTION_RESULT",
-                        instrument_id,
-                    )
-                descriptor = self.descriptors.get(config.backend)
-                if descriptor is None:
-                    raise InstrumentError(
-                        f"Instrument {instrument_id} cannot persist config_updates without an external manifest",
-                        "INSTRUMENT_CONFIG_SAVE_FAILED",
-                        instrument_id,
-                    )
-                try:
-                    normalized = update_instrument_instance_config(
-                        self.config.source_path.parent,
-                        self.config.project_root,
-                        descriptor,
-                        instrument_id,
-                        raw_updates,
-                    )
-                except (ConfigurationError, OSError, ValueError) as exc:
-                    self.events.report(
-                        Severity.ERROR,
-                        instrument_id,
-                        "INSTRUMENT_CONFIG_SAVE_FAILED",
-                        str(exc),
-                        instrument_id,
-                    )
-                    raise InstrumentError(
-                        f"Failed to persist configuration for {config.display_name}: {exc}",
-                        "INSTRUMENT_CONFIG_SAVE_FAILED",
-                        instrument_id,
-                    ) from exc
-                config.extras.update(normalized)
-                result["persisted_config"] = deepcopy(normalized)
 
         if not read_only:
             summary = str(result.get("summary", "")).strip()

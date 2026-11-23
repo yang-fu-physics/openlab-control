@@ -117,7 +117,7 @@ return {
 - `set_target(value, rate_per_minute, mode="Settle", *, control)`：校验限值后下发目标并回读确认；
 - `hold(*, control)`：用同一次操作里现读的新鲜值保持当前状态；
 - `execute_sequence_command(command_id)`（可选）：执行无参数系统指令；
-- `execute_action(action, payload=None)`（可选）：响应自定义卡片或 `setup_widget` 通过 `InstrumentUIAPI.call_action(...)` 发起的异步 JSON 请求；写动作（`read_only=False`）仅在 SEQ Idle 时允许执行并记入 `events.dat`。若返回 `{"config_updates": {...}}`，核心会校验键属于 `config_fields` 并原子写回 `configs/instruments/<id>.toml`（如持久化切换后的 `pid_file`）；
+- `execute_action(action, payload=None)`（可选）：响应自定义卡片或 `setup_widget` 通过 `InstrumentUIAPI.call_action(...)` 发起的异步 JSON 请求；写动作（`read_only=False`）仅在 SEQ Idle 时允许执行并记入 `events.dat`。若返回 `{"config_updates": {...}}`，核心会在同一仪表串行锁内先校验键属于 `config_fields` 并原子写回 `configs/instruments/<id>.toml`，落盘成功后再调用后端的 `apply_config_updates(updates)` 使运行期配置生效；驱动不应在落盘前提前切换运行期配置，以避免保存失败时内存与磁盘不一致；
 - `event_responses()`（可选）：声明由核心执行的跨仪表安全联动；
 - `close()`：幂等释放通讯句柄（不擅自改写仪表设定）。
 

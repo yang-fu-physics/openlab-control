@@ -173,6 +173,20 @@ class SystemInstrument(ABC):
             action,
         )
 
+    def apply_config_updates(
+        self,
+        updates: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """在核心把 ``config_updates`` 原子落盘后调用，通知后端生效配置。
+
+        驱动在 :meth:`execute_action` 中应仅校验并返回 ``config_updates``，待本方法
+        被调用后再切换运行期配置状态，避免磁盘写入失败时内存状态与现场配置不一致。
+        若返回字典，其键（除 ``config_updates`` 外）会合并回该次动作结果。
+        """
+
+        self.config.extras.update(updates)
+        return None
+
     def event_responses(self) -> tuple[EventResponseSpec, ...]:
         """声明由核心执行的事件响应；默认不注册任何响应。"""
 

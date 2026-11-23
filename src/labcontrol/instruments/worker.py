@@ -404,6 +404,25 @@ def instrument_worker_main(connection: Connection, spec: InstrumentWorkerSpec) -
                         "INVALID_INSTRUMENT_ACTION_RESULT",
                         action_name,
                     )
+            elif action == "apply_config_updates":
+                raw_updates = payload.get("updates", {})
+                if not isinstance(raw_updates, dict):
+                    raise InstrumentError(
+                        "Instrument config updates payload must be a dictionary",
+                        "INVALID_INSTRUMENT_ACTION",
+                        "apply_config_updates",
+                    )
+                raw_result = backend.apply_config_updates(dict(raw_updates))
+                if raw_result is None:
+                    value = {}
+                elif isinstance(raw_result, dict):
+                    value = raw_result
+                else:
+                    raise InstrumentError(
+                        "Instrument apply_config_updates() must return a dictionary or None",
+                        "INVALID_INSTRUMENT_ACTION_RESULT",
+                        "apply_config_updates",
+                    )
             elif action == "event_responses":
                 try:
                     value = _event_response_payload(
@@ -905,6 +924,15 @@ class IsolatedInstrumentClient:
             {"name": str(name).strip(), "payload": dict(payload or {})},
         )
 
+    async def apply_config_updates(
+        self,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        return await self._request(
+            "apply_config_updates",
+            {"updates": dict(updates)},
+        )
+
     async def shutdown(
         self,
         timeout_seconds: float | None = None,
@@ -1017,6 +1045,34 @@ class InProcessInstrumentClient:
                 f"Instrument action result is not JSON serializable: {exc}",
                 "INVALID_INSTRUMENT_ACTION_RESULT",
                 action_name,
+            ) from exc
+        return result
+
+    async def apply_config_updates(
+        self,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_result = await asyncio.to_thread(
+            self.backend.apply_config_updates,
+            dict(updates),
+        )
+        if raw_result is None:
+            result: dict[str, Any] = {}
+        elif isinstance(raw_result, dict):
+            result = dict(raw_result)
+        else:
+            raise InstrumentError(
+                "Instrument apply_config_updates() must return a dictionary or None",
+                "INVALID_INSTRUMENT_ACTION_RESULT",
+                "apply_config_updates",
+            )
+        try:
+            json.dumps(result, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise InstrumentError(
+                f"Instrument apply_config_updates result is not JSON serializable: {exc}",
+                "INVALID_INSTRUMENT_ACTION_RESULT",
+                "apply_config_updates",
             ) from exc
         return result
 
