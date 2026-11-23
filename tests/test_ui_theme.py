@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from labcontrol.app import configure_qt_appearance  # noqa: E402
 from labcontrol.ui.theme import (  # noqa: E402
     LIGHT_THEME_COLORS,
+    _color_scheme_drifted,
     apply_light_theme,
     build_light_palette,
 )
@@ -104,7 +105,21 @@ class FixedLightThemeTests(unittest.TestCase):
             and style_hints is not None
             and hasattr(style_hints, "colorScheme")
         ):
-            self.assertEqual(style_hints.colorScheme(), color_scheme_enum.Light)
+            platform_name = (
+                self.application.platformName().lower()
+                if hasattr(self.application, "platformName")
+                else ""
+            )
+            if platform_name == "offscreen":
+                self.assertIn(
+                    style_hints.colorScheme(),
+                    (color_scheme_enum.Light, color_scheme_enum.Unknown),
+                )
+            else:
+                self.assertEqual(
+                    style_hints.colorScheme(),
+                    color_scheme_enum.Light,
+                )
 
         palette = self.application.palette()
         self.assertEqual(
@@ -158,12 +173,26 @@ class FixedLightThemeTests(unittest.TestCase):
             and style_hints is not None
             and hasattr(style_hints, "setColorScheme")
         ):
+            platform_name = (
+                self.application.platformName().lower()
+                if hasattr(self.application, "platformName")
+                else ""
+            )
             style_hints.setColorScheme(color_scheme_enum.Dark)
             QCoreApplication.sendEvent(
                 self.application,
                 QEvent(QEvent.Type.ThemeChange),
             )
-            self.assertEqual(style_hints.colorScheme(), color_scheme_enum.Light)
+            if platform_name == "offscreen":
+                self.assertIn(
+                    style_hints.colorScheme(),
+                    (color_scheme_enum.Light, color_scheme_enum.Unknown),
+                )
+            else:
+                self.assertEqual(
+                    style_hints.colorScheme(),
+                    color_scheme_enum.Light,
+                )
             self.assertEqual(
                 self.application.palette()
                 .color(QPalette.ColorGroup.Active, QPalette.ColorRole.Window)
@@ -171,6 +200,34 @@ class FixedLightThemeTests(unittest.TestCase):
                 .lower(),
                 LIGHT_THEME_COLORS["window"],
             )
+
+    def test_unknown_offscreen_scheme_does_not_drift_and_dark_scheme_recovers(
+        self,
+    ) -> None:
+        color_scheme_enum = getattr(Qt, "ColorScheme", None)
+        if color_scheme_enum is None:
+            return
+
+        class _FakeHints:
+            def __init__(self, scheme) -> None:
+                self._scheme = scheme
+
+            def colorScheme(self):
+                return self._scheme
+
+            def setColorScheme(self, scheme) -> None:
+                self._scheme = scheme
+
+        class _FakeApp:
+            def __init__(self, scheme) -> None:
+                self._hints = _FakeHints(scheme)
+
+            def styleHints(self):
+                return self._hints
+
+        self.assertFalse(_color_scheme_drifted(_FakeApp(color_scheme_enum.Unknown)))
+        self.assertFalse(_color_scheme_drifted(_FakeApp(color_scheme_enum.Light)))
+        self.assertTrue(_color_scheme_drifted(_FakeApp(color_scheme_enum.Dark)))
 
 
 if __name__ == "__main__":

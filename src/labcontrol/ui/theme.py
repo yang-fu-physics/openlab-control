@@ -172,7 +172,8 @@ def _color_scheme_drifted(application: Any) -> bool:
         or not hasattr(style_hints, "colorScheme")
     ):
         return False
-    return style_hints.colorScheme() != color_scheme_enum.Light
+    # 离屏或极简平台插件不提供原生色系，始终返回 Unknown；只有漂移为 Dark 才需要纠正。
+    return style_hints.colorScheme() == color_scheme_enum.Dark
 
 
 def _palette_drifted(current: Any, expected: Any) -> bool:
