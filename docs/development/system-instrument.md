@@ -69,11 +69,13 @@ decimals = 3
 - **`[[config_fields]]`**：需要操作员在扫描器里填写的型号专用字段（如超时、网络 `host`/`port`、通道顺序、PID 文件等），后台通过 `config.extras["字段ID"]` 读取。支持类型：`string`、`integer`、`number`、`boolean`、`choice`、`ordered_choices`（可选 `allow_empty = true` 和 `option_count_from`）、`pid_file`。
 - **`[discovery]`**：VISA 仪表可声明 `identity_pattern` 正则，扫描器会用它标出匹配地址（正式 `open()` 仍须重新核对型号）；非 VISA 网口仪表不写此块，直接用 `config_fields` 声明 `host`/`port`。
 - **`[[controls]]`**：这台仪表有几个可控制回路（例如单回路 `main`，或双回路 `loop_1` / `loop_2`）。
-- **`[[panels]]`**：驱动提供的固定面板模板，共有四种：
+- **`[[panels]]`**：驱动提供的固定面板模板，共有五种：
   - `controller`：绑定一个控制端点、主读数、默认上下限、默认/最大速率与判稳参数；
   - `readout`：显示 1 个只读读数；
   - `readout_grid`：以 2×2 网格显示 1–4 个只读读数；
-  - `switch`：显示 1 个状态值（0/1 → Off/On）并绑定无参数控制按钮。
+  - `switch`：显示 1 个状态值（0/1 → Off/On）并绑定无参数控制按钮；
+  - `custom`：可选自定义底部卡片，通过 `widget = "frontend:ClassName"`（以及可选 `readings = [...]`）加载驱动目录下的自定义 `QWidget`（在扫描器中同样可自由勾选启用与排序）。
+- **`setup_widget`**（顶层可选字段）：指向驱动目录下的自定义配置界面（如 `setup_widget = "frontend:SetupWidget"`），由主菜单 **Instrument → Instrument Setup…** 及仪表卡片右键菜单打开，适合曲线切换、软件 PID 表切换等低频配置，不占用底部卡片位且不在后台周期轮询。
 - **`[readings.<id>]`**：集中声明每个读数的名称、单位和小数位。
 - **`[[sequence_commands]]`**：可选的无参数系统指令（如 `Compressor On` / `Compressor Off`），会自动出现在 `switch` 面板和右侧 **System Commands** 中。
 
@@ -115,8 +117,15 @@ return {
 - `set_target(value, rate_per_minute, mode="Settle", *, control)`：校验限值后下发目标并回读确认；
 - `hold(*, control)`：用同一次操作里现读的新鲜值保持当前状态；
 - `execute_sequence_command(command_id)`（可选）：执行无参数系统指令；
+- `execute_action(action, payload=None)`（可选）：响应自定义卡片或 `setup_widget` 通过 `InstrumentUIAPI.call_action(...)` 发起的异步 JSON 请求；写动作（`read_only=False`）仅在 SEQ Idle 时允许执行并记入 `events.dat`。若返回 `{"config_updates": {...}}`，核心会在同一仪表串行锁内先校验键属于 `config_fields` 并原子写回 `configs/instruments/<id>.toml`，落盘成功后再调用后端的 `apply_config_updates(updates)` 使运行期配置生效；驱动不应在落盘前提前切换运行期配置，以避免保存失败时内存与磁盘不一致；
 - `event_responses()`（可选）：声明由核心执行的跨仪表安全联动；
 - `close()`：幂等释放通讯句柄（不擅自改写仪表设定）。
+
+### 可选自定义卡片与 Instrument Setup 前端（`frontend.py`）
+
+- 自定义 `QWidget` 的 `__init__(self, api: InstrumentUIAPI)` 只通过受限的 `InstrumentUIAPI`（`call_action`、`config`、`snapshot`、`editable`、`open_setup`）与后台通信，绝不直接触碰 VISA/串口句柄；
+- `template = "custom"` 的卡片需实现 `update_snapshot(snapshot)`（可选实现 `set_actions_enabled(enabled)`）；
+- `setup_widget` 可选实现 `on_activated()`（仅在打开窗口或切到该 Tab 时按需向仪表查询）、`update_snapshot(snapshot)` 和 `set_editable(editable)`。
 
 ## 推荐学习顺序
 

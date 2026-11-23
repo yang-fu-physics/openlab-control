@@ -13,6 +13,7 @@ import logging
 import queue
 import threading
 import time
+from collections.abc import Mapping
 from concurrent.futures import Future
 from copy import deepcopy
 from typing import Any
@@ -358,6 +359,24 @@ class RuntimeService:
                 instrument_id,
                 command_id,
                 origin="manual",
+            )
+        )
+
+    def execute_instrument_action(
+        self,
+        instrument_id: str,
+        action: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        read_only: bool = False,
+    ) -> Future[dict[str, Any]]:
+        assert self.instruments is not None
+        return self._submit(
+            self.instruments.execute_action(
+                instrument_id,
+                action,
+                deepcopy(dict(payload or {})),
+                read_only=read_only,
             )
         )
 

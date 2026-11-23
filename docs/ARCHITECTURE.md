@@ -27,7 +27,7 @@ GUI 主线程（PySide6）
 
 ## 2. 两类扩展与共享依赖
 
-- **System Instrument（`system_instruments/`）**：管理主温控、主磁场、开关和常驻监视表。后端继承同步的 `SystemInstrument`，返回普通字典，核心负责子进程、串行队列、限值校验、判稳与断线恢复。
+- **System Instrument（`system_instruments/`）**：管理主温控、主磁场、开关和常驻监视表。后端继承同步的 `SystemInstrument`，返回普通字典，核心负责子进程、串行队列、限值校验、判稳与断线恢复；驱动还可按需通过 `frontend.py` 提供自定义底部卡片（`template = "custom"`）或按需加载的 **Instrument Setup** 弹窗界面（`setup_widget`），所有硬件读写仍经 `InstrumentUIAPI` 走子进程串行队列。
 - **Measurement Module（`modules/`）**：管理按需加载的测量方案。最小目录只需 `module.toml` + `backend.py`（无需继承基类），扫描发现时不导入源码，Enable 后在子进程实例化。
 - **框架共享依赖**：`PySide6`、`QtAwesome`、`packaging`、`PyVISA` 和 `typing_extensions` 由框架统一锁定和打包，扩展不重复声明或维护第二套 Python 环境。
 

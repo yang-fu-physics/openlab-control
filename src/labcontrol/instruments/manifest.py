@@ -28,7 +28,7 @@ _CONFIG_FIELD_TYPES = frozenset(
     {"string", "integer", "number", "boolean", "choice", "ordered_choices", "pid_file"}
 )
 _PANEL_TEMPLATES = frozenset(
-    {"controller", "readout", "readout_grid", "switch"}
+    {"controller", "readout", "readout_grid", "switch", "custom"}
 )
 _CONTROLLER_FIELDS = frozenset(
     {
@@ -115,6 +115,7 @@ class InstrumentPanelDescriptor:
     setpoint_decimals: int | None = None
     fine_setpoint_below: float | None = None
     rate_decimals: int | None = None
+    widget: str = ""
 
 
 @dataclass(slots=True)
@@ -126,6 +127,7 @@ class SystemInstrumentDescriptor:
     api_version: str = ""
     core_requires: str = ""
     backend: str = ""
+    setup_widget: str = ""
     kinds: tuple[InstrumentKind, ...] = ()
     identity_pattern: str = ""
     config_fields: tuple[InstrumentConfigFieldDescriptor, ...] = ()
@@ -300,6 +302,8 @@ def _parse_panels(raw_panels: object) -> tuple[InstrumentPanelDescriptor, ...]:
             unknown = sorted(set(raw) - common - {"readings"})
         elif template == "switch":
             unknown = sorted(set(raw) - common - {"reading", "commands"})
+        elif template == "custom":
+            unknown = sorted(set(raw) - common - {"widget", "readings"})
         else:
             unknown = []
         if unknown:
@@ -380,6 +384,13 @@ def _parse_panels(raw_panels: object) -> tuple[InstrumentPanelDescriptor, ...]:
                     f"panels entry {index} commands",
                 ),
             )
+        elif template == "custom":
+            values["widget"] = str(raw["widget"]).strip()
+            if "readings" in raw:
+                values["readings"] = _array_of_strings(
+                    raw["readings"],
+                    f"panels entry {index} readings",
+                )
         panels.append(InstrumentPanelDescriptor(**values))
     return tuple(panels)
 
@@ -462,6 +473,7 @@ def load_instrument_manifest(
                 "panels",
                 "readings",
                 "sequence_commands",
+                "setup_widget",
                 "version",
             }
         )
@@ -485,6 +497,7 @@ def load_instrument_manifest(
             api_version=str(raw["api_version"]).strip(),
             core_requires=str(raw.get("core_requires", "")).strip(),
             backend=str(raw["backend"]).strip(),
+            setup_widget=str(raw.get("setup_widget", "")).strip(),
             kinds=tuple(
                 InstrumentKind(str(item).strip().casefold())
                 for item in raw["kinds"]
@@ -544,6 +557,13 @@ def load_instrument_manifest(
         module_name = descriptor.backend.split(":", 1)[0]
         if not (path / f"{module_name}.py").is_file():
             errors.append(f"backend source does not exist: {module_name}.py")
+    if descriptor.setup_widget:
+        if not _ENTRYPOINT.fullmatch(descriptor.setup_widget):
+            errors.append("setup_widget must use module:ClassName without a path")
+        else:
+            setup_module = descriptor.setup_widget.split(":", 1)[0]
+            if not (path / f"{setup_module}.py").is_file():
+                errors.append(f"setup_widget source does not exist: {setup_module}.py")
     if not descriptor.kinds:
         errors.append("at least one supported instrument kind is required")
     if len(descriptor.kinds) != len(set(descriptor.kinds)):
@@ -763,16 +783,35 @@ def load_instrument_manifest(
                     f"panel {panel.id} readout_grid requires one to four "
                     "unique declared readings"
                 )
-        elif (
-            panel.reading not in reading_ids
-            or not panel.commands
-            or len(panel.commands) != len(set(panel.commands))
-            or any(command not in command_ids for command in panel.commands)
-        ):
-            errors.append(
-                f"panel {panel.id} switch must reference one reading and "
-                "declared commands"
-            )
+        elif panel.template == "switch":
+            if (
+                panel.reading not in reading_ids
+                or not panel.commands
+                or len(panel.commands) != len(set(panel.commands))
+                or any(command not in command_ids for command in panel.commands)
+            ):
+                errors.append(
+                    f"panel {panel.id} switch must reference one reading and "
+                    "declared commands"
+                )
+        elif panel.template == "custom":
+            if not _ENTRYPOINT.fullmatch(panel.widget):
+                errors.append(
+                    f"panel {panel.id} custom widget must use module:ClassName without a path"
+                )
+            else:
+                widget_module = panel.widget.split(":", 1)[0]
+                if not (path / f"{widget_module}.py").is_file():
+                    errors.append(
+                        f"panel {panel.id} custom widget source does not exist: {widget_module}.py"
+                    )
+            if panel.readings and (
+                len(panel.readings) != len(set(panel.readings))
+                or any(key not in reading_ids for key in panel.readings)
+            ):
+                errors.append(
+                    f"panel {panel.id} custom readings must contain unique declared readings"
+                )
     if errors:
         descriptor.valid = False
         descriptor.error = "; ".join(errors)

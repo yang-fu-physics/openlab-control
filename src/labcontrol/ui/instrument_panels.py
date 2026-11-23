@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from collections.abc import Callable
+from typing import Any
+
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -21,12 +25,15 @@ from ..config import (
     InstrumentReadingConfig,
 )
 from ..formatting import control_decimals, fixed_number
+from ..instruments.frontend_api import InstrumentUIAPI
+from ..instruments.manifest import SystemInstrumentDescriptor
 from ..models import (
     InstrumentConnectionState,
     InstrumentKind,
     InstrumentSnapshot,
     StabilityState,
 )
+from ..package_support.loading import load_source_object
 from ..sequence.model import SystemInstrumentCommandSpec
 from .scaling import scaled, scaled_text
 
@@ -403,11 +410,117 @@ class SwitchPanel(QFrame):
         )
 
 
+class CustomPanel(QFrame):
+    """承载 System Instrument 驱动在 ``frontend.py`` 提供的自定义底部卡片。"""
+
+    setupRequested = Signal(str)
+
+    def __init__(
+        self,
+        config: InstrumentConfig,
+        panel: InstrumentPanelConfig,
+        descriptor: SystemInstrumentDescriptor | None,
+        api: InstrumentUIAPI | None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.config = config
+        self.panel = panel
+        self.api = api
+        self.content: QWidget | None = None
+        self._actions_enabled = True
+        self._connected = False
+        self.setObjectName("instrumentPanel")
+        self.setMinimumWidth(scaled(220))
+        self.setMaximumHeight(scaled(135))
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+
+        layout = _panel_layout(self)
+        self.title_label, self.state_label = _panel_header(
+            layout,
+            panel.display_name,
+        )
+        body = _panel_body(layout)
+
+        if api is not None:
+            api.setupRequested.connect(self.setupRequested)
+
+        error_message = ""
+        if descriptor is None or not panel.widget:
+            error_message = f"Custom panel {panel.id!r} has no widget entry point."
+        elif api is None:
+            error_message = f"Custom panel {panel.id!r} requires a runtime UI bridge."
+        else:
+            try:
+                loaded = load_source_object(
+                    descriptor.path,
+                    panel.widget,
+                    f"instrument_panel_{descriptor.id}_{config.id}_{panel.id}",
+                )
+                if not isinstance(loaded, type):
+                    raise TypeError(f"{panel.widget} is not a class")
+                widget: Any = loaded(api)
+                if not isinstance(widget, QWidget):
+                    raise TypeError(f"{panel.widget} must return a QWidget")
+                if not callable(getattr(widget, "update_snapshot", None)):
+                    raise TypeError(
+                        f"{panel.widget} must implement update_snapshot(snapshot)"
+                    )
+                self.content = widget
+                body.addWidget(widget, 1)
+            except Exception as exc:
+                error_message = f"Failed to load custom panel: {exc}"
+
+        if error_message:
+            fallback = _detail_label(body, error_message)
+            fallback.setToolTip(error_message)
+        self._set_state_style("disconnected")
+
+    def set_actions_enabled(self, enabled: bool) -> None:
+        self._actions_enabled = bool(enabled)
+        if self.api is not None:
+            self.api.set_runtime_editable(self._actions_enabled)
+        setter = (
+            getattr(self.content, "set_actions_enabled", None)
+            if self.content is not None
+            else None
+        )
+        if callable(setter):
+            setter(bool(self._actions_enabled and self._connected))
+
+    def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
+        was_connected = self._connected
+        self._connected = bool(snapshot.connected)
+        if self.api is not None:
+            self.api.update_snapshot(snapshot)
+        if not snapshot.connected:
+            self.state_label.setText(_connection_state_text(snapshot))
+            self.setToolTip(snapshot.message)
+            self._set_state_style(snapshot.connection_state.value)
+        else:
+            self.state_label.setText("Connected")
+            self.setToolTip("")
+            self._set_state_style("stable")
+        if self.content is not None:
+            self.content.update_snapshot(snapshot)
+            if self._connected != was_connected:
+                setter = getattr(self.content, "set_actions_enabled", None)
+                if callable(setter):
+                    setter(bool(self._actions_enabled and self._connected))
+
+    def _set_state_style(self, state: str) -> None:
+        self.setStyleSheet(_instrument_panel_style(state, show_badge=True))
+
+
 class InstrumentPanelHost(QWidget):
     """按全局顺序创建面板，并把物理实例快照扇出到全部面板。"""
 
     controlRequested = Signal(str, str)
     actionRequested = Signal(str, str)
+    setupRequested = Signal(str)
 
     def __init__(
         self,
@@ -418,17 +531,24 @@ class InstrumentPanelHost(QWidget):
             ...,
         ] = (),
         parent: QWidget | None = None,
+        *,
+        descriptors: tuple[SystemInstrumentDescriptor, ...] = (),
+        ui_api_factory: Callable[[InstrumentConfig, QObject | None], InstrumentUIAPI] | None = None,
     ) -> None:
         super().__init__(parent)
         instrument_by_id = {
             instrument.id: instrument for instrument in instruments
+        }
+        descriptors_by_id = {
+            descriptor.id: descriptor for descriptor in descriptors
         }
         self.panels: dict[
             str,
             ControllerPanel
             | ReadoutPanel
             | ReadoutGridPanel
-            | SwitchPanel,
+            | SwitchPanel
+            | CustomPanel,
         ] = {}
         self._panels_by_instrument: dict[
             str,
@@ -437,6 +557,7 @@ class InstrumentPanelHost(QWidget):
                 | ReadoutPanel
                 | ReadoutGridPanel
                 | SwitchPanel
+                | CustomPanel
             ],
         ] = {}
         self._row = QHBoxLayout(self)
@@ -460,8 +581,9 @@ class InstrumentPanelHost(QWidget):
 
         for panel_config in panels:
             instrument = instrument_by_id[panel_config.instrument_id]
+            descriptor = descriptors_by_id.get(instrument.backend)
             if panel_config.template == "controller":
-                panel = ControllerPanel(
+                panel: Any = ControllerPanel(
                     instrument,
                     panel_config,
                     self,
@@ -497,9 +619,30 @@ class InstrumentPanelHost(QWidget):
                     self,
                 )
                 panel.actionRequested.connect(self.actionRequested)
+            elif panel_config.template == "custom":
+                api = (
+                    ui_api_factory(instrument, self)
+                    if ui_api_factory is not None
+                    else None
+                )
+                panel = CustomPanel(
+                    instrument,
+                    panel_config,
+                    descriptor,
+                    api,
+                    self,
+                )
+                panel.setupRequested.connect(self.setupRequested)
             else:
                 raise ValueError(
                     f"Unknown instrument panel template: {panel_config.template}"
+                )
+            if descriptor is not None and descriptor.setup_widget:
+                panel.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                panel.customContextMenuRequested.connect(
+                    lambda pos, target_panel=panel, inst_id=instrument.id: (
+                        self._show_panel_context_menu(target_panel, inst_id, pos)
+                    )
                 )
             self.panels[panel_config.key] = panel
             self._panels_by_instrument.setdefault(
@@ -507,6 +650,19 @@ class InstrumentPanelHost(QWidget):
                 [],
             ).append(panel)
             self._row.insertWidget(self._row.count() - 1, panel)
+
+    def _show_panel_context_menu(
+        self,
+        panel: QWidget,
+        instrument_id: str,
+        position: QPoint,
+    ) -> None:
+        menu = QMenu(panel)
+        setup_action = menu.addAction("Instrument Setup…")
+        setup_action.triggered.connect(
+            lambda _checked=False, inst_id=instrument_id: self.setupRequested.emit(inst_id)
+        )
+        menu.exec(panel.mapToGlobal(position))
 
     def update_snapshot(self, snapshot: InstrumentSnapshot) -> None:
         for panel in self._panels_by_instrument.get(
@@ -517,7 +673,7 @@ class InstrumentPanelHost(QWidget):
 
     def set_actions_enabled(self, enabled: bool) -> None:
         for panel in self.panels.values():
-            if isinstance(panel, SwitchPanel):
+            if isinstance(panel, (SwitchPanel, CustomPanel)):
                 panel.set_actions_enabled(enabled)
 
 
@@ -713,6 +869,7 @@ def _instrument_panel_style(
 
 __all__ = [
     "ControllerPanel",
+    "CustomPanel",
     "InstrumentPanelHost",
     "ReadoutPanel",
     "ReadoutGridPanel",

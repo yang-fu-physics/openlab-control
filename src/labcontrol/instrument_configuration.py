@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
+import tempfile
+import threading
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +54,7 @@ _DOCUMENT_FIELDS = {
     "discovery",
     "readings",
     "sequence_commands",
+    "setup_widget",
     "instances",
 }
 _CONTROLLER_FIELDS = {
@@ -516,6 +522,7 @@ def _configured_panel(
         setpoint_decimals=template.setpoint_decimals,
         fine_setpoint_below=template.fine_setpoint_below,
         rate_decimals=template.rate_decimals,
+        widget=template.widget,
     )
 
 
@@ -875,4 +882,165 @@ def load_instrument_instances(
     return tuple(instances)
 
 
-__all__ = ["load_instrument_instances"]
+def _toml_key(key: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9_-]+", key):
+        return key
+    return json.dumps(key, ensure_ascii=False)
+
+
+def _toml_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ConfigurationError("Non-finite number cannot be saved to TOML")
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise ConfigurationError(f"Cannot render TOML value of type {type(value).__name__}")
+
+
+def _render_toml_document(raw: dict[str, Any]) -> str:
+    lines: list[str] = []
+
+    def emit_table(values: dict[str, Any], path: tuple[str, ...]) -> None:
+        scalars = [
+            (key, value)
+            for key, value in values.items()
+            if not isinstance(value, dict)
+            and not (
+                isinstance(value, list)
+                and value
+                and all(isinstance(item, dict) for item in value)
+            )
+        ]
+        for key, value in scalars:
+            lines.append(f"{_toml_key(key)} = {_toml_value(value)}")
+        for key, value in values.items():
+            child_path = (*path, key)
+            header = ".".join(_toml_key(item) for item in child_path)
+            if isinstance(value, dict):
+                if lines and lines[-1] != "":
+                    lines.append("")
+                lines.append(f"[{header}]")
+                emit_table(value, child_path)
+            elif (
+                isinstance(value, list)
+                and value
+                and all(isinstance(item, dict) for item in value)
+            ):
+                for item in value:
+                    if lines and lines[-1] != "":
+                        lines.append("")
+                    lines.append(f"[[{header}]]")
+                    emit_table(item, child_path)
+
+    emit_table(raw, ())
+    return "\n".join(lines).rstrip() + "\n"
+
+
+_CONFIG_WRITE_LOCK = threading.Lock()
+
+
+def update_instrument_instance_config(
+    configs_directory: Path,
+    project_root: Path,
+    descriptor: Any,
+    instrument_id: str,
+    updates: Mapping[str, Any],
+) -> dict[str, Any]:
+    """校验并原子写回现场实例的声明 ``config_fields``（如 ``pid_file``）。"""
+
+    if not updates:
+        return {}
+    document_path = configs_directory / "instruments" / f"{descriptor.id}.toml"
+    with _CONFIG_WRITE_LOCK:
+        if not document_path.is_file():
+            raise ConfigurationError(
+                f"Cannot update instrument configuration: {document_path} does not exist"
+            )
+        try:
+            with document_path.open("rb") as handle:
+                raw = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            raise ConfigurationError(
+                f"Cannot read instrument configuration {document_path}: {exc}"
+            ) from exc
+
+        raw_instances = raw.get("instances")
+        if not isinstance(raw_instances, list):
+            raise ConfigurationError(f"{document_path} instances must be an array of tables")
+        target_instance = next(
+            (
+                item
+                for item in raw_instances
+                if isinstance(item, dict) and str(item.get("id", "")).strip() == instrument_id
+            ),
+            None,
+        )
+        if target_instance is None:
+            raise ConfigurationError(
+                f"Instrument instance {instrument_id!r} was not found in {document_path}"
+            )
+
+        fields_by_id = {field.id: field for field in descriptor.config_fields}
+        resolved_project_root = project_root.resolve()
+        normalized_extras: dict[str, Any] = {}
+        persisted_values: dict[str, Any] = {}
+        candidate_extras = {
+            field.id: target_instance.get(field.id, field.default)
+            for field in descriptor.config_fields
+        }
+        for key, value in updates.items():
+            field = fields_by_id.get(str(key))
+            if field is None:
+                raise ConfigurationError(
+                    f"Instrument {instrument_id} cannot update undeclared config field {key!r}"
+                )
+            label = f"Instrument {instrument_id} {field.id}"
+            if field.field_type == "ordered_choices":
+                checked = validate_ordered_choices(
+                    value,
+                    field.available_options(candidate_extras),
+                    label,
+                    allow_empty=field.allow_empty,
+                )
+                normalized_extras[field.id] = checked
+                persisted_values[field.id] = checked
+            else:
+                checked = _config_field_value(field, value, resolved_project_root, label)
+                normalized_extras[field.id] = checked
+                if field.field_type == "pid_file":
+                    resolved_path = Path(str(checked)).resolve()
+                    persisted_values[field.id] = resolved_path.relative_to(
+                        resolved_project_root
+                    ).as_posix()
+                else:
+                    persisted_values[field.id] = checked
+            candidate_extras[field.id] = normalized_extras[field.id]
+
+        target_instance.update(persisted_values)
+        rendered = _render_toml_document(raw)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{document_path.name}.",
+            suffix=".tmp",
+            dir=document_path.parent,
+            text=True,
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(rendered)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, document_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return normalized_extras
+
+
+__all__ = ["load_instrument_instances", "update_instrument_instance_config"]

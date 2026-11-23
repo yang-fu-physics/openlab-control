@@ -159,6 +159,7 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
             (descriptor,),
         )
         runtime = Mock()
+        runtime.instrument_descriptors = (descriptor,)
         runtime.instrument_sequence_commands = specs
         runtime.drain_messages.return_value = []
         with patch(
@@ -276,6 +277,7 @@ class SystemInstrumentSequenceCommandTests(unittest.TestCase):
         completed = Future()
         completed.set_result(True)
         runtime = Mock()
+        runtime.instrument_descriptors = (descriptor,)
         runtime.instrument_sequence_commands = specs
         runtime.instrument_action.return_value = completed
         runtime.drain_messages.return_value = []
