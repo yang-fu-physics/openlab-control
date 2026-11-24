@@ -13,7 +13,7 @@ from pathlib import Path
 
 import qtawesome as qta
 from PySide6.QtCore import QEvent, QObject, QSize, QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
+from PySide6.QtGui import QAction, QCloseEvent, QColor, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.mdi = QMdiArea()
-        self.mdi.setBackground(Qt.GlobalColor.lightGray)
+        self.mdi.setBackground(QColor("#dfe4ea"))
         self.setCentralWidget(self.mdi)
 
         self.editor = SequenceEditorWidget(self.document)
@@ -550,16 +550,17 @@ class MainWindow(QMainWindow):
         self.module_manager.openRequested.connect(self._show_module_window)
         self.module_manager.addInstanceRequested.connect(self._add_module_instance)
         self.module_manager.removeInstanceRequested.connect(self._remove_module_instance)
-        self.new_action = QAction(qta.icon("fa5s.file"), "New", self)
-        self.open_action = QAction(qta.icon("fa5s.folder-open"), "Open", self)
-        self.save_action = QAction(qta.icon("fa5s.save"), "Save", self)
-        self.save_as_action = QAction(qta.icon("fa5s.file-signature"), "Save As", self)
-        self.run_action = QAction(qta.icon("fa5s.play", color="green"), "Run", self)
-        self.pause_action = QAction(qta.icon("fa5s.pause", color="orange"), "Pause/Resume", self)
-        self.stop_action = QAction(qta.icon("fa5s.stop", color="red"), "Stop", self)
-        self.graph_action = QAction(qta.icon("fa5s.chart-line"), "Live Trend", self)
-        self.data_browser_action = QAction(qta.icon("fa5s.database"), "Data Browser", self)
-        self.modules_action = QAction(qta.icon("fa5s.cubes"), "Modules", self)
+        icon_color = "#3b4652"
+        self.new_action = QAction(qta.icon("fa5s.file", color=icon_color), "New", self)
+        self.open_action = QAction(qta.icon("fa5s.folder-open", color=icon_color), "Open", self)
+        self.save_action = QAction(qta.icon("fa5s.save", color=icon_color), "Save", self)
+        self.save_as_action = QAction(qta.icon("fa5s.file-signature", color=icon_color), "Save As", self)
+        self.run_action = QAction(qta.icon("fa5s.play", color="#238636"), "Run", self)
+        self.pause_action = QAction(qta.icon("fa5s.pause", color="#b86b00"), "Pause/Resume", self)
+        self.stop_action = QAction(qta.icon("fa5s.stop", color="#cf222e"), "Stop", self)
+        self.graph_action = QAction(qta.icon("fa5s.chart-line", color=icon_color), "Live Trend", self)
+        self.data_browser_action = QAction(qta.icon("fa5s.database", color=icon_color), "Data Browser", self)
+        self.modules_action = QAction(qta.icon("fa5s.cubes", color=icon_color), "Modules", self)
         self.appearance_action = QAction("Appearance…", self)
         self.log_action = self.log_dock.toggleViewAction()
         self.about_action = QAction("About", self)
@@ -821,16 +822,16 @@ class MainWindow(QMainWindow):
         manual_size = scaled_text(30)
         manual_padding = scaled(15)
         self.setStyleSheet(
-            "QLabel#mutedLabel { color: #888888; }"
+            "QLabel#mutedLabel { color: #59636e; }"
             f"QLabel#statusBadge {{ font-size: {status_size}px; font-weight: bold; padding: {status_padding}px; border-radius: {status_radius}px; background: rgba(92, 107, 121, 0.15); color: #435260; }}"
             f"QLabel#panelTitle {{ font-weight: bold; font-size: {tile_title_size}px; }}"
             f"QLabel#panelValue {{ font-size: {tile_value_size}px; font-weight: bold; }}"
-            f"QLabel#panelDetail {{ color: #888888; font-size: {tile_detail_size}px; }}"
+            f"QLabel#panelDetail {{ color: #59636e; font-size: {tile_detail_size}px; }}"
             f"QLabel#readoutName {{ font-size: {tile_detail_size}px; }}"
             f"QLabel#readoutValue {{ font-size: {tile_title_size}px; font-weight: bold; }}"
             f"QLabel#manualCurrent {{ font-size: {manual_size}px; font-weight: bold; padding: {manual_padding}px; }}"
             "QGroupBox { font-weight: bold; }"
-            "QListView::item:selected, QTreeView::item:selected { background: #cce5ff; color: #000000; }"
+            "QListView::item:selected, QTreeView::item:selected { background: #d6e8ff; color: #1f2328; }"
         )
 
     def _load_default_sequence(self) -> None:
