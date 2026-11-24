@@ -16,12 +16,13 @@ import time
 from collections.abc import Mapping
 from concurrent.futures import Future
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
 from .alarm_reporting import AlarmReporter
-from .config import AppConfig
+from .config import AppConfig, AlarmReportingConfig, validate_alarm_reporting
 from .datafile import DatRunLogger
 from .system_log import SystemLogRecorder
 from .events import EventManager
@@ -98,14 +99,8 @@ class RuntimeService:
             popup_errors=self.config.alarms.popup_errors,
         )
         self.events.subscribe(self._on_event)
-        self.alarm_reporter = AlarmReporter(
-            self.config.alarms.reporting,
-            self.config.project_root,
-            self._alarm_delivery_state,
-        )
-        self.events.subscribe(
-            self.alarm_reporter.handle_notice
-        )
+        self.alarm_reporter = self._new_alarm_reporter(self.config.alarms.reporting)
+        self.events.subscribe(self._report_alarm_notice)
         # 报警线程先启动，但它只订阅事件，不参与任何仪表安全决策。
         self.alarm_reporter.start()
         try:
@@ -213,12 +208,46 @@ class RuntimeService:
     def _on_module_message(self, kind: str, payload: dict[str, Any]) -> None:
         self.messages.put(RuntimeMessage(kind, payload))
 
+    def _new_alarm_reporter(self, config: AlarmReportingConfig) -> AlarmReporter:
+        reporter = AlarmReporter(config, self.config.project_root,
+                                 lambda error: self._alarm_delivery_state(error, reporter))
+        return reporter
+
+    def _report_alarm_notice(self, notice: EventNotice) -> None:
+        if self.alarm_reporter is not None:
+            self.alarm_reporter.handle_notice(notice)
+
+    def configure_alarm_reporting(self, config: AlarmReportingConfig) -> Future[Any]:
+        return self._submit(self._configure_alarm_reporting(config))
+
+    async def _configure_alarm_reporting(self, config: AlarmReportingConfig) -> AlarmReportingConfig:
+        config = validate_alarm_reporting(config)
+        reporter = self._new_alarm_reporter(config)
+        token = await asyncio.to_thread(reporter._load_token) if reporter.enabled else None
+        reporter.start(token=token)
+        previous = self.alarm_reporter
+        self.alarm_reporter = reporter
+        self.config = replace(self.config, alarms=replace(self.config.alarms, reporting=config))
+        if previous is not None:
+            assert self.events is not None
+            self.events.resolve("alarm_reporter", "ALARM_DELIVERY_FAILED", previous.config.endpoint)
+            await asyncio.to_thread(previous.close)
+        return config
+
+    def test_alarm_reporting(self, config: AlarmReportingConfig, token: str) -> Future[Any]:
+        config = validate_alarm_reporting(replace(config, enabled=True))
+        reporter = AlarmReporter(config, self.config.project_root)
+        return self._submit(asyncio.to_thread(reporter.test_delivery, token))
+
     def _alarm_delivery_state(
         self,
         error: str | None,
+        reporter: AlarmReporter | None = None,
     ) -> None:
         """把报警线程的结果安全切回 runtime loop，避免跨线程调用 EventManager。"""
 
+        if reporter is not None and reporter is not self.alarm_reporter:
+            return
         loop = self._loop
         if (
             loop is None
@@ -229,6 +258,7 @@ class RuntimeService:
             loop.call_soon_threadsafe(
                 self._apply_alarm_delivery_state,
                 error,
+                reporter,
             )
         except RuntimeError:
             return
@@ -236,10 +266,11 @@ class RuntimeService:
     def _apply_alarm_delivery_state(
         self,
         error: str | None,
+        reporter: AlarmReporter | None = None,
     ) -> None:
         """在 runtime 线程锁存或解除本地报警投递 Warning。"""
 
-        if self.events is None:
+        if self.events is None or (reporter is not None and reporter is not self.alarm_reporter):
             return
         if error is None:
             self.events.resolve(

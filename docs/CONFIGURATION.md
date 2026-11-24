@@ -61,6 +61,8 @@ enabled = false
 endpoint = "http://127.0.0.1:3889/alarm/report"
 token_env = "OPENLAB_ALARM_TOKEN"
 token_file = ""
+target_qq = ""
+device_name = "OpenLab Control"
 timeout_seconds = 3.0
 retry_attempts = 3
 retry_delay_seconds = 1.0
@@ -69,7 +71,11 @@ shutdown_timeout_seconds = 2.0
 allow_insecure_http = false
 ```
 
-远程报警发射默认关闭，运行在独立后台线程中，只发送去重后的状态变化；非本机地址默认要求 HTTPS。投递失败只会产生本地 Warning，不阻塞实验。
+远程报警默认关闭；`target_qq` 为空时始终关闭。QQ 非空时须为正整数数字串，并将该值作为 `target_qq` 随 Warning/Error 请求发送。`device_name` 是通知中的设备名称，消息格式为 `[设备名]：实际错误内容`。Token 通过 `X-Token` 请求头传递。
+
+GUI 顶部 **Settings → Alarm Notifications…** 可设置启用、服务地址、Token 和接收 QQ，保存后立即生效，下次启动保留。GUI 的本机 `alarms.json` 覆盖 TOML 中的报警配置，Token 单独保存在同目录 `alarm-token.txt`；这些文件位于用户配置目录，不复制到运行归档。无界面模式仍读取上述 TOML。
+
+发送运行在独立后台线程中，只发送去重后的状态变化；非本机地址默认要求 HTTPS，使用 HTTP 须显式勾选 Allow HTTP 或设置 `allow_insecure_http = true`。投递失败产生本地 Warning，不阻塞实验。
 
 ### `[modules]`（测量模块超时与目录）
 

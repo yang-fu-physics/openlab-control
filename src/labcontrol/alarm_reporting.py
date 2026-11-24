@@ -4,8 +4,7 @@
 程序退出超时都不能阻塞 SEQ 的 Error 处理、已注册事件响应或仪表进程回收。因此实现采用
 有界队列和独立后台线程，并把最终发送失败重新报告为本地 Warning。
 
-收件人不由发射端指定。发射端只发送 Warning/Error 级别及事件内容，管理员和测试员的
-路由完全由接收端配置，避免持有 Token 的客户端任意选择 QQ 目标。
+target_qq 指定接收 QQ；QQ 留空时关闭通知。
 """
 
 from __future__ import annotations
@@ -14,8 +13,8 @@ import hashlib
 import json
 import os
 import queue
-import socket
 import threading
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -32,6 +31,27 @@ _MAX_MESSAGE_CHARACTERS = 3500
 _MAX_RESPONSE_BYTES = 64 * 1024
 
 
+def read_alarm_token(config: AlarmReportingConfig, project_root: Path) -> str:
+    """Read the configured credential without including it in ordinary config."""
+    token = os.environ.get(config.token_env, "").strip() if config.token_env else ""
+    if not token and config.token_file:
+        path = Path(config.token_file)
+        if not path.is_absolute():
+            path = project_root / path
+        if path.stat().st_size > 4096:
+            raise ValueError("Alarm reporting token file exceeds 4 KiB")
+        token = path.read_text(encoding="utf-8-sig").strip()
+    return token
+
+
+def validate_alarm_token(token: str) -> str:
+    if not token:
+        raise ValueError("Alarm reporting is enabled but no token was found in token_env or token_file")
+    if len(token) > 1024 or any(c.isspace() or ord(c) < 33 or ord(c) == 127 for c in token):
+        raise ValueError("Alarm reporting token must be at most 1024 non-whitespace printable characters")
+    return token
+
+
 @dataclass(frozen=True, slots=True)
 class AlarmReport:
     """一次报警投递的不可变快照。
@@ -43,16 +63,16 @@ class AlarmReport:
     event_id: str
     level: str
     message: str
+    target_qq: str = ""
 
     def payload(self) -> bytes:
         """生成紧凑 UTF-8 JSON；禁止 NaN，避免产生非标准 JSON。"""
 
+        values = {"event_id": self.event_id, "level": self.level, "message": self.message}
+        if self.target_qq:
+            values["target_qq"] = int(self.target_qq)
         return json.dumps(
-            {
-                "event_id": self.event_id,
-                "level": self.level,
-                "message": self.message,
-            },
+            values,
             ensure_ascii=False,
             allow_nan=False,
             separators=(",", ":"),
@@ -91,15 +111,15 @@ class AlarmReporter:
 
     @property
     def enabled(self) -> bool:
-        return self.config.enabled
+        return self.config.enabled and bool(self.config.target_qq)
 
-    def start(self) -> None:
+    def start(self, *, token: str | None = None) -> None:
         """校验凭据后启动发送线程；配置或 Token 无效时保持 fail-closed。"""
 
         if not self.enabled or self._thread is not None:
             return
         try:
-            self._token = self._load_token()
+            self._token = self._load_token() if token is None else token
         except (OSError, ValueError) as exc:
             self._notify_failure(str(exc))
             return
@@ -140,6 +160,7 @@ class AlarmReporter:
             event_id=event_id,
             level=event.severity.value,
             message=self._format_message(notice),
+            target_qq=self.config.target_qq,
         )
         try:
             self._queue.put_nowait(report)
@@ -268,59 +289,24 @@ class AlarmReporter:
         避免把整份配置文件或带换行内容意外放进 HTTP Header。
         """
 
-        token = ""
-        if self.config.token_env:
-            token = os.environ.get(
-                self.config.token_env,
-                "",
-            ).strip()
-        if not token and self.config.token_file:
-            path = Path(self.config.token_file)
-            if not path.is_absolute():
-                path = self.project_root / path
-            if path.stat().st_size > 4096:
-                raise ValueError(
-                    "Alarm reporting token file exceeds 4 KiB"
-                )
-            token = path.read_text(
-                encoding="utf-8-sig"
-            ).strip()
-        if not token:
-            raise ValueError(
-                "Alarm reporting is enabled but no token was "
-                "found in token_env or token_file"
-            )
-        if (
-            len(token) > 1024
-            or any(
-                character.isspace()
-                or ord(character) < 33
-                or ord(character) == 127
-                for character in token
-            )
-        ):
-            raise ValueError(
-                "Alarm reporting token must be at most 1024 "
-                "non-whitespace printable characters"
-            )
-        return token
+        return validate_alarm_token(read_alarm_token(self.config, self.project_root))
 
-    @staticmethod
-    def _format_message(notice: EventNotice) -> str:
+    def test_delivery(self, token: str) -> None:
+        """Send one explicit test Warning, without modifying active reporting."""
+        if not self.config.target_qq:
+            raise ValueError("Enter a recipient QQ number before sending a test")
+        self._token = validate_alarm_token(token)
+        self._deliver(AlarmReport(
+            event_id=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+            level="warning",
+            message=f"[{self.config.device_name}]：测试报警，无实际仪表故障。",
+            target_qq=self.config.target_qq,
+        ))
+
+    def _format_message(self, notice: EventNotice) -> str:
         """生成适合即时消息阅读的文本，并限制远端单条消息长度。"""
 
-        event = notice.event
-        lines = [
-            f"【OpenLab Control {event.severity.value.upper()}】",
-            f"Time: {event.timestamp.astimezone().isoformat()}",
-            f"Host: {socket.gethostname()}",
-            f"Source: {event.source}",
-            f"Code: {event.code}",
-        ]
-        if event.context:
-            lines.append(f"Context: {event.context}")
-        lines.append(f"Message: {event.message}")
-        message = "\n".join(lines)
+        message = f"[{self.config.device_name}]：{notice.event.message}"
         if len(message) <= _MAX_MESSAGE_CHARACTERS:
             return message
         suffix = "\n[message truncated]"
