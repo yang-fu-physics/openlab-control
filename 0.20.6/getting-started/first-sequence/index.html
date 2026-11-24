@@ -610,6 +610,8 @@
       
         
       
+        
+      
     
     
     
@@ -859,6 +861,34 @@
     
   
     Data Browser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/system-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    系统仪表 Log
   
 
     
@@ -1932,7 +1962,7 @@
 <blockquote>
 <p><strong>几个小符号的含义</strong>：
 - 行首的 <code>T</code> 表示启用该行，改为 <code>F</code>（右键 Disable）则跳过执行；
-- <code>Set Temperature</code> / <code>Set Field</code> 下发目标后立即继续，配合 <code>Wait</code> 等待温度/磁场稳定和延时；<code>Scan</code> 的 <code>Settle</code> 模式每点等待稳定后再测，<code>Sweep</code> 模式到达目标容差即测；
+- <code>Set Temperature</code> / <code>Set Field</code> 下发目标后立即继续，配合 <code>Wait</code> 等待温度/磁场稳定和延时；<code>Scan</code> 的 <code>Settle</code> 模式每点等待稳定后再测。<code>Sweep</code> 先到起点稳定并执行一轮内部语句，再连续朝终点变化，按阈值顺序触发内部语句；到达实际终点时执行末次测量（若在当前组执行期间已到达终点则完成该组）后结束 Scan；
 - <code>Set Datafile</code> 的三种模式：<code>create</code>（新建/覆盖）、<code>open</code>（向已有文件追加）、<code>open|create</code>（存在则追加、不存在则新建）。</p>
 </blockquote>
 <h2 id="3">3. 点击运行并查看产出文件<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>

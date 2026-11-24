@@ -608,6 +608,8 @@
       
         
       
+        
+      
     
     
     
@@ -752,6 +754,34 @@
     
   
     Data Browser
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/system-log/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    系统仪表 Log
   
 
     
@@ -2154,8 +2184,8 @@
 <tbody>
 <tr>
 <td><code>stability_timeout</code></td>
-<td><code>info / warning / error</code></td>
-<td>判稳超时告警级别</td>
+<td><code>warning</code>（保留兼容字段）</td>
+<td>判稳超时在运行时统一按 Warning 提示并继续等待，不中止 SEQ（仅驱动明确报告 <code>moving</code> 时暂停超时计时）</td>
 </tr>
 <tr>
 <td><code>stale_reading</code></td>
