@@ -119,7 +119,11 @@ class AlarmReporter:
         if not self.enabled or self._thread is not None:
             return
         try:
-            self._token = self._load_token() if token is None else token
+            self._token = (
+                self._load_token()
+                if token is None
+                else validate_alarm_token(token)
+            )
         except (OSError, ValueError) as exc:
             self._notify_failure(str(exc))
             return
@@ -299,14 +303,17 @@ class AlarmReporter:
         self._deliver(AlarmReport(
             event_id=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
             level="warning",
-            message=f"[{self.config.device_name}]：测试报警，无实际仪表故障。",
+            message=f"[{self.config.device_name}][WARNING][alarm_test]：测试报警，无实际仪表故障。",
             target_qq=self.config.target_qq,
         ))
 
     def _format_message(self, notice: EventNotice) -> str:
         """生成适合即时消息阅读的文本，并限制远端单条消息长度。"""
 
-        message = f"[{self.config.device_name}]：{notice.event.message}"
+        event = notice.event
+        level = event.severity.value.upper()
+        source = event.source.strip() or "system"
+        message = f"[{self.config.device_name}][{level}][{source}]：{event.message}"
         if len(message) <= _MAX_MESSAGE_CHARACTERS:
             return message
         suffix = "\n[message truncated]"

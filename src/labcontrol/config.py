@@ -189,17 +189,53 @@ class AlarmReportingConfig:
 
 def validate_alarm_reporting(config: AlarmReportingConfig) -> AlarmReportingConfig:
     """Validate notification settings from TOML or the settings dialog."""
-    if config.target_qq and not re.fullmatch(r"[1-9][0-9]*", config.target_qq):
+    enabled = _boolean(config.enabled, "alarms.reporting.enabled")
+    allow_insecure_http = _boolean(
+        config.allow_insecure_http,
+        "alarms.reporting.allow_insecure_http",
+    )
+    for field_name in ("endpoint", "token_env", "token_file", "target_qq", "device_name"):
+        if not isinstance(getattr(config, field_name), str):
+            raise ConfigurationError(f"alarms.reporting.{field_name} must be a string")
+    endpoint_text = config.endpoint.strip()
+    token_env = config.token_env.strip()
+    token_file = config.token_file.strip()
+    target_qq = config.target_qq.strip()
+    device_name = config.device_name.strip()
+    timeout_seconds = _positive_float(config.timeout_seconds, "alarms.reporting.timeout_seconds")
+    retry_attempts = _positive_int(config.retry_attempts, "alarms.reporting.retry_attempts")
+    retry_delay_seconds = _nonnegative_float(
+        config.retry_delay_seconds,
+        "alarms.reporting.retry_delay_seconds",
+    )
+    queue_size = _positive_int(config.queue_size, "alarms.reporting.queue_size")
+    shutdown_timeout_seconds = _positive_float(
+        config.shutdown_timeout_seconds,
+        "alarms.reporting.shutdown_timeout_seconds",
+    )
+    if target_qq and not re.fullmatch(r"[1-9][0-9]*", target_qq):
         raise ConfigurationError("alarms.reporting.target_qq must be a positive QQ number")
-    if config.token_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", config.token_env):
+    if token_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env):
         raise ConfigurationError("alarms.reporting.token_env must be an environment variable name")
-    if not config.target_qq:
-        return replace(config, enabled=False)
-    if not config.enabled:
-        return config
-    if not config.device_name.strip() or any(c in config.device_name for c in "\r\n"):
+    normalized = AlarmReportingConfig(
+        enabled=enabled and bool(target_qq),
+        endpoint=endpoint_text,
+        token_env=token_env,
+        token_file=token_file,
+        timeout_seconds=timeout_seconds,
+        retry_attempts=retry_attempts,
+        retry_delay_seconds=retry_delay_seconds,
+        queue_size=queue_size,
+        shutdown_timeout_seconds=shutdown_timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        target_qq=target_qq,
+        device_name=device_name,
+    )
+    if not normalized.enabled:
+        return normalized
+    if not normalized.device_name or any(c in normalized.device_name for c in "\r\n"):
         raise ConfigurationError("alarms.reporting.device_name must be a non-empty single-line name")
-    endpoint = urlsplit(config.endpoint)
+    endpoint = urlsplit(normalized.endpoint)
     if (
         endpoint.scheme not in {"http", "https"} or not endpoint.hostname
         or endpoint.username is not None or endpoint.password is not None or endpoint.fragment
@@ -210,11 +246,11 @@ def validate_alarm_reporting(config: AlarmReportingConfig) -> AlarmReportingConf
         loopback = loopback or ipaddress.ip_address(endpoint.hostname).is_loopback
     except ValueError:
         pass
-    if endpoint.scheme == "http" and not loopback and not config.allow_insecure_http:
+    if endpoint.scheme == "http" and not loopback and not normalized.allow_insecure_http:
         raise ConfigurationError("alarms.reporting.endpoint must use HTTPS outside localhost unless allow_insecure_http=true")
-    if not config.token_env and not config.token_file:
+    if not normalized.token_env and not normalized.token_file:
         raise ConfigurationError("enabled alarm reporting requires token_env or token_file")
-    return config
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)

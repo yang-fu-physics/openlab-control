@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit,
     QPushButton, QVBoxLayout,
@@ -28,6 +28,8 @@ class AlarmSettingsDialog(QDialog):
         self._pending = None
         self._operation = ""
         self._saved_config = None
+        self._saved_token = ""
+        self._remembered_enabled = bool(config.enabled)
         self.setWindowTitle("Alarm Notifications")
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -51,7 +53,7 @@ class AlarmSettingsDialog(QDialog):
         form.addRow("Recipient QQ", self.qq)
         form.addRow(self.allow_http)
         layout.addLayout(form)
-        note = QLabel("Messages: [device name]：error text. QQ blank: notifications are off. Save applies immediately. "
+        note = QLabel("Messages: [device name][LEVEL][source]：error text. QQ blank: notifications are off. Save applies immediately. "
                       "The token is stored separately in your local user settings.")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -69,6 +71,7 @@ class AlarmSettingsDialog(QDialog):
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        self.enabled.toggled.connect(self._enabled_toggled)
         self.qq.textChanged.connect(self._qq_changed)
         self._qq_changed(self.qq.text())
         self._timer = QTimer(self)
@@ -76,12 +79,16 @@ class AlarmSettingsDialog(QDialog):
         self._timer.timeout.connect(self._check_pending)
         fit_initial_window_width(self, preferred_height=360)
 
+    def _enabled_toggled(self, checked: bool) -> None:
+        if self.qq.text().strip():
+            self._remembered_enabled = checked
+
     def _qq_changed(self, text: str) -> None:
         has_qq = bool(text.strip())
         self.enabled.setEnabled(has_qq)
         self.test_button.setEnabled(has_qq)
-        if not has_qq:
-            self.enabled.setChecked(False)
+        with QSignalBlocker(self.enabled):
+            self.enabled.setChecked(self._remembered_enabled if has_qq else False)
 
     def _settings(self, *, for_test: bool = False) -> AlarmReportingConfig:
         token = self.token.text().strip()
@@ -97,23 +104,33 @@ class AlarmSettingsDialog(QDialog):
         return config
 
     def _test(self) -> None:
+        token = self.token.text().strip()
         try:
             config = self._settings(for_test=True)
-        except ValueError as error:
+            future = self.runtime.test_alarm_reporting(config, token)
+        except (OSError, ValueError, RuntimeError) as error:
             self.status.setText(str(error))
             return
         self._operation = "test"
-        self._set_pending(self.runtime.test_alarm_reporting(config, self.token.text().strip()))
+        self._set_pending(future)
 
     def _save(self) -> None:
+        token = self.token.text().strip()
         try:
-            config = self.store.save(self._settings(), self.token.text().strip())
-        except (OSError, ValueError) as error:
+            config = self._settings()
+            if token:
+                validate_alarm_token(token)
+            future = self.runtime.configure_alarm_reporting(
+                config,
+                token=token if config.enabled else None,
+            )
+        except (OSError, ValueError, RuntimeError) as error:
             self.status.setText(str(error))
             return
         self._saved_config = config
+        self._saved_token = token
         self._operation = "save"
-        self._set_pending(self.runtime.configure_alarm_reporting(config))
+        self._set_pending(future)
 
     def _set_pending(self, future) -> None:
         self._pending = future
@@ -136,7 +153,17 @@ class AlarmSettingsDialog(QDialog):
             self.status.setText(f"Notification operation failed: {error}")
             return
         if self._operation == "save":
-            self.settingsSaved.emit(self._saved_config)
+            try:
+                persisted = self.store.save(self._saved_config, self._saved_token)
+            except (OSError, ValueError) as error:
+                try:
+                    self.runtime.configure_alarm_reporting(self.config)
+                except Exception:
+                    pass
+                self.status.setText(f"Could not save local alarm settings: {error}")
+                return
+            self.config = persisted
+            self.settingsSaved.emit(persisted)
             self.accept()
         else:
             self.status.setText("Test warning accepted by the server.")

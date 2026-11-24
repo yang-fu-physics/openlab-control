@@ -68,6 +68,53 @@ class AlarmSettingsStoreTests(unittest.TestCase):
             reporter.test_delivery("test-token")
         opener.assert_not_called()
 
+    def test_store_ignores_unknown_keys_and_rejects_corrupt_or_invalid_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = AlarmSettingsStore(Path(temporary) / "alarms.json")
+            saved = store.save(AlarmReportingConfig(target_qq="123456789", device_name="Cryo B"), "secret")
+            raw = json.loads(store.path.read_text(encoding="utf-8"))
+            raw["future_field"] = {"nested": True}
+            store.path.write_text(json.dumps(raw), encoding="utf-8")
+            self.assertEqual(store.load(AlarmReportingConfig()), saved)
+
+            raw["timeout_seconds"] = -1.0
+            store.path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ConfigurationError):
+                store.load(AlarmReportingConfig())
+
+            store.path.write_text("[]", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                store.load(AlarmReportingConfig())
+
+    def test_explicit_token_validation_and_test_delivery_message_format(self):
+        delivered = []
+        states = []
+
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b'{"status":"success"}'
+
+        def opener(request, timeout):
+            delivered.append(json.loads(request.data.decode("utf-8")))
+            return Response()
+
+        config = AlarmReportingConfig(enabled=True, target_qq="123456789", device_name="2K Hall")
+        bad_reporter = AlarmReporter(config, ROOT, states.append, opener=opener)
+        bad_reporter.start(token="bad token\n")
+        self.assertIsNone(bad_reporter._thread)
+        self.assertTrue(states and "printable" in str(states[0]))
+
+        ok_reporter = AlarmReporter(config, ROOT, opener=opener)
+        ok_reporter.test_delivery("valid-secret")
+        self.assertEqual(len(delivered), 1)
+        self.assertEqual(delivered[0]["level"], "warning")
+        self.assertEqual(
+            delivered[0]["message"],
+            "[2K Hall][WARNING][alarm_test]：测试报警，无实际仪表故障。",
+        )
+
 
 class AlarmRuntimeSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_live_replacement_routes_to_new_qq_then_blank_disables(self):
@@ -182,3 +229,46 @@ class AlarmSettingsDialogTests(unittest.TestCase):
             self.assertEqual(dialog.result(), QDialog.DialogCode.Accepted)
             self.assertFalse(saved[0].enabled)
             self.assertEqual(store.load(AlarmReportingConfig()).target_qq, "")
+
+    def test_corrupt_local_alarms_json_does_not_crash_main_window_startup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = Path(temporary)
+            (profile / "alarms.json").write_text("{corrupt json", encoding="utf-8")
+            base_config = load_simulated_config()
+            window = MainWindow(base_config, ui_preference_store=UiPreferenceStore(profile / "ui.ini"))
+            try:
+                self.assertEqual(window.config.alarms.reporting, base_config.alarms.reporting)
+                self.assertIn("ALARM_SETTINGS_LOAD_FAILED", window.log_view.toPlainText())
+            finally:
+                window.close()
+
+    def test_retyping_qq_preserves_enabled_and_failed_runtime_does_not_overwrite_disk(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = AlarmSettingsStore(Path(temporary) / "alarms.json")
+            initial = store.save(AlarmReportingConfig(
+                enabled=True, token_env="", target_qq="123456789", device_name="Hall A",
+            ), "old-secret")
+            runtime = SimpleNamespace(
+                config=SimpleNamespace(project_root=ROOT),
+                configure_alarm_reporting=Mock(),
+            )
+            future = Future()
+            runtime.configure_alarm_reporting.return_value = future
+            dialog = AlarmSettingsDialog(runtime, store, initial)
+            dialog.qq.clear()
+            self.assertFalse(dialog.enabled.isEnabled())
+            self.assertFalse(dialog.enabled.isChecked())
+            dialog.qq.setText("987654321")
+            self.assertTrue(dialog.enabled.isEnabled())
+            self.assertTrue(dialog.enabled.isChecked())
+            dialog.token.setText("new-secret")
+            dialog._save()
+            # Disk must remain unchanged until runtime applies successfully.
+            self.assertEqual(store.load(AlarmReportingConfig()).target_qq, "123456789")
+            self.assertEqual(read_alarm_token(initial, ROOT), "old-secret")
+            future.set_exception(RuntimeError("runtime busy"))
+            dialog._check_pending()
+            self.assertIn("runtime busy", dialog.status.text())
+            self.assertEqual(store.load(AlarmReportingConfig()).target_qq, "123456789")
+            self.assertEqual(read_alarm_token(initial, ROOT), "old-secret")
+            dialog.reject()

@@ -21,7 +21,7 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
-from .alarm_reporting import AlarmReporter
+from .alarm_reporting import AlarmReporter, validate_alarm_token
 from .config import AppConfig, AlarmReportingConfig, validate_alarm_reporting
 from .datafile import DatRunLogger
 from .system_log import SystemLogRecorder
@@ -217,14 +217,31 @@ class RuntimeService:
         if self.alarm_reporter is not None:
             self.alarm_reporter.handle_notice(notice)
 
-    def configure_alarm_reporting(self, config: AlarmReportingConfig) -> Future[Any]:
-        return self._submit(self._configure_alarm_reporting(config))
+    def configure_alarm_reporting(
+        self,
+        config: AlarmReportingConfig,
+        *,
+        token: str | None = None,
+    ) -> Future[Any]:
+        return self._submit(self._configure_alarm_reporting(config, token=token))
 
-    async def _configure_alarm_reporting(self, config: AlarmReportingConfig) -> AlarmReportingConfig:
+    async def _configure_alarm_reporting(
+        self,
+        config: AlarmReportingConfig,
+        *,
+        token: str | None = None,
+    ) -> AlarmReportingConfig:
         config = validate_alarm_reporting(config)
         reporter = self._new_alarm_reporter(config)
-        token = await asyncio.to_thread(reporter._load_token) if reporter.enabled else None
-        reporter.start(token=token)
+        if reporter.enabled:
+            resolved_token = (
+                await asyncio.to_thread(reporter._load_token)
+                if token is None
+                else validate_alarm_token(token)
+            )
+        else:
+            resolved_token = None
+        reporter.start(token=resolved_token)
         previous = self.alarm_reporter
         self.alarm_reporter = reporter
         self.config = replace(self.config, alarms=replace(self.config.alarms, reporting=config))

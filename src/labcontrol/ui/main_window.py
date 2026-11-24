@@ -130,8 +130,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         profile_path = ui_preference_store.path if ui_preference_store is not None else default_ui_preferences_path()
         self.alarm_settings_store = AlarmSettingsStore(profile_path.with_name("alarms.json"))
-        config = replace(config, alarms=replace(config.alarms,
-                         reporting=self.alarm_settings_store.load(config.alarms.reporting)))
+        self._startup_alarm_settings_error: str | None = None
+        try:
+            reporting_config = self.alarm_settings_store.load(config.alarms.reporting)
+        except (OSError, ValueError, TypeError) as exc:
+            self._startup_alarm_settings_error = str(exc)
+            reporting_config = config.alarms.reporting
+        config = replace(config, alarms=replace(config.alarms, reporting=reporting_config))
         self.config = config
         self.ui_preference_store = ui_preference_store
         self.ui_preferences = ui_preferences or UiPreferences(
@@ -234,6 +239,16 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(scaled(1180), scaled(720))
         self.setAcceptDrops(True)
         self._build_ui()
+        if self._startup_alarm_settings_error:
+            self._append_log(
+                "WARNING",
+                "alarm_settings",
+                "ALARM_SETTINGS_LOAD_FAILED",
+                (
+                    f"Could not load local alarm settings from {self.alarm_settings_store.path}; "
+                    f"falling back to TOML configuration: {self._startup_alarm_settings_error}"
+                ),
+            )
         self._restore_window_layout()
         self._apply_style()
         self._load_default_sequence()

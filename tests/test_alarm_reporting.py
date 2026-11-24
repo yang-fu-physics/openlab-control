@@ -186,7 +186,8 @@ class AlarmReporterTests(unittest.TestCase):
             all(item["target_qq"] == 123456789 for item in payloads)
         )
         self.assertEqual([item["message"] for item in payloads], [
-            "[2K Hall]：Temperature is stale", "[2K Hall]：Field interlock opened",
+            "[2K Hall][WARNING][temperature]：Temperature is stale",
+            "[2K Hall][ERROR][field]：Field interlock opened",
         ])
         self.assertNotEqual(
             payloads[0]["event_id"],

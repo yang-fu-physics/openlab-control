@@ -173,11 +173,11 @@ SEQ 空闲时，双击底部 `controller` 面板（例如 Temperature 或 Magnet
 如需把 Warning / Error 异步推送到 QQ 或通知服务：
 
 1. 在独立接收服务中开启 `/alarm/report`，接收 `X-Token` 请求头及 JSON 中的 `message`、`target_qq`。
-2. 打开顶部菜单 **Settings → Alarm Notifications…**，填写设备名称、完整 Service URL、Token 和接收 QQ，勾选启用。消息显示为 `[设备名]：实际错误内容`。使用远程 HTTP 服务时勾选 **Allow HTTP**；HTTPS 无需此项。
+2. 打开顶部菜单 **Settings → Alarm Notifications…**，填写设备名称、完整 Service URL、Token 和接收 QQ，勾选启用。消息显示为 `[设备名][级别][来源]：实际错误内容`。使用远程 HTTP 服务时勾选 **Allow HTTP**；HTTPS 无需此项。
 3. 点击 **Send Test Warning** 发送一条明确标注为测试、无实际仪表故障的 Warning。测试使用窗口中的当前输入，不保存设置；服务器接受后显示成功，实际 QQ 送达由接收端完成。
-4. 点击 **Save** 保存并立即生效，成功后窗口关闭。设置保存在本机用户配置目录的 `alarms.json`，Token 单独保存在 `alarm-token.txt`；它们不进入 SEQ、DAT 或运行配置快照。下次打开程序自动读取这组本机设置。
+4. 点击 **Save** 先在运行时生效再原子保存到本机，成功后窗口关闭。设置保存在本机用户配置目录的 `alarms.json`，Token 单独保存在 `alarm-token.txt`；它们不进入 SEQ、DAT 或运行配置快照。下次打开程序自动读取这组本机设置；若 `alarms.json` 损坏则自动回退到 TOML 配置并在日志中提示 Warning，不阻塞启动。
 
-**接收 QQ 留空即关闭远程通知**，即使原配置为启用也不发送；测试按钮同时禁用。Warning 和 Error 均发送到设置中的同一个 QQ，级别保留在消息中。服务端自行处理额外路由规则，本框架不设置管理员／测试员 QQ 列表。
+**接收 QQ 留空即关闭远程通知**，即使原配置为启用也不发送；测试按钮同时禁用。Warning 和 Error 均发送到设置中的同一个 QQ，级别和事件来源均包含在正文（同时 `level` 保留在请求 JSON 中）。服务端自行处理额外路由规则，本框架不设置管理员／测试员 QQ 列表。
 
 无界面运行使用 `configs/general.toml` 中的 `[alarms.reporting]`，通过 `target_qq` 指定接收人，并通过 `token_env` 或 `token_file` 引用凭据；GUI 本机设置不改写这个 TOML 文件。
 

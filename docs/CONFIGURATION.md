@@ -71,7 +71,7 @@ shutdown_timeout_seconds = 2.0
 allow_insecure_http = false
 ```
 
-远程报警默认关闭；`target_qq` 为空时始终关闭。QQ 非空时须为正整数数字串，并将该值作为 `target_qq` 随 Warning/Error 请求发送。`device_name` 是通知中的设备名称，消息格式为 `[设备名]：实际错误内容`。Token 通过 `X-Token` 请求头传递。
+远程报警默认关闭；`target_qq` 为空时始终关闭。QQ 非空时须为正整数数字串，并将该值作为 `target_qq` 随 Warning/Error 请求发送。`device_name` 是通知中的设备名称，消息格式为 `[设备名][级别][来源]：实际错误内容`（例如 `[2K Hall][ERROR][cryocon22c]：...`）。Token 通过 `X-Token` 请求头传递。
 
 GUI 顶部 **Settings → Alarm Notifications…** 可设置启用、服务地址、Token 和接收 QQ，保存后立即生效，下次启动保留。GUI 的本机 `alarms.json` 覆盖 TOML 中的报警配置，Token 单独保存在同目录 `alarm-token.txt`；这些文件位于用户配置目录，不复制到运行归档。无界面模式仍读取上述 TOML。
 
