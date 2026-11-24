@@ -67,6 +67,7 @@ from labcontrol.instruments.manifest import (  # noqa: E402
     SystemInstrumentDescriptor,
     load_instrument_manifest,
 )
+from labcontrol.ui.theme import apply_light_theme  # noqa: E402
 from labcontrol.ui.widgets import PrecisionDoubleSpinBox  # noqa: E402
 
 
@@ -2331,6 +2332,7 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     values = _arguments(argv)
     application = QApplication.instance() or QApplication(sys.argv[:1])
+    apply_light_theme(application)
     try:
         window = InstrumentScannerWindow(
             ROOT / "configs",
