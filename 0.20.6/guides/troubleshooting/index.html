@@ -2151,7 +2151,8 @@
 <li>开发模块前端时请使用 Qt Layout，避免写死像素宽高，防止出现横向滚动条。</li>
 </ul>
 <h2 id="http">远程 HTTP 报警发不出去<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
-<p>报警通道是独立的异步线程，网络不通只会记一条去重的本地 Warning，不影响实验运行。请排查 <code>[alarms.reporting]</code> 的 URL（非本机需 HTTPS）、<code>X-Token</code> 与接收端配置，排查时切勿把 Token 打进公开日志。</p>
+<p>在顶部 <strong>Settings → Alarm Notifications…</strong> 核对完整 URL（含 <code>/alarm/report</code>）、Token 和接收 QQ，再点击 Send Test Warning。QQ 留空时通知关闭；HTTP 接收端需要勾选 Allow HTTP。返回 422 且提示缺少 <code>target_qq</code> 时，检查是否使用了旧版本客户端。</p>
+<p>报警通道是独立的异步线程，网络不通只会记一条去重的本地 Warning，不影响实验运行。无界面运行核对 <code>[alarms.reporting]</code> 的 <code>target_qq</code>、URL 和 Token 引用。排查时切勿把 Token 打进公开日志。</p>
 
 
 
