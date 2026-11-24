@@ -83,4 +83,6 @@ Live Trend 只读取已有缓存，正常不会增加任何仪表查询。如果
 
 ## 远程 HTTP 报警发不出去
 
-报警通道是独立的异步线程，网络不通只会记一条去重的本地 Warning，不影响实验运行。请排查 `[alarms.reporting]` 的 URL（非本机需 HTTPS）、`X-Token` 与接收端配置，排查时切勿把 Token 打进公开日志。
+在顶部 **Settings → Alarm Notifications…** 核对完整 URL（含 `/alarm/report`）、Token 和接收 QQ，再点击 Send Test Warning。QQ 留空时通知关闭；HTTP 接收端需要勾选 Allow HTTP。返回 422 且提示缺少 `target_qq` 时，检查是否使用了旧版本客户端。
+
+报警通道是独立的异步线程，网络不通只会记一条去重的本地 Warning，不影响实验运行。无界面运行核对 `[alarms.reporting]` 的 `target_qq`、URL 和 Token 引用。排查时切勿把 Token 打进公开日志。

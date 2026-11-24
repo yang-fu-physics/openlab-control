@@ -49,6 +49,18 @@ def _raise_os_error(message: str):
 
 
 class AlarmReportingConfigTests(unittest.TestCase):
+    def test_toml_qq_is_loaded_and_blank_qq_overrides_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "general.toml"
+            text = (ROOT / "configs/general.toml").read_text(encoding="utf-8")
+            text = text.replace("enabled = false", "enabled = true", 1)
+            path.write_text(text, encoding="utf-8")
+            self.assertFalse(load_config(path).alarms.reporting.enabled)
+            path.write_text(text.replace('target_qq = ""', 'target_qq = "123456789"', 1), encoding="utf-8")
+            loaded = load_config(path).alarms.reporting
+            self.assertTrue(loaded.enabled)
+            self.assertEqual(loaded.target_qq, "123456789")
+
     def test_default_reporting_is_disabled_and_bounded(self) -> None:
         config = load_config(
             ROOT / "configs" / "general.toml"
@@ -81,6 +93,8 @@ class AlarmReportingConfigTests(unittest.TestCase):
                     "http://127.0.0.1:3889/alarm/report",
                     "http://alarm.example.test/alarm/report",
                     1,
+                ).replace(
+                    'target_qq = ""', 'target_qq = "123456789"', 1,
                 ),
                 encoding="utf-8",
             )
@@ -107,11 +121,12 @@ class AlarmReporterTests(unittest.TestCase):
             "retry_delay_seconds": 0.0,
             "queue_size": 10,
             "shutdown_timeout_seconds": 1.0,
+            "target_qq": "123456789",
         }
         values.update(changes)
         return AlarmReportingConfig(**values)
 
-    def test_sends_deduplicated_warning_and_error_without_qq(
+    def test_sends_deduplicated_warning_and_error_with_qq(
         self,
     ) -> None:
         requests = []
@@ -127,7 +142,7 @@ class AlarmReporterTests(unittest.TestCase):
             clear=False,
         ):
             reporter = AlarmReporter(
-                self._config(),
+                self._config(device_name="2K Hall"),
                 ROOT,
                 states.append,
                 opener=open_request,
@@ -168,8 +183,12 @@ class AlarmReporterTests(unittest.TestCase):
             ["warning", "error"],
         )
         self.assertTrue(
-            all("target_qq" not in item for item in payloads)
+            all(item["target_qq"] == 123456789 for item in payloads)
         )
+        self.assertEqual([item["message"] for item in payloads], [
+            "[2K Hall][WARNING][temperature]：Temperature is stale",
+            "[2K Hall][ERROR][field]：Field interlock opened",
+        ])
         self.assertNotEqual(
             payloads[0]["event_id"],
             payloads[1]["event_id"],

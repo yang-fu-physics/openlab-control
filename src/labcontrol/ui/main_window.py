@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from ..alarm_settings import AlarmSettingsStore
 from ..config import AppConfig, InstrumentConfig
 from ..instruments.frontend_api import InstrumentUIAPI
 from ..instruments.manifest import SystemInstrumentDescriptor
@@ -87,6 +89,7 @@ from ..sequence.module_settings import (
 )
 from ..sequence.parser import load_sequence, parse_sequence, save_sequence, serialize_sequence
 from .appearance import AppearanceDialog
+from .alarm_settings import AlarmSettingsDialog
 from .data_browser import DatBrowserWidget
 from .dialogs import AlertDialog, CommandDialog, ManualControlDialog
 from .measurement_modules import (
@@ -96,7 +99,7 @@ from .measurement_modules import (
 from .module_monitor import ModuleMonitorPanel
 from .instrument_panels import InstrumentPanelHost
 from .instrument_setup import InstrumentSetupDialog
-from .preferences import UiPreferences, UiPreferenceStore
+from .preferences import UiPreferences, UiPreferenceStore, default_ui_preferences_path
 from .scaling import (
     current_font_scale,
     current_ui_scale,
@@ -125,6 +128,15 @@ class MainWindow(QMainWindow):
         ui_preference_store: UiPreferenceStore | None = None,
     ) -> None:
         super().__init__()
+        profile_path = ui_preference_store.path if ui_preference_store is not None else default_ui_preferences_path()
+        self.alarm_settings_store = AlarmSettingsStore(profile_path.with_name("alarms.json"))
+        self._startup_alarm_settings_error: str | None = None
+        try:
+            reporting_config = self.alarm_settings_store.load(config.alarms.reporting)
+        except (OSError, ValueError, TypeError) as exc:
+            self._startup_alarm_settings_error = str(exc)
+            reporting_config = config.alarms.reporting
+        config = replace(config, alarms=replace(config.alarms, reporting=reporting_config))
         self.config = config
         self.ui_preference_store = ui_preference_store
         self.ui_preferences = ui_preferences or UiPreferences(
@@ -227,6 +239,16 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(scaled(1180), scaled(720))
         self.setAcceptDrops(True)
         self._build_ui()
+        if self._startup_alarm_settings_error:
+            self._append_log(
+                "WARNING",
+                "alarm_settings",
+                "ALARM_SETTINGS_LOAD_FAILED",
+                (
+                    f"Could not load local alarm settings from {self.alarm_settings_store.path}; "
+                    f"falling back to TOML configuration: {self._startup_alarm_settings_error}"
+                ),
+            )
         self._restore_window_layout()
         self._apply_style()
         self._load_default_sequence()
@@ -573,6 +595,8 @@ class MainWindow(QMainWindow):
         self.data_browser_action = QAction(qta.icon("fa5s.database", color=icon_color), "Data Browser", self)
         self.modules_action = QAction(qta.icon("fa5s.cubes", color=icon_color), "Modules", self)
         self.appearance_action = QAction("Appearance…", self)
+        self.alarm_settings_action = QAction("Alarm Notifications…", self)
+        self.alarm_settings_action.triggered.connect(self._show_alarm_settings)
         self.log_action = self.log_dock.toggleViewAction()
         self.system_log_action = QAction("System Log…", self)
         self.system_log_action.triggered.connect(self._open_system_log)
@@ -619,6 +643,8 @@ class MainWindow(QMainWindow):
         view_menu.addActions([self.left_dock.toggleViewAction(), self.command_dock.toggleViewAction(), self.log_action])
         view_menu.addSeparator()
         view_menu.addAction(self.appearance_action)
+        self.settings_menu = menu.addMenu("Settings")
+        self.settings_menu.addAction(self.alarm_settings_action)
         sequence_menu = menu.addMenu("Sequence")
         sequence_menu.addActions([self.run_action, self.pause_action, self.stop_action])
         graph_menu = menu.addMenu("Graph")
@@ -849,6 +875,19 @@ class MainWindow(QMainWindow):
             "QGroupBox { font-weight: bold; }"
             "QListView::item:selected, QTreeView::item:selected { background: #d6e8ff; color: #1f2328; }"
         )
+
+    def _show_alarm_settings(self) -> None:
+        try:
+            dialog = AlarmSettingsDialog(self.runtime, self.alarm_settings_store,
+                                         self.config.alarms.reporting, self)
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "Alarm Settings Failed", str(error))
+            return
+        dialog.settingsSaved.connect(self._alarm_settings_saved)
+        dialog.exec()
+
+    def _alarm_settings_saved(self, config) -> None:
+        self.config = replace(self.config, alarms=replace(self.config.alarms, reporting=config))
 
     def _load_default_sequence(self) -> None:
         store = self.ui_preference_store

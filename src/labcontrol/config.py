@@ -12,7 +12,7 @@ import math
 import ipaddress
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -183,6 +183,74 @@ class AlarmReportingConfig:
     queue_size: int = 100
     shutdown_timeout_seconds: float = 2.0
     allow_insecure_http: bool = False
+    target_qq: str = ""
+    device_name: str = "OpenLab Control"
+
+
+def validate_alarm_reporting(config: AlarmReportingConfig) -> AlarmReportingConfig:
+    """Validate notification settings from TOML or the settings dialog."""
+    enabled = _boolean(config.enabled, "alarms.reporting.enabled")
+    allow_insecure_http = _boolean(
+        config.allow_insecure_http,
+        "alarms.reporting.allow_insecure_http",
+    )
+    for field_name in ("endpoint", "token_env", "token_file", "target_qq", "device_name"):
+        if not isinstance(getattr(config, field_name), str):
+            raise ConfigurationError(f"alarms.reporting.{field_name} must be a string")
+    endpoint_text = config.endpoint.strip()
+    token_env = config.token_env.strip()
+    token_file = config.token_file.strip()
+    target_qq = config.target_qq.strip()
+    device_name = config.device_name.strip()
+    timeout_seconds = _positive_float(config.timeout_seconds, "alarms.reporting.timeout_seconds")
+    retry_attempts = _positive_int(config.retry_attempts, "alarms.reporting.retry_attempts")
+    retry_delay_seconds = _nonnegative_float(
+        config.retry_delay_seconds,
+        "alarms.reporting.retry_delay_seconds",
+    )
+    queue_size = _positive_int(config.queue_size, "alarms.reporting.queue_size")
+    shutdown_timeout_seconds = _positive_float(
+        config.shutdown_timeout_seconds,
+        "alarms.reporting.shutdown_timeout_seconds",
+    )
+    if target_qq and not re.fullmatch(r"[1-9][0-9]*", target_qq):
+        raise ConfigurationError("alarms.reporting.target_qq must be a positive QQ number")
+    if token_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env):
+        raise ConfigurationError("alarms.reporting.token_env must be an environment variable name")
+    normalized = AlarmReportingConfig(
+        enabled=enabled and bool(target_qq),
+        endpoint=endpoint_text,
+        token_env=token_env,
+        token_file=token_file,
+        timeout_seconds=timeout_seconds,
+        retry_attempts=retry_attempts,
+        retry_delay_seconds=retry_delay_seconds,
+        queue_size=queue_size,
+        shutdown_timeout_seconds=shutdown_timeout_seconds,
+        allow_insecure_http=allow_insecure_http,
+        target_qq=target_qq,
+        device_name=device_name,
+    )
+    if not normalized.enabled:
+        return normalized
+    if not normalized.device_name or any(c in normalized.device_name for c in "\r\n"):
+        raise ConfigurationError("alarms.reporting.device_name must be a non-empty single-line name")
+    endpoint = urlsplit(normalized.endpoint)
+    if (
+        endpoint.scheme not in {"http", "https"} or not endpoint.hostname
+        or endpoint.username is not None or endpoint.password is not None or endpoint.fragment
+    ):
+        raise ConfigurationError("alarms.reporting.endpoint must be an http(s) URL without credentials or a fragment")
+    loopback = endpoint.hostname.casefold() == "localhost"
+    try:
+        loopback = loopback or ipaddress.ip_address(endpoint.hostname).is_loopback
+    except ValueError:
+        pass
+    if endpoint.scheme == "http" and not loopback and not normalized.allow_insecure_http:
+        raise ConfigurationError("alarms.reporting.endpoint must use HTTPS outside localhost unless allow_insecure_http=true")
+    if not normalized.token_env and not normalized.token_file:
+        raise ConfigurationError("enabled alarm reporting requires token_env or token_file")
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -566,40 +634,6 @@ def load_config(path: str | Path) -> AppConfig:
         reporting_raw.get("allow_insecure_http", False),
         "alarms.reporting.allow_insecure_http",
     )
-    parsed_endpoint = urlsplit(reporting_endpoint)
-    if reporting_enabled:
-        if (
-            parsed_endpoint.scheme not in {"http", "https"}
-            or not parsed_endpoint.hostname
-            or parsed_endpoint.username is not None
-            or parsed_endpoint.password is not None
-            or parsed_endpoint.fragment
-        ):
-            raise ConfigurationError(
-                "alarms.reporting.endpoint must be an http(s) URL "
-                "without credentials or a fragment"
-            )
-        loopback_host = (
-            parsed_endpoint.hostname.casefold() == "localhost"
-        )
-        try:
-            loopback_host = (
-                loopback_host
-                or ipaddress.ip_address(
-                    parsed_endpoint.hostname
-                ).is_loopback
-            )
-        except ValueError:
-            pass
-        if (
-            parsed_endpoint.scheme == "http"
-            and not loopback_host
-            and not allow_insecure_http
-        ):
-            raise ConfigurationError(
-                "alarms.reporting.endpoint must use HTTPS outside "
-                "localhost unless allow_insecure_http=true"
-            )
     token_env = str(
         reporting_raw.get(
             "token_env",
@@ -609,18 +643,6 @@ def load_config(path: str | Path) -> AppConfig:
     token_file = str(
         reporting_raw.get("token_file", "")
     ).strip()
-    if token_env and not re.fullmatch(
-        r"[A-Za-z_][A-Za-z0-9_]*",
-        token_env,
-    ):
-        raise ConfigurationError(
-            "alarms.reporting.token_env must be an environment "
-            "variable name"
-        )
-    if reporting_enabled and not token_env and not token_file:
-        raise ConfigurationError(
-            "enabled alarm reporting requires token_env or token_file"
-        )
 
     return AppConfig(
         source_path=source,
@@ -653,7 +675,7 @@ def load_config(path: str | Path) -> AppConfig:
             stale_reading=_severity(str(alarm_raw.get("stale_reading", "warning")), "stale_reading"),
             popup_warnings=bool(alarm_raw.get("popup_warnings", True)),
             popup_errors=bool(alarm_raw.get("popup_errors", True)),
-            reporting=AlarmReportingConfig(
+            reporting=validate_alarm_reporting(AlarmReportingConfig(
                 enabled=reporting_enabled,
                 endpoint=reporting_endpoint,
                 token_env=token_env,
@@ -691,7 +713,9 @@ def load_config(path: str | Path) -> AppConfig:
                     "alarms.reporting.shutdown_timeout_seconds",
                 ),
                 allow_insecure_http=allow_insecure_http,
-            ),
+                target_qq=str(reporting_raw.get("target_qq", "")).strip(),
+                device_name=str(reporting_raw.get("device_name", "OpenLab Control")).strip(),
+            )),
         ),
         modules=ModuleConfig(
             directory=str(module_raw.get("directory", "modules")),
