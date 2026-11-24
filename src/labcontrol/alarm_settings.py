@@ -34,14 +34,24 @@ class AlarmSettingsStore:
         if token:
             validate_alarm_token(token)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        previous_token = self.token_path.read_bytes() if self.token_path.exists() else None
+        token_tmp = self.token_path.with_name(f".{self.token_path.name}.tmp")
+        config_tmp = self.path.with_name(f".{self.path.name}.tmp")
+        config_tmp.write_text(json.dumps(asdict(config), ensure_ascii=False, indent=2), encoding="utf-8")
         if token:
-            token_tmp = self.token_path.with_name(f".{self.token_path.name}.tmp")
             with os.fdopen(os.open(token_tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as output:
                 output.write(token)
             os.replace(token_tmp, self.token_path)
-        config_tmp = self.path.with_name(f".{self.path.name}.tmp")
-        config_tmp.write_text(json.dumps(asdict(config), ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(config_tmp, self.path)
-        if not token:
+        else:
             self.token_path.unlink(missing_ok=True)
+        try:
+            os.replace(config_tmp, self.path)
+        except OSError:
+            if previous_token is None:
+                self.token_path.unlink(missing_ok=True)
+            else:
+                with os.fdopen(os.open(token_tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as output:
+                    output.write(previous_token)
+                os.replace(token_tmp, self.token_path)
+            raise
         return config

@@ -68,6 +68,35 @@ class AlarmSettingsStoreTests(unittest.TestCase):
             reporter.test_delivery("test-token")
         opener.assert_not_called()
 
+    def test_config_commit_failure_restores_previous_credential(self):
+        for old_token, new_token in (
+            ("old-secret", "new-secret"),
+            ("old-secret", ""),
+            ("", "new-secret"),
+            (None, "new-secret"),
+        ):
+            with self.subTest(old_token=old_token, new_token=new_token), tempfile.TemporaryDirectory() as temporary:
+                store = AlarmSettingsStore(Path(temporary) / "alarms.json")
+                initial = AlarmReportingConfig(token_env="", target_qq="123456789")
+                if old_token is not None:
+                    store.save(initial, old_token)
+                previous_config = store.path.read_bytes() if store.path.exists() else None
+                actual_replace = os.replace
+
+                def fail_config_commit(source, destination):
+                    if Path(destination) == store.path:
+                        raise PermissionError("config replacement denied")
+                    return actual_replace(source, destination)
+
+                with patch("labcontrol.alarm_settings.os.replace", side_effect=fail_config_commit):
+                    with self.assertRaisesRegex(PermissionError, "config replacement denied"):
+                        store.save(replace(initial, target_qq="987654321"), new_token)
+                self.assertEqual(store.path.read_bytes() if store.path.exists() else None, previous_config)
+                if old_token:
+                    self.assertEqual(store.token_path.read_text(encoding="utf-8"), old_token)
+                else:
+                    self.assertFalse(store.token_path.exists())
+
     def test_store_ignores_unknown_keys_and_rejects_corrupt_or_invalid_values(self):
         with tempfile.TemporaryDirectory() as temporary:
             store = AlarmSettingsStore(Path(temporary) / "alarms.json")
@@ -272,3 +301,52 @@ class AlarmSettingsDialogTests(unittest.TestCase):
             self.assertEqual(store.load(AlarmReportingConfig()).target_qq, "123456789")
             self.assertEqual(read_alarm_token(initial, ROOT), "old-secret")
             dialog.reject()
+
+    def test_disk_failure_waits_for_runtime_rollback_and_reports_rollback_failure(self):
+        for rollback_error in (None, RuntimeError("rollback unavailable")):
+            with self.subTest(rollback_error=rollback_error), tempfile.TemporaryDirectory() as temporary:
+                store = AlarmSettingsStore(Path(temporary) / "alarms.json")
+                initial = store.save(AlarmReportingConfig(
+                    enabled=True, token_env="", target_qq="123456789",
+                ), "old-secret")
+                applied, restored = Future(), Future()
+                runtime = SimpleNamespace(
+                    config=SimpleNamespace(project_root=ROOT),
+                    configure_alarm_reporting=Mock(side_effect=[applied, restored]),
+                )
+                dialog = AlarmSettingsDialog(runtime, store, initial)
+                saved = []
+                dialog.settingsSaved.connect(saved.append)
+                dialog.qq.setText("987654321")
+                dialog.token.setText("new-secret")
+                dialog._save()
+                applied.set_result(None)
+                actual_replace = os.replace
+
+                def fail_config_commit(source, destination):
+                    if Path(destination) == store.path:
+                        raise PermissionError("config replacement denied")
+                    return actual_replace(source, destination)
+
+                with patch("labcontrol.alarm_settings.os.replace", side_effect=fail_config_commit):
+                    dialog._check_pending()
+                self.assertEqual(runtime.configure_alarm_reporting.call_args.args[0], initial)
+                self.assertIs(dialog._pending, restored)
+                self.assertFalse(dialog.qq.isEnabled())
+                self.assertEqual(store.load(AlarmReportingConfig()), initial)
+                self.assertEqual(read_alarm_token(initial, ROOT), "old-secret")
+                if rollback_error is None:
+                    restored.set_result(initial)
+                else:
+                    restored.set_exception(rollback_error)
+                dialog._check_pending()
+                self.assertIn("config replacement denied", dialog.status.text())
+                if rollback_error is None:
+                    self.assertIn("Previous alarm settings restored", dialog.status.text())
+                else:
+                    self.assertIn("rollback unavailable", dialog.status.text())
+                    self.assertNotIn("Previous alarm settings restored", dialog.status.text())
+                self.assertTrue(dialog.qq.isEnabled())
+                self.assertEqual(saved, [])
+                self.assertEqual(dialog.result(), QDialog.DialogCode.Rejected)
+                dialog.reject()

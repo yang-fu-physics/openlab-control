@@ -29,6 +29,7 @@ class AlarmSettingsDialog(QDialog):
         self._operation = ""
         self._saved_config = None
         self._saved_token = ""
+        self._save_error = ""
         self._remembered_enabled = bool(config.enabled)
         self.setWindowTitle("Alarm Notifications")
         layout = QVBoxLayout(self)
@@ -136,7 +137,11 @@ class AlarmSettingsDialog(QDialog):
         self._pending = future
         for widget in (self.enabled, self.device_name, self.endpoint, self.token, self.qq, self.allow_http, self.test_button, self.buttons):
             widget.setEnabled(False)
-        self.status.setText("Sending test warning…" if self._operation == "test" else "Saving notifications…")
+        self.status.setText({
+            "test": "Sending test warning…",
+            "save": "Saving notifications…",
+            "rollback": "Restoring previous alarm settings…",
+        }[self._operation])
         self._timer.start()
 
     def _check_pending(self) -> None:
@@ -150,21 +155,32 @@ class AlarmSettingsDialog(QDialog):
         try:
             future.result()
         except Exception as error:
-            self.status.setText(f"Notification operation failed: {error}")
+            if self._operation == "rollback":
+                self.status.setText(f"Could not save local alarm settings: {self._save_error}; "
+                                    f"could not restore previous alarm settings: {error}")
+            else:
+                self.status.setText(f"Notification operation failed: {error}")
             return
         if self._operation == "save":
             try:
                 persisted = self.store.save(self._saved_config, self._saved_token)
             except (OSError, ValueError) as error:
+                self._save_error = str(error)
                 try:
-                    self.runtime.configure_alarm_reporting(self.config)
-                except Exception:
-                    pass
-                self.status.setText(f"Could not save local alarm settings: {error}")
+                    rollback = self.runtime.configure_alarm_reporting(self.config)
+                except (OSError, ValueError, RuntimeError) as rollback_error:
+                    self.status.setText(f"Could not save local alarm settings: {error}; "
+                                        f"could not restore previous alarm settings: {rollback_error}")
+                    return
+                self._operation = "rollback"
+                self._set_pending(rollback)
                 return
             self.config = persisted
             self.settingsSaved.emit(persisted)
             self.accept()
+        elif self._operation == "rollback":
+            self.status.setText(f"Could not save local alarm settings: {self._save_error}. "
+                                "Previous alarm settings restored.")
         else:
             self.status.setText("Test warning accepted by the server.")
 
