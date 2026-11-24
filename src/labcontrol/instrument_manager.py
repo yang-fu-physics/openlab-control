@@ -1370,12 +1370,13 @@ class InstrumentManager:
                             state.target,
                             snapshot.timestamp,
                             ready=state.ready,
+                            moving=state.activity is InstrumentActivity.MOVING,
                         )
                         state.stability = result.state
                         timeout_code = "STABILITY_TIMEOUT"
                         if result.state is StabilityState.TIMED_OUT:
                             self.events.report(
-                                self.config.alarms.stability_timeout,
+                                Severity.WARNING,
                                 instrument_id,
                                 timeout_code,
                                 f"{panel.display_name} did not stabilize within "

@@ -169,7 +169,7 @@ class DatPlotCanvas(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(scaled(640), scaled(390))
+        self.setMinimumSize(scaled(240), scaled(160))
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
         self.document: DatDocument | None = None
@@ -735,7 +735,11 @@ class DatPlotCanvas(QWidget):
                 scaled_float(18),
             ),
             Qt.AlignmentFlag.AlignRight,
-            f"{total:,} plotted points | drag to zoom | double-click a point for details",
+            painter.fontMetrics().elidedText(
+                f"{total:,} plotted points | drag to zoom | double-click a point for details",
+                Qt.TextElideMode.ElideRight,
+                int(footer.width()),
+            ),
         )
 
         if self._drag_origin is not None and self._drag_current is not None:

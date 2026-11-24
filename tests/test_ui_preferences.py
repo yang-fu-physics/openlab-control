@@ -26,6 +26,17 @@ from labcontrol.ui.preferences import (  # noqa: E402
 
 
 class UiPreferenceStoreTests(unittest.TestCase):
+    def test_last_sequence_is_separate_from_window_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UiPreferenceStore(Path(directory) / "ui.ini")
+            self.assertIsNone(store.last_sequence())
+            sequence = Path(directory) / "saved.seq"
+            store.set_last_sequence(sequence)
+            store.clear_window_layout()
+            self.assertEqual(store.last_sequence(), sequence.resolve())
+            store.set_last_sequence(None)
+            self.assertIsNone(store.last_sequence())
+
     def test_missing_values_use_site_scale_and_safe_defaults(
         self,
     ) -> None:

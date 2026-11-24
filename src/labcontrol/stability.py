@@ -73,12 +73,13 @@ class StabilityEvaluator:
         now: float,
         *,
         ready: bool | None = None,
+        moving: bool = False,
     ) -> StabilityResult:
         """加入新样本并计算 MOVING、SETTLING、STABLE 或 TIMED_OUT。
 
         ``ready`` 为 ``False`` 时禁止开始或继续 dwell；``True`` 也不能
         单独判稳，仍必须通过核心的误差、斜率和驻留时间检查。``None`` 保留没有该
-        状态位的仪表原有行为。
+        状态位的仪表原有行为。只有驱动报告 ``moving=True`` 才暂停稳定超时计时。
         """
 
         if self._target is None or not math.isclose(
@@ -109,8 +110,22 @@ class StabilityEvaluator:
             else 0.0
         )
 
+        # A device-declared ramp is travel toward the final target, not settling.
+        if moving:
+            self._target_started_at = None
+            self._paused_total = 0.0
+            if self._paused_at is not None:
+                self._paused_at = now
+            elapsed = 0.0
+        elif self._target_started_at is None:
+            self._target_started_at = now
+            self._paused_total = 0.0
+            if self._paused_at is not None:
+                self._paused_at = now
+            elapsed = 0.0
+
         # 仪表状态只作附加门槛，不能绕过软件独立计算的误差、历史和斜率条件。
-        qualified_by_instrument = ready is not False
+        qualified_by_instrument = ready is not False and not moving
         if within and enough_history and slope_ok and qualified_by_instrument:
             if self._qualified_at is None:
                 self._qualified_at = now

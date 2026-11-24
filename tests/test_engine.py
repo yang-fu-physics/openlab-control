@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 
@@ -149,6 +150,66 @@ class SequenceEngineTests(unittest.TestCase):
             await asyncio.gather(poll_task, return_exceptions=True)
             await modules.shutdown()
             await manager.disconnect_all()
+
+    def test_saving_called_sequence_during_run_only_affects_the_next_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self._fast_config(root)
+            child = root / "child.seq"
+            child.write_text("T Remark original child\nT End Sequence\n", encoding="utf-8")
+            marker = Command(CommandType.REMARK, {"text": "edit marker"})
+            document = SequenceDocument([marker, Command(CommandType.CALL_SEQUENCE, {"path": "child.seq"})])
+            edited = []
+            def progress_changed(progress):
+                if progress.command_id == marker.id and not edited:
+                    child.write_text("T Remark updated child\nT End Sequence\n", encoding="utf-8")
+                    edited.append(True)
+            notices = []
+            state, _, _ = asyncio.run(self._run(config, document, notices, SimpleNamespace(append=progress_changed)))
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertTrue(edited)
+            messages = [notice.event.message for notice in notices]
+            self.assertIn("original child", messages)
+            self.assertNotIn("updated child", messages)
+            next_notices = []
+            state, _, _ = asyncio.run(self._run(config, document, next_notices))
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertIn("updated child", [notice.event.message for notice in next_notices])
+
+    def test_continuous_sweep_with_simulated_controller_records_initial_and_continues(self):
+        from unittest.mock import patch
+
+        original_set_target = InstrumentManager.set_target
+        writes = []
+        initial_stability = []
+
+        async def observe(manager, instrument_id, value, rate_per_minute, mode="Settle", *, control, origin="sequence"):
+            if instrument_id == "temperature":
+                writes.append((value, mode))
+                if len(writes) == 2:
+                    initial_stability.append(manager.latest[instrument_id].controls["main"].stability)
+            return await original_set_target(manager, instrument_id, value, rate_per_minute,
+                                             mode, control=control, origin=origin)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self._fast_config(Path(temporary))
+            document = SequenceDocument([
+                Command(CommandType.SCAN_TEMPERATURE,
+                        {"start": 299.8, "stop": 299.0, "steps": 9, "rate": 10.0, "mode": "Sweep"},
+                        [Command(CommandType.MEASURE)]),
+                Command(CommandType.REMARK, {"text": "after continuous sweep"}),
+            ])
+            notices, progresses = [], []
+            with patch.object(InstrumentManager, "set_target", observe):
+                state, snapshots, paths = asyncio.run(self._run(config, document, notices, progresses))
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertEqual(writes, [(299.8, "Settle"), (299.0, "Sweep")])
+            self.assertEqual(initial_stability, [StabilityState.STABLE])
+            self.assertEqual(snapshots["temperature"].controls["main"].target, 299.0)
+            self.assertTrue(any(n.event.code == "SWEEP_END_REACHED" for n in notices))
+            self.assertTrue(any(n.event.message == "after continuous sweep" for n in notices))
+            self.assertTrue(paths.data_file.is_file())
+            self.assertEqual(progresses[-1].completed_steps, progresses[-1].total_steps)
 
     def test_nested_temperature_field_measurement(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -579,14 +640,14 @@ class SequenceEngineTests(unittest.TestCase):
                 current=300.0,
                 target=299.0,
                 rate_per_minute=1.0,
-                activity=InstrumentActivity.MOVING,
+                activity=InstrumentActivity.HOLDING,
                 stability=StabilityState.MOVING,
                 controls={
                     "main": InstrumentControlState(
                         current=300.0,
                         target=299.0,
                         rate_per_minute=1.0,
-                        activity=InstrumentActivity.MOVING,
+                        activity=InstrumentActivity.HOLDING,
                         stability=StabilityState.MOVING,
                     )
                 },
@@ -608,7 +669,7 @@ class SequenceEngineTests(unittest.TestCase):
                 engine._abort_requested = False
                 engine._fatal_abort = False
                 events.resolve("temperature", "STABILITY_TIMEOUT")
-                with self.assertRaises(SequenceAbort):
+                with self.assertRaises(asyncio.TimeoutError):
                     await asyncio.wait_for(
                         wait("temperature", panel),
                         timeout=0.25,
@@ -626,6 +687,57 @@ class SequenceEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config = self._fast_config(Path(temp))
             asyncio.run(scenario(config))
+
+    def test_wait_timers_follow_moving_not_ready(self) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            notices = []
+            events.subscribe(notices.append)
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            panel = manager.resolve_control_panel(InstrumentKind.TEMPERATURE)
+            panel = replace(panel, stability=replace(panel.stability, timeout_seconds=0.04))
+            engine = SequenceEngine(
+                replace(config, control_poll_interval_seconds=0.005), manager, events,
+                object(), object(),
+            )
+            engine.state = RunState.RUNNING
+            control = manager.latest["temperature"].controls[panel.id]
+            for wait in (engine._wait_for_stability, engine._wait_for_target):
+                with self.subTest(wait=wait.__name__):
+                    events.resolve("temperature", "STABILITY_TIMEOUT")
+                    notices.clear()
+                    control.current, control.target = 300.0, 299.0
+                    control.activity = InstrumentActivity.MOVING
+                    control.stability = StabilityState.MOVING
+                    control.ready = None
+                    task = asyncio.create_task(wait("temperature", panel))
+                    try:
+                        await asyncio.sleep(0.1)
+                        self.assertFalse(task.done())
+                        self.assertFalse(any(n.event.code == "STABILITY_TIMEOUT" for n in notices))
+                        control.activity = InstrumentActivity.HOLDING
+                        control.ready = False
+                        await asyncio.sleep(0.1)
+                        self.assertFalse(task.done())
+                        warnings = [n for n in notices if n.event.code == "STABILITY_TIMEOUT"
+                                    and not n.is_resolution]
+                        self.assertEqual(len(warnings), 1)
+                        self.assertEqual(warnings[0].event.severity, Severity.WARNING)
+                        control.current = control.target
+                        control.ready = True
+                        control.stability = StabilityState.STABLE
+                        await asyncio.wait_for(task, timeout=0.3)
+                    finally:
+                        if not task.done():
+                            task.cancel()
+                            with self.assertRaises(asyncio.CancelledError):
+                                await task
+            await manager.disconnect_all()
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
 
     def test_runtime_rejects_programmatic_parameter_limit_bypasses(self) -> None:
         cases = (
@@ -1282,6 +1394,9 @@ class SequenceEngineTests(unittest.TestCase):
             await asyncio.sleep(0.09)
             self.assertFalse(wait_task.done())
             manager.latest["field"].controls["main"].stability = StabilityState.STABLE
+            await asyncio.sleep(0.03)
+            self.assertFalse(wait_task.done())
+            manager.latest["temperature"].controls["main"].stability = StabilityState.STABLE
             await asyncio.wait_for(wait_task, timeout=0.3)
             timeout_events = [
                 notice

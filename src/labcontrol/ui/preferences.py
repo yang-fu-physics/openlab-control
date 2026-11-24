@@ -169,6 +169,16 @@ class UiPreferenceStore:
         )
         self._sync(settings)
 
+    def last_sequence(self) -> Path | None:
+        value = str(self._settings().value("session/last_sequence", ""))
+        return Path(value) if value else None
+
+    def set_last_sequence(self, path: Path | None) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        settings = self._settings()
+        settings.setValue("session/last_sequence", str(path.resolve()) if path is not None else "")
+        self._sync(settings)
+
     def geometry(self, key: str) -> QByteArray | None:
         value = self._settings().value(
             f"windows/{key}/geometry"

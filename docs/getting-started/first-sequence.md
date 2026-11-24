@@ -42,7 +42,7 @@ T End Sequence
 
 > **几个小符号的含义**：
 > - 行首的 `T` 表示启用该行，改为 `F`（右键 Disable）则跳过执行；
-> - `Set Temperature` / `Set Field` 下发目标后立即继续，配合 `Wait` 等待温度/磁场稳定和延时；`Scan` 的 `Settle` 模式每点等待稳定后再测，`Sweep` 模式到达目标容差即测；
+> - `Set Temperature` / `Set Field` 下发目标后立即继续，配合 `Wait` 等待温度/磁场稳定和延时；`Scan` 的 `Settle` 模式每点等待稳定后再测。`Sweep` 先到起点稳定并执行一轮内部语句，再连续朝终点变化，按阈值顺序触发内部语句；到达实际终点后完成当前整组并结束 Scan；
 > - `Set Datafile` 的三种模式：`create`（新建/覆盖）、`open`（向已有文件追加）、`open|create`（存在则追加、不存在则新建）。
 
 ## 3. 点击运行并查看产出文件

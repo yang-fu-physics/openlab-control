@@ -19,10 +19,10 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QHeaderView,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPushButton,
+    QToolBar,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -114,37 +114,38 @@ class DatBrowserWidget(QWidget):
         self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
-        controls = QHBoxLayout()
         self.path_label = QLabel("No DAT file selected - drop a file anywhere in this window")
         self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.path_label.setWordWrap(True)
+        self.path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.path_label)
+        controls = QToolBar(self)
+        controls.setMovable(False)
+        controls.setFloatable(False)
         self.layout_combo = QComboBox()
         self.layout_combo.setToolTip("Overlay Y series or stack plots with a shared X axis")
         self.layout_combo.addItem("Overlay", OVERLAY_LAYOUT)
         self.layout_combo.addItem("Stacked / Shared X", STACKED_LAYOUT)
-        open_button = QPushButton("Open DAT")
-        reload_button = QPushButton("Reload")
-        self.save_format_button = QPushButton("Save PLT")
-        reset_button = QPushButton("Reset Zoom")
-        controls.addWidget(self.path_label, 1)
         controls.addWidget(QLabel("Layout:"))
         controls.addWidget(self.layout_combo)
-        controls.addWidget(open_button)
-        controls.addWidget(reload_button)
-        controls.addWidget(self.save_format_button)
-        controls.addWidget(reset_button)
-        layout.addLayout(controls)
+        open_action = controls.addAction("Open DAT")
+        reload_action = controls.addAction("Reload")
+        self.save_format_button = controls.addAction("Save PLT")
+        reset_action = controls.addAction("Reset Zoom")
+        layout.addWidget(controls)
 
         self.canvas = DatPlotCanvas()
         layout.addWidget(self.canvas, 1)
         self.status_label = QLabel("Waiting for a DAT file")
         self.status_label.setStyleSheet("color: #5d6672;")
+        self.status_label.setWordWrap(True)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.status_label)
 
-        open_button.clicked.connect(self.open_dialog)
-        reload_button.clicked.connect(self.reload)
-        self.save_format_button.clicked.connect(lambda checked=False: self.save_format(show_errors=True))
-        reset_button.clicked.connect(lambda checked=False: self.canvas.reset_zoom())
+        open_action.triggered.connect(self.open_dialog)
+        reload_action.triggered.connect(self.reload)
+        self.save_format_button.triggered.connect(lambda checked=False: self.save_format(show_errors=True))
+        reset_action.triggered.connect(lambda checked=False: self.canvas.reset_zoom())
         self.layout_combo.currentIndexChanged.connect(self._layout_selected)
         self.canvas.openRequested.connect(self.open_dialog)
         self.canvas.reloadRequested.connect(self.reload)

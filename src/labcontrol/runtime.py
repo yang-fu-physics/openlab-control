@@ -23,6 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 from .alarm_reporting import AlarmReporter
 from .config import AppConfig
 from .datafile import DatRunLogger
+from .system_log import SystemLogRecorder
 from .events import EventManager
 from .models import EventNotice, RunProgress, RunState, RuntimeMessage, Severity
 from .measurement.manifest import ModuleDescriptor, discover_modules
@@ -52,6 +53,8 @@ class RuntimeService:
         self._ready = threading.Event()
         self._sequence_task: asyncio.Task[Any] | None = None
         self._poll_task: asyncio.Task[Any] | None = None
+        self._system_log_task: asyncio.Task[None] | None = None
+        self.system_log = SystemLogRecorder(config)
         self._logger_closed_during_shutdown = False
         self.events: EventManager | None = None
         self.instruments: InstrumentManager | None = None
@@ -268,6 +271,53 @@ class RuntimeService:
         if self._loop is None or not self._loop.is_running():
             raise RuntimeError("Instrument runtime has not started")
         return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+
+    def start_system_log(self, path: str, interval_seconds: int, fields: tuple[str, ...]) -> Future[Any]:
+        return self._submit(self._start_system_log(path, interval_seconds, tuple(fields)))
+
+    async def _start_system_log(self, path: str, interval_seconds: int, fields: tuple[str, ...]) -> dict[str, object]:
+        assert self.instruments is not None
+        state = self.system_log.start(path, interval_seconds, fields, self.instruments.snapshots())
+        self._system_log_task = asyncio.create_task(self._system_log_loop())
+        self.messages.put(RuntimeMessage("system_log_state", state))
+        return state
+
+    def stop_system_log(self) -> Future[Any]:
+        return self._submit(self._stop_system_log())
+
+    async def _stop_system_log(self) -> dict[str, object]:
+        task, self._system_log_task = self._system_log_task, None
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        try:
+            self.system_log.close()
+        finally:
+            self.messages.put(RuntimeMessage("system_log_state", self.system_log.state()))
+        return self.system_log.state()
+
+    async def _system_log_loop(self) -> None:
+        assert self.instruments is not None
+        assert self.events is not None
+        while True:
+            await asyncio.sleep(self.system_log.interval_seconds)
+            try:
+                # Only copy the existing cache. Never poll or change polling intervals here.
+                self.system_log.write(self.instruments.snapshots())
+            except OSError as exc:
+                error = str(exc)
+                try:
+                    self.system_log.close()
+                except OSError as close_error:
+                    error += f"; close failed: {close_error}"
+                state = self.system_log.state()
+                state["error"] = error
+                self.messages.put(RuntimeMessage("system_log_state", state))
+                self.events.report(Severity.WARNING, "system_log", "SYSTEM_LOG_WRITE_FAILED", error, str(self.system_log.path))
+                return
 
     def run_sequence(
         self,
@@ -723,6 +773,10 @@ class RuntimeService:
                         cleanup_errors.append(
                             f"poll task cancellation: {type(exc).__name__}: {exc}"
                         )
+                try:
+                    await self._stop_system_log()
+                except OSError as exc:
+                    cleanup_errors.append(f"system_log.close: {exc}")
                 if self.modules is not None:
                     # 模块先于仪表断开，因为模块 close 仍需要自己的仪表连接；二者都在仪表
                     # poll loop 停止后执行，避免新的状态轮询与关闭交叉。

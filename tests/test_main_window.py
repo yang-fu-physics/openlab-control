@@ -70,6 +70,126 @@ class MainWindowLayoutTests(unittest.TestCase):
         cls.config = load_simulated_config()
         configure_qt_appearance(cls.application, cls.config.ui_scale)
 
+    def test_manual_set_closes_only_its_dialog_after_success(self):
+        window = MainWindow(self.config)
+        try:
+            window._open_manual_control("temperature", "main")
+            window._open_manual_control("field", "main")
+            panel = self.config.instrument("temperature").panel("main")
+            dialog = window.manual_dialogs[panel.key]
+            other = window.manual_dialogs[self.config.instrument("field").panel("main").key]
+            dialog.update_snapshot(InstrumentSnapshot(
+                instrument_id="temperature", display_name="Temperature",
+                kind=self.config.instrument("temperature").kind, timestamp=time.monotonic(),
+                connection_state=InstrumentConnectionState.CONNECTED,
+                controls={"main": InstrumentControlState(current=300.0, target=300.0)},
+            ))
+            future = Future()
+            with patch.object(window.runtime, "set_target", return_value=future):
+                dialog.apply_button.click()
+            window._check_pending_manual_operations()
+            self.assertTrue(dialog.isVisible())
+            future.set_result(True)
+            window._check_pending_manual_operations()
+            self.assertFalse(dialog.isVisible())
+            self.assertTrue(other.isVisible())
+            self.assertEqual(window._pending_manual_operations, [])
+        finally:
+            window.close()
+
+    def test_failed_or_unconfirmed_manual_set_keeps_dialog_open(self):
+        for outcome in (False, RuntimeError("simulated write failure")):
+            with self.subTest(outcome=outcome):
+                window = MainWindow(self.config)
+                try:
+                    window._open_manual_control("temperature", "main")
+                    dialog = window.manual_dialogs[self.config.instrument("temperature").panel("main").key]
+                    dialog.update_snapshot(InstrumentSnapshot(
+                        instrument_id="temperature", display_name="Temperature",
+                        kind=self.config.instrument("temperature").kind, timestamp=time.monotonic(),
+                        connection_state=InstrumentConnectionState.CONNECTED,
+                        controls={"main": InstrumentControlState(current=300.0, target=300.0)},
+                    ))
+                    future = Future()
+                    with patch.object(window.runtime, "set_target", return_value=future):
+                        dialog.apply_button.click()
+                    if isinstance(outcome, Exception):
+                        future.set_exception(outcome)
+                    else:
+                        future.set_result(outcome)
+                    window._check_pending_manual_operations()
+                    self.assertTrue(dialog.isVisible())
+                    self.assertIn("not confirmed" if outcome is False else "simulated write failure",
+                                  window.statusBar().currentMessage())
+                finally:
+                    window.close()
+
+    def test_data_browser_can_resize_and_move_outside_the_main_viewport(self):
+        window = MainWindow(self.config)
+        try:
+            window.show()
+            viewer = window._show_data_browser()
+            self.application.processEvents()
+            self.assertTrue(viewer.isWindow())
+            self.assertNotIn(viewer, window.mdi.subWindowList())
+            self.assertLess(viewer.minimumSizeHint().width(), 640)
+            viewer.resize(480, 340)
+            viewer.move(60, window.y() + window.height() + 20)
+            position = viewer.pos()
+            window._fit_mdi_windows()
+            self.application.processEvents()
+            self.assertEqual(viewer.pos(), position)
+            self.assertLessEqual(viewer.width(), 480)
+        finally:
+            window.close()
+
+    def test_loaded_sequence_restores_dat_and_next_start_restores_sequence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sequence = root / "remembered.seq"
+            sequence.write_text('T Set Datafile open|create external saved.dat\nT Measure\nT End Sequence\n', encoding="utf-8")
+            store = UiPreferenceStore(root / "ui.ini")
+            first = MainWindow(self.config, ui_preference_store=store)
+            try:
+                with patch("labcontrol.ui.main_window.QFileDialog.getOpenFileName", return_value=(str(sequence), "")):
+                    first._open_sequence()
+                self.assertEqual(first.data_file_label.fullText(), "saved.dat")
+                self.assertTrue(first._datafile_selected)
+                self.assertEqual(store.last_sequence(), sequence.resolve())
+            finally:
+                first.close()
+            second = MainWindow(self.config, ui_preference_store=store)
+            try:
+                self.assertEqual(second.sequence_path, sequence.resolve())
+                self.assertEqual(second.data_file_label.fullText(), "saved.dat")
+                second._new_sequence()
+                self.assertEqual(second.data_file_label.fullText(), "")
+                self.assertIsNone(store.last_sequence())
+            finally:
+                second.close()
+
+    def test_running_sequence_keeps_editor_enabled_and_live_controls_locked(self):
+        window = MainWindow(self.config)
+        try:
+            window._set_document(SequenceDocument([Command(CommandType.REMARK, {"text": "original"})]))
+            with patch.object(window.runtime, "run_sequence"):
+                window._start_sequence({})
+            self.assertTrue(window.command_tree.isEnabled())
+            self.assertTrue(window.change_sequence_button.isEnabled())
+            self.assertFalse(window.modules_action.isEnabled())
+            self.assertFalse(window.run_button.isEnabled())
+            window.editor.list.setCurrentRow(0)
+            added = Command(CommandType.REMARK, {"text": "next run"})
+            window.editor.insert_command(added)
+            self.assertEqual(window.document.commands[0], added)
+            self.assertTrue(window._dirty)
+            self.assertIn("next Run", window.editor.toolTip())
+            window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
+            self.assertTrue(window.modules_action.isEnabled())
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.close()
+
     def test_floating_windows_stay_inside_minimum_viewport(self) -> None:
         window = MainWindow(self.config)
         try:
@@ -81,7 +201,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
 
             viewport = window.mdi.viewport().rect()
-            for subwindow in (window.sequence_window, data_window):
+            for subwindow in (window.sequence_window,):
                 geometry = subwindow.geometry()
                 self.assertGreaterEqual(geometry.left(), viewport.left())
                 self.assertGreaterEqual(geometry.top(), viewport.top())
@@ -1088,7 +1208,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             window.current_run_state = RunState.IDLE
             window.close()
 
-    def test_nested_set_datafile_keeps_datafile_selection_for_run(self) -> None:
+    def test_loading_nested_set_datafile_selects_path_for_run(self) -> None:
         window = MainWindow(self.config)
         try:
             nested_datafile = Command(
@@ -1105,8 +1225,8 @@ class MainWindowLayoutTests(unittest.TestCase):
                 [nested_datafile],
             )
             window._set_document(SequenceDocument([scan], "nested-dat.seq"))
-            self.assertEqual(window.data_file_label.fullText(), "")
-            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "nested.dat")
+            self.assertTrue(window._datafile_selected)
 
             window._remember_datafile_directory(nested_datafile)
             window._mark_dirty()

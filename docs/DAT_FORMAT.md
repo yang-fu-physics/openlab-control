@@ -96,6 +96,8 @@ Timestamp(s),ISO8601,Severity,Source,Code,State,Count,Context,Message
 
 ## 3. 连续仪表状态日志（`instrument_status.dat`）
 
+如需自选路径、正整数秒间隔和按仪表分页选择记录项，使用 [System Log](guides/system-log.md)：默认 30 s，手动开始／停止，空闲和 SEQ 期间均可记录已有缓存，同名文件续写。
+
 Run 开始时立即建立并先写一行初始快照，随后默认每秒写一行（只在 Run 期间写入，不受打开 Live Trend 影响）：
 
 - 每个启用的 `controller` 面板按 `<仪表ID>.<面板ID>.*` 记录：`Current`、`Target`、`Rate`、`Activity`、`Stability`、`Ready`；

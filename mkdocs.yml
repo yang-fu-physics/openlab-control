@@ -108,6 +108,7 @@ nav:
       - 扫描与配置仪表: guides/instrument-scanner.md
       - 操作手册: OPERATIONS.md
       - Data Browser: guides/data-browser.md
+      - 系统仪表 Log: guides/system-log.md
       - 常见问题: guides/troubleshooting.md
   - Measurement Module:
       - 从这里开始: development/index.md

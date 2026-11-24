@@ -33,10 +33,12 @@ from labcontrol.instruments.worker import (  # noqa: E402
     IsolatedInstrumentClient,
 )
 from labcontrol.models import (  # noqa: E402
+    InstrumentActivity,
     InstrumentControlState,
     InstrumentKind,
     InstrumentMetric,
     InstrumentSnapshot,
+    StabilityState,
 )
 from labcontrol.sequence.model import (  # noqa: E402
     SPECS_BY_TYPE,
@@ -191,6 +193,43 @@ class InstrumentRuntimeV4Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_driver_moving_controls_stability_timer_independently_of_ready(self) -> None:
+        class Client(_RecordingClient):
+            moving = True
+
+            async def read_status(self):
+                reading = await super().read_status()
+                return dict(reading, value=299.0, moving=self.moving, ready=False)
+
+        async def scenario():
+            config = _multi_panel_config()
+            instrument = config.instrument("temperature")
+            instrument = replace(instrument, panels=tuple(
+                replace(panel, stability=replace(panel.stability, timeout_seconds=0.01))
+                if panel.template == "controller" else panel
+                for panel in instrument.panels))
+            config = replace(config, instrument_instances=(instrument,))
+            manager = InstrumentManager(config, EventManager(), isolate_processes=False)
+            client = Client()
+            manager.instruments["temperature"] = client
+            await manager.connect_all()
+            panel = manager.resolve_control_panel(InstrumentKind.TEMPERATURE)
+            await manager.poll_all()
+            await asyncio.sleep(0.03)
+            control = (await manager.poll_all())["temperature"].controls[panel.id]
+            self.assertEqual(control.activity, InstrumentActivity.MOVING)
+            self.assertNotEqual(control.stability, StabilityState.TIMED_OUT)
+            client.moving = False
+            await manager.poll_all()
+            await asyncio.sleep(0.03)
+            control = (await manager.poll_all())["temperature"].controls[panel.id]
+            self.assertFalse(control.ready)
+            self.assertEqual(control.activity, InstrumentActivity.HOLDING)
+            self.assertEqual(control.stability, StabilityState.TIMED_OUT)
+            await manager.disconnect_all()
+
+        asyncio.run(scenario())
 
     def test_one_physical_instance_opens_once_and_routes_control_by_role(self) -> None:
         async def scenario() -> None:

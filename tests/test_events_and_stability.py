@@ -87,6 +87,36 @@ class StabilityTests(unittest.TestCase):
         self.assertIn(StabilityState.SETTLING, states)
         self.assertEqual(states[-1], StabilityState.STABLE)
 
+    def test_long_device_ramp_does_not_consume_settling_timeout(self):
+        evaluator = StabilityEvaluator(StabilityConfig(tolerance=0.01, max_slope_per_minute=0.01,
+            dwell_seconds=1.0, timeout_seconds=1800.0, window_seconds=1.0))
+        for moment in (0.0, 1800.0, 3600.0):
+            result = evaluator.update(100.0, 3.0, moment, ready=False, moving=True)
+            self.assertNotEqual(result.state, StabilityState.TIMED_OUT)
+            self.assertEqual(result.elapsed_seconds, 0.0)
+        result = evaluator.update(4.0, 3.0, 3601.0, ready=True)
+        self.assertEqual(result.elapsed_seconds, 0.0)
+        result = evaluator.update(4.0, 3.0, 5402.0, ready=True)
+        self.assertEqual(result.state, StabilityState.TIMED_OUT)
+
+    def test_not_ready_without_moving_still_consumes_timeout(self):
+        evaluator = StabilityEvaluator(StabilityConfig(
+            tolerance=0.01, max_slope_per_minute=0.01,
+            dwell_seconds=1.0, timeout_seconds=2.0, window_seconds=1.0))
+        evaluator.update(3.0, 3.0, 0.0, ready=False)
+        result = evaluator.update(3.0, 3.0, 2.1, ready=False)
+        self.assertEqual(result.state, StabilityState.TIMED_OUT)
+        self.assertEqual(result.elapsed_seconds, 2.1)
+
+    def test_moving_without_ready_flag_blocks_stability_and_timeout(self):
+        evaluator = StabilityEvaluator(StabilityConfig(
+            tolerance=0.01, max_slope_per_minute=0.01,
+            dwell_seconds=1.0, timeout_seconds=2.0, window_seconds=1.0))
+        for moment in (0.0, 0.5, 1.0, 1.5, 3.0):
+            result = evaluator.update(3.0, 3.0, moment, moving=True)
+            self.assertNotIn(result.state, (StabilityState.STABLE, StabilityState.TIMED_OUT))
+        self.assertEqual(result.elapsed_seconds, 0.0)
+
     def test_timeout(self) -> None:
         evaluator = StabilityEvaluator(StabilityConfig(
             tolerance=0.01,

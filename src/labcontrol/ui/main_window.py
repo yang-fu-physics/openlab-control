@@ -104,6 +104,7 @@ from .scaling import (
     scaled_text,
 )
 from .sequence_editor import SequenceEditorWidget
+from .system_log import SystemLogDialog
 from .trend import TrendDialog
 from .widgets import ElidedLabel
 from .window_sizing import (
@@ -178,6 +179,8 @@ class MainWindow(QMainWindow):
         self.current_run_state = RunState.IDLE
         self._close_after_stop = False
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
+        self.system_log_dialog: SystemLogDialog | None = None
+        self._system_log_state = {"active": False, "path": "", "interval_seconds": 30, "fields": []}
         self.instrument_setup_dialog: InstrumentSetupDialog | None = None
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
@@ -200,7 +203,7 @@ class MainWindow(QMainWindow):
             tuple[object, bool],
         ] = {}
         self._minimized_module_windows: set[str] = set()
-        self._pending_manual_operations: list[tuple[object, str]] = []
+        self._pending_manual_operations: list[tuple[object, str, ManualControlDialog | None]] = []
         self.alert_dialogs: dict[str, AlertDialog] = {}
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
@@ -244,7 +247,7 @@ class MainWindow(QMainWindow):
         self.sequence_window.show()
 
         self.data_browser_windows: dict[
-            QMdiSubWindow,
+            QMainWindow,
             DatBrowserWidget,
         ] = {}
 
@@ -563,6 +566,8 @@ class MainWindow(QMainWindow):
         self.modules_action = QAction(qta.icon("fa5s.cubes", color=icon_color), "Modules", self)
         self.appearance_action = QAction("Appearance…", self)
         self.log_action = self.log_dock.toggleViewAction()
+        self.system_log_action = QAction("System Log…", self)
+        self.system_log_action.triggered.connect(self._open_system_log)
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
 
@@ -610,7 +615,10 @@ class MainWindow(QMainWindow):
         sequence_menu.addActions([self.run_action, self.pause_action, self.stop_action])
         graph_menu = menu.addMenu("Graph")
         graph_menu.addActions([self.graph_action, self.data_browser_action])
+        graph_menu.addAction(self.system_log_action)
         instrument_menu = menu.addMenu("Instrument")
+        instrument_menu.addAction(self.system_log_action)
+        instrument_menu.addSeparator()
         has_controller_menu = False
         for panel in self.config.panels:
             if panel.template != "controller":
@@ -657,7 +665,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addActions([self.run_action, self.pause_action, self.stop_action])
         toolbar.addSeparator()
-        toolbar.addActions([self.graph_action, self.data_browser_action, self.modules_action])
+        toolbar.addActions([self.graph_action, self.data_browser_action, self.system_log_action, self.modules_action])
         self.addToolBar(toolbar)
 
     def _restore_dialog_geometry(
@@ -835,11 +843,14 @@ class MainWindow(QMainWindow):
         )
 
     def _load_default_sequence(self) -> None:
-        if not self.config.default_sequence:
-            self._set_document(SequenceDocument())
-            return
-        path = self.config.resolve_project_path(self.config.default_sequence)
-        if path.exists():
+        store = self.ui_preference_store
+        remembered = store.last_sequence() if store is not None else None
+        path = remembered if remembered is not None and remembered.is_file() else None
+        if path is None and self.config.default_sequence:
+            path = self.config.resolve_project_path(self.config.default_sequence)
+        if remembered is not None and not remembered.is_file():
+            self._append_log("WARNING", "sequence", "LAST_SEQUENCE_MISSING", f"Last SEQ is unavailable: {remembered}; using the configured default")
+        if path is not None and path.is_file():
             result = load_sequence(
                 path,
                 instrument_commands=(
@@ -900,6 +911,9 @@ class MainWindow(QMainWindow):
         self.current_data_file = None
         self._datafile_selected = False
         self.sequence_path = document.path
+        self._datafile_selected = self._first_effective_datafile_command() is not None
+        if self.ui_preference_store is not None:
+            self.ui_preference_store.set_last_sequence(document.path)
         imported = module_settings or (
             SequenceModuleSettings({}, {})
         )
@@ -1292,6 +1306,8 @@ class MainWindow(QMainWindow):
             return False
 
         self.sequence_path = destination
+        if self.ui_preference_store is not None:
+            self.ui_preference_store.set_last_sequence(destination)
         self.sequence_label.setFullText(
             destination.name
         )
@@ -1355,7 +1371,7 @@ class MainWindow(QMainWindow):
 
     def _insert_palette_command(self, item: QTreeWidgetItem, column: int) -> None:
         value = item.data(0, Qt.ItemDataRole.UserRole)
-        if not value or self.current_run_state not in self.TERMINAL_STATES:
+        if not value:
             return
         if not isinstance(value, tuple) or not value:
             return
@@ -1718,6 +1734,7 @@ class MainWindow(QMainWindow):
         self._set_runtime_editable(False)
         self.current_run_state = RunState.RUNNING
         self.run_status_label.setText("Sequence Running")
+        self.run_detail_label.setText("Running a snapshot; SEQ edits apply to the next Run")
         self.run_button.setEnabled(False)
         self.pause_button.setEnabled(True)
         self.stop_button.setEnabled(True)
@@ -1729,10 +1746,11 @@ class MainWindow(QMainWindow):
             self.runtime.pause_sequence()
 
     def _set_runtime_editable(self, editable: bool) -> None:
-        self.editor.set_editable(editable)
-        self.command_tree.setEnabled(editable)
-        self.change_sequence_button.setEnabled(editable)
-        self.change_data_button.setEnabled(editable)
+        self.editor.set_editable(True)
+        self.command_tree.setEnabled(True)
+        self.change_sequence_button.setEnabled(True)
+        self.change_data_button.setEnabled(True)
+        self.editor.setToolTip("" if editable else "Running an independent snapshot; edits apply to the next Run.")
         self.modules_action.setEnabled(editable)
         self.module_manager.set_operations_enabled(editable)
         for window in self.module_windows.values():
@@ -1751,6 +1769,11 @@ class MainWindow(QMainWindow):
                 self._handle_event(message.payload)
             elif message.kind == "progress":
                 self._handle_progress(message.payload)
+            elif message.kind == "system_log_state":
+                self._system_log_state = message.payload
+                self.system_log_action.setText("System Log (Recording)…" if message.payload["active"] else "System Log…")
+                if self.system_log_dialog is not None:
+                    self.system_log_dialog.set_state(message.payload)
             elif message.kind == "module_state":
                 self._handle_module_state(message.payload)
             elif message.kind == "module_result":
@@ -1828,10 +1851,10 @@ class MainWindow(QMainWindow):
             )
 
     def _check_pending_manual_operations(self) -> None:
-        remaining: list[tuple[object, str]] = []
-        for future, success_message in self._pending_manual_operations:
+        remaining: list[tuple[object, str, ManualControlDialog | None]] = []
+        for future, success_message, dialog in self._pending_manual_operations:
             if not future.done():
-                remaining.append((future, success_message))
+                remaining.append((future, success_message, dialog))
                 continue
             exception = future.exception()
             if exception is not None:
@@ -1848,6 +1871,8 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self.statusBar().showMessage(success_message, 3000)
+                if dialog is not None:
+                    dialog.accept()
         self._pending_manual_operations = remaining
 
     def _check_pending_run(self) -> None:
@@ -2511,6 +2536,35 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"Removed module instance {descriptor.name}", 3000)
 
+    def _open_system_log(self) -> None:
+        if self.system_log_dialog is None:
+            current = self.current_data_file
+            if current is None:
+                displayed = self.data_file_label.fullText().strip()
+                if displayed:
+                    current = self.config.resolve_project_path(displayed)
+            directory = current.parent if current is not None else self._last_data_directory
+            path = directory / f"instrument_log_{datetime.now():%Y%m%d_%H%M%S}.log"
+            dialog = SystemLogDialog(self.config, str(path), self)
+            dialog.startRequested.connect(self._start_system_log)
+            dialog.stopRequested.connect(self._stop_system_log)
+            self.system_log_dialog = dialog
+        self.system_log_dialog.set_state(self._system_log_state)
+        self.system_log_dialog.show()
+        self.system_log_dialog.raise_()
+        self.system_log_dialog.activateWindow()
+
+    def _start_system_log(self, path: str, interval_seconds: int, fields: tuple[str, ...]) -> None:
+        try:
+            future = self.runtime.start_system_log(path, interval_seconds, fields)
+        except RuntimeError as exc:
+            QMessageBox.warning(self.system_log_dialog, "System Log Failed", str(exc))
+            return
+        self.system_log_dialog.set_pending(future)
+
+    def _stop_system_log(self) -> None:
+        self.system_log_dialog.set_pending(self.runtime.stop_system_log())
+
     def _open_manual_control(
         self,
         instrument_id: str,
@@ -2522,7 +2576,11 @@ class MainWindow(QMainWindow):
         dialog = self.manual_dialogs.get(key)
         if dialog is None:
             dialog = ManualControlDialog(config, panel, self)
-            dialog.setRequested.connect(self._manual_set_target)
+            dialog.setRequested.connect(
+                lambda instrument_id, control, value, rate: self._manual_set_target(
+                    instrument_id, control, value, rate, dialog
+                )
+            )
             dialog.holdRequested.connect(self._manual_hold_instrument)
             self._restore_dialog_geometry(
                 dialog,
@@ -2609,6 +2667,7 @@ class MainWindow(QMainWindow):
         control: str,
         value: float,
         rate: float,
+        dialog: ManualControlDialog,
     ) -> None:
         future = self.runtime.set_target(
             instrument_id,
@@ -2622,6 +2681,7 @@ class MainWindow(QMainWindow):
             (
                 future,
                 f"Confirmed target {fixed_number(value, precision)} for {instrument_id}",
+                dialog,
             )
         )
         self.statusBar().showMessage(f"Sending target to {instrument_id}...")
@@ -2636,7 +2696,7 @@ class MainWindow(QMainWindow):
             control=control,
         )
         self._pending_manual_operations.append(
-            (future, f"Hold Current confirmed for {instrument_id}")
+            (future, f"Hold Current confirmed for {instrument_id}", None)
         )
         self.statusBar().showMessage(f"Requesting Hold Current for {instrument_id}...")
 
@@ -2663,7 +2723,7 @@ class MainWindow(QMainWindow):
             command_id,
         )
         self._pending_manual_operations.append(
-            (future, f"{spec.label} confirmed")
+            (future, f"{spec.label} confirmed", None)
         )
         self.statusBar().showMessage(f"Sending {spec.label}...")
 
@@ -2675,16 +2735,15 @@ class MainWindow(QMainWindow):
     def _show_data_browser(
         self,
         path: str | Path | None = None,
-    ) -> QMdiSubWindow:
+    ) -> QMainWindow:
         browser = DatBrowserWidget(self.config.project_root)
-        data_window = QMdiSubWindow()
-        data_window.setWidget(browser)
+        data_window = QMainWindow(self, Qt.WindowType.Window)
+        data_window.setCentralWidget(browser)
         data_window.setWindowTitle("Data Browser")
         data_window.setAttribute(
             Qt.WidgetAttribute.WA_DeleteOnClose,
             True,
         )
-        self.mdi.addSubWindow(data_window)
         data_window.resize(scaled(900), scaled(620))
         store = self.ui_preference_store
         if (
@@ -2716,9 +2775,7 @@ class MainWindow(QMainWindow):
             data_window.x() + offset,
             data_window.y() + offset,
         )
-        self.mdi.setActiveSubWindow(data_window)
         data_window.raise_()
-        QTimer.singleShot(0, self._fit_mdi_windows)
         if path is not None:
             browser.load_path(path, show_errors=True)
         return data_window
@@ -2732,7 +2789,6 @@ class MainWindow(QMainWindow):
         max_height = max(240, viewport.height() - 4)
         for subwindow in (
             self.sequence_window,
-            *self.data_browser_windows,
         ):
             if subwindow.isMaximized():
                 continue
@@ -2772,7 +2828,7 @@ class MainWindow(QMainWindow):
 
     def _data_browser_file_changed(
         self,
-        window: QMdiSubWindow,
+        window: QMainWindow,
         path: str,
     ) -> None:
         window.setWindowTitle(
@@ -2860,6 +2916,8 @@ class MainWindow(QMainWindow):
         for window in self.module_windows.values():
             window.allow_application_close()
             window.close()
+        for viewer in tuple(self.data_browser_windows):
+            viewer.close()
         self.timer.stop()
         try:
             self.runtime.shutdown()

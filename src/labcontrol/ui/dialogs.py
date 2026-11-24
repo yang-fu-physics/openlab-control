@@ -364,15 +364,23 @@ class CommandDialog(QDialog):
         stop_widget = self.inputs.get("stop")
         steps_widget = self.inputs.get("steps")
         for widget in (start_widget, stop_widget):
-            if isinstance(widget, QDoubleSpinBox):
-                widget.valueChanged.connect(self._refresh_step_from_points)
-            elif isinstance(widget, QLineEdit):
-                widget.textChanged.connect(self._refresh_step_from_points)
+            if isinstance(widget, (QDoubleSpinBox, QLineEdit)):
+                widget.editingFinished.connect(self._refresh_points_from_step)
         if isinstance(steps_widget, QSpinBox):
             steps_widget.valueChanged.connect(self._refresh_step_from_points)
         if self.step_input is not None:
             self.step_input.textChanged.connect(self._on_step_text_changed)
             self.step_input.editingFinished.connect(self._on_step_editing_finished)
+
+    def _refresh_points_from_step(self) -> None:
+        """上下限提交后优先沿用步长，取最近整数点数并显示实际步长。"""
+
+        if self._syncing_step or self.step_input is None:
+            return
+        if not self.step_input.text().strip() and not self._step_edited:
+            self._refresh_step_from_points()
+        else:
+            self._apply_step_input()
 
     def _on_step_text_changed(self, _text: str) -> None:
         if not self._syncing_step:
@@ -512,7 +520,7 @@ class CommandDialog(QDialog):
         self._syncing_step = True
         try:
             steps_widget.setValue(new_steps)
-            self.step_input.setText(formatted)
+            self.step_input.setText(raw if new_steps == 1 else formatted)
             self.step_input.setToolTip("")
             self._step_edited = False
         finally:
