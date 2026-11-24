@@ -1913,7 +1913,8 @@
 <li>选中 <code>End Sequence</code>，在右侧 <strong>Sequence Command Bar</strong> 中依次双击以下指令并填好参数：</li>
 <li><strong>Remark</strong>：填写备注 <code>First simulated run</code></li>
 <li><strong>Set Datafile</strong>：Mode 选 <code>create</code>，Location 选 <code>Run folder</code>，文件名填 <code>experiment.dat</code></li>
-<li><strong>Set Temperature</strong>：<code>300 K</code>，速率 <code>10 K/min</code>，模式 <code>Settle</code></li>
+<li><strong>Set Temperature</strong>：<code>300 K</code>，速率 <code>10 K/min</code></li>
+<li><strong>Wait</strong>：勾选 <code>Wait for Temperature</code>，<code>Delay (s)</code> 设为 <code>0.0</code></li>
 <li><strong>Scan Field</strong>：从 <code>0 Oe</code> 到 <code>200 Oe</code>，共 <code>3</code> 个点，速率 <code>5000 Oe/min</code>，模式 <code>Settle</code></li>
 <li>选中刚插入的 <strong>Scan Field</strong>（或它的 <strong>End Scan</strong>），双击右侧的 <strong>Measure</strong>，它会自动缩进放进 <code>Scan Field</code> 内部。</li>
 <li>点击 <strong>File → Save As</strong>，保存为 <code>first-run.seq</code>。</li>
@@ -1921,16 +1922,17 @@
 <p>完成后，序列编辑器里会显示类似下面的内容（缩进和 <code>End Scan</code> 由程序自动维护）：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>T Remark First simulated run
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>T Set Datafile create experiment.dat
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>T Set Temperature 300 K at 10 K/min in Settle mode
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>T Scan Field 0 Oe to 200 Oe in 3 steps at 5000 Oe/min, Settle
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>T     Measure
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>T End Scan
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>T End Sequence
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>T Set Temperature 300 K at 10 K/min
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>T Wait For Temperature
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>T Scan Field 0 Oe to 200 Oe in 3 steps at 5000 Oe/min, Settle
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>T     Measure
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>T End Scan
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>T End Sequence
 </span></code></pre></div>
 <blockquote>
 <p><strong>几个小符号的含义</strong>：
 - 行首的 <code>T</code> 表示启用该行，改为 <code>F</code>（右键 Disable）则跳过执行；
-- <code>Settle</code> 表示等温度/磁场稳定后再走下一步；<code>Sweep</code> 则下发目标后立即继续；
+- <code>Set Temperature</code> / <code>Set Field</code> 下发目标后立即继续，配合 <code>Wait</code> 等待温度/磁场稳定和延时；<code>Scan</code> 的 <code>Settle</code> 模式每点等待稳定后再测，<code>Sweep</code> 模式到达目标容差即测；
 - <code>Set Datafile</code> 的三种模式：<code>create</code>（新建/覆盖）、<code>open</code>（向已有文件追加）、<code>open|create</code>（存在则追加、不存在则新建）。</p>
 </blockquote>
 <h2 id="3">3. 点击运行并查看产出文件<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>

@@ -2125,17 +2125,24 @@
 </ul>
 <h3 id="wait">Wait（等待）<a class="headerlink" href="#wait" title="Permanent link">&para;</a></h3>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>T Wait For 10.0 secs
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>T Wait For Temperature
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>T Wait For Field
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>T Wait For Temperature, Field
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>T Wait For Temperature, Field, Delay 60.0 secs
 </span></code></pre></div>
-<p>有效范围 <code>0</code>–<code>31,536,000</code> 秒（1 位小数）。<code>Pause</code> 会冻结计时，<code>Stop</code> / <code>Error</code> 可立即打断。</p>
+<ul>
+<li>可勾选等待主温度（<code>sample_temp</code> 角色）和/或主磁场（<code>field</code> 角色）稳定，并可附加延时 <code>Delay</code>（有效范围 <code>0</code>–<code>31,536,000</code> 秒，1 位小数）；</li>
+<li>同时勾选多项条件时，会等待所有勾选控制器<strong>同时</strong>进入核心 <code>Stable</code> 状态，然后再开始执行 <code>Delay</code> 延时；</li>
+<li><code>Pause</code> 会冻结稳定超时与延时计时，<code>Stop</code> / <code>Error</code> 可立即打断。</li>
+</ul>
 <h3 id="set-temperature-set-field">Set Temperature / Set Field（单点控温 / 控场）<a class="headerlink" href="#set-temperature-set-field" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>T Set Temperature 20.000 K at 5.000 K/min in Settle mode
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>T Set Temperature 300.000 K at 10.000 K/min in Sweep mode
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>T Set Temperature 20.000 K at 5.000 K/min
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>T Set Field 10000.00 Oe at 5000.00 Oe/min
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>T Set Field 1.000000 T at 0.500000 T/min
 </span></code></pre></div>
 <ul>
 <li>温度固定使用角色为 <code>sample_temp</code> 的控制器面板，磁场固定使用角色为 <code>field</code> 的控制器面板；</li>
-<li><code>Settle</code>：发目标后等待核心判定稳定再继续；<code>Sweep</code>：发目标后立即进入下一条指令；</li>
+<li>单点 <code>Set</code> 指令均为非阻塞下发：校验并写入目标与速率后立即进入下一条指令，便于同时启动变温与变场；如需等待稳定，请在后续放置 <code>Wait</code> 指令；</li>
 <li>磁场支持 <code>Oe</code>（2 位小数）或 <code>T</code>（6 位小数），同一条指令内目标与速率须用相同单位。</li>
 </ul>
 <h3 id="scan-temperature">Scan Temperature（线性 / 对数 / 列表扫温）<a class="headerlink" href="#scan-temperature" title="Permanent link">&para;</a></h3>
