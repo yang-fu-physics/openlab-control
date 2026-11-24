@@ -70,7 +70,7 @@ class ContinuousSweepTests(unittest.IsolatedAsyncioTestCase):
         engine._interruptible_sleep = AsyncMock(side_effect=advance)
         await engine._scan_controlled(command, InstrumentKind.TEMPERATURE, ["scan"])
         self.assertEqual(writes, [(10.0, "Settle"), (20.0, "Sweep")])
-        self.assertEqual(order, ["stable", ("measure", 1, 10.0)])
+        self.assertEqual(order, ["stable", ("measure", 1, 10.0), ("measure", 2, 20.0)])
         engine._wait_for_stability.assert_awaited_once()
         engine._wait_for_target.assert_not_awaited()
 
@@ -95,10 +95,15 @@ class ContinuousSweepTests(unittest.IsolatedAsyncioTestCase):
                 engine._execute_commands = AsyncMock(side_effect=group)
                 await engine._scan_controlled(command, kind, ["scan"])
                 self.assertEqual(writes, [(start, "Settle"), (stop, "Sweep")])
-                self.assertEqual([label for label, _ in groups], [f"point {i}/11" for i in range(1, 8)])
-                self.assertEqual([value for _, value in groups],
-                                 [start] + [start + direction * 3.2] * 3 + [start + direction * 6.5] * 3)
-                self.assertEqual(engine._total_steps, 8)
+                self.assertEqual(
+                    [label for label, _ in groups],
+                    [f"point {i}/11" for i in range(1, 8)] + ["point 11/11"],
+                )
+                self.assertEqual(
+                    [value for _, value in groups],
+                    [start] + [start + direction * 3.2] * 3 + [start + direction * 6.5] * 3 + [stop],
+                )
+                self.assertEqual(engine._total_steps, 9)
 
     async def test_endpoint_during_a_group_finishes_whole_group_then_continues_seq(self):
         engine, manager, state, writes, command, panel = self.make_scan()
@@ -154,8 +159,37 @@ class ContinuousSweepTests(unittest.IsolatedAsyncioTestCase):
                 engine._interruptible_sleep = AsyncMock(side_effect=advance)
                 engine._execute_commands = AsyncMock(side_effect=group)
                 await engine._scan_controlled(command, InstrumentKind.TEMPERATURE, [])
-                self.assertEqual(groups, [f"point {i}/{count}" for i in range(1, count)])
+                self.assertEqual(groups, [f"point {i}/{count}" for i in range(1, count + 1)])
                 self.assertEqual(len(writes), 2)
+
+    async def test_two_point_and_full_sweep_measure_final_endpoint(self):
+        for steps, readings in (
+            (2, (15.0, 20.0)),
+            (5, (12.5, 15.0, 17.5, 19.9995)),
+        ):
+            with self.subTest(steps=steps):
+                engine, manager, state, writes, command, panel = self.make_scan(
+                    InstrumentKind.TEMPERATURE, 10.0, 20.0, steps=steps
+                )
+                samples = iter(readings)
+                measured = []
+
+                async def advance(_):
+                    state.current = next(samples)
+
+                async def group(children, path):
+                    measured.append((path[-1].split("=")[0], state.current))
+
+                engine._interruptible_sleep = AsyncMock(side_effect=advance)
+                engine._execute_commands = AsyncMock(side_effect=group)
+                await engine._scan_controlled(command, InstrumentKind.TEMPERATURE, [])
+                self.assertEqual(writes, [(10.0, "Settle"), (20.0, "Sweep")])
+                self.assertEqual(
+                    [label for label, _ in measured],
+                    [f"point {i}/{steps}" for i in range(1, steps + 1)],
+                )
+                self.assertEqual(measured[-1][1], readings[-1])
+                self.assertEqual(engine._total_steps, steps + 1)
 
     async def test_nonmonotonic_sweep_list_rejected_before_any_write(self):
         engine, manager, state, writes, command, panel = self.make_scan()

@@ -194,7 +194,9 @@ class MainWindow(QMainWindow):
             str,
             QTreeWidgetItem,
         ] = {}
-        self._pending_run: tuple[dict[str, dict[str, object]], list[object]] | None = None
+        self._pending_run: (
+            tuple[SequenceDocument, dict[str, dict[str, object]], list[object]] | None
+        ) = None
         # Enable/Disable 是提交到后台 event loop 的 Future。必须保留并收取异常，
         # 否则在后台尚未来得及发布最终 module_state 前失败时，复选框会永久停在
         # Initializing/Disabling，用户也看不到可重试的状态。
@@ -937,26 +939,38 @@ class MainWindow(QMainWindow):
         self.sequence_window.setWindowTitle(document.name)
         # 对已经 Enabled 的模块只替换 Settings 页显示值并标为未 Apply；不会调用
         # runtime.apply_module_settings，更不会自动打开新的仪表 session。
+        # 运行中或正在 Apply 模块准备 Run 时，模块窗口保持锁定，不改写正在运行的模块界面。
+        run_locked = (
+            self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        )
         for module_id, settings in (
             self._sequence_module_settings.items()
         ):
             if module_id not in self.enabled_modules:
                 continue
             window = self.module_windows.get(module_id)
-            if window is not None:
-                try:
-                    window.load_settings(
-                        settings,
-                        mark_unapplied=True,
-                    )
-                except Exception as exc:
-                    # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
-                    # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
-                    self._sequence_module_window_issues.append(
-                        f"Could not load imported settings "
-                        f"into enabled module {module_id!r}: "
-                        f"{exc}"
-                    )
+            if window is None:
+                continue
+            if run_locked:
+                self._sequence_module_window_issues.append(
+                    f"Module {module_id!r} window is locked during an active Run; "
+                    "imported settings were not loaded into the live module window"
+                )
+                continue
+            try:
+                window.load_settings(
+                    settings,
+                    mark_unapplied=True,
+                )
+            except Exception as exc:
+                # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
+                # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
+                self._sequence_module_window_issues.append(
+                    f"Could not load imported settings "
+                    f"into enabled module {module_id!r}: "
+                    f"{exc}"
+                )
         self._dirty = False
         self._sync_datafile_label()
         # Closing an MDI subwindow hides it because WA_DeleteOnClose is false.
@@ -1718,7 +1732,11 @@ class MainWindow(QMainWindow):
                                 module_id, module_settings[module_id]
                             )
                         )
-                self._pending_run = (module_settings, futures)
+                self._pending_run = (
+                    deepcopy(self.document),
+                    module_settings,
+                    futures,
+                )
                 self._set_runtime_editable(False)
                 self.run_button.setEnabled(False)
                 self.run_status_label.setText("Applying Module Settings")
@@ -1727,10 +1745,15 @@ class MainWindow(QMainWindow):
             assert message.clickedButton() is run_button
         self._start_sequence(module_settings)
 
-    def _start_sequence(self, module_settings: dict[str, dict[str, object]]) -> None:
+    def _start_sequence(
+        self,
+        module_settings: dict[str, dict[str, object]],
+        document: SequenceDocument | None = None,
+    ) -> None:
         self._close_after_stop = False
         self.run_directory = None
-        self.runtime.run_sequence(self.document, module_settings)
+        target_document = self.document if document is None else document
+        self.runtime.run_sequence(target_document, module_settings)
         self._set_runtime_editable(False)
         self.current_run_state = RunState.RUNNING
         self.run_status_label.setText("Sequence Running")
@@ -1878,7 +1901,7 @@ class MainWindow(QMainWindow):
     def _check_pending_run(self) -> None:
         if self._pending_run is None:
             return
-        settings, futures = self._pending_run
+        document, settings, futures = self._pending_run
         if not all(future.done() for future in futures):
             return
         self._pending_run = None
@@ -1893,7 +1916,7 @@ class MainWindow(QMainWindow):
             window = self.module_windows.get(module_id)
             if window is not None and window.has_unapplied_edits():
                 window.mark_applied()
-        self._start_sequence(settings)
+        self._start_sequence(settings, document=document)
 
     def _handle_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         self.current_snapshots = snapshots

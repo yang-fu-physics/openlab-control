@@ -51,7 +51,7 @@ configs/
 
 | 键 | 可选值 / 默认值 | 说明 |
 | --- | --- | --- |
-| `stability_timeout` | `info / warning / error` | 判稳超时告警级别 |
+| `stability_timeout` | `warning`（保留兼容字段） | 判稳超时在运行时统一按 Warning 提示并继续等待，不中止 SEQ（仅驱动明确报告 `moving` 时暂停超时计时） |
 | `stale_reading` | `info / warning / error` | 仪表读数过期告警级别 |
 | `popup_warnings` / `popup_errors` | `bool` | 是否弹窗提示（关闭弹窗不改变日志记录与 Error 停机语义） |
 

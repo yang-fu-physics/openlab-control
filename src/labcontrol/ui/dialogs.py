@@ -88,6 +88,7 @@ class CommandDialog(QDialog):
         )
         self._syncing_step = False
         self._step_edited = False
+        self._bounds_edited = False
         self.step_input: QLineEdit | None = None
         self.inputs: dict[str, QWidget] = {}
         self.limit_label: QLabel | None = None
@@ -364,7 +365,11 @@ class CommandDialog(QDialog):
         stop_widget = self.inputs.get("stop")
         steps_widget = self.inputs.get("steps")
         for widget in (start_widget, stop_widget):
-            if isinstance(widget, (QDoubleSpinBox, QLineEdit)):
+            if isinstance(widget, QDoubleSpinBox):
+                widget.valueChanged.connect(self._on_bounds_changed)
+                widget.editingFinished.connect(self._refresh_points_from_step)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self._on_bounds_changed)
                 widget.editingFinished.connect(self._refresh_points_from_step)
         if isinstance(steps_widget, QSpinBox):
             steps_widget.valueChanged.connect(self._refresh_step_from_points)
@@ -372,11 +377,16 @@ class CommandDialog(QDialog):
             self.step_input.textChanged.connect(self._on_step_text_changed)
             self.step_input.editingFinished.connect(self._on_step_editing_finished)
 
+    def _on_bounds_changed(self, *_args: object) -> None:
+        if not self._syncing_step:
+            self._bounds_edited = True
+
     def _refresh_points_from_step(self) -> None:
         """上下限提交后优先沿用步长，取最近整数点数并显示实际步长。"""
 
         if self._syncing_step or self.step_input is None:
             return
+        self._bounds_edited = False
         if not self.step_input.text().strip() and not self._step_edited:
             self._refresh_step_from_points()
         else:
@@ -453,6 +463,7 @@ class CommandDialog(QDialog):
             self.step_input.setText(text)
             self.step_input.setToolTip("")
             self._step_edited = False
+            self._bounds_edited = False
         finally:
             self._syncing_step = False
 
@@ -554,6 +565,8 @@ class CommandDialog(QDialog):
     def accept(self) -> None:
         """关闭前同步步长并验证列表语法、Log 约束及仪表/模块范围。"""
 
+        if self._has_step_sync and self._bounds_edited and not self._step_edited:
+            self._refresh_points_from_step()
         if self._has_step_sync and self._step_edited:
             step_error = self._apply_step_input()
             if step_error is not None:

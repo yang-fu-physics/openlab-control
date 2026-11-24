@@ -22,16 +22,21 @@ OpenLab Control 把实验室里的硬件按“职责”分成两类，目录和�
 
 ## 核心功能一览
 
-- **MultiVu 风格序列编辑（SEQ）**：可视化拖拽/双击插入指令，支持任意层级的温度扫描、磁场扫描、时间扫描与模块自定义扫描嵌套，支持 `Pause`、`Stop`、`Call Sequence`、`Set Datafile`、`Remark` 和无参数 `Measure`。
-- **多模块协同与隔离运行**：每个系统仪表和每个启用的测量模块都在独立子进程中运行；同一 `Measure` 下不同模块可并行测量，多通道模块自动按槽位对齐写出每通道一行的数据。
-- **实时看数与对比画图**：主窗口左侧卡片实时展示最近通道结果；**Data Browser** 可同时打开多个独立窗口对比不同 `.dat` 文件，新数据写入时自动刷新；**Live Trend** 复用已有轮询缓存，不增加额外仪表通讯。
+- **MultiVu 风格序列编辑（SEQ）**：
+  - 可视化拖拽/双击插入指令，默认插在选中行之前（选中 `End Scan` 时追加到扫描内部）；支持任意层级的温度扫描、磁场扫描、时间扫描与模块自定义扫描嵌套，以及 `Pause`、`Stop`、`Call Sequence`、`Set Datafile`、`Remark` 和无参数 `Measure`。
+  - `Set Temperature` / `Set Field` 下发目标后立即继续，配合多条件 `Wait`（支持同时等待温度、磁场稳定与延时）编排流程；`Scan` 支持逐点判稳的 `Settle` 与连续 `Sweep`（先在起点判稳并采集，再一次设终点连续扫过、按阈值顺序触发并在到达实际终点时执行末次测量），修改 Scan 上下限时优先沿用步长（`Increase`）。
+  - 支持**运行中编辑与保存 SEQ**（当前 Run 隔离执行启动时的主序列及 `Call Sequence` 子序列快照，编辑结果在下一次 Run 生效）；启动时自动恢复上次保存的 SEQ 及其 DAT 路径。
+- **多模块协同、多实例与按需仪表设置**：每个系统仪表和每个启用的测量模块都在独立子进程中运行；同一 `Measure` 下不同模块可并行测量，多通道模块自动按槽位对齐写出每通道一行的数据，支持同一模块创建多个实例；支持 **Instrument Setup** 按需配置窗口（如传感器校准曲线与软件 PID 表切换，不占用额外底部面板，也不在后台轮询）。
+- **实时看数、独立画图与缓存系统日志**：
+  - 主窗口左侧卡片实时展示最近通道结果；**Data Browser** 为独立顶层窗口，可跨屏移动与缩窄（工具栏自动收纳），支持多窗口对比不同 `.dat` 文件并在新数据写入时自动刷新。
+  - **Live Trend** 与手动 **System Log** 均直接复用已有轮询缓存，不额外查询仪表或改变轮询频率；**System Log** 支持按系统仪表实例分页勾选记录项、正整数秒间隔（默认 30 s）、自选 `.log` 路径并同名续写，空闲、手动调温与 SEQ 运行/暂停期间均可独立记录。
 - **完整可追溯的运行记录**：每次 Run 自动在 `runs/` 下生成独立目录，保存实验 `.dat`、原始采样 `rawdata/`、连续仪表状态 `instrument_status.dat`、事件日志 `events.dat` 以及当次 SEQ、配置与模块参数快照。
 - **清晰的安全边界**：
   - 全新安装默认不启用任何面板或仿真，所有测量模块默认 `Disabled`；加载历史 SEQ 只把参数填回界面，不会自动下发到仪表（须手动点击 **Apply Settings** 确认）。
-  - 温度/磁场的上下限与最大速率在配置、界面弹窗和运行时统一生效。
-  - **Warning** 记录并继续实验，**Error** 立即中止 SEQ；SEQ 结束、Stop 或报错默认不会擅自改写温控/磁体设定值，测量模块则在 `run_end` 中按约定收尾输出。
+  - 温度/磁场的上下限与最大速率在配置、界面弹窗和运行时统一生效；手动 Set 弹窗确认成功后自动关闭，失败或未确认时保持打开。
+  - **Warning** 记录并继续实验（判稳超时作为 Warning 提示后继续等待，仅驱动明确报告 `moving` 时暂停超时计时），**Error** 立即中止 SEQ；SEQ 结束、Stop 或报错默认不会擅自改写温控/磁体设定值，测量模块则在 `run_end` 中按约定收尾输出。
   - 可选异步 HTTP 报警通知（Warning 通知测试员，Error 同时通知管理员和测试员）。
-- **高分屏友好**：在 **View → Appearance** 中可分别调整整体缩放与文字大小，并自由选择窗口启动策略。
+- **高分屏与统一浅色界面**：界面固定使用高对比度浅色主题，不随 Windows 深色模式或系统配色变化；在 **View → Appearance** 中可分别调整整体缩放与文字大小，并自由选择窗口启动策略。
 
 ## 快速开始
 
@@ -76,7 +81,7 @@ OpenLab Control 把实验室里的硬件按“职责”分成两类，目录和�
 3. 按向导完成三页配置：
    - **VISA Resources**：扫描 GPIB/USB 地址，未分配给系统仪表的地址自动留给测量模块（写入 `configs/visa.resources.toml`）。
    - **各系统仪表页**：添加物理实例，选择地址（或网络仪表的 Host/Port）、确认面板角色（`sample_temp` / `field` 全局各最多一个，其余为 `none`）及现场安全上下限。
-   - **Review & Save**：按需勾选内置仿真、调整底部面板全局顺序，检查写入预览后保存。
+   - **Review & Save**：按需勾选内置仿真、调整底部面板全局顺序，检查写入预览后保存（保存成功后扫描器自动关闭；若包含待填写的空 PID 模板会先提示）。
 4. 重启 OpenLab Control，在底部面板和 Run Log 中确认连接状态与读数。
 
 > 首次配置带 PID 文件的温控仪时，扫描器会把示例模板复制到 `configs/pid/<实例ID>.toml`；此后重新保存不会覆盖或删除已有的 PID 文件。若模板中 `zones` 为空，须先填入现场验证过的参数再启动。
@@ -124,13 +129,15 @@ tools/                       扫描器与打包辅助脚本（发布包中不保
 ## 文档导航
 
 - [在线中文文档](https://yang-fu-physics.github.io/openlab-control/)
-- [操作手册](docs/OPERATIONS.md) · [仪表扫描与配置](docs/guides/instrument-scanner.md) · [Data Browser](docs/guides/data-browser.md)
+- [操作手册](docs/OPERATIONS.md) · [仪表扫描与配置](docs/guides/instrument-scanner.md) · [Data Browser](docs/guides/data-browser.md) · [系统仪表 Log](docs/guides/system-log.md)
 - [Measurement Module 开发教程](docs/development/index.md) · [System Instrument 开发教程](docs/development/system-instrument.md)
 - [配置参考](docs/CONFIGURATION.md) · [SEQ 格式](docs/SEQUENCE_FORMAT.md) · [DAT 与事件格式](docs/DAT_FORMAT.md)
 - [系统架构](docs/ARCHITECTURE.md) · [完整开发规范](docs/DEVELOPMENT_REFERENCE.md)
 
 ## 实机验证状态与安全提示
 
-- **已实机验证（2026-11-05，现场确认）**：Lake Shore 340 温控、ZLAN 压缩机控制以及 Keithley 6221 + 2182A Delta 测量已完成现场实机测试（仅覆盖已测试的接线与配置）。
-- **其他型号与模式**：目前仅完成仿真和协议测试，接入真机前请务必对照 [真实仪表安全清单](docs/guides/safety-checklist.md) 从只读检查与低风险负载开始逐步验证，完成验证前请勿无人值守运行。
+- **已实机验证（仅覆盖已测接线与配置）**：
+  - `2026-11-05`：Lake Shore 340 温控、ZLAN 压缩机控制以及 Keithley 6221 + 2182A Delta 测量；
+  - `2026-11-22`：Cryo-con 22C 温控仪现场读写与升温响应（24C 尚未实机验证）。
+- **其他型号与新增模式**：目前仅完成仿真、协议或离线测试，接入真机前请务必对照 [真实仪表安全清单](docs/guides/safety-checklist.md) 从只读检查与低风险负载开始逐步验证，完成验证前请勿无人值守运行。
 - **硬件保护优先**：软件限值与进程隔离永远不能替代仪表本机的限流/限压/限温保护、硬件联锁和人工急停。

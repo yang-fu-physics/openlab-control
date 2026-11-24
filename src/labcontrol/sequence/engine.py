@@ -762,11 +762,19 @@ class SequenceEngine:
             self._set_current_command(command.id)
             self._current_path = " / ".join(point_path)
             self._publish(f"{scan_label} ({point_label})")
+            sweep_end_reached = False
             if sweep and point_index > 1:
-                if not await self._wait_for_sweep_point(
+                sweep_end_reached = await self._wait_for_sweep_point(
                     instrument_id, panel, point, points[-1], direction
-                ):
-                    break
+                )
+                if sweep_end_reached and point_index < steps:
+                    point_label = (
+                        f"point {steps}/{steps}="
+                        f"{fixed_number(points[-1], decimals)} {instrument_unit}"
+                    )
+                    point_path = path + [point_label]
+                    self._current_path = " / ".join(point_path)
+                    self._publish(f"{scan_label} ({point_label})")
             else:
                 applied = await self.instruments.set_target(
                     instrument_id,
@@ -782,12 +790,20 @@ class SequenceEngine:
                 await self._wait_for_stability(instrument_id, panel)
             await self._execute_commands(command.children, point_path)
             executed_points += 1
-            if sweep and point_index == 1:
-                if points[0] == points[-1]:
+            if sweep:
+                if sweep_end_reached:
                     break
-                if not await self.instruments.set_target(
-                    instrument_id, points[-1], rate, mode, control=panel.control_id
+                if point_index == 1:
+                    if points[0] == points[-1]:
+                        break
+                    if not await self.instruments.set_target(
+                        instrument_id, points[-1], rate, mode, control=panel.control_id
+                    ):
+                        break
+                elif point_index < steps and self._at_sweep_end(
+                    instrument_id, panel, points[-1], direction
                 ):
+                    self._report_sweep_end(instrument_id, panel)
                     break
         if sweep:
             base_directory = self._call_stack[-1].parent if self._call_stack else self.config.project_root
@@ -1135,6 +1151,42 @@ class SequenceEngine:
                 self.config.control_poll_interval_seconds
             )
 
+    def _at_sweep_end(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+        final: float,
+        direction: int,
+    ) -> bool:
+        tolerance = panel.stability.tolerance if panel.stability else 0.0
+        snapshot = self.instruments.latest.get(instrument_id)
+        state = None if snapshot is None else snapshot.controls.get(panel.id)
+        return (
+            state is not None
+            and state.current is not None
+            and direction * (state.current - final) >= -tolerance
+        )
+
+    def _report_sweep_end(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+    ) -> None:
+        snapshot = self.instruments.latest.get(instrument_id)
+        state = None if snapshot is None else snapshot.controls.get(panel.id)
+        current_text = (
+            f"{state.current:g}"
+            if state is not None and state.current is not None
+            else "endpoint"
+        )
+        self.events.report(
+            Severity.INFO,
+            "sequence",
+            "SWEEP_END_REACHED",
+            f"{panel.display_name} reached sweep end at {current_text}",
+            self._current_path,
+        )
+
     async def _wait_for_sweep_point(
         self,
         instrument_id: str,
@@ -1143,26 +1195,22 @@ class SequenceEngine:
         final: float,
         direction: int,
     ) -> bool:
-        """按方向判断阈值；到达实际终点即结束，不在终点补做剩余轮次。"""
+        """按方向等待阈值或终点；返回 True 表示已达实际终点（执行末次采集后结束）。"""
 
         tolerance = panel.stability.tolerance if panel.stability else 0.0
         started = self._active_time()
         warned = False
         while True:
             await self._checkpoint()
-            state = self.instruments.latest[instrument_id].controls[panel.id]
-            if direction * (state.current - final) >= -tolerance:
-                self.events.report(
-                    Severity.INFO,
-                    "sequence",
-                    "SWEEP_END_REACHED",
-                    f"{panel.display_name} reached sweep end at {state.current:g}",
-                    self._current_path,
-                )
-                return False
-            if direction * (state.current - point) >= 0:
-                return True
-            if state.activity is InstrumentActivity.MOVING:
+            snapshot = self.instruments.latest.get(instrument_id)
+            state = None if snapshot is None else snapshot.controls.get(panel.id)
+            if state is not None and state.current is not None:
+                if direction * (state.current - final) >= -tolerance:
+                    self._report_sweep_end(instrument_id, panel)
+                    return True
+                if direction * (state.current - point) >= 0:
+                    return False
+            if state is not None and state.activity is InstrumentActivity.MOVING:
                 started = self._active_time()
             elif not warned and self._control_wait_timed_out(
                 instrument_id, panel, started, "reach its sweep threshold"

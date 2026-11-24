@@ -113,3 +113,16 @@ class ScanStepPriorityTests(unittest.TestCase):
             self.assertEqual(dialog.values()["point_mode"], "List")
         finally:
             dialog.close()
+
+    def test_accept_syncs_points_from_step_when_bounds_edited_without_blur(self):
+        spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
+        command = spec.create()
+        command.params.update(start=10.0, stop=20.0, steps=11)
+        dialog = CommandDialog(command, spec, instrument_configs=load_simulated_config().instrument_instances)
+        try:
+            dialog.inputs["stop"].setValue(30.0)
+            dialog.accept()
+            self.assertEqual(dialog.inputs["steps"].value(), 21)
+            self.assertEqual(dialog.values()["steps"], 21)
+        finally:
+            dialog.close()

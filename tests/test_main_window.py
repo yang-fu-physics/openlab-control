@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from concurrent.futures import Future
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -186,6 +187,59 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertIn("next Run", window.editor.toolTip())
             window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
             self.assertTrue(window.modules_action.isEnabled())
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.close()
+
+    def test_loading_sequence_during_run_does_not_overwrite_locked_module_window(self):
+        from labcontrol.sequence.module_settings import SequenceModuleSettings
+        window = MainWindow(self.config)
+        try:
+            fake_module_window = type(
+                "FakeModuleWindow",
+                (),
+                {
+                    "load_settings": lambda self, *a, **kw: self.calls.append((a, kw)),
+                    "set_sequence_running": lambda self, running: None,
+                    "allow_application_close": lambda self: None,
+                    "close": lambda self: True,
+                },
+            )()
+            fake_module_window.calls = []
+            window.enabled_modules.add("demo_mod")
+            window.module_windows["demo_mod"] = fake_module_window
+            window.current_run_state = RunState.RUNNING
+            imported = SequenceModuleSettings({"demo_mod": {"gain": 5}}, {"demo_mod": "1.0"})
+            window._set_document(
+                SequenceDocument([Command(CommandType.REMARK, {"text": "next"})]),
+                imported,
+            )
+            self.assertEqual(fake_module_window.calls, [])
+            self.assertTrue(window._sequence_module_window_issues)
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.module_windows.pop("demo_mod", None)
+            window.enabled_modules.discard("demo_mod")
+            window.close()
+
+    def test_pending_run_snapshots_validated_document_before_module_apply_finishes(self):
+        window = MainWindow(self.config)
+        try:
+            original = SequenceDocument([Command(CommandType.REMARK, {"text": "validated"})])
+            window._set_document(original)
+            future = Future()
+            window._pending_run = (deepcopy(original), {"demo": {"v": 1}}, [future])
+            window.document.commands[0].update_params({"text": "edited while applying"})
+            future.set_result(None)
+            started = []
+            with patch.object(
+                window.runtime,
+                "run_sequence",
+                side_effect=lambda doc, settings: started.append((doc, settings)),
+            ):
+                window._check_pending_run()
+            self.assertEqual(len(started), 1)
+            self.assertEqual(started[0][0].commands[0].params["text"], "validated")
         finally:
             window.current_run_state = RunState.IDLE
             window.close()
