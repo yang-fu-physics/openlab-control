@@ -204,6 +204,15 @@ class CommandDialog(QDialog):
             self.limit_label.setStyleSheet("color: #59636e;")
             layout.addWidget(self.limit_label)
             self._apply_instrument_limits()
+        elif command.type is CommandType.WAIT:
+            hint = QLabel(
+                "Waits until all checked conditions are simultaneously stable, "
+                "then waits Delay (s)."
+            )
+            hint.setObjectName("mutedLabel")
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color: #59636e;")
+            layout.addWidget(hint)
         elif isinstance(spec, ModuleCommandSpec) and spec.point_limits is not None:
             self._module_bounds = resolve_module_point_bounds(spec, self._module_settings)
             if self._module_bounds[2]:

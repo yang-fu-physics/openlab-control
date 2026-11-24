@@ -726,6 +726,30 @@ class InstrumentPanelTests(unittest.TestCase):
         command_dialog.close()
         scan_dialog.close()
 
+    def test_wait_and_set_command_dialogs_expose_updated_fields(self) -> None:
+        for kind in (CommandType.SET_TEMPERATURE, CommandType.SET_FIELD):
+            spec = SPECS_BY_TYPE[kind]
+            dialog = CommandDialog(spec.create(), spec)
+            self.assertNotIn("mode", dialog.inputs)
+            dialog.close()
+
+        wait_spec = SPECS_BY_TYPE[CommandType.WAIT]
+        wait_cmd = wait_spec.create()
+        wait_dialog = CommandDialog(wait_cmd, wait_spec)
+        self.assertIsInstance(wait_dialog.inputs["wait_temperature"], QCheckBox)
+        self.assertIsInstance(wait_dialog.inputs["wait_field"], QCheckBox)
+        self.assertFalse(wait_dialog.inputs["wait_temperature"].isChecked())
+        self.assertFalse(wait_dialog.inputs["wait_field"].isChecked())
+        wait_dialog.inputs["wait_temperature"].setChecked(True)
+        wait_dialog.inputs["wait_field"].setChecked(True)
+        wait_dialog.inputs["seconds"].setValue(30.0)
+        wait_cmd.update_params(wait_dialog.values())
+        self.assertEqual(
+            wait_cmd.params,
+            {"wait_temperature": True, "wait_field": True, "seconds": 30.0},
+        )
+        wait_dialog.close()
+
     def test_temperature_scan_dialog_switches_between_linear_and_list_points(self) -> None:
         spec = SPECS_BY_TYPE[CommandType.SCAN_TEMPERATURE]
         dialog = CommandDialog(spec.create(), spec)

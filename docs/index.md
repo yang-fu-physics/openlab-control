@@ -20,7 +20,8 @@ hide:
   </div>
   <div class="olc-terminal" aria-label="最小 SEQ 与模块示意">
     <pre><code><span class="olc-keyword"># 1. 用树状 SEQ 编排变温、扫场与测量</span>
-T Set Temperature 10 K at 5 K/min in Settle mode
+T Set Temperature 10 K at 5 K/min
+T Wait For Temperature
 T Scan Field -1 T to 1 T in 21 steps at 0.5 T/min, Settle
 T     Measure
 T End Scan
