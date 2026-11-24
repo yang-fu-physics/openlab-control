@@ -21,7 +21,8 @@
 2. 选中 `End Sequence`，在右侧 **Sequence Command Bar** 中依次双击以下指令并填好参数：
    - **Remark**：填写备注 `First simulated run`
    - **Set Datafile**：Mode 选 `create`，Location 选 `Run folder`，文件名填 `experiment.dat`
-   - **Set Temperature**：`300 K`，速率 `10 K/min`，模式 `Settle`
+   - **Set Temperature**：`300 K`，速率 `10 K/min`
+   - **Wait**：勾选 `Wait for Temperature`，`Delay (s)` 设为 `0.0`
    - **Scan Field**：从 `0 Oe` 到 `200 Oe`，共 `3` 个点，速率 `5000 Oe/min`，模式 `Settle`
 3. 选中刚插入的 **Scan Field**（或它的 **End Scan**），双击右侧的 **Measure**，它会自动缩进放进 `Scan Field` 内部。
 4. 点击 **File → Save As**，保存为 `first-run.seq`。
@@ -31,7 +32,8 @@
 ```text
 T Remark First simulated run
 T Set Datafile create experiment.dat
-T Set Temperature 300 K at 10 K/min in Settle mode
+T Set Temperature 300 K at 10 K/min
+T Wait For Temperature
 T Scan Field 0 Oe to 200 Oe in 3 steps at 5000 Oe/min, Settle
 T     Measure
 T End Scan
@@ -40,7 +42,7 @@ T End Sequence
 
 > **几个小符号的含义**：
 > - 行首的 `T` 表示启用该行，改为 `F`（右键 Disable）则跳过执行；
-> - `Settle` 表示等温度/磁场稳定后再走下一步；`Sweep` 则下发目标后立即继续；
+> - `Set Temperature` / `Set Field` 下发目标后立即继续，配合 `Wait` 等待温度/磁场稳定和延时；`Scan` 的 `Settle` 模式每点等待稳定后再测，`Sweep` 模式到达目标容差即测；
 > - `Set Datafile` 的三种模式：`create`（新建/覆盖）、`open`（向已有文件追加）、`open|create`（存在则追加、不存在则新建）。
 
 ## 3. 点击运行并查看产出文件

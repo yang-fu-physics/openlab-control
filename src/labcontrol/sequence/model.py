@@ -333,15 +333,15 @@ COMMAND_SPECS: tuple[CommandSpec, ...] = (
         FieldSpec("target", "Target", "float", 0.0),
         FieldSpec("unit", "Unit", "choice", "Oe", choices=("Oe", "T")),
         FieldSpec("rate", "Rate per minute", "float", 5000.0, 0.000001),
-        FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.SET_TEMPERATURE, "Set Temperature", "System Commands", (
         FieldSpec("target", "Target (K)", "float", 300.0),
         FieldSpec("rate", "Rate (K/min)", "float", 5.0, 0.000001),
-        FieldSpec("mode", "Mode", "choice", "Settle", choices=("Settle", "Sweep")),
     )),
     CommandSpec(CommandType.WAIT, "Wait", "System Commands", (
-        FieldSpec("seconds", "Wait time (s)", "float", 10.0, 0.0, 31536000.0, decimals=1),
+        FieldSpec("wait_temperature", "Wait for Temperature", "bool", False),
+        FieldSpec("wait_field", "Wait for Field", "bool", False),
+        FieldSpec("seconds", "Delay (s)", "float", 10.0, 0.0, 31536000.0, decimals=1),
     )),
     CommandSpec(CommandType.INJECT_WARNING, "Inject Warning", "Advanced Commands (Simulation)", (
         FieldSpec("code", "Code", "text", "SIM_WARNING"),

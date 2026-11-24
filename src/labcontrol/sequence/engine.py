@@ -526,23 +526,14 @@ class SequenceEngine:
             )
             return
         if command.type is CommandType.WAIT:
-            await self._interruptible_sleep(float(p.get("seconds", 0.0)))
+            await self._execute_wait(command)
             return
         if command.type is CommandType.SET_TEMPERATURE:
-            panel = self.instruments.resolve_control_panel(
-                InstrumentKind.TEMPERATURE
-            )
-            instrument_id = panel.instrument_id
-            applied = await self.instruments.set_target_by_kind(
+            await self.instruments.set_target_by_kind(
                 InstrumentKind.TEMPERATURE,
                 float(p.get("target", 300.0)),
                 float(p.get("rate", 5.0)),
-                str(p.get("mode", "Settle")),
             )
-            if not applied:
-                return
-            if "settle" in str(p.get("mode", "Settle")).lower():
-                await self._wait_for_stability(instrument_id, panel)
             return
         if command.type is CommandType.SET_FIELD:
             panel = self.instruments.resolve_control_panel(
@@ -553,17 +544,12 @@ class SequenceEngine:
             instrument_unit = instrument.reading(panel.reading).unit
             source_unit = str(p.get("unit", instrument_unit))
             target = convert_value(float(p.get("target", 0.0)), source_unit, instrument_unit)
-            rate = convert_value(float(p.get("rate", 0.5)), source_unit, instrument_unit)
-            applied = await self.instruments.set_target_by_kind(
+            rate = convert_value(float(p.get("rate", 5000.0)), source_unit, instrument_unit)
+            await self.instruments.set_target_by_kind(
                 InstrumentKind.FIELD,
                 target,
                 rate,
-                str(p.get("mode", "Settle")),
             )
-            if not applied:
-                return
-            if "settle" in str(p.get("mode", "Settle")).lower():
-                await self._wait_for_stability(instrument_id, panel)
             return
         if command.type is CommandType.SCAN_TEMPERATURE:
             await self._scan_controlled(command, InstrumentKind.TEMPERATURE, path)
@@ -1034,36 +1020,96 @@ class SequenceEngine:
                 return invalid_child
         return None
 
+    async def _execute_wait(self, command: Command) -> None:
+        """先等待全部勾选控制面板同时稳定，再执行附加延时。"""
+
+        p = command.params
+        targets: list[tuple[str, InstrumentPanelConfig]] = []
+        if p.get("wait_temperature", False) is True:
+            panel = self.instruments.resolve_control_panel(
+                InstrumentKind.TEMPERATURE
+            )
+            targets.append((panel.instrument_id, panel))
+        if p.get("wait_field", False) is True:
+            panel = self.instruments.resolve_control_panel(
+                InstrumentKind.FIELD
+            )
+            targets.append((panel.instrument_id, panel))
+        if targets:
+            await self._wait_for_all_stability(tuple(targets))
+        delay_seconds = float(p.get("seconds", 0.0))
+        if targets and delay_seconds > 0.0:
+            self._publish(
+                f"{format_command(command)} (Delay {fixed_number(delay_seconds, 1)} secs)"
+            )
+        if delay_seconds > 0.0 or not targets:
+            await self._interruptible_sleep(delay_seconds)
+
     async def _wait_for_stability(
         self,
         instrument_id: str,
         panel: InstrumentPanelConfig,
     ) -> None:
-        started = self._active_time()
+        await self._wait_for_all_stability(((instrument_id, panel),))
+
+    async def _wait_for_all_stability(
+        self,
+        targets: tuple[tuple[str, InstrumentPanelConfig], ...],
+    ) -> None:
+        """等待所有指定控制面板在同一时刻均处于 STABLE 状态。
+
+        每个未稳定的面板按各自的 ``stability.timeout_seconds`` 独立计时；某个面板稳定后
+        若在等待其他面板期间被扰动脱离稳定，会重新开始计入等待，直到所有面板同时稳定
+        （或在非致命超时策略下各未稳定面板均已超时）。
+        """
+
+        if not targets:
+            return
+        unstable_since: dict[str, float | None] = {
+            panel.key: None for _, panel in targets
+        }
+        timed_out_keys: set[str] = set()
         while True:
             await self._checkpoint()
-            snapshot = self.instruments.latest.get(instrument_id)
-            if snapshot is not None:
-                control_state = snapshot.controls.get(panel.id)
+            now = self._active_time()
+            all_satisfied = True
+            for instrument_id, panel in targets:
+                snapshot = self.instruments.latest.get(instrument_id)
+                control_state = (
+                    None
+                    if snapshot is None
+                    else snapshot.controls.get(panel.id)
+                )
                 if (
                     control_state is not None
                     and control_state.stability is StabilityState.STABLE
                 ):
-                    return
+                    unstable_since[panel.key] = None
+                    continue
+                if panel.key in timed_out_keys:
+                    continue
                 if (
                     control_state is not None
-                    and control_state.stability
-                    is StabilityState.TIMED_OUT
+                    and control_state.stability is StabilityState.TIMED_OUT
                 ):
                     self._check_control()
                     if self.config.alarms.stability_timeout is not Severity.ERROR:
-                        return
-            if self._control_wait_timed_out(
-                instrument_id,
-                panel,
-                started,
-                "stabilize",
-            ):
+                        timed_out_keys.add(panel.key)
+                        continue
+                started = unstable_since[panel.key]
+                if started is None:
+                    started = now
+                    unstable_since[panel.key] = started
+                if self._control_wait_timed_out(
+                    instrument_id,
+                    panel,
+                    started,
+                    "stabilize",
+                ):
+                    timed_out_keys.add(panel.key)
+                    continue
+                all_satisfied = False
+            if all_satisfied:
                 return
             await self._interruptible_sleep(
                 self.config.control_poll_interval_seconds

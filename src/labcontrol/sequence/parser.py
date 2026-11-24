@@ -54,13 +54,12 @@ class ParseResult:
 
 _SET_TEMPERATURE = re.compile(
     rf"^Set\s+Temperature\s+(?P<target>{NUMBER})\s*K\s+at\s+"
-    rf"(?P<rate>{NUMBER})\s*K/min\s+in\s+(?P<mode>Settle|Sweep)\s+mode$",
+    rf"(?P<rate>{NUMBER})\s*K/min$",
     re.IGNORECASE,
 )
 _SET_FIELD = re.compile(
     rf"^Set\s+Field\s+(?P<target>{NUMBER})\s*(?P<unit>T|Oe)\s+at\s+"
-    rf"(?P<rate>{NUMBER})\s*(?P<rate_unit>T|Oe)/min\s+in\s+"
-    rf"(?P<mode>Settle|Sweep)\s+mode$",
+    rf"(?P<rate>{NUMBER})\s*(?P<rate_unit>T|Oe)/min$",
     re.IGNORECASE,
 )
 _SCAN_TEMPERATURE = re.compile(
@@ -92,12 +91,24 @@ _SCAN_TIME = re.compile(
     r"(?P<steps>\d+)\s+steps$",
     re.IGNORECASE,
 )
-_WAIT = re.compile(
-    rf"^Wait(?:\s+For)?\s+(?P<seconds>{NUMBER})\s*(?:secs?|seconds?)$",
+_WAIT_PREFIX = re.compile(
+    r"^Wait(?:\s+For)?(?=$|\s)(?P<payload>.*)$",
+    re.IGNORECASE,
+)
+_WAIT_DELAY_CLAUSE = re.compile(
+    rf"^(?:Delay\s+)?(?P<seconds>{NUMBER})\s*(?:secs?|seconds?)$",
     re.IGNORECASE,
 )
 _REMOVED_INSTRUMENT_SUFFIX = re.compile(
     r"\s+using\s+instrument\b",
+    re.IGNORECASE,
+)
+_SET_COMMAND_PREFIX = re.compile(
+    r"^Set\s+(?:Temperature|Field)\b",
+    re.IGNORECASE,
+)
+_REMOVED_SET_MODE_SUFFIX = re.compile(
+    r"\bin\s+\S+\s+mode\b",
     re.IGNORECASE,
 )
 _INSTRUMENT_COMMAND_PREFIX = re.compile(
@@ -203,6 +214,115 @@ def _parse_module_command(
     ), None
 
 
+def _parse_wait_command(
+    text: str,
+    line_number: int,
+) -> tuple[Command, SequenceIssue | None] | None:
+    """解析 Wait 命令：支持 Temperature、Field 稳定等待以及 Delay 延时组合。"""
+
+    prefix = _WAIT_PREFIX.match(text)
+    if prefix is None:
+        return None
+    payload = prefix.group("payload").strip()
+    if not payload:
+        return Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        ), SequenceIssue(
+            line_number,
+            "error",
+            "Invalid Wait command; specify Temperature, Field, and/or a delay in secs",
+            text,
+        )
+    wait_temperature = False
+    wait_field = False
+    seconds: float | None = None
+    for raw_clause in payload.split(","):
+        clause = raw_clause.strip()
+        if not clause:
+            return Command(
+                CommandType.UNKNOWN,
+                {"text": text},
+                raw_text=text,
+                source_line=line_number,
+            ), SequenceIssue(
+                line_number,
+                "error",
+                "Invalid Wait command; empty wait condition",
+                text,
+            )
+        lowered_clause = clause.casefold()
+        if lowered_clause == "temperature":
+            if wait_temperature:
+                return Command(
+                    CommandType.UNKNOWN,
+                    {"text": text},
+                    raw_text=text,
+                    source_line=line_number,
+                ), SequenceIssue(
+                    line_number,
+                    "error",
+                    "Duplicate Wait condition: Temperature",
+                    text,
+                )
+            wait_temperature = True
+            continue
+        if lowered_clause == "field":
+            if wait_field:
+                return Command(
+                    CommandType.UNKNOWN,
+                    {"text": text},
+                    raw_text=text,
+                    source_line=line_number,
+                ), SequenceIssue(
+                    line_number,
+                    "error",
+                    "Duplicate Wait condition: Field",
+                    text,
+                )
+            wait_field = True
+            continue
+        delay_match = _WAIT_DELAY_CLAUSE.match(clause)
+        if delay_match:
+            if seconds is not None:
+                return Command(
+                    CommandType.UNKNOWN,
+                    {"text": text},
+                    raw_text=text,
+                    source_line=line_number,
+                ), SequenceIssue(
+                    line_number,
+                    "error",
+                    "Duplicate Wait delay",
+                    text,
+                )
+            seconds = float(delay_match.group("seconds"))
+            continue
+        return Command(
+            CommandType.UNKNOWN,
+            {"text": text},
+            raw_text=text,
+            source_line=line_number,
+        ), SequenceIssue(
+            line_number,
+            "error",
+            f"Invalid Wait condition '{clause}'; expected Temperature, Field, or Delay <seconds> secs",
+            text,
+        )
+    return Command(
+        CommandType.WAIT,
+        {
+            "wait_temperature": wait_temperature,
+            "wait_field": wait_field,
+            "seconds": 0.0 if seconds is None else seconds,
+        },
+        raw_text=text,
+        source_line=line_number,
+    ), None
+
+
 def _temperature_point_items(value: object) -> list[object]:
     """拆分温度点，并兼容旧式裸列表和新的方括号列表。"""
 
@@ -292,7 +412,6 @@ def _parse_base_command(
             {
                 "target": float(match.group("target")),
                 "rate": float(match.group("rate")),
-                "mode": match.group("mode").title(),
             },
             raw_text=text,
             source_line=line_number,
@@ -311,7 +430,6 @@ def _parse_base_command(
                 "target": float(match.group("target")),
                 "unit": unit,
                 "rate": float(match.group("rate")),
-                "mode": match.group("mode").title(),
             },
             raw_text=text,
             source_line=line_number,
@@ -429,14 +547,9 @@ def _parse_base_command(
             source_line=line_number,
         ), None
 
-    match = _WAIT.match(text)
-    if match:
-        return Command(
-            CommandType.WAIT,
-            {"seconds": float(match.group("seconds"))},
-            raw_text=text,
-            source_line=line_number,
-        ), None
+    wait_result = _parse_wait_command(text, line_number)
+    if wait_result is not None:
+        return wait_result
 
     if lowered.startswith("set datafile "):
         payload = text[len("Set Datafile "):].strip()
@@ -582,6 +695,18 @@ def _parse_command(
     command.raw_text = original
     if (
         command.type is CommandType.UNKNOWN
+        and _SET_COMMAND_PREFIX.match(original)
+        and _REMOVED_SET_MODE_SUFFIX.search(original)
+        and (issue is None or issue.level != "error")
+    ):
+        issue = SequenceIssue(
+            line_number,
+            "error",
+            "Set Temperature and Set Field no longer accept a mode; remove 'in ... mode' and add a Wait command to wait for stability",
+            original,
+        )
+    elif (
+        command.type is CommandType.UNKNOWN
         and _INSTRUMENT_COMMAND_PREFIX.match(original)
         and (issue is None or issue.level != "error")
     ):
@@ -705,18 +830,29 @@ def format_command(command: Command, *, preserve_raw: bool = True) -> str:
             f"{scope}{p.get('path', 'experiment.dat')}"
         )
     if command.type is CommandType.WAIT:
-        return f"Wait For {_format_number(p.get('seconds', 0.0), 1)} secs"
+        wait_temperature = p.get("wait_temperature", False) is True
+        wait_field = p.get("wait_field", False) is True
+        seconds = float(p.get("seconds", 0.0))
+        clauses: list[str] = []
+        if wait_temperature:
+            clauses.append("Temperature")
+        if wait_field:
+            clauses.append("Field")
+        if not clauses or not math.isfinite(seconds) or seconds != 0.0:
+            delay_text = f"{_format_number(seconds, 1)} secs"
+            clauses.append(f"Delay {delay_text}" if clauses else delay_text)
+        return f"Wait For {', '.join(clauses)}"
     if command.type is CommandType.SET_TEMPERATURE:
         return (
             f"Set Temperature {_format_number(p.get('target', 300.0))} K at "
-            f"{_format_number(p.get('rate', 5.0))} K/min in {p.get('mode', 'Settle')} mode"
+            f"{_format_number(p.get('rate', 5.0))} K/min"
         )
     if command.type is CommandType.SET_FIELD:
         unit = p.get("unit", "Oe")
         decimals = field_decimals(unit)
         return (
             f"Set Field {_format_number(p.get('target', 0.0), decimals)} {unit} at "
-            f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min in {p.get('mode', 'Settle')} mode"
+            f"{_format_number(p.get('rate', 5000.0), decimals)} {unit}/min"
         )
     if command.type is CommandType.SCAN_TEMPERATURE:
         point_mode = str(p.get("point_mode", "Linear")).casefold()

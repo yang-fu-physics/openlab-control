@@ -55,21 +55,26 @@ T Set Datafile create external C:\Experiment Data\sample.dat
 
 ```text
 T Wait For 10.0 secs
+T Wait For Temperature
+T Wait For Field
+T Wait For Temperature, Field
+T Wait For Temperature, Field, Delay 60.0 secs
 ```
 
-有效范围 `0`–`31,536,000` 秒（1 位小数）。`Pause` 会冻结计时，`Stop` / `Error` 可立即打断。
+- 可勾选等待主温度（`sample_temp` 角色）和/或主磁场（`field` 角色）稳定，并可附加延时 `Delay`（有效范围 `0`–`31,536,000` 秒，1 位小数）；
+- 同时勾选多项条件时，会等待所有勾选控制器**同时**进入核心 `Stable` 状态，然后再开始执行 `Delay` 延时；
+- `Pause` 会冻结稳定超时与延时计时，`Stop` / `Error` 可立即打断。
 
 ### Set Temperature / Set Field（单点控温 / 控场）
 
 ```text
-T Set Temperature 20.000 K at 5.000 K/min in Settle mode
-T Set Temperature 300.000 K at 10.000 K/min in Sweep mode
-T Set Field 10000.00 Oe at 5000.00 Oe/min in Settle mode
-T Set Field 1.000000 T at 0.500000 T/min in Sweep mode
+T Set Temperature 20.000 K at 5.000 K/min
+T Set Field 10000.00 Oe at 5000.00 Oe/min
+T Set Field 1.000000 T at 0.500000 T/min
 ```
 
 - 温度固定使用角色为 `sample_temp` 的控制器面板，磁场固定使用角色为 `field` 的控制器面板；
-- `Settle`：发目标后等待核心判定稳定再继续；`Sweep`：发目标后立即进入下一条指令；
+- 单点 `Set` 指令均为非阻塞下发：校验并写入目标与速率后立即进入下一条指令，便于同时启动变温与变场；如需等待稳定，请在后续放置 `Wait` 指令；
 - 磁场支持 `Oe`（2 位小数）或 `T`（6 位小数），同一条指令内目标与速率须用相同单位。
 
 ### Scan Temperature（线性 / 对数 / 列表扫温）
