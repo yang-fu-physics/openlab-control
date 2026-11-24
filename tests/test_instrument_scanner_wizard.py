@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QStackedWidget,
     QTabWidget,
+    QMessageBox,
 )
 from instrument_scanner import (  # noqa: E402
     InstrumentScannerWindow,
@@ -207,6 +208,46 @@ class InstrumentScannerWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
+
+    def test_successful_save_closes_scanner_without_an_extra_confirmation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch("instrument_scanner.QTimer.singleShot"):
+                window = InstrumentScannerWindow(root / "configs", root / "system_instruments")
+            try:
+                window._simulation_checks["simulated_temperature"].setChecked(True)
+                window.show()
+                with patch("instrument_scanner.QMessageBox.question", return_value=QMessageBox.StandardButton.Save), \
+                     patch("instrument_scanner.QMessageBox.information") as information:
+                    window._save()
+                self.assertFalse(window.isVisible())
+                self.assertTrue((root / "configs/instruments/simulated_temperature.toml").is_file())
+                information.assert_not_called()
+            finally:
+                window.close()
+
+    def test_cancel_or_write_failure_keeps_scanner_open(self):
+        for outcome in ("cancel", "write_failure"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                with patch("instrument_scanner.QTimer.singleShot"):
+                    window = InstrumentScannerWindow(root / "configs", root / "system_instruments")
+                try:
+                    window._simulation_checks["simulated_temperature"].setChecked(True)
+                    window.show()
+                    answer = QMessageBox.StandardButton.Cancel if outcome == "cancel" else QMessageBox.StandardButton.Save
+                    with patch("instrument_scanner.QMessageBox.question", return_value=answer), \
+                         patch("instrument_scanner.execute_save_plan", side_effect=OSError("simulated disk failure")) as write, \
+                         patch("instrument_scanner.QMessageBox.critical") as error:
+                        window._save()
+                    self.assertTrue(window.isVisible())
+                    if outcome == "cancel":
+                        write.assert_not_called()
+                        error.assert_not_called()
+                    else:
+                        error.assert_called_once()
+                finally:
+                    window.close()
 
     def test_unique_review_page_complete_plan_and_pid_preservation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

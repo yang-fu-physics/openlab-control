@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from concurrent.futures import Future
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -70,6 +71,223 @@ class MainWindowLayoutTests(unittest.TestCase):
         cls.config = load_simulated_config()
         configure_qt_appearance(cls.application, cls.config.ui_scale)
 
+    def test_manual_set_closes_only_its_dialog_after_success(self):
+        window = MainWindow(self.config)
+        try:
+            window._open_manual_control("temperature", "main")
+            window._open_manual_control("field", "main")
+            panel = self.config.instrument("temperature").panel("main")
+            dialog = window.manual_dialogs[panel.key]
+            other = window.manual_dialogs[self.config.instrument("field").panel("main").key]
+            dialog.update_snapshot(InstrumentSnapshot(
+                instrument_id="temperature", display_name="Temperature",
+                kind=self.config.instrument("temperature").kind, timestamp=time.monotonic(),
+                connection_state=InstrumentConnectionState.CONNECTED,
+                controls={"main": InstrumentControlState(current=300.0, target=300.0)},
+            ))
+            future = Future()
+            with patch.object(window.runtime, "set_target", return_value=future):
+                dialog.apply_button.click()
+            window._check_pending_manual_operations()
+            self.assertTrue(dialog.isVisible())
+            future.set_result(True)
+            window._check_pending_manual_operations()
+            self.assertFalse(dialog.isVisible())
+            self.assertTrue(other.isVisible())
+            self.assertEqual(window._pending_manual_operations, [])
+        finally:
+            window.close()
+
+    def test_failed_or_unconfirmed_manual_set_keeps_dialog_open(self):
+        for outcome in (False, RuntimeError("simulated write failure")):
+            with self.subTest(outcome=outcome):
+                window = MainWindow(self.config)
+                try:
+                    window._open_manual_control("temperature", "main")
+                    dialog = window.manual_dialogs[self.config.instrument("temperature").panel("main").key]
+                    dialog.update_snapshot(InstrumentSnapshot(
+                        instrument_id="temperature", display_name="Temperature",
+                        kind=self.config.instrument("temperature").kind, timestamp=time.monotonic(),
+                        connection_state=InstrumentConnectionState.CONNECTED,
+                        controls={"main": InstrumentControlState(current=300.0, target=300.0)},
+                    ))
+                    future = Future()
+                    with patch.object(window.runtime, "set_target", return_value=future):
+                        dialog.apply_button.click()
+                    if isinstance(outcome, Exception):
+                        future.set_exception(outcome)
+                    else:
+                        future.set_result(outcome)
+                    window._check_pending_manual_operations()
+                    self.assertTrue(dialog.isVisible())
+                    self.assertIn("not confirmed" if outcome is False else "simulated write failure",
+                                  window.statusBar().currentMessage())
+                finally:
+                    window.close()
+
+    def test_data_browser_can_resize_and_move_outside_the_main_viewport(self):
+        window = MainWindow(self.config)
+        try:
+            window.show()
+            viewer = window._show_data_browser()
+            self.application.processEvents()
+            self.assertTrue(viewer.isWindow())
+            self.assertNotIn(viewer, window.mdi.subWindowList())
+            self.assertLess(viewer.minimumSizeHint().width(), 640)
+            viewer.resize(480, 340)
+            viewer.move(60, window.y() + window.height() + 20)
+            position = viewer.pos()
+            window._fit_mdi_windows()
+            self.application.processEvents()
+            self.assertEqual(viewer.pos(), position)
+            self.assertLessEqual(viewer.width(), 480)
+        finally:
+            window.close()
+
+    def test_loaded_sequence_restores_dat_and_next_start_restores_sequence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sequence = root / "remembered.seq"
+            sequence.write_text('T Set Datafile open|create external saved.dat\nT Measure\nT End Sequence\n', encoding="utf-8")
+            store = UiPreferenceStore(root / "ui.ini")
+            first = MainWindow(self.config, ui_preference_store=store)
+            try:
+                with patch("labcontrol.ui.main_window.QFileDialog.getOpenFileName", return_value=(str(sequence), "")):
+                    first._open_sequence()
+                self.assertEqual(first.data_file_label.fullText(), "saved.dat")
+                self.assertTrue(first._datafile_selected)
+                self.assertEqual(store.last_sequence(), sequence.resolve())
+            finally:
+                first.close()
+            second = MainWindow(self.config, ui_preference_store=store)
+            try:
+                self.assertEqual(second.sequence_path, sequence.resolve())
+                self.assertEqual(second.data_file_label.fullText(), "saved.dat")
+                second._new_sequence()
+                self.assertEqual(second.data_file_label.fullText(), "")
+                self.assertIsNone(store.last_sequence())
+            finally:
+                second.close()
+
+    def test_running_sequence_keeps_editor_enabled_and_live_controls_locked(self):
+        window = MainWindow(self.config)
+        try:
+            window._set_document(SequenceDocument([Command(CommandType.REMARK, {"text": "original"})]))
+            with patch.object(window.runtime, "run_sequence"):
+                window._start_sequence({})
+            self.assertTrue(window.command_tree.isEnabled())
+            self.assertTrue(window.change_sequence_button.isEnabled())
+            self.assertFalse(window.modules_action.isEnabled())
+            self.assertFalse(window.run_button.isEnabled())
+            window.editor.list.setCurrentRow(0)
+            added = Command(CommandType.REMARK, {"text": "next run"})
+            window.editor.insert_command(added)
+            self.assertEqual(window.document.commands[0], added)
+            self.assertTrue(window._dirty)
+            self.assertIn("next Run", window.editor.toolTip())
+            window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
+            self.assertTrue(window.modules_action.isEnabled())
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.close()
+
+    def test_loading_sequence_during_run_defers_module_settings_until_run_ends(self):
+        from labcontrol.sequence.module_settings import SequenceModuleSettings
+        window = MainWindow(self.config)
+        try:
+            class FakeModuleWindow:
+                def __init__(self) -> None:
+                    self.current = {"current_a": 0.003}
+                    self.unapplied = False
+                    self.calls: list[tuple[dict[str, object], bool]] = []
+
+                def settings(self) -> dict[str, object]:
+                    return deepcopy(self.current)
+
+                def load_settings(self, values: dict[str, object], *, mark_unapplied: bool = False) -> None:
+                    self.calls.append((deepcopy(values), mark_unapplied))
+                    self.current = deepcopy(values)
+                    self.unapplied = mark_unapplied
+
+                def has_unapplied_edits(self) -> bool:
+                    return self.unapplied
+
+                def isHidden(self) -> bool:
+                    return False
+
+                def set_sequence_running(self, running: bool) -> None:
+                    pass
+
+                def allow_application_close(self) -> None:
+                    pass
+
+                def close(self) -> bool:
+                    return True
+
+            fake_module_window = FakeModuleWindow()
+            descriptor = window.module_descriptors[0]
+            module_id = descriptor.id
+            window.enabled_modules.add(module_id)
+            window.module_windows[module_id] = fake_module_window
+            window.current_run_state = RunState.RUNNING
+            imported = SequenceModuleSettings(
+                {module_id: {"current_a": 0.0001}},
+                {module_id: descriptor.version},
+            )
+            window._set_document(
+                SequenceDocument([Command(CommandType.REMARK, {"text": "next"})]),
+                imported,
+            )
+            # During the active Run, the locked module window stays at old 3 mA.
+            self.assertEqual(fake_module_window.calls, [])
+            self.assertEqual(fake_module_window.settings()["current_a"], 0.003)
+            self.assertTrue(window._sequence_module_window_issues)
+            # Saving SEQ while Run is still active keeps imported 0.1 mA instead of old 3 mA.
+            collected_during_run, _ = window._collect_sequence_module_settings()
+            self.assertEqual(collected_during_run[module_id]["current_a"], 0.0001)
+
+            # Once the active Run finishes, deferred 0.1 mA loads into the unlocked window as unapplied.
+            window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
+            self.assertEqual(len(fake_module_window.calls), 1)
+            self.assertEqual(fake_module_window.settings()["current_a"], 0.0001)
+            self.assertTrue(fake_module_window.has_unapplied_edits())
+            self.assertEqual(window._deferred_sequence_module_settings, {})
+
+            # Next Run collects the imported 0.1 mA (not overwritten by old 3 mA).
+            with patch("labcontrol.ui.main_window.save_settings"):
+                next_run_settings = window._save_and_collect_enabled_module_settings()
+            self.assertEqual(next_run_settings[module_id]["current_a"], 0.0001)
+        finally:
+            window.current_run_state = RunState.IDLE
+            window._deferred_sequence_module_settings.clear()
+            for key, mod_win in list(window.module_windows.items()):
+                if mod_win is fake_module_window:
+                    window.module_windows.pop(key, None)
+                    window.enabled_modules.discard(key)
+            window.close()
+
+    def test_pending_run_snapshots_validated_document_before_module_apply_finishes(self):
+        window = MainWindow(self.config)
+        try:
+            original = SequenceDocument([Command(CommandType.REMARK, {"text": "validated"})])
+            window._set_document(original)
+            future = Future()
+            window._pending_run = (deepcopy(original), {"demo": {"v": 1}}, [future])
+            window.document.commands[0].update_params({"text": "edited while applying"})
+            future.set_result(None)
+            started = []
+            with patch.object(
+                window.runtime,
+                "run_sequence",
+                side_effect=lambda doc, settings: started.append((doc, settings)),
+            ):
+                window._check_pending_run()
+            self.assertEqual(len(started), 1)
+            self.assertEqual(started[0][0].commands[0].params["text"], "validated")
+        finally:
+            window.current_run_state = RunState.IDLE
+            window.close()
+
     def test_floating_windows_stay_inside_minimum_viewport(self) -> None:
         window = MainWindow(self.config)
         try:
@@ -81,7 +299,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
 
             viewport = window.mdi.viewport().rect()
-            for subwindow in (window.sequence_window, data_window):
+            for subwindow in (window.sequence_window,):
                 geometry = subwindow.geometry()
                 self.assertGreaterEqual(geometry.left(), viewport.left())
                 self.assertGreaterEqual(geometry.top(), viewport.top())
@@ -1088,7 +1306,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             window.current_run_state = RunState.IDLE
             window.close()
 
-    def test_nested_set_datafile_keeps_datafile_selection_for_run(self) -> None:
+    def test_loading_nested_set_datafile_selects_path_for_run(self) -> None:
         window = MainWindow(self.config)
         try:
             nested_datafile = Command(
@@ -1105,8 +1323,8 @@ class MainWindowLayoutTests(unittest.TestCase):
                 [nested_datafile],
             )
             window._set_document(SequenceDocument([scan], "nested-dat.seq"))
-            self.assertEqual(window.data_file_label.fullText(), "")
-            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "nested.dat")
+            self.assertTrue(window._datafile_selected)
 
             window._remember_datafile_directory(nested_datafile)
             window._mark_dirty()

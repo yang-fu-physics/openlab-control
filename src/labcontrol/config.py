@@ -189,7 +189,7 @@ class AlarmReportingConfig:
 class AlarmConfig:
     """本地事件级别、弹窗策略和远程报警配置。"""
 
-    stability_timeout: Severity = Severity.ERROR
+    stability_timeout: Severity = Severity.WARNING
     stale_reading: Severity = Severity.WARNING
     popup_warnings: bool = True
     popup_errors: bool = True
@@ -649,7 +649,7 @@ def load_config(path: str | Path) -> AppConfig:
             ),
         ),
         alarms=AlarmConfig(
-            stability_timeout=_severity(str(alarm_raw.get("stability_timeout", "error")), "stability_timeout"),
+            stability_timeout=_severity(str(alarm_raw.get("stability_timeout", "warning")), "stability_timeout"),
             stale_reading=_severity(str(alarm_raw.get("stale_reading", "warning")), "stale_reading"),
             popup_warnings=bool(alarm_raw.get("popup_warnings", True)),
             popup_errors=bool(alarm_raw.get("popup_errors", True)),

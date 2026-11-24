@@ -2289,12 +2289,13 @@ class InstrumentScannerWindow(QMainWindow):
                 "with values validated for this cryostat before starting "
                 "OpenLab Control."
             )
-        QMessageBox.information(
-            self,
-            "Configuration Saved",
-            "The complete instrument configuration was saved." + warning,
-        )
-        self._refresh_review()
+        if warning:
+            QMessageBox.information(
+                self,
+                "Configuration Saved",
+                "The complete instrument configuration was saved." + warning,
+            )
+        self.close()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self.scan_thread is not None:

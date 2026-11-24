@@ -104,6 +104,7 @@ from .scaling import (
     scaled_text,
 )
 from .sequence_editor import SequenceEditorWidget
+from .system_log import SystemLogDialog
 from .trend import TrendDialog
 from .widgets import ElidedLabel
 from .window_sizing import (
@@ -169,6 +170,12 @@ class MainWindow(QMainWindow):
         self._sequence_module_window_issues: list[
             str
         ] = []
+        # 运行中或等待 Apply 期间打开新 SEQ 时，不能改写已锁定的在运模块窗口；
+        # 暂存导入值，待本次 Run 结束解锁后再加载进模块窗口并标为未 Apply。
+        self._deferred_sequence_module_settings: dict[
+            str,
+            dict[str, object],
+        ] = {}
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
@@ -178,6 +185,8 @@ class MainWindow(QMainWindow):
         self.current_run_state = RunState.IDLE
         self._close_after_stop = False
         self.manual_dialogs: dict[str, ManualControlDialog] = {}
+        self.system_log_dialog: SystemLogDialog | None = None
+        self._system_log_state = {"active": False, "path": "", "interval_seconds": 30, "fields": []}
         self.instrument_setup_dialog: InstrumentSetupDialog | None = None
         self.module_windows: dict[str, ModuleWindow] = {}
         self.enabled_modules: set[str] = set()
@@ -191,7 +200,9 @@ class MainWindow(QMainWindow):
             str,
             QTreeWidgetItem,
         ] = {}
-        self._pending_run: tuple[dict[str, dict[str, object]], list[object]] | None = None
+        self._pending_run: (
+            tuple[SequenceDocument, dict[str, dict[str, object]], list[object]] | None
+        ) = None
         # Enable/Disable 是提交到后台 event loop 的 Future。必须保留并收取异常，
         # 否则在后台尚未来得及发布最终 module_state 前失败时，复选框会永久停在
         # Initializing/Disabling，用户也看不到可重试的状态。
@@ -200,7 +211,7 @@ class MainWindow(QMainWindow):
             tuple[object, bool],
         ] = {}
         self._minimized_module_windows: set[str] = set()
-        self._pending_manual_operations: list[tuple[object, str]] = []
+        self._pending_manual_operations: list[tuple[object, str, ManualControlDialog | None]] = []
         self.alert_dialogs: dict[str, AlertDialog] = {}
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
@@ -244,7 +255,7 @@ class MainWindow(QMainWindow):
         self.sequence_window.show()
 
         self.data_browser_windows: dict[
-            QMdiSubWindow,
+            QMainWindow,
             DatBrowserWidget,
         ] = {}
 
@@ -563,6 +574,8 @@ class MainWindow(QMainWindow):
         self.modules_action = QAction(qta.icon("fa5s.cubes", color=icon_color), "Modules", self)
         self.appearance_action = QAction("Appearance…", self)
         self.log_action = self.log_dock.toggleViewAction()
+        self.system_log_action = QAction("System Log…", self)
+        self.system_log_action.triggered.connect(self._open_system_log)
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
 
@@ -610,7 +623,10 @@ class MainWindow(QMainWindow):
         sequence_menu.addActions([self.run_action, self.pause_action, self.stop_action])
         graph_menu = menu.addMenu("Graph")
         graph_menu.addActions([self.graph_action, self.data_browser_action])
+        graph_menu.addAction(self.system_log_action)
         instrument_menu = menu.addMenu("Instrument")
+        instrument_menu.addAction(self.system_log_action)
+        instrument_menu.addSeparator()
         has_controller_menu = False
         for panel in self.config.panels:
             if panel.template != "controller":
@@ -657,7 +673,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addActions([self.run_action, self.pause_action, self.stop_action])
         toolbar.addSeparator()
-        toolbar.addActions([self.graph_action, self.data_browser_action, self.modules_action])
+        toolbar.addActions([self.graph_action, self.data_browser_action, self.system_log_action, self.modules_action])
         self.addToolBar(toolbar)
 
     def _restore_dialog_geometry(
@@ -835,11 +851,14 @@ class MainWindow(QMainWindow):
         )
 
     def _load_default_sequence(self) -> None:
-        if not self.config.default_sequence:
-            self._set_document(SequenceDocument())
-            return
-        path = self.config.resolve_project_path(self.config.default_sequence)
-        if path.exists():
+        store = self.ui_preference_store
+        remembered = store.last_sequence() if store is not None else None
+        path = remembered if remembered is not None and remembered.is_file() else None
+        if path is None and self.config.default_sequence:
+            path = self.config.resolve_project_path(self.config.default_sequence)
+        if remembered is not None and not remembered.is_file():
+            self._append_log("WARNING", "sequence", "LAST_SEQUENCE_MISSING", f"Last SEQ is unavailable: {remembered}; using the configured default")
+        if path is not None and path.is_file():
             result = load_sequence(
                 path,
                 instrument_commands=(
@@ -900,6 +919,9 @@ class MainWindow(QMainWindow):
         self.current_data_file = None
         self._datafile_selected = False
         self.sequence_path = document.path
+        self._datafile_selected = self._first_effective_datafile_command() is not None
+        if self.ui_preference_store is not None:
+            self.ui_preference_store.set_last_sequence(document.path)
         imported = module_settings or (
             SequenceModuleSettings({}, {})
         )
@@ -913,6 +935,7 @@ class MainWindow(QMainWindow):
             imported.source
         )
         self._sequence_module_window_issues = []
+        self._deferred_sequence_module_settings.clear()
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
@@ -923,26 +946,41 @@ class MainWindow(QMainWindow):
         self.sequence_window.setWindowTitle(document.name)
         # 对已经 Enabled 的模块只替换 Settings 页显示值并标为未 Apply；不会调用
         # runtime.apply_module_settings，更不会自动打开新的仪表 session。
+        # 运行中或正在 Apply 模块准备 Run 时，模块窗口保持锁定，暂存导入值并在 Run 结束后加载。
+        run_locked = (
+            self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        )
         for module_id, settings in (
             self._sequence_module_settings.items()
         ):
             if module_id not in self.enabled_modules:
                 continue
             window = self.module_windows.get(module_id)
-            if window is not None:
-                try:
-                    window.load_settings(
-                        settings,
-                        mark_unapplied=True,
-                    )
-                except Exception as exc:
-                    # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
-                    # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
-                    self._sequence_module_window_issues.append(
-                        f"Could not load imported settings "
-                        f"into enabled module {module_id!r}: "
-                        f"{exc}"
-                    )
+            if window is None:
+                continue
+            if run_locked:
+                self._deferred_sequence_module_settings[module_id] = deepcopy(
+                    settings
+                )
+                self._sequence_module_window_issues.append(
+                    f"Module {module_id!r} window is locked during an active Run; "
+                    "imported settings were preserved and will load when this Run finishes"
+                )
+                continue
+            try:
+                window.load_settings(
+                    settings,
+                    mark_unapplied=True,
+                )
+            except Exception as exc:
+                # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
+                # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
+                self._sequence_module_window_issues.append(
+                    f"Could not load imported settings "
+                    f"into enabled module {module_id!r}: "
+                    f"{exc}"
+                )
         self._dirty = False
         self._sync_datafile_label()
         # Closing an MDI subwindow hides it because WA_DeleteOnClose is false.
@@ -1292,6 +1330,8 @@ class MainWindow(QMainWindow):
             return False
 
         self.sequence_path = destination
+        if self.ui_preference_store is not None:
+            self.ui_preference_store.set_last_sequence(destination)
         self.sequence_label.setFullText(
             destination.name
         )
@@ -1355,7 +1395,7 @@ class MainWindow(QMainWindow):
 
     def _insert_palette_command(self, item: QTreeWidgetItem, column: int) -> None:
         value = item.data(0, Qt.ItemDataRole.UserRole)
-        if not value or self.current_run_state not in self.TERMINAL_STATES:
+        if not value:
             return
         if not isinstance(value, tuple) or not value:
             return
@@ -1702,7 +1742,11 @@ class MainWindow(QMainWindow):
                                 module_id, module_settings[module_id]
                             )
                         )
-                self._pending_run = (module_settings, futures)
+                self._pending_run = (
+                    deepcopy(self.document),
+                    module_settings,
+                    futures,
+                )
                 self._set_runtime_editable(False)
                 self.run_button.setEnabled(False)
                 self.run_status_label.setText("Applying Module Settings")
@@ -1711,13 +1755,19 @@ class MainWindow(QMainWindow):
             assert message.clickedButton() is run_button
         self._start_sequence(module_settings)
 
-    def _start_sequence(self, module_settings: dict[str, dict[str, object]]) -> None:
+    def _start_sequence(
+        self,
+        module_settings: dict[str, dict[str, object]],
+        document: SequenceDocument | None = None,
+    ) -> None:
         self._close_after_stop = False
         self.run_directory = None
-        self.runtime.run_sequence(self.document, module_settings)
+        target_document = self.document if document is None else document
+        self.runtime.run_sequence(target_document, module_settings)
         self._set_runtime_editable(False)
         self.current_run_state = RunState.RUNNING
         self.run_status_label.setText("Sequence Running")
+        self.run_detail_label.setText("Running a snapshot; SEQ edits apply to the next Run")
         self.run_button.setEnabled(False)
         self.pause_button.setEnabled(True)
         self.stop_button.setEnabled(True)
@@ -1729,10 +1779,11 @@ class MainWindow(QMainWindow):
             self.runtime.pause_sequence()
 
     def _set_runtime_editable(self, editable: bool) -> None:
-        self.editor.set_editable(editable)
-        self.command_tree.setEnabled(editable)
-        self.change_sequence_button.setEnabled(editable)
-        self.change_data_button.setEnabled(editable)
+        self.editor.set_editable(True)
+        self.command_tree.setEnabled(True)
+        self.change_sequence_button.setEnabled(True)
+        self.change_data_button.setEnabled(True)
+        self.editor.setToolTip("" if editable else "Running an independent snapshot; edits apply to the next Run.")
         self.modules_action.setEnabled(editable)
         self.module_manager.set_operations_enabled(editable)
         for window in self.module_windows.values():
@@ -1751,6 +1802,11 @@ class MainWindow(QMainWindow):
                 self._handle_event(message.payload)
             elif message.kind == "progress":
                 self._handle_progress(message.payload)
+            elif message.kind == "system_log_state":
+                self._system_log_state = message.payload
+                self.system_log_action.setText("System Log (Recording)…" if message.payload["active"] else "System Log…")
+                if self.system_log_dialog is not None:
+                    self.system_log_dialog.set_state(message.payload)
             elif message.kind == "module_state":
                 self._handle_module_state(message.payload)
             elif message.kind == "module_result":
@@ -1828,10 +1884,10 @@ class MainWindow(QMainWindow):
             )
 
     def _check_pending_manual_operations(self) -> None:
-        remaining: list[tuple[object, str]] = []
-        for future, success_message in self._pending_manual_operations:
+        remaining: list[tuple[object, str, ManualControlDialog | None]] = []
+        for future, success_message, dialog in self._pending_manual_operations:
             if not future.done():
-                remaining.append((future, success_message))
+                remaining.append((future, success_message, dialog))
                 continue
             exception = future.exception()
             if exception is not None:
@@ -1848,18 +1904,21 @@ class MainWindow(QMainWindow):
                 )
             else:
                 self.statusBar().showMessage(success_message, 3000)
+                if dialog is not None:
+                    dialog.accept()
         self._pending_manual_operations = remaining
 
     def _check_pending_run(self) -> None:
         if self._pending_run is None:
             return
-        settings, futures = self._pending_run
+        document, settings, futures = self._pending_run
         if not all(future.done() for future in futures):
             return
         self._pending_run = None
         errors = [future.exception() for future in futures if future.exception() is not None]
         if errors:
             self._set_runtime_editable(True)
+            self._apply_deferred_sequence_module_settings()
             self._update_run_availability()
             self.run_status_label.setText("Sequence Idle")
             self.statusBar().showMessage("Run cancelled because module settings could not be applied", 5000)
@@ -1868,7 +1927,7 @@ class MainWindow(QMainWindow):
             window = self.module_windows.get(module_id)
             if window is not None and window.has_unapplied_edits():
                 window.mark_applied()
-        self._start_sequence(settings)
+        self._start_sequence(settings, document=document)
 
     def _handle_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         self.current_snapshots = snapshots
@@ -1988,6 +2047,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(progress.step_path or progress.message)
         if progress.state in self.TERMINAL_STATES:
             self._set_runtime_editable(True)
+            self._apply_deferred_sequence_module_settings()
             self._update_run_availability()
             self.pause_button.setEnabled(False)
             self.stop_button.setEnabled(False)
@@ -2074,6 +2134,67 @@ class MainWindow(QMainWindow):
             module_id
         ] = descriptor.version
 
+    def _apply_deferred_sequence_module_settings(self) -> None:
+        """在 Run 结束并解锁模块窗口后，把运行中加载的新 SEQ 模块参数装回对应窗口。"""
+
+        if (
+            not self._deferred_sequence_module_settings
+            or self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        ):
+            return
+        pending = self._deferred_sequence_module_settings
+        self._deferred_sequence_module_settings = {}
+        loaded_count = 0
+        issues: list[str] = []
+        for module_id, settings in pending.items():
+            if module_id not in self.enabled_modules:
+                continue
+            window = self.module_windows.get(module_id)
+            if window is None:
+                continue
+            try:
+                window.load_settings(
+                    deepcopy(settings),
+                    mark_unapplied=True,
+                )
+                loaded_count += 1
+            except Exception as exc:
+                issue = (
+                    f"Could not load deferred imported settings "
+                    f"into enabled module {module_id!r}: {exc}"
+                )
+                issues.append(issue)
+                self._append_log(
+                    "WARNING",
+                    "sequence",
+                    "MODULE_SETTINGS_IMPORT",
+                    issue,
+                )
+        if loaded_count:
+            self._append_log(
+                "INFO",
+                "sequence",
+                "MODULE_SETTINGS_IMPORTED",
+                (
+                    f"Loaded deferred SEQ module settings into {loaded_count} "
+                    "enabled module window(s); review and Apply Settings before the next Run"
+                ),
+            )
+            self.statusBar().showMessage(
+                (
+                    f"Loaded deferred SEQ settings into {loaded_count} module window(s); "
+                    "Apply Settings before the next Run"
+                ),
+                8000,
+            )
+        if issues:
+            QMessageBox.warning(
+                self,
+                "SEQ Module Settings Import",
+                "\n".join(issues[:12]),
+            )
+
     def _collect_sequence_module_settings(
         self,
     ) -> tuple[
@@ -2083,9 +2204,10 @@ class MainWindow(QMainWindow):
         """合并已导入关系和当前 Enabled 模块的 Settings 页快照。
 
         未安装或当前 Disabled 的关联模块会原样保留，避免仅打开再保存一次 SEQ 就丢掉
-        第三方模块设置；Enabled 模块则始终以界面当前值为准。
+        第三方模块设置；运行中暂存的新 SEQ 参数亦优先保留，不被锁定中的旧窗口值覆盖。
         """
 
+        self._apply_deferred_sequence_module_settings()
         settings = deepcopy(
             self._sequence_module_settings
         )
@@ -2095,16 +2217,21 @@ class MainWindow(QMainWindow):
         for module_id in sorted(
             self.enabled_modules
         ):
-            window = self.module_windows.get(
-                module_id
-            )
-            values = (
-                window.settings()
-                if window is not None
-                else self._saved_module_settings(
+            if module_id in self._deferred_sequence_module_settings:
+                values = deepcopy(
+                    self._deferred_sequence_module_settings[module_id]
+                )
+            else:
+                window = self.module_windows.get(
                     module_id
                 )
-            )
+                values = (
+                    window.settings()
+                    if window is not None
+                    else self._saved_module_settings(
+                        module_id
+                    )
+                )
             settings[module_id] = deepcopy(
                 values
             )
@@ -2126,6 +2253,7 @@ class MainWindow(QMainWindow):
         return settings
 
     def _save_and_collect_enabled_module_settings(self) -> dict[str, dict[str, object]]:
+        self._apply_deferred_sequence_module_settings()
         settings: dict[str, dict[str, object]] = {}
         for module_id in sorted(self.enabled_modules):
             settings[module_id] = self._save_module_window(module_id)
@@ -2511,6 +2639,35 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"Removed module instance {descriptor.name}", 3000)
 
+    def _open_system_log(self) -> None:
+        if self.system_log_dialog is None:
+            current = self.current_data_file
+            if current is None:
+                displayed = self.data_file_label.fullText().strip()
+                if displayed:
+                    current = self.config.resolve_project_path(displayed)
+            directory = current.parent if current is not None else self._last_data_directory
+            path = directory / f"instrument_log_{datetime.now():%Y%m%d_%H%M%S}.log"
+            dialog = SystemLogDialog(self.config, str(path), self)
+            dialog.startRequested.connect(self._start_system_log)
+            dialog.stopRequested.connect(self._stop_system_log)
+            self.system_log_dialog = dialog
+        self.system_log_dialog.set_state(self._system_log_state)
+        self.system_log_dialog.show()
+        self.system_log_dialog.raise_()
+        self.system_log_dialog.activateWindow()
+
+    def _start_system_log(self, path: str, interval_seconds: int, fields: tuple[str, ...]) -> None:
+        try:
+            future = self.runtime.start_system_log(path, interval_seconds, fields)
+        except RuntimeError as exc:
+            QMessageBox.warning(self.system_log_dialog, "System Log Failed", str(exc))
+            return
+        self.system_log_dialog.set_pending(future)
+
+    def _stop_system_log(self) -> None:
+        self.system_log_dialog.set_pending(self.runtime.stop_system_log())
+
     def _open_manual_control(
         self,
         instrument_id: str,
@@ -2522,7 +2679,11 @@ class MainWindow(QMainWindow):
         dialog = self.manual_dialogs.get(key)
         if dialog is None:
             dialog = ManualControlDialog(config, panel, self)
-            dialog.setRequested.connect(self._manual_set_target)
+            dialog.setRequested.connect(
+                lambda instrument_id, control, value, rate: self._manual_set_target(
+                    instrument_id, control, value, rate, dialog
+                )
+            )
             dialog.holdRequested.connect(self._manual_hold_instrument)
             self._restore_dialog_geometry(
                 dialog,
@@ -2609,6 +2770,7 @@ class MainWindow(QMainWindow):
         control: str,
         value: float,
         rate: float,
+        dialog: ManualControlDialog,
     ) -> None:
         future = self.runtime.set_target(
             instrument_id,
@@ -2622,6 +2784,7 @@ class MainWindow(QMainWindow):
             (
                 future,
                 f"Confirmed target {fixed_number(value, precision)} for {instrument_id}",
+                dialog,
             )
         )
         self.statusBar().showMessage(f"Sending target to {instrument_id}...")
@@ -2636,7 +2799,7 @@ class MainWindow(QMainWindow):
             control=control,
         )
         self._pending_manual_operations.append(
-            (future, f"Hold Current confirmed for {instrument_id}")
+            (future, f"Hold Current confirmed for {instrument_id}", None)
         )
         self.statusBar().showMessage(f"Requesting Hold Current for {instrument_id}...")
 
@@ -2663,7 +2826,7 @@ class MainWindow(QMainWindow):
             command_id,
         )
         self._pending_manual_operations.append(
-            (future, f"{spec.label} confirmed")
+            (future, f"{spec.label} confirmed", None)
         )
         self.statusBar().showMessage(f"Sending {spec.label}...")
 
@@ -2675,16 +2838,15 @@ class MainWindow(QMainWindow):
     def _show_data_browser(
         self,
         path: str | Path | None = None,
-    ) -> QMdiSubWindow:
+    ) -> QMainWindow:
         browser = DatBrowserWidget(self.config.project_root)
-        data_window = QMdiSubWindow()
-        data_window.setWidget(browser)
+        data_window = QMainWindow(self, Qt.WindowType.Window)
+        data_window.setCentralWidget(browser)
         data_window.setWindowTitle("Data Browser")
         data_window.setAttribute(
             Qt.WidgetAttribute.WA_DeleteOnClose,
             True,
         )
-        self.mdi.addSubWindow(data_window)
         data_window.resize(scaled(900), scaled(620))
         store = self.ui_preference_store
         if (
@@ -2716,9 +2878,7 @@ class MainWindow(QMainWindow):
             data_window.x() + offset,
             data_window.y() + offset,
         )
-        self.mdi.setActiveSubWindow(data_window)
         data_window.raise_()
-        QTimer.singleShot(0, self._fit_mdi_windows)
         if path is not None:
             browser.load_path(path, show_errors=True)
         return data_window
@@ -2732,7 +2892,6 @@ class MainWindow(QMainWindow):
         max_height = max(240, viewport.height() - 4)
         for subwindow in (
             self.sequence_window,
-            *self.data_browser_windows,
         ):
             if subwindow.isMaximized():
                 continue
@@ -2772,7 +2931,7 @@ class MainWindow(QMainWindow):
 
     def _data_browser_file_changed(
         self,
-        window: QMdiSubWindow,
+        window: QMainWindow,
         path: str,
     ) -> None:
         window.setWindowTitle(
@@ -2860,6 +3019,8 @@ class MainWindow(QMainWindow):
         for window in self.module_windows.values():
             window.allow_application_close()
             window.close()
+        for viewer in tuple(self.data_browser_windows):
+            viewer.close()
         self.timer.stop()
         try:
             self.runtime.shutdown()

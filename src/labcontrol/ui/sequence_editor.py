@@ -313,7 +313,7 @@ class SequenceEditorWidget(QWidget):
 
         if not self._editable:
             return
-        self.document.insert(command, self.selected_row())
+        self.document.insert(command, self.selected_row(), before=True)
         self.rebuild(command.id)
         self.documentChanged.emit()
 
@@ -372,7 +372,7 @@ class SequenceEditorWidget(QWidget):
         self._update_action_states()
 
     def paste(self) -> None:
-        """连续插入所有剪贴板子树，并一次性选中新副本。"""
+        """在选中行前连续粘贴同级子树；End Scan 处追加到扫描内部。"""
 
         if not self._editable or not self._clipboard:
             return
@@ -383,7 +383,7 @@ class SequenceEditorWidget(QWidget):
             if inserted:
                 self.document.insert_after(duplicate, inserted[-1].id)
             else:
-                self.document.insert(duplicate, anchor)
+                self.document.insert(duplicate, anchor, before=True)
             inserted.append(duplicate)
         self.rebuild(
             inserted[-1].id,

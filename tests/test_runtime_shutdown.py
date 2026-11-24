@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import asyncio
+from unittest.mock import patch
 import tempfile
 import time
 import unittest
@@ -26,6 +28,21 @@ from tests.configuration_fixtures import (  # noqa: E402
 
 
 class RuntimeShutdownTests(unittest.TestCase):
+    def test_run_copies_document_and_settings_before_gui_can_edit_them(self):
+        runtime = RuntimeService(load_simulated_config(), module_descriptors=())
+        document = SequenceDocument([Command(CommandType.REMARK, {"text": "this run"})])
+        settings = {"example": {"value": 1}}
+        captured = []
+        async def execute(snapshot, applied):
+            captured.append((snapshot, applied))
+        with patch.object(runtime, "_run_sequence", side_effect=execute), patch.object(runtime, "_submit", side_effect=lambda coroutine: coroutine):
+            pending = runtime.run_sequence(document, settings)
+            document.commands[0].update_params({"text": "next run"})
+            settings["example"]["value"] = 2
+            asyncio.run(pending)
+        self.assertEqual(captured[0][0].commands[0].params["text"], "this run")
+        self.assertEqual(captured[0][1]["example"]["value"], 1)
+
     def test_control_states_use_faster_polling_without_changing_idle_rate(
         self,
     ) -> None:

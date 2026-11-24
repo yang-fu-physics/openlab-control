@@ -23,7 +23,7 @@ from ..datafile import DatRunLogger
 from ..instruments.base import InstrumentError
 from ..events import EventManager
 from ..formatting import control_decimals, fixed_number
-from ..models import InstrumentKind, EventNotice, RunProgress, RunState, Severity, StabilityState
+from ..models import InstrumentActivity, InstrumentKind, EventNotice, RunProgress, RunState, Severity, StabilityState
 from ..measurement.service import MeasurementModuleService
 from ..module_commands import estimate_module_scan_points, resolve_module_scan_points
 from ..instrument_manager import InstrumentManager
@@ -35,7 +35,7 @@ from .model import (
     SystemInstrumentCommandSpec,
     validate_command_parameters,
 )
-from .parser import format_command, load_sequence, parse_temperature_points, serialize_sequence
+from .parser import ParseResult, format_command, load_sequence, parse_temperature_points, serialize_sequence
 
 
 class SequenceAbort(RuntimeError):
@@ -89,6 +89,7 @@ class SequenceEngine:
         self._current_command_id = ""
         self._call_depth = 0
         self._call_stack: list[Path] = []
+        self._called_sequences: dict[Path, ParseResult] = {}
         self.events.subscribe_occurrences(self._on_event)
 
     def _on_event(self, notice: EventNotice) -> None:
@@ -127,6 +128,7 @@ class SequenceEngine:
         self._waiting_for_instruments = False
         self._completed_steps = 0
         self._call_stack.clear()
+        self._called_sequences.clear()
         self._call_depth = 0
         self._current_command_id = ""
         if document.path is not None:
@@ -624,6 +626,7 @@ class SequenceEngine:
         source_unit = "K" if kind is InstrumentKind.TEMPERATURE else str(p.get("unit", instrument_unit))
         rate = convert_value(float(p.get("rate", panel.default_rate_per_minute)), source_unit, instrument_unit)
         mode = str(p.get("mode", "Settle"))
+        sweep = mode.casefold() == "sweep"
         point_mode = (
             str(p.get("point_mode", "Linear")).casefold()
             if kind is InstrumentKind.TEMPERATURE
@@ -729,6 +732,14 @@ class SequenceEngine:
                 quantized.append(point)
             points = quantized
 
+        direction = 1 if points[-1] > points[0] else -1
+        if sweep and any((b - a) * direction < 0 for a, b in zip(points, points[1:])):
+            raise InstrumentError(
+                "Sweep points must follow one direction toward the final target",
+                "INVALID_SWEEP_SCAN",
+                instrument_id,
+            )
+
         # 在移动第一个设定点之前验证完整路径。后面的坏点不能让实验停在“已执行一半”
         # 的中间状态。
         for point in points:
@@ -740,6 +751,7 @@ class SequenceEngine:
             )
         scan_label = format_command(command)
         decimals = control_decimals(kind, instrument_unit)
+        executed_points = 0
         for point_index, point in enumerate(points, start=1):
             await self._checkpoint()
             point_label = (
@@ -750,20 +762,54 @@ class SequenceEngine:
             self._set_current_command(command.id)
             self._current_path = " / ".join(point_path)
             self._publish(f"{scan_label} ({point_label})")
-            applied = await self.instruments.set_target(
-                instrument_id,
-                point,
-                rate,
-                mode,
-                control=panel.control_id,
-            )
-            if not applied:
-                continue
-            if "settle" in mode.lower():
-                await self._wait_for_stability(instrument_id, panel)
+            sweep_end_reached = False
+            if sweep and point_index > 1:
+                sweep_end_reached = await self._wait_for_sweep_point(
+                    instrument_id, panel, point, points[-1], direction
+                )
+                if sweep_end_reached and point_index < steps:
+                    point_label = (
+                        f"point {steps}/{steps}="
+                        f"{fixed_number(points[-1], decimals)} {instrument_unit}"
+                    )
+                    point_path = path + [point_label]
+                    self._current_path = " / ".join(point_path)
+                    self._publish(f"{scan_label} ({point_label})")
             else:
-                await self._wait_for_target(instrument_id, panel)
+                applied = await self.instruments.set_target(
+                    instrument_id,
+                    point,
+                    rate,
+                    "Settle" if sweep else mode,
+                    control=panel.control_id,
+                )
+                if not applied:
+                    if sweep:
+                        break
+                    continue
+                await self._wait_for_stability(instrument_id, panel)
             await self._execute_commands(command.children, point_path)
+            executed_points += 1
+            if sweep:
+                if sweep_end_reached:
+                    break
+                if point_index == 1:
+                    if points[0] == points[-1]:
+                        break
+                    if not await self.instruments.set_target(
+                        instrument_id, points[-1], rate, mode, control=panel.control_id
+                    ):
+                        break
+                elif point_index < steps and self._at_sweep_end(
+                    instrument_id, panel, points[-1], direction
+                ):
+                    self._report_sweep_end(instrument_id, panel)
+                    break
+        if sweep:
+            base_directory = self._call_stack[-1].parent if self._call_stack else self.config.project_root
+            self._total_steps -= (steps - executed_points) * self._estimate_execution_steps(
+                command.children, base_directory, frozenset(self._call_stack)
+            )
 
     async def _scan_time(self, command: Command, path: list[str]) -> None:
         duration = float(command.params.get("duration_seconds", 0.0))
@@ -845,6 +891,13 @@ class SequenceEngine:
         await self.modules.measure_all(self.logger, self._current_path)
         await self._checkpoint()
 
+    def _load_called_sequence(self, source: Path) -> ParseResult:
+        if source not in self._called_sequences:
+            self._called_sequences[source] = load_sequence(
+                source, instrument_commands=self.instrument_sequence_commands,
+            )
+        return self._called_sequences[source]
+
     async def _call_sequence(self, requested: str, path: list[str]) -> None:
         source = Path(requested)
         if not source.is_absolute():
@@ -852,12 +905,9 @@ class SequenceEngine:
             source = (base / source).resolve()
         if source in self._call_stack:
             raise InstrumentError(f"Circular sequence call detected: {source}", "SEQUENCE_CALL_CYCLE", str(source))
-        if not source.exists():
+        if source not in self._called_sequences and not source.exists():
             raise InstrumentError(f"Subsequence does not exist: {source}", "SEQUENCE_NOT_FOUND", str(source))
-        result = load_sequence(
-            source,
-            instrument_commands=self.instrument_sequence_commands,
-        )
+        result = self._load_called_sequence(source)
         if result.has_errors:
             details = "; ".join(issue.message for issue in result.issues if issue.level == "error")
             raise InstrumentError(f"Subsequence parsing failed: {details}", "SEQUENCE_PARSE_ERROR", str(source))
@@ -924,12 +974,7 @@ class SequenceEngine:
                 if source in call_stack or not source.exists():
                     continue
                 try:
-                    result = load_sequence(
-                        source,
-                        instrument_commands=(
-                            self.instrument_sequence_commands
-                        ),
-                    )
+                    result = self._load_called_sequence(source)
                 except OSError:
                     continue
                 if result.has_errors:
@@ -988,12 +1033,7 @@ class SequenceEngine:
             if source in call_stack or not source.exists():
                 continue
             try:
-                result = load_sequence(
-                    source,
-                    instrument_commands=(
-                        self.instrument_sequence_commands
-                    ),
-                )
+                result = self._load_called_sequence(source)
             except OSError:
                 continue
             if result.has_errors:
@@ -1059,8 +1099,8 @@ class SequenceEngine:
         """等待所有指定控制面板在同一时刻均处于 STABLE 状态。
 
         每个未稳定的面板按各自的 ``stability.timeout_seconds`` 独立计时；某个面板稳定后
-        若在等待其他面板期间被扰动脱离稳定，会重新开始计入等待，直到所有面板同时稳定
-        （或在非致命超时策略下各未稳定面板均已超时）。
+        若在等待其他面板期间被扰动脱离稳定，会重新开始计入等待，直到所有面板同时稳定。
+        驱动报告正在移动时暂停超时计时；超时只提示，继续等待所有面板稳定。
         """
 
         if not targets:
@@ -1068,7 +1108,7 @@ class SequenceEngine:
         unstable_since: dict[str, float | None] = {
             panel.key: None for _, panel in targets
         }
-        timed_out_keys: set[str] = set()
+        warned_keys: set[str] = set()
         while True:
             await self._checkpoint()
             now = self._active_time()
@@ -1086,16 +1126,12 @@ class SequenceEngine:
                 ):
                     unstable_since[panel.key] = None
                     continue
-                if panel.key in timed_out_keys:
+                all_satisfied = False
+                if control_state is not None and control_state.activity is InstrumentActivity.MOVING:
+                    unstable_since[panel.key] = None
                     continue
-                if (
-                    control_state is not None
-                    and control_state.stability is StabilityState.TIMED_OUT
-                ):
-                    self._check_control()
-                    if self.config.alarms.stability_timeout is not Severity.ERROR:
-                        timed_out_keys.add(panel.key)
-                        continue
+                if panel.key in warned_keys:
+                    continue
                 started = unstable_since[panel.key]
                 if started is None:
                     started = now
@@ -1106,7 +1142,7 @@ class SequenceEngine:
                     started,
                     "stabilize",
                 ):
-                    timed_out_keys.add(panel.key)
+                    warned_keys.add(panel.key)
                     continue
                 all_satisfied = False
             if all_satisfied:
@@ -1115,6 +1151,73 @@ class SequenceEngine:
                 self.config.control_poll_interval_seconds
             )
 
+    def _at_sweep_end(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+        final: float,
+        direction: int,
+    ) -> bool:
+        tolerance = panel.stability.tolerance if panel.stability else 0.0
+        snapshot = self.instruments.latest.get(instrument_id)
+        state = None if snapshot is None else snapshot.controls.get(panel.id)
+        return (
+            state is not None
+            and state.current is not None
+            and direction * (state.current - final) >= -tolerance
+        )
+
+    def _report_sweep_end(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+    ) -> None:
+        snapshot = self.instruments.latest.get(instrument_id)
+        state = None if snapshot is None else snapshot.controls.get(panel.id)
+        current_text = (
+            f"{state.current:g}"
+            if state is not None and state.current is not None
+            else "endpoint"
+        )
+        self.events.report(
+            Severity.INFO,
+            "sequence",
+            "SWEEP_END_REACHED",
+            f"{panel.display_name} reached sweep end at {current_text}",
+            self._current_path,
+        )
+
+    async def _wait_for_sweep_point(
+        self,
+        instrument_id: str,
+        panel: InstrumentPanelConfig,
+        point: float,
+        final: float,
+        direction: int,
+    ) -> bool:
+        """按方向等待阈值或终点；返回 True 表示已达实际终点（执行末次采集后结束）。"""
+
+        tolerance = panel.stability.tolerance if panel.stability else 0.0
+        started = self._active_time()
+        warned = False
+        while True:
+            await self._checkpoint()
+            snapshot = self.instruments.latest.get(instrument_id)
+            state = None if snapshot is None else snapshot.controls.get(panel.id)
+            if state is not None and state.current is not None:
+                if direction * (state.current - final) >= -tolerance:
+                    self._report_sweep_end(instrument_id, panel)
+                    return True
+                if direction * (state.current - point) >= 0:
+                    return False
+            if state is not None and state.activity is InstrumentActivity.MOVING:
+                started = self._active_time()
+            elif not warned and self._control_wait_timed_out(
+                instrument_id, panel, started, "reach its sweep threshold"
+            ):
+                warned = True
+            await self._interruptible_sleep(self.config.control_poll_interval_seconds)
+
     async def _wait_for_target(
         self,
         instrument_id: str,
@@ -1122,6 +1225,7 @@ class SequenceEngine:
     ) -> None:
         tolerance = panel.stability.tolerance if panel.stability else 0.0
         started = self._active_time()
+        warned = False
         while True:
             await self._checkpoint()
             snapshot = self.instruments.latest.get(instrument_id)
@@ -1138,13 +1242,10 @@ class SequenceEngine:
                 <= tolerance
             ):
                 return
-            if self._control_wait_timed_out(
-                instrument_id,
-                panel,
-                started,
-                "reach its target",
-            ):
-                return
+            if control_state is not None and control_state.activity is InstrumentActivity.MOVING:
+                started = self._active_time()
+            elif not warned and self._control_wait_timed_out(instrument_id, panel, started, "reach its target"):
+                warned = True
             await self._interruptible_sleep(
                 self.config.control_poll_interval_seconds
             )
@@ -1167,7 +1268,7 @@ class SequenceEngine:
         if elapsed < timeout:
             return False
         self.events.report(
-            self.config.alarms.stability_timeout,
+            Severity.WARNING,
             instrument_id,
             "STABILITY_TIMEOUT",
             f"{panel.display_name} did not {action} within {elapsed:.1f} seconds",

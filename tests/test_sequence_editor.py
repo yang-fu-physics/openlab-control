@@ -35,6 +35,28 @@ class SequenceEditorTests(unittest.TestCase):
                 QItemSelectionModel.SelectionFlag.NoUpdate,
             )
 
+    def test_palette_insert_is_before_selected_row_and_inside_end_scan(self):
+        child = Command(CommandType.MEASURE)
+        scan = Command(CommandType.SCAN_TIME, {"duration_seconds": 1.0, "steps": 2}, [child])
+        editor = SequenceEditorWidget(SequenceDocument([scan]))
+        self._select_rows(editor, 0)
+        before_scan = Command(CommandType.REMARK, {"text": "before scan"})
+        editor.insert_command(before_scan)
+        self.assertEqual(editor.document.commands, [before_scan, scan])
+        self._select_rows(editor, 2)
+        before_child = Command(CommandType.REMARK, {"text": "before child"})
+        editor.insert_command(before_child)
+        self.assertEqual(scan.children, [before_child, child])
+        end_index = next(i for i in range(editor.list.count()) if editor.list.item(i).data(Qt.ItemDataRole.UserRole).is_end)
+        self._select_rows(editor, end_index)
+        at_end = Command(CommandType.REMARK, {"text": "inside scan"})
+        editor.insert_command(at_end)
+        self.assertEqual(scan.children, [before_child, child, at_end])
+        row = editor.selected_row()
+        self.assertEqual(row.depth, 1)
+        self.assertFalse(row.is_end)
+        editor.close()
+
     def test_context_menu_and_keyboard_edit_complete_nodes(self) -> None:
         scan = Command(
             CommandType.SCAN_TIME,
@@ -210,6 +232,66 @@ class SequenceEditorTests(unittest.TestCase):
         self.assertEqual(pasted_sibling.type, CommandType.REMARK)
         self.assertEqual(pasted_sibling.params["text"], "sibling")
         editor.close()
+
+    def test_batch_paste_before_nested_scan_preserves_sibling_order_and_subtrees(self) -> None:
+        source_scan = Command(CommandType.SCAN_TIME, {"duration_seconds": 1.0, "steps": 2},
+                              [Command(CommandType.MEASURE)])
+        source_remark = Command(CommandType.REMARK, {"text": "copied sibling"})
+        inner_child = Command(CommandType.WAIT, {"seconds": 1.0})
+        inner_scan = Command(CommandType.SCAN_TIME, {"duration_seconds": 2.0, "steps": 2}, [inner_child])
+        tail = Command(CommandType.MEASURE)
+        outer_scan = Command(CommandType.SCAN_TIME, {"duration_seconds": 3.0, "steps": 2}, [inner_scan, tail])
+        document = SequenceDocument([source_scan, source_remark, outer_scan])
+        editor = SequenceEditorWidget(document)
+        self._select_rows(editor, 0, 3)
+        editor.copy_selected()
+        self._select_rows(editor, 5)
+        changes = []
+        editor.documentChanged.connect(lambda: changes.append(True))
+        editor.paste_action.trigger()
+        self.assertEqual(len(outer_scan.children), 4)
+        pasted_scan, pasted_remark = outer_scan.children[:2]
+        self.assertEqual(outer_scan.children[2:], [inner_scan, tail])
+        self.assertEqual(inner_scan.children, [inner_child])
+        self.assertEqual(pasted_scan.type, CommandType.SCAN_TIME)
+        self.assertEqual([c.type for c in pasted_scan.children], [CommandType.MEASURE])
+        self.assertEqual(pasted_remark.params, source_remark.params)
+        self.assertNotEqual(pasted_scan.id, source_scan.id)
+        self.assertNotEqual(pasted_scan.children[0].id, source_scan.children[0].id)
+        self.assertEqual([c.id for c in editor.selected_commands()], [pasted_scan.id, pasted_remark.id])
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(document.commands, [source_scan, source_remark, outer_scan])
+        editor.close()
+
+    def test_paste_before_command_and_at_nested_end_markers(self) -> None:
+        for anchor in ("child", "inner_end", "outer_end", "sequence_end", "none"):
+            with self.subTest(anchor=anchor):
+                source = Command(CommandType.REMARK, {"text": "copy"})
+                child = Command(CommandType.MEASURE)
+                inner = Command(CommandType.SCAN_TIME, {"duration_seconds": 1.0, "steps": 2}, [child])
+                outer = Command(CommandType.SCAN_TIME, {"duration_seconds": 2.0, "steps": 2}, [inner])
+                document = SequenceDocument([source, outer])
+                editor = SequenceEditorWidget(document)
+                self._select_rows(editor, 0)
+                editor.copy_selected()
+                if anchor == "none":
+                    editor.list.setCurrentRow(-1)
+                else:
+                    self._select_rows(editor, {"child": 3, "inner_end": 4,
+                                               "outer_end": 5, "sequence_end": 6}[anchor])
+                editor.paste()
+                if anchor == "child":
+                    self.assertEqual([c.type for c in inner.children], [CommandType.REMARK, CommandType.MEASURE])
+                elif anchor == "inner_end":
+                    self.assertEqual([c.type for c in inner.children], [CommandType.MEASURE, CommandType.REMARK])
+                elif anchor == "outer_end":
+                    self.assertEqual([c.type for c in outer.children], [CommandType.SCAN_TIME, CommandType.REMARK])
+                    self.assertEqual(inner.children, [child])
+                else:
+                    self.assertEqual([c.type for c in document.commands],
+                                     [CommandType.REMARK, CommandType.SCAN_TIME, CommandType.REMARK])
+                    self.assertEqual(outer.children, [inner])
+                editor.close()
 
     def test_rebuild_keeps_command_prefixes_visible(self) -> None:
         document = SequenceDocument([

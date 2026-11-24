@@ -20,7 +20,7 @@ allow_external_paths = false
 compact_measurement_data = true
 
 [alarms]
-stability_timeout = "error"
+stability_timeout = "warning"
 stale_reading = "warning"
 popup_warnings = true
 popup_errors = true

@@ -175,8 +175,8 @@ class SequenceDocument:
 
         return search(self.commands)
 
-    def insert(self, command: Command, selected: FlatRow | None = None) -> None:
-        """按当前表格选择插入；选中容器或 End Scan 时插入其子列表。"""
+    def insert(self, command: Command, selected: FlatRow | None = None, *, before: bool = False) -> None:
+        """按选择插入；before 插在同级行前，End Scan 始终追加到扫描内部。"""
 
         if selected is None or selected.is_sequence_end:
             self.commands.append(command)
@@ -185,7 +185,7 @@ class SequenceDocument:
             self.commands.append(command)
             return
         selected_command = self.find(selected.command_id)
-        if selected.is_end or (selected_command is not None and selected_command.type.is_container):
+        if selected.is_end or (not before and selected_command is not None and selected_command.type.is_container):
             if selected_command is not None:
                 selected_command.children.append(command)
                 return
@@ -194,7 +194,7 @@ class SequenceDocument:
             self.commands.append(command)
             return
         parent, index = location
-        parent.insert(index + 1, command)
+        parent.insert(index if before else index + 1, command)
 
     def insert_after(self, command: Command, anchor_id: str) -> None:
         """在锚点的同级位置之后插入，找不到锚点时追加到根级。"""
