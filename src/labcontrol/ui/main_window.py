@@ -170,6 +170,12 @@ class MainWindow(QMainWindow):
         self._sequence_module_window_issues: list[
             str
         ] = []
+        # 运行中或等待 Apply 期间打开新 SEQ 时，不能改写已锁定的在运模块窗口；
+        # 暂存导入值，待本次 Run 结束解锁后再加载进模块窗口并标为未 Apply。
+        self._deferred_sequence_module_settings: dict[
+            str,
+            dict[str, object],
+        ] = {}
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
@@ -929,6 +935,7 @@ class MainWindow(QMainWindow):
             imported.source
         )
         self._sequence_module_window_issues = []
+        self._deferred_sequence_module_settings.clear()
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
@@ -939,7 +946,7 @@ class MainWindow(QMainWindow):
         self.sequence_window.setWindowTitle(document.name)
         # 对已经 Enabled 的模块只替换 Settings 页显示值并标为未 Apply；不会调用
         # runtime.apply_module_settings，更不会自动打开新的仪表 session。
-        # 运行中或正在 Apply 模块准备 Run 时，模块窗口保持锁定，不改写正在运行的模块界面。
+        # 运行中或正在 Apply 模块准备 Run 时，模块窗口保持锁定，暂存导入值并在 Run 结束后加载。
         run_locked = (
             self.current_run_state not in self.TERMINAL_STATES
             or self._pending_run is not None
@@ -953,9 +960,12 @@ class MainWindow(QMainWindow):
             if window is None:
                 continue
             if run_locked:
+                self._deferred_sequence_module_settings[module_id] = deepcopy(
+                    settings
+                )
                 self._sequence_module_window_issues.append(
                     f"Module {module_id!r} window is locked during an active Run; "
-                    "imported settings were not loaded into the live module window"
+                    "imported settings were preserved and will load when this Run finishes"
                 )
                 continue
             try:
@@ -1908,6 +1918,7 @@ class MainWindow(QMainWindow):
         errors = [future.exception() for future in futures if future.exception() is not None]
         if errors:
             self._set_runtime_editable(True)
+            self._apply_deferred_sequence_module_settings()
             self._update_run_availability()
             self.run_status_label.setText("Sequence Idle")
             self.statusBar().showMessage("Run cancelled because module settings could not be applied", 5000)
@@ -2036,6 +2047,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(progress.step_path or progress.message)
         if progress.state in self.TERMINAL_STATES:
             self._set_runtime_editable(True)
+            self._apply_deferred_sequence_module_settings()
             self._update_run_availability()
             self.pause_button.setEnabled(False)
             self.stop_button.setEnabled(False)
@@ -2122,6 +2134,67 @@ class MainWindow(QMainWindow):
             module_id
         ] = descriptor.version
 
+    def _apply_deferred_sequence_module_settings(self) -> None:
+        """在 Run 结束并解锁模块窗口后，把运行中加载的新 SEQ 模块参数装回对应窗口。"""
+
+        if (
+            not self._deferred_sequence_module_settings
+            or self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        ):
+            return
+        pending = self._deferred_sequence_module_settings
+        self._deferred_sequence_module_settings = {}
+        loaded_count = 0
+        issues: list[str] = []
+        for module_id, settings in pending.items():
+            if module_id not in self.enabled_modules:
+                continue
+            window = self.module_windows.get(module_id)
+            if window is None:
+                continue
+            try:
+                window.load_settings(
+                    deepcopy(settings),
+                    mark_unapplied=True,
+                )
+                loaded_count += 1
+            except Exception as exc:
+                issue = (
+                    f"Could not load deferred imported settings "
+                    f"into enabled module {module_id!r}: {exc}"
+                )
+                issues.append(issue)
+                self._append_log(
+                    "WARNING",
+                    "sequence",
+                    "MODULE_SETTINGS_IMPORT",
+                    issue,
+                )
+        if loaded_count:
+            self._append_log(
+                "INFO",
+                "sequence",
+                "MODULE_SETTINGS_IMPORTED",
+                (
+                    f"Loaded deferred SEQ module settings into {loaded_count} "
+                    "enabled module window(s); review and Apply Settings before the next Run"
+                ),
+            )
+            self.statusBar().showMessage(
+                (
+                    f"Loaded deferred SEQ settings into {loaded_count} module window(s); "
+                    "Apply Settings before the next Run"
+                ),
+                8000,
+            )
+        if issues:
+            QMessageBox.warning(
+                self,
+                "SEQ Module Settings Import",
+                "\n".join(issues[:12]),
+            )
+
     def _collect_sequence_module_settings(
         self,
     ) -> tuple[
@@ -2131,9 +2204,10 @@ class MainWindow(QMainWindow):
         """合并已导入关系和当前 Enabled 模块的 Settings 页快照。
 
         未安装或当前 Disabled 的关联模块会原样保留，避免仅打开再保存一次 SEQ 就丢掉
-        第三方模块设置；Enabled 模块则始终以界面当前值为准。
+        第三方模块设置；运行中暂存的新 SEQ 参数亦优先保留，不被锁定中的旧窗口值覆盖。
         """
 
+        self._apply_deferred_sequence_module_settings()
         settings = deepcopy(
             self._sequence_module_settings
         )
@@ -2143,16 +2217,21 @@ class MainWindow(QMainWindow):
         for module_id in sorted(
             self.enabled_modules
         ):
-            window = self.module_windows.get(
-                module_id
-            )
-            values = (
-                window.settings()
-                if window is not None
-                else self._saved_module_settings(
+            if module_id in self._deferred_sequence_module_settings:
+                values = deepcopy(
+                    self._deferred_sequence_module_settings[module_id]
+                )
+            else:
+                window = self.module_windows.get(
                     module_id
                 )
-            )
+                values = (
+                    window.settings()
+                    if window is not None
+                    else self._saved_module_settings(
+                        module_id
+                    )
+                )
             settings[module_id] = deepcopy(
                 values
             )
@@ -2174,6 +2253,7 @@ class MainWindow(QMainWindow):
         return settings
 
     def _save_and_collect_enabled_module_settings(self) -> dict[str, dict[str, object]]:
+        self._apply_deferred_sequence_module_settings()
         settings: dict[str, dict[str, object]] = {}
         for module_id in sorted(self.enabled_modules):
             settings[module_id] = self._save_module_window(module_id)

@@ -191,35 +191,79 @@ class MainWindowLayoutTests(unittest.TestCase):
             window.current_run_state = RunState.IDLE
             window.close()
 
-    def test_loading_sequence_during_run_does_not_overwrite_locked_module_window(self):
+    def test_loading_sequence_during_run_defers_module_settings_until_run_ends(self):
         from labcontrol.sequence.module_settings import SequenceModuleSettings
         window = MainWindow(self.config)
         try:
-            fake_module_window = type(
-                "FakeModuleWindow",
-                (),
-                {
-                    "load_settings": lambda self, *a, **kw: self.calls.append((a, kw)),
-                    "set_sequence_running": lambda self, running: None,
-                    "allow_application_close": lambda self: None,
-                    "close": lambda self: True,
-                },
-            )()
-            fake_module_window.calls = []
-            window.enabled_modules.add("demo_mod")
-            window.module_windows["demo_mod"] = fake_module_window
+            class FakeModuleWindow:
+                def __init__(self) -> None:
+                    self.current = {"current_a": 0.003}
+                    self.unapplied = False
+                    self.calls: list[tuple[dict[str, object], bool]] = []
+
+                def settings(self) -> dict[str, object]:
+                    return deepcopy(self.current)
+
+                def load_settings(self, values: dict[str, object], *, mark_unapplied: bool = False) -> None:
+                    self.calls.append((deepcopy(values), mark_unapplied))
+                    self.current = deepcopy(values)
+                    self.unapplied = mark_unapplied
+
+                def has_unapplied_edits(self) -> bool:
+                    return self.unapplied
+
+                def isHidden(self) -> bool:
+                    return False
+
+                def set_sequence_running(self, running: bool) -> None:
+                    pass
+
+                def allow_application_close(self) -> None:
+                    pass
+
+                def close(self) -> bool:
+                    return True
+
+            fake_module_window = FakeModuleWindow()
+            descriptor = window.module_descriptors[0]
+            module_id = descriptor.id
+            window.enabled_modules.add(module_id)
+            window.module_windows[module_id] = fake_module_window
             window.current_run_state = RunState.RUNNING
-            imported = SequenceModuleSettings({"demo_mod": {"gain": 5}}, {"demo_mod": "1.0"})
+            imported = SequenceModuleSettings(
+                {module_id: {"current_a": 0.0001}},
+                {module_id: descriptor.version},
+            )
             window._set_document(
                 SequenceDocument([Command(CommandType.REMARK, {"text": "next"})]),
                 imported,
             )
+            # During the active Run, the locked module window stays at old 3 mA.
             self.assertEqual(fake_module_window.calls, [])
+            self.assertEqual(fake_module_window.settings()["current_a"], 0.003)
             self.assertTrue(window._sequence_module_window_issues)
+            # Saving SEQ while Run is still active keeps imported 0.1 mA instead of old 3 mA.
+            collected_during_run, _ = window._collect_sequence_module_settings()
+            self.assertEqual(collected_during_run[module_id]["current_a"], 0.0001)
+
+            # Once the active Run finishes, deferred 0.1 mA loads into the unlocked window as unapplied.
+            window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
+            self.assertEqual(len(fake_module_window.calls), 1)
+            self.assertEqual(fake_module_window.settings()["current_a"], 0.0001)
+            self.assertTrue(fake_module_window.has_unapplied_edits())
+            self.assertEqual(window._deferred_sequence_module_settings, {})
+
+            # Next Run collects the imported 0.1 mA (not overwritten by old 3 mA).
+            with patch("labcontrol.ui.main_window.save_settings"):
+                next_run_settings = window._save_and_collect_enabled_module_settings()
+            self.assertEqual(next_run_settings[module_id]["current_a"], 0.0001)
         finally:
             window.current_run_state = RunState.IDLE
-            window.module_windows.pop("demo_mod", None)
-            window.enabled_modules.discard("demo_mod")
+            window._deferred_sequence_module_settings.clear()
+            for key, mod_win in list(window.module_windows.items()):
+                if mod_win is fake_module_window:
+                    window.module_windows.pop(key, None)
+                    window.enabled_modules.discard(key)
             window.close()
 
     def test_pending_run_snapshots_validated_document_before_module_apply_finishes(self):
