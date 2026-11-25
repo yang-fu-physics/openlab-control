@@ -38,6 +38,9 @@ from ..sequence.model import SystemInstrumentCommandSpec
 from .scaling import scaled, scaled_text
 
 
+PANEL_MAX_HEIGHT = 106
+
+
 class ControllerPanel(QFrame):
     """显示温度或磁场的当前值、目标、速率和稳定状态。"""
 
@@ -55,7 +58,7 @@ class ControllerPanel(QFrame):
         self.reading = config.reading(panel.reading)
         self.setObjectName("instrumentPanel")
         self.setMinimumWidth(scaled(205))
-        self.setMaximumHeight(scaled(135))
+        self.setMaximumHeight(scaled(PANEL_MAX_HEIGHT))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -161,7 +164,7 @@ class ReadoutPanel(QFrame):
         self.main_reading = main_reading or reading.key
         self.setObjectName("instrumentPanel")
         self.setMinimumWidth(scaled(205))
-        self.setMaximumHeight(scaled(135))
+        self.setMaximumHeight(scaled(PANEL_MAX_HEIGHT))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -241,8 +244,8 @@ class ReadoutGridPanel(QFrame):
         self.name_labels: dict[str, QLabel] = {}
         self.value_labels: dict[str, QLabel] = {}
         self.setObjectName("instrumentPanel")
-        self.setMinimumWidth(scaled(300))
-        self.setMaximumHeight(scaled(135))
+        self.setMinimumWidth(scaled(280))
+        self.setMaximumHeight(scaled(PANEL_MAX_HEIGHT))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -254,16 +257,16 @@ class ReadoutGridPanel(QFrame):
         body = _panel_body(layout)
         readings_layout = QGridLayout()
         readings_layout.setContentsMargins(0, 0, 0, 0)
-        readings_layout.setHorizontalSpacing(scaled(8))
-        readings_layout.setVerticalSpacing(scaled(3))
+        readings_layout.setHorizontalSpacing(scaled(10))
+        readings_layout.setVerticalSpacing(scaled(2))
         for index, reading in enumerate(readings):
             cell = QWidget(self)
             cell_layout = QVBoxLayout(cell)
             cell_layout.setContentsMargins(
-                scaled(4),
-                scaled(1),
-                scaled(4),
-                scaled(1),
+                scaled(2),
+                0,
+                scaled(2),
+                0,
             )
             cell_layout.setSpacing(0)
             name_label = QLabel(reading.display_name)
@@ -337,8 +340,8 @@ class SwitchPanel(QFrame):
         self._actions_enabled = True
         self._connected = False
         self.setObjectName("instrumentPanel")
-        self.setMinimumWidth(scaled(260))
-        self.setMaximumHeight(scaled(135))
+        self.setMinimumWidth(scaled(265))
+        self.setMaximumHeight(scaled(PANEL_MAX_HEIGHT))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -350,8 +353,8 @@ class SwitchPanel(QFrame):
             panel.display_name,
         )
         body = _panel_body(layout)
-        self.value_label = _value_label(body)
         button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(scaled(5))
         for command in commands:
             button = QPushButton(command.label)
@@ -363,7 +366,25 @@ class SwitchPanel(QFrame):
             button.setEnabled(False)
             button_row.addWidget(button)
             self.buttons[command.command_id] = button
-        body.addLayout(button_row)
+        if len(commands) <= 2:
+            body.addStretch(1)
+            inline_row = QHBoxLayout()
+            inline_row.setContentsMargins(0, 0, 0, 0)
+            inline_row.setSpacing(scaled(10))
+            self.value_label = QLabel("—")
+            self.value_label.setObjectName("panelValue")
+            self.value_label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft
+                | Qt.AlignmentFlag.AlignVCenter
+            )
+            inline_row.addWidget(self.value_label)
+            inline_row.addStretch(1)
+            inline_row.addLayout(button_row)
+            body.addLayout(inline_row)
+            body.addStretch(1)
+        else:
+            self.value_label = _value_label(body)
+            body.addLayout(button_row)
         self._set_state_style("disconnected")
 
     def set_actions_enabled(self, enabled: bool) -> None:
@@ -432,7 +453,7 @@ class CustomPanel(QFrame):
         self._connected = False
         self.setObjectName("instrumentPanel")
         self.setMinimumWidth(scaled(220))
-        self.setMaximumHeight(scaled(135))
+        self.setMaximumHeight(scaled(PANEL_MAX_HEIGHT))
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Preferred,
@@ -564,15 +585,16 @@ class InstrumentPanelHost(QWidget):
         self.setObjectName("instrumentPanelHost")
         self.setStyleSheet(
             "QWidget#instrumentPanelHost { "
-            "background-color: #f3f5f7; border: none; }"
+            "background-color: #eceff3; border: none; "
+            "border-top: 1px solid #cfd7e0; }"
         )
         self._row.setContentsMargins(
-            scaled(5),
-            scaled(5),
-            scaled(5),
-            scaled(5),
+            scaled(6),
+            scaled(4),
+            scaled(6),
+            scaled(4),
         )
-        self._row.setSpacing(scaled(5))
+        self._row.setSpacing(scaled(6))
         self._row.addStretch(1)
         self.setSizePolicy(
             QSizePolicy.Policy.MinimumExpanding,
@@ -687,13 +709,13 @@ def _panel_layout(panel: QFrame) -> QVBoxLayout:
 def _panel_header_layout(layout: QVBoxLayout) -> QHBoxLayout:
     header = QFrame()
     header.setObjectName("panelHeader")
-    header.setMinimumHeight(scaled(30))
+    header.setMinimumHeight(scaled(24))
     header_layout = QHBoxLayout(header)
     header_layout.setContentsMargins(
-        scaled(10),
-        scaled(4),
-        scaled(10),
-        scaled(4),
+        scaled(8),
+        scaled(2),
+        scaled(8),
+        scaled(2),
     )
     header_layout.setSpacing(scaled(6))
     layout.addWidget(header)
@@ -730,10 +752,10 @@ def _panel_body(layout: QVBoxLayout) -> QVBoxLayout:
     body.setObjectName("panelBody")
     body_layout = QVBoxLayout(body)
     body_layout.setContentsMargins(
-        scaled(10),
-        scaled(6),
-        scaled(10),
-        scaled(6),
+        scaled(8),
+        scaled(4),
+        scaled(8),
+        scaled(4),
     )
     body_layout.setSpacing(scaled(2))
     layout.addWidget(body, 1)
@@ -820,50 +842,51 @@ def _instrument_panel_style(
         "faulted": ("#cf222e", "#fdecec"),
         "disconnected": ("#6e7781", "#f0f2f4"),
     }.get(state, ("#6e7781", "#f0f2f4"))
-    title_size = scaled_text(14, font_scale=1.0)
-    value_size = scaled_text(26, font_scale=1.0)
-    detail_size = scaled_text(12, font_scale=1.0)
-    readout_size = scaled_text(17, font_scale=1.0)
-    badge_size = scaled_text(12, font_scale=1.0)
-    radius = scaled(6)
+    title_size = scaled_text(12, font_scale=1.0)
+    value_size = scaled_text(21, font_scale=1.0)
+    detail_size = scaled_text(11, font_scale=1.0)
+    readout_name_size = scaled_text(10, font_scale=1.0)
+    readout_size = scaled_text(13, font_scale=1.0)
+    badge_size = scaled_text(11, font_scale=1.0)
+    radius = scaled(5)
     badge_radius = scaled(3)
     badge_horizontal_padding = scaled(6)
     bottom_color = "#d5dbe2" if show_badge else color
     return (
         "QFrame#instrumentPanel { background-color: #ffffff; "
-        "border: 1px solid #d5dbe2; "
+        "border: 1px solid #ced6e0; "
         f"border-bottom: 3px solid {bottom_color}; "
         f"border-radius: {radius}px; }}"
         "QFrame#instrumentPanel QFrame#panelHeader { "
-        "background-color: #f7f9fb; border: none; "
-        "border-bottom: 1px solid #e1e6eb; }"
+        "background-color: #f5f7fa; border: none; "
+        "border-bottom: 1px solid #e2e7ee; }"
         "QFrame#instrumentPanel QFrame#panelBody { "
         "background: transparent; border: none; }"
         "QFrame#instrumentPanel QLabel { background: transparent; "
         "border: none; color: #1f2328; }"
-        f"QFrame#instrumentPanel QLabel#panelTitle {{ color: #626b75; "
+        f"QFrame#instrumentPanel QLabel#panelTitle {{ color: #475467; "
         f"font-size: {title_size}px; font-weight: bold; }}"
         f"QFrame#instrumentPanel QLabel#stateBadge {{ color: {color}; "
         f"background-color: {badge_background}; border: 1px solid {color}; "
-        f"border-radius: {badge_radius}px; padding: 1px {badge_horizontal_padding}px; "
+        f"border-radius: {badge_radius}px; padding: 0px {badge_horizontal_padding}px; "
         f"font-size: {badge_size}px; font-weight: bold; }}"
-        f"QFrame#instrumentPanel QLabel#panelValue {{ color: #1f2328; "
+        f"QFrame#instrumentPanel QLabel#panelValue {{ color: #101828; "
         f"font-size: {value_size}px; font-weight: bold; "
         "font-family: Consolas; }"
-        f"QFrame#instrumentPanel QLabel#panelDetail {{ color: #6e7781; "
+        f"QFrame#instrumentPanel QLabel#panelDetail {{ color: #667085; "
         f"font-size: {detail_size}px; }}"
-        f"QFrame#instrumentPanel QLabel#readoutName {{ color: #6e7781; "
-        f"font-size: {detail_size}px; }}"
-        f"QFrame#instrumentPanel QLabel#readoutValue {{ color: #1f2328; "
+        f"QFrame#instrumentPanel QLabel#readoutName {{ color: #667085; "
+        f"font-size: {readout_name_size}px; }}"
+        f"QFrame#instrumentPanel QLabel#readoutValue {{ color: #101828; "
         f"font-size: {readout_size}px; font-weight: bold; "
         "font-family: Consolas; }"
-        f"QFrame#instrumentPanel QPushButton {{ background: #f6f8fa; "
-        "color: #202124; border: 1px solid #b8bec6; border-radius: 3px; "
-        f"font-size: {detail_size}px; padding: 2px 8px; }}"
-        "QFrame#instrumentPanel QPushButton:hover { background: #eef2f7; }"
+        f"QFrame#instrumentPanel QPushButton {{ background: #f8fafc; "
+        "color: #1f2328; border: 1px solid #c5ced8; border-radius: 4px; "
+        f"font-size: {detail_size}px; padding: 3px 8px; }}"
+        "QFrame#instrumentPanel QPushButton:hover { background: #eef3f8; border-color: #9fb0c3; }"
         "QFrame#instrumentPanel QPushButton:pressed { background: #e2e8f0; }"
-        "QFrame#instrumentPanel QPushButton:disabled { color: #8a8a8a; "
-        "background: #eeeeee; }"
+        "QFrame#instrumentPanel QPushButton:disabled { color: #8c959f; "
+        "background: #f1f3f5; border-color: #dce1e7; }"
     )
 
 

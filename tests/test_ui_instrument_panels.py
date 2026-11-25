@@ -46,6 +46,7 @@ from labcontrol.ui.dialogs import (  # noqa: E402
 from labcontrol.ui.trend import TrendCanvas, TrendDialog  # noqa: E402
 from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 from labcontrol.ui.instrument_panels import (  # noqa: E402
+    PANEL_MAX_HEIGHT,
     ControllerPanel,
     InstrumentPanelHost,
     ReadoutGridPanel,
@@ -87,7 +88,7 @@ class InstrumentPanelTests(unittest.TestCase):
         )
         self.assertIsInstance(panel, QFrame)
         self.assertEqual(panel.minimumWidth(), 205)
-        self.assertEqual(panel.maximumHeight(), 135)
+        self.assertEqual(panel.maximumHeight(), PANEL_MAX_HEIGHT)
         self.assertEqual(
             panel.value_label.objectName(),
             "panelValue",
@@ -185,7 +186,7 @@ class InstrumentPanelTests(unittest.TestCase):
             readout.value_labels["heater_range"].text(),
             "LOW",
         )
-        self.assertEqual(panel.maximumHeight(), 135)
+        self.assertEqual(panel.maximumHeight(), PANEL_MAX_HEIGHT)
 
         host.update_snapshot(
             InstrumentSnapshot(

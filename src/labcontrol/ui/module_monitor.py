@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..measurement.manifest import ModuleDescriptor
-from .scaling import scaled
+from .scaling import scaled, scaled_text
 
 
 _MAX_VISIBLE_RESULT_LINES = 8
@@ -110,12 +110,12 @@ class ModuleMonitorCard(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
-            scaled(6),
-            scaled(4),
-            scaled(6),
-            scaled(4),
+            scaled(8),
+            scaled(5),
+            scaled(7),
+            scaled(5),
         )
-        layout.setSpacing(0)
+        layout.setSpacing(scaled(2))
         self.name_label = QLabel(descriptor.name)
         self.name_label.setTextFormat(Qt.TextFormat.PlainText)
         self.name_label.setWordWrap(True)
@@ -124,7 +124,7 @@ class ModuleMonitorCard(QFrame):
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
-        self.name_label.setStyleSheet("font-weight: bold;")
+        self.name_label.setStyleSheet("font-weight: 600; color: #1f2328;")
         layout.addWidget(self.name_label)
         self.state_label = QLabel("Enabled")
         self.state_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -140,8 +140,14 @@ class ModuleMonitorCard(QFrame):
         )
         layout.addWidget(self.state_label)
         self.results_label = QLabel("No results yet")
+        self.results_label.setObjectName("moduleResultsLabel")
         self.results_label.setTextFormat(Qt.TextFormat.PlainText)
         self.results_label.setWordWrap(True)
+        result_size = scaled_text(11)
+        self.results_label.setStyleSheet(
+            f"font-family: Consolas; "
+            f"font-size: {result_size}px; color: #344054;"
+        )
         layout.addWidget(self.results_label)
         for label in (
             self.name_label,
@@ -324,37 +330,46 @@ class ModuleMonitorCard(QFrame):
         )
         colors = {
             "enabled": (
-                "#2e7d32",
-                "rgba(46, 125, 50, 0.08)",
+                "#238636",
+                "#d5dce4",
+                "#ffffff",
             ),
             "measuring": (
-                "#1565c0",
-                "rgba(21, 101, 192, 0.10)",
+                "#1d63b8",
+                "#b7d1f2",
+                "#f5f9ff",
             ),
             "warning": (
-                "#a86100",
-                "rgba(255, 167, 38, 0.13)",
+                "#b26a00",
+                "#e6c17a",
+                "#fffaf0",
             ),
             "error": (
-                "#b3261e",
-                "rgba(179, 38, 30, 0.12)",
+                "#cf222e",
+                "#e6a4a9",
+                "#fff5f5",
             ),
             "initializing": (
-                "#6d5d00",
-                "rgba(109, 93, 0, 0.10)",
+                "#7a6500",
+                "#dcd4a8",
+                "#fdfcf4",
             ),
         }
-        border, background = colors.get(
+        accent, outer_border, background = colors.get(
             visual_state,
-            ("#7a7a7a", "rgba(120, 120, 120, 0.08)"),
+            ("#667085", "#d5dce4", "#ffffff"),
         )
         self.setStyleSheet(
             "QFrame#moduleMonitorCard {"
-            f"border: 1px solid {border};"
-            f"border-left: {scaled(4)}px solid {border};"
+            f"border: 1px solid {outer_border};"
+            f"border-left: {scaled(3)}px solid {accent};"
             f"border-radius: {scaled(5)}px;"
             f"background: {background};"
             "}"
+        )
+        state_size = scaled_text(11)
+        self.state_label.setStyleSheet(
+            f"color: {accent}; font-size: {state_size}px; font-weight: 600;"
         )
         if alert:
             state_text = alert.title()
@@ -413,7 +428,9 @@ class ModuleMonitorPanel(QGroupBox):
         self.cards: dict[str, ModuleMonitorCard] = {}
         self._alerts: dict[str, dict[str, str]] = {}
 
-        group_layout = QVBoxLayout(self)
+        self._group_layout = QVBoxLayout(self)
+        self._group_layout.setContentsMargins(0, scaled(4), 0, 0)
+        self._group_layout.setSpacing(scaled(4))
         self.scroll = QScrollArea()
         self.scroll.setObjectName("moduleMonitorScroll")
         self.scroll.setWidgetResizable(True)
@@ -424,7 +441,9 @@ class ModuleMonitorPanel(QGroupBox):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setStyleSheet("QScrollArea { background: transparent; }")
         self.content = QWidget()
+        self.content.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.content_layout.setSpacing(scaled(5))
@@ -436,7 +455,12 @@ class ModuleMonitorPanel(QGroupBox):
         self.content_layout.addWidget(self.empty_label)
         self.content_layout.addStretch(1)
         self.scroll.setWidget(self.content)
-        group_layout.addWidget(self.scroll)
+        self._group_layout.addWidget(self.scroll)
+
+    def set_summary_widget(self, widget: QWidget) -> None:
+        """在模块卡片列表顶部显示一行紧凑摘要（例如已启用模块数量）。"""
+
+        self._group_layout.insertWidget(0, widget)
 
     def update_module(
         self,

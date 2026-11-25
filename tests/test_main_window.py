@@ -577,6 +577,10 @@ class MainWindowLayoutTests(unittest.TestCase):
                 window.command_dock.features(),
                 QDockWidget.DockWidgetFeature.NoDockWidgetFeatures,
             )
+            self.assertTrue(window.command_dock.isHidden())
+            window._focus_sequence()
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
             self.assertIsNotNone(window.status_dock.titleBarWidget())
             self.assertEqual(window.status_dock.titleBarWidget().height(), 0)
             compact_width = window.command_dock.minimumWidth()
@@ -1512,6 +1516,97 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(window.document.commands[0].params["path"], str(chosen_path.resolve()))
             self.assertTrue(window._datafile_selected)
             self.assertEqual(window.data_file_label.fullText(), str(chosen_path.resolve()))
+        finally:
+            window.close()
+
+    def test_command_dock_defaults_hidden_and_follows_sequence_selection(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            self.application.processEvents()
+
+            # Collapsed by default on startup so workspace width stays maximized.
+            self.assertTrue(window.command_dock.isHidden())
+            self.assertFalse(window.commands_toolbar_action.isChecked())
+
+            # Clicking inside the SEQ list auto-expands the command bar.
+            QTest.mousePress(
+                window.editor.list.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=window.editor.list.viewport().rect().center(),
+            )
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
+            self.assertTrue(window.commands_toolbar_action.isChecked())
+
+            # Opening/activating a Data Browser auto-collapses the command bar.
+            browser_window = window._show_data_browser()
+            self.application.processEvents()
+            self.assertIs(window.mdi.activeSubWindow(), browser_window)
+            self.assertTrue(window.command_dock.isHidden())
+            self.assertFalse(window.commands_toolbar_action.isChecked())
+
+            # Switching back to SEQ auto-expands the command bar again.
+            window.mdi.setActiveSubWindow(window.sequence_window)
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
+
+            # Manually collapsing while editing SEQ keeps it hidden on clicks inside SEQ.
+            window.commands_toolbar_action.trigger()
+            self.application.processEvents()
+            self.assertTrue(window.command_dock.isHidden())
+            QTest.mousePress(
+                window.editor.list.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=window.editor.list.viewport().rect().center(),
+            )
+            self.application.processEvents()
+            self.assertTrue(window.command_dock.isHidden())
+
+            # Switching to Data Browser and back to SEQ re-enables auto-expand.
+            window.mdi.setActiveSubWindow(browser_window)
+            self.application.processEvents()
+            window.mdi.setActiveSubWindow(window.sequence_window)
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
+        finally:
+            window.close()
+
+    def test_status_bar_run_log_toggle_tracks_unread_severity_and_clears_on_open(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            self.application.processEvents()
+
+            self.assertTrue(window.log_dock.isHidden())
+            self.assertFalse(window.log_toggle_button.isChecked())
+            self.assertEqual(window.log_toggle_button.text(), "Run Log")
+
+            window._append_log("INFO", "sequence", "STEP", "Started step 1")
+            self.assertEqual(window.log_toggle_button.text(), "Run Log (1)")
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "")
+
+            window._append_log("WARNING", "instrument", "WARN", "High heater output")
+            self.assertIn("warn", window.log_toggle_button.text())
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "warning")
+
+            window._append_log("ERROR", "instrument", "ERR", "Timeout")
+            self.assertIn("err", window.log_toggle_button.text())
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "error")
+
+            window.log_toggle_button.click()
+            self.application.processEvents()
+            self.assertFalse(window.log_dock.isHidden())
+            self.assertTrue(window.log_toggle_button.isChecked())
+            self.assertEqual(window.log_toggle_button.text(), "Run Log")
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "")
+
+            window.log_toggle_button.click()
+            self.application.processEvents()
+            self.assertTrue(window.log_dock.isHidden())
+            self.assertFalse(window.log_toggle_button.isChecked())
         finally:
             window.close()
 

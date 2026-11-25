@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
+    QFocusEvent,
     QGuiApplication,
     QIcon,
     QResizeEvent,
@@ -43,6 +44,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyle,
     QToolBar,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -342,6 +344,12 @@ class MainWindow(QMainWindow):
         self.run_directory: Path | None = None
         self.trend_dialog = TrendDialog(self)
         self._dirty = False
+        self._initializing_ui = True
+        self._command_dock_user_hidden = False
+        self._command_dock_sized = False
+        self._last_active_subwindow: QMdiSubWindow | None = None
+        self._unread_log_count = 0
+        self._unread_log_level = ""
         self.ui_scale = current_ui_scale()
         self.font_scale = current_font_scale()
         application = QApplication.instance()
@@ -366,6 +374,8 @@ class MainWindow(QMainWindow):
         self._restore_window_layout()
         self._apply_style()
         self._load_default_sequence()
+        self._last_active_subwindow = self.mdi.activeSubWindow() or self.sequence_window
+        self._initializing_ui = False
         self.runtime.start()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._drain_runtime_messages)
@@ -387,6 +397,11 @@ class MainWindow(QMainWindow):
         self.sequence_window.setWindowTitle(self.document.name)
         self.sequence_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.mdi.addSubWindow(self.sequence_window)
+        self.mdi.subWindowActivated.connect(self._sync_command_dock_for_subwindow)
+        self.sequence_window.installEventFilter(self)
+        self.editor.installEventFilter(self)
+        self.editor.list.installEventFilter(self)
+        self.editor.list.viewport().installEventFilter(self)
         self.sequence_window.resize(scaled(780), scaled(560))
         self.sequence_window.show()
 
@@ -400,6 +415,7 @@ class MainWindow(QMainWindow):
         self._build_status_dock()
         self._build_log_dock()
         self._build_actions()
+        self._build_status_bar_controls()
         self.statusBar().showMessage(
             f"Starting instrument runtime · UI scale {self.ui_scale:.2f}x "
             f"({self.ui_scale_mode}) · text {self.font_scale:.0%}"
@@ -417,23 +433,22 @@ class MainWindow(QMainWindow):
         )
         dock.setMinimumWidth(scaled(205))
         panel = QWidget()
+        panel.setObjectName("leftDockPanel")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(scaled(8), scaled(6), scaled(8), scaled(8))
+        layout.setSpacing(scaled(6))
 
-        project_group = QGroupBox("Experiment")
-        project_layout = QVBoxLayout(project_group)
-        project_layout.addWidget(QLabel("System Instruments"))
-        self.measure_status_label = QLabel(
-            f"0 of {len(self.module_descriptors)} measurement modules enabled"
-        )
-        self.measure_status_label.setObjectName("mutedLabel")
-        project_layout.addWidget(self.measure_status_label)
-        layout.addWidget(project_group)
-
-        data_group = QGroupBox("Data File Name")
+        data_group = QGroupBox("Data File")
+        data_group.setObjectName("firstInspectorGroup")
         data_layout = QVBoxLayout(data_group)
+        data_layout.setContentsMargins(0, scaled(4), 0, scaled(2))
+        data_layout.setSpacing(scaled(4))
         self.data_file_label = ElidedLabel("")
+        self.data_file_label.setObjectName("sidebarField")
         data_layout.addWidget(self.data_file_label)
         data_buttons = QHBoxLayout()
+        data_buttons.setContentsMargins(0, 0, 0, 0)
+        data_buttons.setSpacing(scaled(5))
         self.view_data_button = QPushButton("View")
         self.change_data_button = QPushButton("Change")
         self.view_data_button.clicked.connect(self._view_data)
@@ -443,11 +458,16 @@ class MainWindow(QMainWindow):
         data_layout.addLayout(data_buttons)
         layout.addWidget(data_group)
 
-        sequence_group = QGroupBox("Selected Sequence")
+        sequence_group = QGroupBox("Sequence")
         sequence_layout = QVBoxLayout(sequence_group)
+        sequence_layout.setContentsMargins(0, scaled(4), 0, scaled(2))
+        sequence_layout.setSpacing(scaled(4))
         self.sequence_label = ElidedLabel("Untitled.seq")
+        self.sequence_label.setObjectName("sidebarField")
         sequence_layout.addWidget(self.sequence_label)
         sequence_buttons = QHBoxLayout()
+        sequence_buttons.setContentsMargins(0, 0, 0, 0)
+        sequence_buttons.setSpacing(scaled(5))
         self.edit_sequence_button = QPushButton("Edit")
         self.change_sequence_button = QPushButton("Change")
         self.edit_sequence_button.clicked.connect(self._focus_sequence)
@@ -460,20 +480,31 @@ class MainWindow(QMainWindow):
         status_group = QGroupBox("Sequence Status")
         status_group.setObjectName("statusGroup")
         status_layout = QVBoxLayout(status_group)
+        status_layout.setContentsMargins(0, scaled(4), 0, scaled(2))
+        status_layout.setSpacing(scaled(4))
         self.run_status_label = QLabel("Sequence Idle")
         self.run_status_label.setObjectName("statusBadge")
+        self.run_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.run_status_label.setProperty("runState", "idle")
         self.run_detail_label = QLabel("")
         self.run_detail_label.setWordWrap(True)
         self.run_detail_label.setObjectName("mutedLabel")
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.progress_bar.setMaximumHeight(scaled(16))
         status_layout.addWidget(self.run_status_label)
         status_layout.addWidget(self.run_detail_label)
         status_layout.addWidget(self.progress_bar)
         layout.addWidget(status_group)
 
+        self.measure_status_label = QLabel(
+            f"0 of {len(self.module_descriptors)} measurement modules enabled"
+        )
+        self.measure_status_label.setObjectName("mutedLabel")
+        self.measure_status_label.setWordWrap(True)
         self.module_monitor_group = ModuleMonitorPanel(panel)
+        self.module_monitor_group.set_summary_widget(self.measure_status_label)
         self.module_monitor_group.activated.connect(
             self._show_module_window
         )
@@ -487,9 +518,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.module_monitor_group, 1)
 
         run_buttons = QHBoxLayout()
+        run_buttons.setContentsMargins(0, scaled(2), 0, 0)
+        run_buttons.setSpacing(scaled(5))
         self.run_button = QPushButton("Run")
+        self.run_button.setObjectName("runPrimaryButton")
         self.pause_button = QPushButton("Pause")
+        self.pause_button.setObjectName("pauseButton")
         self.stop_button = QPushButton("Stop")
+        self.stop_button.setObjectName("stopDangerButton")
         self.run_button.clicked.connect(self._run_sequence)
         self.pause_button.clicked.connect(self._pause_or_resume)
         self.stop_button.clicked.connect(self.runtime.stop_sequence)
@@ -516,7 +552,10 @@ class MainWindow(QMainWindow):
         # 后的右栏接近 400 px，看起来像分隔线失效。
         dock.setMinimumWidth(scaled(190))
         panel = QWidget()
+        panel.setObjectName("commandDockPanel")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(scaled(8), scaled(6), scaled(8), scaled(8))
+        layout.setSpacing(scaled(5))
         # 允许按停靠栏的实际宽度自动换行。横向 Ignored 很关键：否则 QLabel 的
         # 单行 sizeHint 会反过来决定停靠栏最低宽度，使“自动换行”永远没有机会发生。
         self.command_hint = QLabel(
@@ -530,7 +569,10 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.command_hint)
         self.command_tree = QTreeWidget()
+        self.command_tree.setObjectName("commandTree")
         self.command_tree.setHeaderHidden(True)
+        self.command_tree.setIndentation(scaled(14))
+        self.command_tree.setUniformRowHeights(True)
         self.command_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         groups: dict[str, QTreeWidgetItem] = {}
         for spec in COMMAND_SPECS:
@@ -538,6 +580,9 @@ class MainWindow(QMainWindow):
             if group is None:
                 group = QTreeWidgetItem([spec.category])
                 group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                group_font = group.font(0)
+                group_font.setBold(True)
+                group.setFont(0, group_font)
                 groups[spec.category] = group
                 self.command_tree.addTopLevelItem(group)
             child = QTreeWidgetItem([spec.label])
@@ -565,6 +610,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.command_tree, 1)
         dock.setWidget(panel)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        dock.hide()
+        dock.toggleViewAction().triggered.connect(self._on_command_dock_user_toggled)
         self.command_dock = dock
 
     def _set_module_command_palette(
@@ -626,6 +673,9 @@ class MainWindow(QMainWindow):
                 group.flags()
                 & ~Qt.ItemFlag.ItemIsSelectable
             )
+            group_font = group.font(0)
+            group_font.setBold(True)
+            group.setFont(0, group_font)
             for spec in specs:
                 self._module_command_specs[
                     (module_id, spec.command_id)
@@ -688,7 +738,26 @@ class MainWindow(QMainWindow):
         dock.setWidget(self.log_view)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
         dock.hide()
+        dock.visibilityChanged.connect(self._on_log_dock_visibility_changed)
         self.log_dock = dock
+
+    def _build_status_bar_controls(self) -> None:
+        self.log_toggle_button = QToolButton(self)
+        self.log_toggle_button.setObjectName("statusLogToggle")
+        self.log_toggle_button.setCheckable(True)
+        self.log_toggle_button.setAutoRaise(True)
+        self.log_toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.log_toggle_button.setIcon(
+            qta.icon("fa5s.terminal", color="#475467")
+        )
+        self.log_toggle_button.setIconSize(QSize(scaled(13), scaled(13)))
+        self.log_toggle_button.setText("Run Log")
+        self.log_toggle_button.setToolTip("Show or hide the Run Log panel")
+        self.log_toggle_button.clicked.connect(self._toggle_log_dock)
+        self.statusBar().addPermanentWidget(self.log_toggle_button)
+        self._refresh_log_toggle_button()
 
     def _build_actions(self) -> None:
         self.module_manager = ModuleManagerDialog(self.module_descriptors, self)
@@ -712,8 +781,20 @@ class MainWindow(QMainWindow):
         self.alarm_settings_action = QAction("Alarm Notifications…", self)
         self.alarm_settings_action.triggered.connect(self._show_alarm_settings)
         self.log_action = self.log_dock.toggleViewAction()
-        self.system_log_action = QAction("System Log…", self)
+        self._system_log_idle_icon = qta.icon("fa5s.clipboard-list", color=icon_color)
+        self._system_log_recording_icon = qta.icon("fa5s.dot-circle", color="#cf222e")
+        self.system_log_action = QAction(self._system_log_idle_icon, "System Log…", self)
         self.system_log_action.triggered.connect(self._open_system_log)
+        self.commands_toolbar_action = QAction(
+            qta.icon("fa5s.list-ul", color=icon_color),
+            "Commands",
+            self,
+        )
+        self.commands_toolbar_action.setCheckable(True)
+        self.commands_toolbar_action.setChecked(not self.command_dock.isHidden())
+        self.commands_toolbar_action.setToolTip("Show or hide the Sequence Command Bar")
+        self.commands_toolbar_action.triggered.connect(self._on_commands_toolbar_toggled)
+        self.command_dock.visibilityChanged.connect(self._sync_commands_toolbar_state)
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
 
@@ -808,12 +889,32 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Main", self)
         toolbar.setObjectName("mainToolbar")
         toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(scaled(20), scaled(20)))
+        toolbar.setIconSize(QSize(scaled(18), scaled(18)))
         toolbar.addActions([self.new_action, self.open_action, self.save_action])
         toolbar.addSeparator()
         toolbar.addActions([self.run_action, self.pause_action, self.stop_action])
         toolbar.addSeparator()
-        toolbar.addActions([self.graph_action, self.data_browser_action, self.system_log_action, self.modules_action])
+        toolbar.addActions([self.graph_action, self.data_browser_action, self.modules_action])
+        toolbar.addSeparator()
+        toolbar.addAction(self.system_log_action)
+        system_log_btn = toolbar.widgetForAction(self.system_log_action)
+        if isinstance(system_log_btn, QToolButton):
+            system_log_btn.setObjectName("systemLogToolButton")
+            system_log_btn.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            )
+            system_log_btn.setProperty("recording", False)
+            self._system_log_button: QToolButton | None = system_log_btn
+        else:
+            self._system_log_button = None
+        toolbar.addSeparator()
+        toolbar.addAction(self.commands_toolbar_action)
+        commands_btn = toolbar.widgetForAction(self.commands_toolbar_action)
+        if isinstance(commands_btn, QToolButton):
+            commands_btn.setObjectName("commandsToolButton")
+            commands_btn.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            )
         self.addToolBar(toolbar)
 
     def _restore_dialog_geometry(
@@ -981,17 +1082,213 @@ class MainWindow(QMainWindow):
         )
 
     def _apply_style(self) -> None:
-        status_size = scaled_text(21)
-        status_padding = scaled(6)
-        status_radius = scaled(6)
+        status_size = scaled_text(14)
+        status_padding_v = scaled(5)
+        status_padding_h = scaled(8)
+        status_radius = scaled(5)
+        section_size = scaled_text(11)
+        section_margin = scaled(14)
+        first_section_margin = scaled(11)
         tile_title_size = scaled_text(18)
         tile_value_size = scaled_text(27)
         tile_detail_size = scaled_text(16)
         manual_size = scaled_text(30)
         manual_padding = scaled(15)
+        toolbar_pad_v = scaled(3)
+        toolbar_pad_h = scaled(6)
         self.setStyleSheet(
             "QLabel#mutedLabel { color: #59636e; }"
-            f"QLabel#statusBadge {{ font-size: {status_size}px; font-weight: bold; padding: {status_padding}px; border-radius: {status_radius}px; background: rgba(92, 107, 121, 0.15); color: #435260; }}"
+            "QToolBar#mainToolbar {"
+            "  background: #f7f9fb;"
+            "  border: none;"
+            "  border-bottom: 1px solid #d5dce4;"
+            f"  spacing: {scaled(3)}px;"
+            f"  padding: {scaled(2)}px {scaled(6)}px;"
+            "}"
+            "QToolBar#mainToolbar::separator {"
+            "  background: #d0d7de;"
+            "  width: 1px;"
+            f"  margin: {scaled(4)}px {scaled(4)}px;"
+            "}"
+            "QToolBar#mainToolbar QToolButton {"
+            "  border: 1px solid transparent;"
+            f"  border-radius: {scaled(4)}px;"
+            f"  padding: {toolbar_pad_v}px {toolbar_pad_h}px;"
+            "  color: #24292f;"
+            "}"
+            "QToolBar#mainToolbar QToolButton:hover {"
+            "  background: #e9eff6;"
+            "  border-color: #cfd8e3;"
+            "}"
+            "QToolBar#mainToolbar QToolButton:checked {"
+            "  background: #dce9f9;"
+            "  border-color: #8bb4e6;"
+            "  color: #174a8b;"
+            "}"
+            "QToolBar#mainToolbar QToolButton#systemLogToolButton {"
+            "  background: #ffffff;"
+            "  border: 1px solid #d0d7de;"
+            f"  padding: {toolbar_pad_v}px {scaled(8)}px;"
+            "}"
+            "QToolBar#mainToolbar QToolButton#systemLogToolButton:hover {"
+            "  background: #eef3f8;"
+            "  border-color: #aeb9c6;"
+            "}"
+            "QToolBar#mainToolbar QToolButton#systemLogToolButton[recording=\"true\"] {"
+            "  background: #fdecec;"
+            "  border-color: #e4a1a6;"
+            "  color: #b42318;"
+            "  font-weight: 600;"
+            "}"
+            "QDockWidget::title {"
+            "  background: #eef2f6;"
+            "  color: #344054;"
+            "  font-weight: 600;"
+            f"  padding: {scaled(5)}px {scaled(8)}px;"
+            "  border-bottom: 1px solid #d5dce4;"
+            "}"
+            "QWidget#leftDockPanel {"
+            "  background: #f5f7fa;"
+            "}"
+            "QDockWidget#sequenceControlDock QGroupBox {"
+            "  border: none;"
+            "  border-top: 1px solid #d5dce4;"
+            f"  margin-top: {section_margin}px;"
+            f"  padding-top: {scaled(4)}px;"
+            f"  font-size: {section_size}px;"
+            "  font-weight: 600;"
+            "  color: #475467;"
+            "  background: transparent;"
+            "}"
+            "QDockWidget#sequenceControlDock QGroupBox#firstInspectorGroup {"
+            "  border-top: none;"
+            f"  margin-top: {first_section_margin}px;"
+            "}"
+            "QDockWidget#sequenceControlDock QGroupBox::title {"
+            "  subcontrol-origin: margin;"
+            "  subcontrol-position: top left;"
+            "  left: 0px;"
+            "  top: 0px;"
+            "  padding: 0 4px 0 0;"
+            "  background: #f5f7fa;"
+            "}"
+            "QLabel#sidebarField {"
+            "  background: #ffffff;"
+            "  border: 1px solid #d5dce4;"
+            f"  border-radius: {scaled(4)}px;"
+            f"  padding: {scaled(3)}px {scaled(6)}px;"
+            "  color: #1f2328;"
+            "}"
+            "QWidget#leftDockPanel QPushButton {"
+            "  background: #ffffff;"
+            "  color: #24292f;"
+            "  border: 1px solid #c6cfd9;"
+            f"  border-radius: {scaled(4)}px;"
+            f"  padding: {scaled(4)}px {scaled(8)}px;"
+            "}"
+            "QWidget#leftDockPanel QPushButton:hover {"
+            "  background: #eef3f8;"
+            "  border-color: #9fb0c3;"
+            "}"
+            "QWidget#leftDockPanel QPushButton:pressed {"
+            "  background: #e1e8f0;"
+            "}"
+            "QWidget#leftDockPanel QPushButton:disabled {"
+            "  background: #edf0f3;"
+            "  color: #8c959f;"
+            "  border-color: #d8dee6;"
+            "}"
+            "QWidget#leftDockPanel QPushButton#runPrimaryButton:enabled {"
+            "  background: #238636;"
+            "  border-color: #1e732e;"
+            "  color: #ffffff;"
+            "  font-weight: 600;"
+            "}"
+            "QWidget#leftDockPanel QPushButton#runPrimaryButton:hover:enabled {"
+            "  background: #1f7730;"
+            "}"
+            "QWidget#leftDockPanel QPushButton#pauseButton:enabled {"
+            "  background: #fff8e6;"
+            "  border-color: #d49a2a;"
+            "  color: #8a5700;"
+            "  font-weight: 600;"
+            "}"
+            "QWidget#leftDockPanel QPushButton#pauseButton:hover:enabled {"
+            "  background: #ffefc7;"
+            "}"
+            "QWidget#leftDockPanel QPushButton#stopDangerButton:enabled {"
+            "  background: #fdecec;"
+            "  border-color: #d95c65;"
+            "  color: #b42318;"
+            "  font-weight: 600;"
+            "}"
+            "QWidget#leftDockPanel QPushButton#stopDangerButton:hover:enabled {"
+            "  background: #fad8d8;"
+            "}"
+            f"QLabel#statusBadge {{ font-size: {status_size}px; font-weight: bold; padding: {status_padding_v}px {status_padding_h}px; border-radius: {status_radius}px; border: 1px solid #d0d7de; background: #e9eef3; color: #344054; }}"
+            "QLabel#statusBadge[runState=\"running\"] { background: #e8f1fc; border-color: #9dc0ee; color: #175cd3; }"
+            "QLabel#statusBadge[runState=\"paused\"] { background: #fef3c7; border-color: #e4b65c; color: #92400e; }"
+            "QLabel#statusBadge[runState=\"completed\"] { background: #eaf7ef; border-color: #86c99a; color: #1b7a3d; }"
+            "QLabel#statusBadge[runState=\"faulted\"] { background: #fdecec; border-color: #e5989e; color: #b42318; }"
+            "QLabel#statusBadge[runState=\"applying\"] { background: #eef2ff; border-color: #a5b4fc; color: #3730a3; }"
+            "QWidget#leftDockPanel QProgressBar {"
+            "  border: 1px solid #cfd7e0;"
+            f"  border-radius: {scaled(4)}px;"
+            "  background: #ffffff;"
+            "  text-align: center;"
+            "  color: #24292f;"
+            "}"
+            "QWidget#leftDockPanel QProgressBar::chunk {"
+            "  background: #2f6fbb;"
+            f"  border-radius: {scaled(3)}px;"
+            "}"
+            "QWidget#commandDockPanel {"
+            "  background: #f5f7fa;"
+            "}"
+            "QTreeWidget#commandTree {"
+            "  background: #ffffff;"
+            "  border: 1px solid #d5dce4;"
+            f"  border-radius: {scaled(4)}px;"
+            f"  padding: {scaled(2)}px;"
+            "}"
+            "QTreeWidget#commandTree::item {"
+            f"  padding: {scaled(3)}px {scaled(4)}px;"
+            "}"
+            "QTreeWidget#commandTree::item:hover {"
+            "  background: #eef4fb;"
+            "}"
+            "QStatusBar {"
+            "  background: #f5f7fa;"
+            "  border-top: 1px solid #d5dce4;"
+            "  color: #475467;"
+            "}"
+            "QToolButton#statusLogToggle {"
+            "  border: 1px solid transparent;"
+            f"  border-radius: {scaled(4)}px;"
+            f"  padding: {scaled(1)}px {scaled(7)}px;"
+            "  color: #344054;"
+            "}"
+            "QToolButton#statusLogToggle:hover {"
+            "  background: #e6edf5;"
+            "  border-color: #c5d0dc;"
+            "}"
+            "QToolButton#statusLogToggle:checked {"
+            "  background: #dce9f9;"
+            "  border-color: #8bb4e6;"
+            "  color: #174a8b;"
+            "}"
+            "QToolButton#statusLogToggle[logSeverity=\"warning\"] {"
+            "  background: #fff6df;"
+            "  border-color: #dfb457;"
+            "  color: #8a5700;"
+            "  font-weight: 600;"
+            "}"
+            "QToolButton#statusLogToggle[logSeverity=\"error\"] {"
+            "  background: #fdecec;"
+            "  border-color: #e49aa0;"
+            "  color: #b42318;"
+            "  font-weight: 600;"
+            "}"
             f"QLabel#panelTitle {{ font-weight: bold; font-size: {tile_title_size}px; }}"
             f"QLabel#panelValue {{ font-size: {tile_value_size}px; font-weight: bold; }}"
             f"QLabel#panelDetail {{ color: #59636e; font-size: {tile_detail_size}px; }}"
@@ -1800,6 +2097,123 @@ class MainWindow(QMainWindow):
                 path = displayed
         self._show_data_browser(path)
 
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if not self._initializing_ui and watched in {
+            self.sequence_window,
+            self.editor,
+            self.editor.list,
+            self.editor.list.viewport(),
+        }:
+            event_type = event.type()
+            if event_type == QEvent.Type.MouseButtonPress:
+                self._expand_command_dock_for_sequence()
+            elif event_type == QEvent.Type.FocusIn and isinstance(event, QFocusEvent):
+                if event.reason() in {
+                    Qt.FocusReason.MouseFocusReason,
+                    Qt.FocusReason.TabFocusReason,
+                    Qt.FocusReason.BacktabFocusReason,
+                }:
+                    self._expand_command_dock_for_sequence()
+        return super().eventFilter(watched, event)
+
+    def _show_command_dock(self) -> None:
+        was_hidden = self.command_dock.isHidden()
+        self.command_dock.show()
+        if was_hidden and not self._command_dock_sized:
+            self._command_dock_sized = True
+            self.resizeDocks(
+                [self.command_dock],
+                [scaled(268)],
+                Qt.Orientation.Horizontal,
+            )
+
+    def _expand_command_dock_for_sequence(self) -> None:
+        if self._initializing_ui or self._command_dock_user_hidden:
+            return
+        self._show_command_dock()
+
+    def _sync_command_dock_for_subwindow(
+        self,
+        subwindow: QMdiSubWindow | None,
+    ) -> None:
+        if self._initializing_ui:
+            return
+        previous = self._last_active_subwindow
+        self._last_active_subwindow = subwindow
+        if subwindow is self.sequence_window:
+            if previous is not self.sequence_window:
+                self._command_dock_user_hidden = False
+                self._show_command_dock()
+        elif subwindow is not None:
+            self.command_dock.hide()
+
+    def _on_command_dock_user_toggled(self, checked: bool) -> None:
+        if checked:
+            self._command_dock_user_hidden = False
+            self._show_command_dock()
+        else:
+            if self.mdi.activeSubWindow() is self.sequence_window:
+                self._command_dock_user_hidden = True
+            self.command_dock.hide()
+
+    def _on_commands_toolbar_toggled(self, checked: bool) -> None:
+        self._on_command_dock_user_toggled(checked)
+
+    def _sync_commands_toolbar_state(self, visible: bool) -> None:
+        if hasattr(self, "commands_toolbar_action"):
+            self.commands_toolbar_action.setChecked(visible)
+
+    def _toggle_log_dock(self, checked: bool) -> None:
+        self.log_dock.setVisible(checked)
+
+    def _on_log_dock_visibility_changed(self, visible: bool) -> None:
+        if visible:
+            self._unread_log_count = 0
+            self._unread_log_level = ""
+        self._refresh_log_toggle_button()
+
+    def _refresh_log_toggle_button(self) -> None:
+        if not hasattr(self, "log_toggle_button"):
+            return
+        visible = not self.log_dock.isHidden()
+        self.log_toggle_button.blockSignals(True)
+        self.log_toggle_button.setChecked(visible)
+        self.log_toggle_button.blockSignals(False)
+        severity = ""
+        if visible or self._unread_log_count == 0:
+            self.log_toggle_button.setText("Run Log")
+        elif self._unread_log_level == "ERROR":
+            severity = "error"
+            self.log_toggle_button.setText(f"Run Log ({self._unread_log_count} err)")
+        elif self._unread_log_level == "WARNING":
+            severity = "warning"
+            self.log_toggle_button.setText(f"Run Log ({self._unread_log_count} warn)")
+        else:
+            self.log_toggle_button.setText(f"Run Log ({self._unread_log_count})")
+        if self.log_toggle_button.property("logSeverity") != severity:
+            self.log_toggle_button.setProperty("logSeverity", severity)
+            self.log_toggle_button.style().unpolish(self.log_toggle_button)
+            self.log_toggle_button.style().polish(self.log_toggle_button)
+
+    def _set_run_status_badge(self, text: str, state: str) -> None:
+        self.run_status_label.setText(text)
+        if self.run_status_label.property("runState") != state:
+            self.run_status_label.setProperty("runState", state)
+            self.run_status_label.style().unpolish(self.run_status_label)
+            self.run_status_label.style().polish(self.run_status_label)
+
+    def _update_system_log_indicator(self, active: bool) -> None:
+        self.system_log_action.setText(
+            "System Log (Recording)…" if active else "System Log…"
+        )
+        self.system_log_action.setIcon(
+            self._system_log_recording_icon if active else self._system_log_idle_icon
+        )
+        if getattr(self, "_system_log_button", None) is not None:
+            self._system_log_button.setProperty("recording", active)
+            self._system_log_button.style().unpolish(self._system_log_button)
+            self._system_log_button.style().polish(self._system_log_button)
+
     def _focus_sequence(self) -> None:
         self.sequence_window.showNormal()
         # QMdiSubWindow.close() also hides its child widget even when the
@@ -1809,6 +2223,9 @@ class MainWindow(QMainWindow):
         self.sequence_window.setFocus()
         self.mdi.setActiveSubWindow(self.sequence_window)
         self.sequence_window.raise_()
+        if not self._initializing_ui:
+            self._command_dock_user_hidden = False
+            self._show_command_dock()
         QTimer.singleShot(0, self._fit_mdi_windows)
 
     def _run_sequence(self) -> None:
@@ -1914,7 +2331,7 @@ class MainWindow(QMainWindow):
                 )
                 self._set_runtime_editable(False)
                 self.run_button.setEnabled(False)
-                self.run_status_label.setText("Applying Module Settings")
+                self._set_run_status_badge("Applying Module Settings", "applying")
                 self.statusBar().showMessage("Applying module settings before Run...")
                 return
             assert message.clickedButton() is run_button
@@ -1931,7 +2348,7 @@ class MainWindow(QMainWindow):
         self.runtime.run_sequence(target_document, module_settings)
         self._set_runtime_editable(False)
         self.current_run_state = RunState.RUNNING
-        self.run_status_label.setText("Sequence Running")
+        self._set_run_status_badge("Sequence Running", "running")
         self.run_detail_label.setText("Running a snapshot; SEQ edits apply to the next Run")
         self.run_button.setEnabled(False)
         self.pause_button.setEnabled(True)
@@ -1969,7 +2386,7 @@ class MainWindow(QMainWindow):
                 self._handle_progress(message.payload)
             elif message.kind == "system_log_state":
                 self._system_log_state = message.payload
-                self.system_log_action.setText("System Log (Recording)…" if message.payload["active"] else "System Log…")
+                self._update_system_log_indicator(bool(message.payload["active"]))
                 if self.system_log_dialog is not None:
                     self.system_log_dialog.set_state(message.payload)
             elif message.kind == "module_state":
@@ -2085,7 +2502,7 @@ class MainWindow(QMainWindow):
             self._set_runtime_editable(True)
             self._apply_deferred_sequence_module_settings()
             self._update_run_availability()
-            self.run_status_label.setText("Sequence Idle")
+            self._set_run_status_badge("Sequence Idle", "idle")
             self.statusBar().showMessage("Run cancelled because module settings could not be applied", 5000)
             return
         for module_id in self.enabled_modules:
@@ -2200,7 +2617,10 @@ class MainWindow(QMainWindow):
         self.editor.set_running_command(
             "" if progress.state in self.TERMINAL_STATES else progress.command_id
         )
-        self.run_status_label.setText(f"Sequence {progress.state.value.title()}")
+        self._set_run_status_badge(
+            f"Sequence {progress.state.value.title()}",
+            progress.state.value,
+        )
         if self._close_after_stop and progress.state not in self.TERMINAL_STATES:
             self.run_detail_label.setText(
                 "Stopping sequence and waiting for module cleanup before closing"
@@ -2231,6 +2651,13 @@ class MainWindow(QMainWindow):
     def _append_log(self, level: str, source: str, code: str, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_view.appendPlainText(f"{timestamp}  {level:<8}  {source}/{code}  {message}")
+        if self.log_dock.isHidden():
+            self._unread_log_count += 1
+            upper = level.upper()
+            rank = {"ERROR": 3, "WARNING": 2, "INFO": 1}
+            if rank.get(upper, 0) > rank.get(self._unread_log_level, 0):
+                self._unread_log_level = upper
+            self._refresh_log_toggle_button()
 
     def _module_descriptor(self, module_id: str) -> ModuleDescriptor:
         descriptor = next(
