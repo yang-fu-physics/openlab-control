@@ -29,7 +29,7 @@ runs/20260723_120000_nested_scan/
 ```text
 [Header]
 ; OpenLab Control Data File (default extension .dat)
-BYAPP,OpenLab Control,0.20.6
+BYAPP,OpenLab Control,0.20.7
 INFO,...
 
 [Data]

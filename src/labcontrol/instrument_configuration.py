@@ -198,7 +198,7 @@ def _config_field_value(
             if configured.is_absolute()
             else (project_root / configured).resolve()
         )
-        if not resolved.is_relative_to(project_root):
+        if not resolved.is_relative_to(project_root.resolve()):
             raise ConfigurationError(
                 f"{label} must stay inside the project root"
             )

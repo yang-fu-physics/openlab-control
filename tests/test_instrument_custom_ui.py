@@ -297,6 +297,14 @@ class InstrumentCustomManifestAndRuntimeTests(unittest.TestCase):
             )
             self.assertEqual(reloaded[0].extras["pid_file"], expected_path)
 
+            # Equivalent non-canonical roots (e.g. Windows short TEMP paths) must
+            # not make a valid in-project PID file look like a path traversal.
+            reloaded = load_instrument_instances(
+                root / "configs", root / "system_instruments",
+                root / "configs" / "..", (),
+            )
+            self.assertEqual(reloaded[0].extras["pid_file"], expected_path)
+
             # Undeclared field and path traversal are both rejected.
             with self.assertRaises(ConfigurationError):
                 update_instrument_instance_config(
