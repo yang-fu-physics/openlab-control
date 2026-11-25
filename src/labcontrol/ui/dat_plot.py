@@ -61,14 +61,14 @@ ROW_NUMBER_AXIS = "Row Number"
 OVERLAY_LAYOUT = "overlay"
 STACKED_LAYOUT = "stacked"
 PLOT_COLORS = (
-    "#2468b4",
-    "#d1495b",
-    "#2a9d6f",
-    "#8b5cf6",
-    "#e07a1f",
-    "#008c99",
-    "#b3449b",
-    "#6b7280",
+    "#1b5ea8",
+    "#c03546",
+    "#1e8259",
+    "#6f42c1",
+    "#c96a12",
+    "#0b7d8a",
+    "#9c3386",
+    "#4b5563",
 )
 
 
@@ -163,9 +163,11 @@ class DatPlotCanvas(QWidget):
     reloadRequested = Signal()
     saveFormatRequested = Signal()
     reloadFormatRequested = Signal()
+    copyPathRequested = Signal()
     axesChanged = Signal(str, object)
     displayChanged = Signal()
     pointActivated = Signal(object)
+    pointHovered = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -187,6 +189,7 @@ class DatPlotCanvas(QWidget):
         self._drag_origin: QPointF | None = None
         self._drag_current: QPointF | None = None
         self._drag_series: str | None = None
+        self._hover_hit: PlotHit | None = None
         self._timestamp_reference: TimestampReference | None = None
 
     @property
@@ -445,9 +448,15 @@ class DatPlotCanvas(QWidget):
             )
         )
 
+    def _clear_hover(self) -> None:
+        if self._hover_hit is not None:
+            self._hover_hit = None
+            self.pointHovered.emit(None)
+
     def _rebuild_points(self) -> None:
         """从不可变 DAT 文档重建每条曲线的有限数值点。"""
 
+        self._clear_hover()
         if self.document is None:
             self.points_by_series = {}
             self._timestamp_reference = None
@@ -568,19 +577,29 @@ class DatPlotCanvas(QWidget):
     def _plot_rects(self) -> list[tuple[str | None, QRectF]]:
         """按布局和曲线数分配实际绘图面板，所有分图共享 X。"""
 
+        show_overlay_legend = (
+            self.layout_mode == OVERLAY_LAYOUT and len(self.y_columns) > 1
+        )
+        show_vertical_y_title = (
+            self.layout_mode == STACKED_LAYOUT or len(self.y_columns) == 1
+        )
+        left_margin = scaled(98 if show_vertical_y_title else 78)
+        top_margin = scaled(26 if show_overlay_legend else 10)
+        right_margin = scaled(16)
+        bottom_margin = scaled(42)
         frame = QRectF(
             self.rect().adjusted(
-                scaled(84),
-                scaled(38),
-                -scaled(24),
-                -scaled(66),
+                left_margin,
+                top_margin,
+                -right_margin,
+                -bottom_margin,
             )
         )
         if self.layout_mode == OVERLAY_LAYOUT or len(self.y_columns) <= 1:
             series = None if self.layout_mode == OVERLAY_LAYOUT else self.y_column
             return [(series, frame)]
         count = len(self.y_columns)
-        gap = scaled_float(14.0)
+        gap = scaled_float(6.0)
         height = max(1.0, (frame.height() - gap * (count - 1)) / count)
         return [
             (
@@ -677,13 +696,13 @@ class DatPlotCanvas(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#fbfbfc"))
+        painter.fillRect(self.rect(), QColor("#ffffff"))
         if self.document is None:
             painter.setPen(QColor("#657080"))
             painter.drawText(
                 self.rect(),
                 Qt.AlignmentFlag.AlignCenter,
-                "Drop a DAT file here\nor use Open DAT",
+                "Drop a DAT file here\nor use Open",
             )
             return
         if not self.y_columns:
@@ -701,6 +720,7 @@ class DatPlotCanvas(QWidget):
                 plot,
                 ranges,
                 show_x_labels=panel_index == len(panels) - 1,
+                stacked_multi=len(panels) > 1,
             )
             has_points = has_points or ranges is not None
 
@@ -716,38 +736,18 @@ class DatPlotCanvas(QWidget):
                 Qt.AlignmentFlag.AlignCenter,
                 message,
             )
-        elif self.layout_mode == OVERLAY_LAYOUT:
+        elif self.layout_mode == OVERLAY_LAYOUT and len(self.y_columns) > 1:
             self._draw_legend(painter, panels[0][1])
 
-        total = sum(
-            1
-            for points in self.points_by_series.values()
-            for point in points
-            if self._point_is_plottable(point)
-        )
-        footer = panels[-1][1] if panels else self._plot_rect()
-        painter.setPen(QColor("#5e6875"))
-        painter.drawText(
-            QRectF(
-                footer.left(),
-                footer.bottom() + scaled_float(48),
-                footer.width(),
-                scaled_float(18),
-            ),
-            Qt.AlignmentFlag.AlignRight,
-            painter.fontMetrics().elidedText(
-                f"{total:,} plotted points | drag to zoom | double-click a point for details",
-                Qt.TextElideMode.ElideRight,
-                int(footer.width()),
-            ),
-        )
+        if self._hover_hit is not None and self._drag_origin is None and has_points:
+            self._draw_hover(painter, panels, self._hover_hit)
 
         if self._drag_origin is not None and self._drag_current is not None:
             panel = self._panel_for_series(self._drag_series)
             if panel is not None:
                 selection = QRectF(self._drag_origin, self._drag_current).normalized().intersected(panel)
-                painter.setBrush(QColor(36, 104, 180, 35))
-                painter.setPen(QPen(QColor("#2468b4"), 1, Qt.PenStyle.DashLine))
+                painter.setBrush(QColor(27, 94, 168, 32))
+                painter.setPen(QPen(QColor("#1b5ea8"), 1, Qt.PenStyle.DashLine))
                 painter.drawRect(selection)
 
     def _draw_panel(
@@ -758,10 +758,13 @@ class DatPlotCanvas(QWidget):
         ranges: tuple[float, float, float, float] | None,
         *,
         show_x_labels: bool,
+        stacked_multi: bool = False,
     ) -> None:
-        painter.setPen(QPen(QColor("#aeb5bf"), 1))
-        painter.drawRect(plot)
+        painter.fillRect(plot, QColor("#ffffff"))
+        frame_pen = QPen(QColor("#2c3440"), 1.2)
         if ranges is None:
+            painter.setPen(frame_pen)
+            painter.drawRect(plot)
             return
         x_min, x_max, y_min, y_max = ranges
         timestamp_axis = (
@@ -769,6 +772,8 @@ class DatPlotCanvas(QWidget):
             if self.x_scale == LINEAR_SCALE
             else None
         )
+        x_target = max(3, min(7, int(plot.width() // scaled_float(95.0))))
+        y_target = max(3, min(5, int(plot.height() // scaled_float(30.0))))
         if timestamp_axis is not None:
             x_ticks = timestamp_ticks(
                 x_min,
@@ -778,13 +783,21 @@ class DatPlotCanvas(QWidget):
         elif self.x_scale == LOG_SCALE:
             x_ticks = logarithmic_ticks(x_min, x_max)
         else:
-            x_ticks = linear_ticks(x_min, x_max)
+            x_ticks = linear_ticks(x_min, x_max, target_intervals=x_target)
         y_ticks = (
             logarithmic_ticks(y_min, y_max)
             if self.y_scale == LOG_SCALE
-            else linear_ticks(y_min, y_max)
+            else linear_ticks(y_min, y_max, target_intervals=y_target)
         )
 
+        grid_pen = QPen(QColor("#dce2ea"), 1.0, Qt.PenStyle.DashLine)
+        tick_pen = QPen(QColor("#2c3440"), 1.0)
+        tick_len = scaled_float(4.5)
+        tick_font = painter.font()
+        tick_font.setPointSizeF(max(7.0, tick_font.pointSizeF() * 0.92))
+        metrics = painter.fontMetrics()
+
+        last_x_right = -1e9
         for x_value in x_ticks.values:
             fraction = self._axis_fraction(
                 x_value,
@@ -793,10 +806,12 @@ class DatPlotCanvas(QWidget):
                 self.x_scale,
             )
             x = plot.left() + plot.width() * fraction
-            painter.setPen(QPen(QColor("#e1e5ea"), 1))
+            painter.setPen(grid_pen)
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+            painter.setPen(tick_pen)
+            painter.drawLine(QPointF(x, plot.bottom()), QPointF(x, plot.bottom() - tick_len))
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.top() + tick_len))
             if show_x_labels:
-                painter.setPen(QColor("#4c5562"))
                 label = (
                     timestamp_tick_label(
                         x_value,
@@ -811,22 +826,33 @@ class DatPlotCanvas(QWidget):
                         x_ticks.step,
                     )
                 )
-                label_width = scaled_float(
-                    140
-                    if timestamp_axis is not None
-                    else 110
-                )
-                painter.drawText(
-                    QRectF(
-                        x - label_width / 2,
-                        plot.bottom() + scaled_float(4),
-                        label_width,
-                        scaled_float(20),
-                    ),
-                    Qt.AlignmentFlag.AlignHCenter,
-                    label,
-                )
+                painter.save()
+                painter.setFont(tick_font)
+                t_metrics = painter.fontMetrics()
+                text_w = t_metrics.horizontalAdvance(label)
+                left_edge = x - text_w / 2.0
+                if left_edge >= last_x_right + scaled_float(8.0):
+                    painter.setPen(QColor("#2c3440"))
+                    label_width = max(text_w + scaled_float(6.0), scaled_float(40.0))
+                    painter.drawText(
+                        QRectF(
+                            x - label_width / 2.0,
+                            plot.bottom() + scaled_float(3.0),
+                            label_width,
+                            scaled_float(18.0),
+                        ),
+                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                        label,
+                    )
+                    last_x_right = x + text_w / 2.0
+                painter.restore()
 
+        painter.save()
+        painter.setFont(tick_font)
+        t_metrics = painter.fontMetrics()
+        min_y_sep = t_metrics.height() + scaled_float(2.0)
+        y_edge_pad = scaled_float(4.0) if stacked_multi else scaled_float(0.0)
+        y_entries: list[tuple[float, float]] = []
         for y_value in y_ticks.values:
             fraction = self._axis_fraction(
                 y_value,
@@ -835,28 +861,45 @@ class DatPlotCanvas(QWidget):
                 self.y_scale,
             )
             y = plot.bottom() - plot.height() * fraction
-            painter.setPen(QPen(QColor("#e1e5ea"), 1))
-            painter.drawLine(
-                QPointF(plot.left(), y),
-                QPointF(plot.right(), y),
-            )
-            painter.setPen(QColor("#4c5562"))
-            painter.drawText(
-                QRectF(
-                    scaled_float(2),
-                    y - scaled_float(10),
-                    scaled_float(76),
-                    scaled_float(20),
-                ),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                numeric_tick_label(
-                    y_value,
-                    y_ticks.step,
-                ),
-            )
+            y_entries.append((y, y_value))
+        y_entries.sort(key=lambda item: item[0])
+        last_drawn_y = -1e9
+        y_label_left = scaled_float(23.0) if (stacked_multi or len(self.y_columns) == 1) else scaled_float(2.0)
+        y_label_width = max(scaled_float(30.0), plot.left() - y_label_left - scaled_float(6.0))
+        for y, y_value in y_entries:
+            painter.setPen(grid_pen)
+            painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+            painter.setPen(tick_pen)
+            painter.drawLine(QPointF(plot.left(), y), QPointF(plot.left() + tick_len, y))
+            painter.drawLine(QPointF(plot.right(), y), QPointF(plot.right() - tick_len, y))
+            if (
+                y - last_drawn_y >= min_y_sep
+                and y >= plot.top() + y_edge_pad
+                and y <= plot.bottom() - y_edge_pad
+            ):
+                painter.setPen(QColor("#2c3440"))
+                painter.drawText(
+                    QRectF(
+                        y_label_left,
+                        y - scaled_float(10.0),
+                        y_label_width,
+                        scaled_float(20.0),
+                    ),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    numeric_tick_label(
+                        y_value,
+                        y_ticks.step,
+                    ),
+                )
+                last_drawn_y = y
+        painter.restore()
 
         if show_x_labels:
-            painter.setPen(QColor("#26313f"))
+            painter.save()
+            title_font = painter.font()
+            title_font.setWeight(title_font.Weight.DemiBold)
+            painter.setFont(title_font)
+            painter.setPen(QColor("#1f2630"))
             x_axis_title = self.x_label
             if timestamp_axis is not None:
                 x_axis_title = timestamp_axis_title(
@@ -868,9 +911,9 @@ class DatPlotCanvas(QWidget):
             painter.drawText(
                 QRectF(
                     plot.left(),
-                    plot.bottom() + scaled_float(27),
+                    plot.bottom() + scaled_float(22.0),
                     plot.width(),
-                    scaled_float(20),
+                    scaled_float(18.0),
                 ),
                 Qt.AlignmentFlag.AlignCenter,
                 x_axis_title
@@ -880,19 +923,38 @@ class DatPlotCanvas(QWidget):
                     else ""
                 ),
             )
-        if self.layout_mode == STACKED_LAYOUT and series is not None:
-            color = QColor(PLOT_COLORS[self.y_columns.index(series) % len(PLOT_COLORS)])
-            painter.setPen(QPen(color, 1.5))
+            painter.restore()
+
+        y_title_series = series if (self.layout_mode == STACKED_LAYOUT and series is not None) else (
+            self.y_columns[0] if len(self.y_columns) == 1 else None
+        )
+        if y_title_series is not None:
+            color = QColor(PLOT_COLORS[self.y_columns.index(y_title_series) % len(PLOT_COLORS)])
+            y_title_text = y_title_series + (" [Log]" if self.y_scale == LOG_SCALE else "")
+            painter.save()
+            title_font = painter.font()
+            title_font.setPointSizeF(max(7.5, title_font.pointSizeF() * 0.94))
+            title_font.setWeight(title_font.Weight.DemiBold)
+            painter.setFont(title_font)
+            painter.setPen(color)
+            elided = painter.fontMetrics().elidedText(
+                y_title_text,
+                Qt.TextElideMode.ElideRight,
+                max(20, int(plot.height() - scaled_float(6.0))),
+            )
+            painter.translate(scaled_float(13.0), plot.center().y())
+            painter.rotate(-90.0)
             painter.drawText(
                 QRectF(
-                    plot.left() + scaled_float(7),
-                    plot.top() + scaled_float(4),
-                    plot.width() - scaled_float(14),
-                    scaled_float(20),
+                    -plot.height() / 2.0,
+                    -scaled_float(10.0),
+                    plot.height(),
+                    scaled_float(20.0),
                 ),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-                series + (" [Log]" if self.y_scale == LOG_SCALE else ""),
+                Qt.AlignmentFlag.AlignCenter,
+                elided,
             )
+            painter.restore()
 
         draw_series = self.y_columns if self.layout_mode == OVERLAY_LAYOUT else (series,)
         for name in draw_series:
@@ -903,6 +965,45 @@ class DatPlotCanvas(QWidget):
                 continue
             color = QColor(PLOT_COLORS[self.y_columns.index(name) % len(PLOT_COLORS)])
             self._draw_series(painter, points, color, plot, ranges)
+
+        # Draw crisp 4-sided scientific axis box last so edges remain sharp over curves.
+        painter.setPen(frame_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(plot)
+
+    def _draw_hover(
+        self,
+        painter: QPainter,
+        panels: list[tuple[str | None, QRectF]],
+        hit: PlotHit,
+    ) -> None:
+        guide_pen = QPen(QColor("#64748b"), 1.0, Qt.PenStyle.DotLine)
+        for series, plot in panels:
+            ranges = self._ranges(series)
+            if ranges is None:
+                continue
+            x_min, x_max, _, _ = ranges
+            if self.x_scale == LOG_SCALE and (hit.x <= 0 or x_min <= 0):
+                continue
+            frac = self._axis_fraction(hit.x, x_min, x_max, self.x_scale)
+            if 0.0 <= frac <= 1.0:
+                x = plot.left() + plot.width() * frac
+                painter.save()
+                painter.setPen(guide_pen)
+                painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+                painter.restore()
+            if (
+                (self.layout_mode == OVERLAY_LAYOUT or series == hit.series)
+                and hit.series in self.y_columns
+            ):
+                screen = self._screen_point(hit.x, hit.y, plot, ranges)
+                if screen is not None and plot.contains(screen):
+                    color = QColor(PLOT_COLORS[self.y_columns.index(hit.series) % len(PLOT_COLORS)])
+                    painter.save()
+                    painter.setPen(QPen(color, 2.0))
+                    painter.setBrush(QColor("#ffffff"))
+                    painter.drawEllipse(screen, scaled_float(4.5), scaled_float(4.5))
+                    painter.restore()
 
     def _draw_series(
         self,
@@ -932,7 +1033,7 @@ class DatPlotCanvas(QWidget):
                 segment_started = True
         painter.save()
         painter.setClipRect(plot)
-        painter.setPen(QPen(color, 1.45))
+        painter.setPen(QPen(color, 1.65))
         painter.drawPath(path)
         if len(points) <= 3_000:
             painter.setBrush(color)
@@ -940,16 +1041,16 @@ class DatPlotCanvas(QWidget):
             for point in points:
                 screen = self._screen_point(point.x, point.y, plot, ranges)
                 if screen is not None:
-                    painter.drawEllipse(screen, scaled_float(2.1), scaled_float(2.1))
+                    painter.drawEllipse(screen, scaled_float(2.3), scaled_float(2.3))
         painter.restore()
 
     def _draw_legend(self, painter: QPainter, plot: QRectF) -> None:
-        cursor_x = plot.left() + scaled_float(8)
-        y = max(scaled_float(3.0), plot.top() - scaled_float(27))
+        cursor_x = plot.left() + scaled_float(4)
+        y = max(scaled_float(2.0), plot.top() - scaled_float(22))
         for index, name in enumerate(self.y_columns):
             width = max(
-                scaled_float(82.0),
-                painter.fontMetrics().horizontalAdvance(name) + scaled_float(34.0),
+                scaled_float(76.0),
+                painter.fontMetrics().horizontalAdvance(name) + scaled_float(30.0),
             )
             if cursor_x + width > plot.right():
                 break
@@ -957,17 +1058,17 @@ class DatPlotCanvas(QWidget):
             painter.setPen(QPen(color, 2.5))
             painter.drawLine(
                 QPointF(cursor_x, y + scaled_float(9)),
-                QPointF(cursor_x + scaled_float(18), y + scaled_float(9)),
+                QPointF(cursor_x + scaled_float(16), y + scaled_float(9)),
             )
-            painter.setPen(QColor("#26313f"))
+            painter.setPen(QColor("#1f2630"))
             painter.drawText(
                 QRectF(
-                    cursor_x + scaled_float(23),
+                    cursor_x + scaled_float(20),
                     y,
-                    width - scaled_float(23),
-                    scaled_float(20),
+                    width - scaled_float(20),
+                    scaled_float(18),
                 ),
-                Qt.AlignmentFlag.AlignLeft,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 name,
             )
             cursor_x += width
@@ -983,6 +1084,7 @@ class DatPlotCanvas(QWidget):
 
         panel = self._panel_at(event.position())
         if event.button() == Qt.MouseButton.LeftButton and panel is not None:
+            self._clear_hover()
             self._drag_series, _ = panel
             self._drag_origin = event.position()
             self._drag_current = event.position()
@@ -1002,7 +1104,18 @@ class DatPlotCanvas(QWidget):
                 self.update()
             event.accept()
             return
+        hit = self._nearest_point(event.position()) if self.document is not None else None
+        if hit != self._hover_hit:
+            self._hover_hit = hit
+            self.pointHovered.emit(hit)
+            self.update()
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self._hover_hit is not None:
+            self._clear_hover()
+            self.update()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """完成足够大的框选，写入共享 X 和对应面板的 Y 范围。"""
@@ -1088,12 +1201,15 @@ class DatPlotCanvas(QWidget):
         menu = QMenu(self)
         open_action = menu.addAction("Open DAT...")
         reload_action = menu.addAction("Reload DAT")
+        copy_path_action = menu.addAction("Copy File Path")
         menu.addSeparator()
         save_action = menu.addAction("Save Plot Format")
         load_action = menu.addAction("Reload Plot Format")
         reset_action = menu.addAction("Reset Zoom")
         open_action.triggered.connect(lambda checked=False: self.openRequested.emit())
         reload_action.triggered.connect(lambda checked=False: self.reloadRequested.emit())
+        copy_path_action.triggered.connect(lambda checked=False: self.copyPathRequested.emit())
+        copy_path_action.setEnabled(self.document is not None)
         save_action.triggered.connect(lambda checked=False: self.saveFormatRequested.emit())
         load_action.triggered.connect(lambda checked=False: self.reloadFormatRequested.emit())
         reset_action.triggered.connect(lambda checked=False: self.reset_zoom())

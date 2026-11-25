@@ -205,6 +205,7 @@ class DataBrowserTests(unittest.TestCase):
 
             menu = browser.canvas.build_context_menu()
             labels = [action.text() for action in menu.actions()]
+            self.assertIn("Copy File Path", labels)
             self.assertIn("Select Y Series...", labels)
             self.assertIn("X Scale", labels)
             self.assertIn("Y Scale", labels)
@@ -331,6 +332,51 @@ class DataBrowserTests(unittest.TestCase):
                 settings.stacked_y_ranges,
             )
             restored.close()
+
+    def test_hover_updates_single_line_status_and_clears_on_leave(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "hover.dat"
+            path.write_text(
+                "[Data]\nTemp,R1(Ohm),R2(Ohm),R3(Ohm),R4(Ohm)\n"
+                "292,0.01322,0.00940,0.03060,0.01800\n"
+                "296,0.01328,0.00946,0.03075,0.01806\n"
+                "300,0.01334,0.00954,0.03100,0.01814\n",
+                encoding="utf-8",
+            )
+            browser = DatBrowserWidget(Path(temp))
+            browser.resize(900, 640)
+            browser.show()
+            self.application.processEvents()
+            self.assertTrue(browser.load_path(path))
+            self.assertTrue(browser.path_label.isHidden())
+            self.assertFalse(browser.status_label.wordWrap())
+            self.assertTrue(
+                browser.canvas.set_axes(
+                    "Temp",
+                    ("R1(Ohm)", "R2(Ohm)", "R3(Ohm)", "R4(Ohm)"),
+                )
+            )
+            self.assertTrue(browser.canvas.set_layout("stacked"))
+            browser.canvas.repaint()
+            self.application.processEvents()
+
+            panels = browser.canvas._plot_rects()
+            self.assertEqual(len(panels), 4)
+            r1_rect = panels[0][1]
+            ranges = browser.canvas._ranges("R1(Ohm)")
+            self.assertIsNotNone(ranges)
+            pt = browser.canvas.points_by_series["R1(Ohm)"][1]
+            screen = browser.canvas._screen_point(pt.x, pt.y, r1_rect, ranges)
+            self.assertIsNotNone(screen)
+            QTest.mouseMove(browser.canvas, screen.toPoint())
+            self.application.processEvents()
+            self.assertIn("R1(Ohm) = 0.01328", browser.status_label.text())
+            self.assertIn("Temp = 296", browser.status_label.text())
+
+            browser.canvas.leaveEvent(None)
+            self.application.processEvents()
+            self.assertNotIn("R1(Ohm) = 0.01328", browser.status_label.text())
+            browser.close()
 
 
 if __name__ == "__main__":

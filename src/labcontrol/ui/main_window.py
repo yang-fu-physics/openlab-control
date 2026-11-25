@@ -376,7 +376,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self.mdi = QMdiArea()
-        self.mdi.setBackground(QColor("#dfe4ea"))
+        self.mdi.setBackground(QColor("#96a0aa"))
         self.setCentralWidget(self.mdi)
 
         self.editor = SequenceEditorWidget(self.document)
@@ -802,6 +802,16 @@ class MainWindow(QMainWindow):
             lambda: self.runtime.inject_event(Severity.ERROR, "MANUAL_ERROR", "Manually injected simulation error")
         )
         resolve_action.triggered.connect(lambda: self._resolve_simulated_events())
+        self.window_menu = menu.addMenu("Window")
+        self.tile_windows_action = self.window_menu.addAction("Tile Windows")
+        self.tile_windows_action.triggered.connect(self.mdi.tileSubWindows)
+        self.cascade_windows_action = self.window_menu.addAction("Cascade Windows")
+        self.cascade_windows_action.triggered.connect(self.mdi.cascadeSubWindows)
+        self.window_menu.addSeparator()
+        focus_seq_action = self.window_menu.addAction("Focus Sequence")
+        focus_seq_action.triggered.connect(self._focus_sequence)
+        new_browser_action = self.window_menu.addAction("New Data Browser")
+        new_browser_action.triggered.connect(lambda checked=False: self._show_data_browser())
         help_menu = menu.addMenu("Help")
         help_menu.addAction(self.about_action)
 
