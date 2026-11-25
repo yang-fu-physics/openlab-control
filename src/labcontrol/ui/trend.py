@@ -45,6 +45,9 @@ class TrendSeriesMeta:
     decimals: int | None = None
     color: str = "#2d6cdf"
     default_visible: bool = True
+    instrument_id: str = ""
+    metric_key: str | None = None
+    display_name: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,7 +141,9 @@ class TrendCanvas(QWidget):
         self.series_meta: dict[str, TrendSeriesMeta] = {}
         self.selected_keys: set[str] = set()
         self._base_name_owner: dict[str, str] = {}
-        self._clock_offset: float | None = None
+        # 固定以初始化时的当前墙钟与单调钟之差换算采样时刻，避免延迟快照被错标为接收时刻
+        # 或后续消息改动历史点显示时间。
+        self._clock_offset: float = time.time() - time.monotonic()
         self._pinned_timestamp: float | None = None
         self._pinned_primary_key: str | None = None
         self._current_inspection: TrendInspection | None = None
@@ -169,6 +174,9 @@ class TrendCanvas(QWidget):
         unit: str = "",
         decimals: int | None = None,
         default_visible: bool = True,
+        instrument_id: str = "",
+        metric_key: str | None = None,
+        display_name: str = "",
     ) -> bool:
         existing = self.series_meta.get(key)
         if existing is not None:
@@ -185,17 +193,41 @@ class TrendCanvas(QWidget):
             decimals=decimals,
             color=color,
             default_visible=default_visible,
+            instrument_id=instrument_id,
+            metric_key=metric_key,
+            display_name=display_name or label,
         )
         if default_visible:
             self.selected_keys.add(key)
+        if metric_key is not None:
+            self._disambiguate_metric_labels(instrument_id, display_name or label)
         return True
+
+    def _disambiguate_metric_labels(
+        self,
+        instrument_id: str,
+        metric_display_name: str,
+    ) -> None:
+        """同一物理仪表下不同 metric_key 共用相同 display_name 时，补充 [metric_key] 区分。"""
+
+        matches = [
+            meta
+            for meta in self.series_meta.values()
+            if meta.metric_key is not None
+            and meta.instrument_id == instrument_id
+            and meta.display_name == metric_display_name
+        ]
+        if len(matches) < 2:
+            return
+        for meta in matches:
+            base = meta.label.split(" · ", 1)[0]
+            meta.label = f"{base} · {meta.display_name} [{meta.metric_key}]"
 
     def add_snapshots(self, snapshots: dict[str, InstrumentSnapshot]) -> None:
         """追加有数值的仪表主读数与辅助读数快照，并合并安排下一次可见重绘。"""
 
         appended = False
         catalog_changed = False
-        latest_monotonic: float | None = None
         for snapshot in snapshots.values():
             if snapshot.kind not in (
                 InstrumentKind.TEMPERATURE,
@@ -210,6 +242,7 @@ class TrendCanvas(QWidget):
                     base_name,
                     unit=snapshot.unit,
                     default_visible=True,
+                    instrument_id=snapshot.instrument_id,
                 ):
                     catalog_changed = True
                 # 使用读数本身的单调时间，避免 GUI 消息排队时把延迟错误画成采样时间。
@@ -217,55 +250,44 @@ class TrendCanvas(QWidget):
                     (snapshot.timestamp, float(snapshot.current))
                 )
                 appended = True
-                latest_monotonic = (
-                    snapshot.timestamp
-                    if latest_monotonic is None
-                    else max(latest_monotonic, snapshot.timestamp)
-                )
             if len(snapshot.controls) > 1:
                 for panel_id, control in snapshot.controls.items():
                     if not _is_finite_number(control.current):
                         continue
-                    key = f"{base_name} · {panel_id}"
+                    key = f"{snapshot.instrument_id}.control:{panel_id}"
+                    label = f"{base_name} · {panel_id}"
                     if self._register_series(
                         key,
-                        key,
+                        label,
                         unit=snapshot.unit,
                         default_visible=False,
+                        instrument_id=snapshot.instrument_id,
                     ):
                         catalog_changed = True
                     self.history[key].append(
                         (snapshot.timestamp, float(control.current))
                     )
                     appended = True
-                    latest_monotonic = (
-                        snapshot.timestamp
-                        if latest_monotonic is None
-                        else max(latest_monotonic, snapshot.timestamp)
-                    )
-            for metric in snapshot.metrics.values():
+            for metric_key, metric in snapshot.metrics.items():
                 if not _is_finite_number(metric.value):
                     continue
-                key = f"{base_name} · {metric.display_name}"
+                key = f"{snapshot.instrument_id}.metric:{metric_key}"
+                label = f"{base_name} · {metric.display_name}"
                 if self._register_series(
                     key,
-                    key,
+                    label,
                     unit=metric.unit,
                     decimals=metric.decimals,
                     default_visible=False,
+                    instrument_id=snapshot.instrument_id,
+                    metric_key=metric_key,
+                    display_name=metric.display_name,
                 ):
                     catalog_changed = True
                 self.history[key].append(
                     (snapshot.timestamp, float(metric.value))
                 )
                 appended = True
-                latest_monotonic = (
-                    snapshot.timestamp
-                    if latest_monotonic is None
-                    else max(latest_monotonic, snapshot.timestamp)
-                )
-        if latest_monotonic is not None:
-            self._clock_offset = time.time() - latest_monotonic
         if catalog_changed:
             self.seriesCatalogChanged.emit()
         if appended:
@@ -349,9 +371,10 @@ class TrendCanvas(QWidget):
         super().hideEvent(event)
 
     def _format_wall_time(self, monotonic_ts: float) -> str:
-        if self._clock_offset is None:
+        wall_ts = monotonic_ts + self._clock_offset
+        if wall_ts <= 0:
             return f"t={monotonic_ts:.1f} s"
-        return datetime.fromtimestamp(monotonic_ts + self._clock_offset).strftime(
+        return datetime.fromtimestamp(wall_ts).strftime(
             "%H:%M:%S.%f"
         )[:-5]
 
@@ -924,7 +947,11 @@ class TrendDialog(QDialog):
 
     def _sync_trace_controls(self) -> None:
         for key, meta in self.canvas.series_meta.items():
-            if key in self.trace_checkboxes:
+            display_label = f"{meta.label} ({meta.unit})" if meta.unit else meta.label
+            existing_box = self.trace_checkboxes.get(key)
+            if existing_box is not None:
+                if existing_box.text() != display_label:
+                    existing_box.setText(display_label)
                 continue
             row_widget = QWidget()
             row_layout = QVBoxLayout(row_widget)
@@ -939,7 +966,6 @@ class TrendDialog(QDialog):
             swatch.setStyleSheet(
                 f"background-color: {meta.color}; border-radius: 2px;"
             )
-            display_label = f"{meta.label} ({meta.unit})" if meta.unit else meta.label
             box = QCheckBox(display_label)
             box.setChecked(key in self.canvas.selected_keys)
             box.toggled.connect(

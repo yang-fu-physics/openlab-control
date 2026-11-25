@@ -593,25 +593,27 @@ class InstrumentPanelTests(unittest.TestCase):
                 dialog.add_snapshots({"temperature": temp_snap, "field": field_snap})
 
             self.app.processEvents()
-            # 主读数与数值型辅助指标可选，非数值文本指标（Heater Range）不进入曲线列表。
+            # 主读数与数值型辅助指标可选（辅助指标用稳定键），非数值文本指标不进入曲线列表。
+            ch_b_key = "temperature.metric:ch_b"
             self.assertIn("Temperature", dialog.trace_checkboxes)
             self.assertIn("Field", dialog.trace_checkboxes)
-            self.assertIn("Temperature · CH B", dialog.trace_checkboxes)
-            self.assertNotIn("Temperature · Heater Range", dialog.trace_checkboxes)
+            self.assertIn(ch_b_key, dialog.trace_checkboxes)
+            self.assertNotIn("temperature.metric:heater_range", dialog.trace_checkboxes)
             self.assertTrue(dialog.trace_checkboxes["Temperature"].isChecked())
             self.assertTrue(dialog.trace_checkboxes["Field"].isChecked())
-            self.assertFalse(dialog.trace_checkboxes["Temperature · CH B"].isChecked())
+            self.assertFalse(dialog.trace_checkboxes[ch_b_key].isChecked())
             self.assertIn("K", dialog.trace_checkboxes["Temperature"].text())
+            self.assertIn("CH B", dialog.trace_checkboxes[ch_b_key].text())
             self.assertIn("Oe", dialog.trace_checkboxes["Field"].text())
 
             # 勾选辅助曲线、取消 Field 后，固定配色不变且仅绘制当前选中曲线。
             field_color = dialog.canvas.series_meta["Field"].color
-            dialog.trace_checkboxes["Temperature · CH B"].setChecked(True)
+            dialog.trace_checkboxes[ch_b_key].setChecked(True)
             dialog.trace_checkboxes["Field"].setChecked(False)
             self.assertEqual(dialog.canvas.series_meta["Field"].color, field_color)
             self.assertEqual(
                 [key for key, _ in dialog.canvas.visible_series()],
-                ["Temperature", "Temperature · CH B"],
+                ["Temperature", ch_b_key],
             )
 
             # 在画布中间点击拾取精确数值，返回所有可见曲线的该时刻值并刷新底部读数栏。
@@ -622,9 +624,9 @@ class InstrumentPanelTests(unittest.TestCase):
             self.assertIsNotNone(inspection)
             assert inspection is not None
             by_key = {entry.key: entry for entry in inspection.entries}
-            self.assertEqual(set(by_key), {"Temperature", "Temperature · CH B"})
+            self.assertEqual(set(by_key), {"Temperature", ch_b_key})
             self.assertAlmostEqual(by_key["Temperature"].value, 5.0)
-            self.assertAlmostEqual(by_key["Temperature · CH B"].value, 44.0)
+            self.assertAlmostEqual(by_key[ch_b_key].value, 44.0)
             self.assertIn("Temperature", dialog.inspection_label.text())
             self.assertIn("44.00 K", dialog.inspection_label.text())
             self.assertTrue(dialog.clear_inspection_button.isEnabled())
@@ -635,6 +637,108 @@ class InstrumentPanelTests(unittest.TestCase):
             self.assertFalse(dialog.clear_inspection_button.isEnabled())
         finally:
             dialog.close()
+
+    def test_live_trend_keeps_sampling_wall_time_stable_and_separates_same_name_metrics(
+        self,
+    ) -> None:
+        from datetime import datetime
+
+        wall_base = 1_700_000_000.0
+        now_state = {"wall": wall_base + 100.0, "mono": 100.0}
+        with (
+            patch("labcontrol.ui.trend.time.time", side_effect=lambda: now_state["wall"]),
+            patch("labcontrol.ui.trend.time.monotonic", side_effect=lambda: now_state["mono"]),
+        ):
+            dialog = TrendDialog()
+            try:
+                # 1) 延迟 10 秒到达的快照，其墙钟时间应对应采样时刻（90 s），而非接收时刻（100 s），
+                #    且后续新快照到达后同一历史点显示时间不能漂移。
+                delayed_ts = 90.0
+                dialog.add_snapshots(
+                    {
+                        "temperature": InstrumentSnapshot(
+                            instrument_id="temperature",
+                            display_name="Temperature",
+                            kind=InstrumentKind.TEMPERATURE,
+                            timestamp=delayed_ts,
+                            unit="K",
+                            current=4.2,
+                            metrics={
+                                "sensor_a": InstrumentMetric(
+                                    display_name="Sensor",
+                                    value=4.2,
+                                    unit="K",
+                                    decimals=2,
+                                ),
+                                "sensor_b": InstrumentMetric(
+                                    display_name="Sensor",
+                                    value=42.0,
+                                    unit="K",
+                                    decimals=2,
+                                ),
+                            },
+                        )
+                    }
+                )
+                expected_delayed_time = datetime.fromtimestamp(
+                    wall_base + delayed_ts
+                ).strftime("%H:%M:%S.%f")[:-5]
+                self.assertEqual(
+                    dialog.canvas._format_wall_time(delayed_ts),
+                    expected_delayed_time,
+                )
+
+                now_state["wall"] = wall_base + 105.0
+                now_state["mono"] = 105.0
+                dialog.add_snapshots(
+                    {
+                        "temperature": InstrumentSnapshot(
+                            instrument_id="temperature",
+                            display_name="Temperature",
+                            kind=InstrumentKind.TEMPERATURE,
+                            timestamp=105.0,
+                            unit="K",
+                            current=4.3,
+                            metrics={
+                                "sensor_a": InstrumentMetric(
+                                    display_name="Sensor",
+                                    value=4.3,
+                                    unit="K",
+                                    decimals=2,
+                                ),
+                                "sensor_b": InstrumentMetric(
+                                    display_name="Sensor",
+                                    value=43.0,
+                                    unit="K",
+                                    decimals=2,
+                                ),
+                            },
+                        )
+                    }
+                )
+                # 历史点显示时间保持不变。
+                self.assertEqual(
+                    dialog.canvas._format_wall_time(delayed_ts),
+                    expected_delayed_time,
+                )
+
+                # 2) 同名辅助读数按稳定 metric_key 分离成独立历史与独立复选框，并自动带键名区分。
+                key_a = "temperature.metric:sensor_a"
+                key_b = "temperature.metric:sensor_b"
+                self.assertIn(key_a, dialog.trace_checkboxes)
+                self.assertIn(key_b, dialog.trace_checkboxes)
+                self.assertEqual(
+                    [value for _, value in dialog.canvas.history[key_a]],
+                    [4.2, 4.3],
+                )
+                self.assertEqual(
+                    [value for _, value in dialog.canvas.history[key_b]],
+                    [42.0, 43.0],
+                )
+                self.assertIn("[sensor_a]", dialog.trace_checkboxes[key_a].text())
+                self.assertIn("[sensor_b]", dialog.trace_checkboxes[key_b].text())
+            finally:
+                dialog.close()
 
     def test_tile_distinguishes_reconnecting_and_faulted_states(
         self,
