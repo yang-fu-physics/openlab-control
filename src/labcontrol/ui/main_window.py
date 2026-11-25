@@ -13,8 +13,17 @@ from datetime import datetime
 from pathlib import Path
 
 import qtawesome as qta
-from PySide6.QtCore import QEvent, QObject, QSize, QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QColor, QDragEnterEvent, QDropEvent, QIcon, QResizeEvent
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, QTimer, Qt, Signal
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QGuiApplication,
+    QIcon,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -114,6 +123,78 @@ from .window_sizing import (
     fit_initial_window_width,
     preserve_restored_window_size,
 )
+
+
+class _DataBrowserMdiSubWindow(QMdiSubWindow):
+    """中央 MDI 区内的数据浏览子窗口；将标题栏拖出中央区域后自动弹出为独立窗口。"""
+
+    detachRequested = Signal(QPoint)
+
+    def __init__(self, mdi: QMdiArea, detach_margin: int) -> None:
+        super().__init__()
+        self._mdi = mdi
+        self._detach_margin = max(0, int(detach_margin))
+        self._drag_start_pos: QPoint | None = None
+        self._drag_start_size: QSize | None = None
+        self._pressed_title_bar = False
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        self._drag_start_pos = None
+        self._drag_start_size = None
+        self._pressed_title_bar = False
+        if event.button() == Qt.MouseButton.LeftButton and not self.isMaximized():
+            self._drag_start_pos = QPoint(self.pos())
+            self._drag_start_size = QSize(self.size())
+            child = self.widget()
+            pos = event.position().toPoint()
+            if child is not None:
+                child_rect = child.geometry()
+                left_bound = child_rect.left() + scaled(24)
+                right_bound = max(left_bound, child_rect.right() - scaled(96))
+                self._pressed_title_bar = (
+                    pos.y() < child_rect.top()
+                    and left_bound <= pos.x() <= right_bound
+                )
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        start_pos = self._drag_start_pos
+        start_size = self._drag_start_size
+        pressed_title_bar = self._pressed_title_bar
+        self._drag_start_pos = None
+        self._drag_start_size = None
+        self._pressed_title_bar = False
+        super().mouseReleaseEvent(event)
+        if (
+            event.button() != Qt.MouseButton.LeftButton
+            or start_pos is None
+            or start_size is None
+            or self.isMaximized()
+        ):
+            return
+        # 拉边缩放会改变窗口尺寸，绝不误触发弹出；仅在标题栏拖动并越出中央 MDI 边界时弹出。
+        if self.size() != start_size:
+            return
+        if self.pos() == start_pos and not pressed_title_bar:
+            return
+        global_pos = event.globalPosition().toPoint()
+        if self._should_detach_at(global_pos):
+            QTimer.singleShot(
+                0,
+                lambda point=QPoint(global_pos): self.detachRequested.emit(point),
+            )
+
+    def _should_detach_at(self, global_pos: QPoint) -> bool:
+        viewport = self._mdi.viewport()
+        top_left = viewport.mapToGlobal(QPoint(0, 0))
+        mdi_rect = QRect(top_left, viewport.size())
+        expanded = mdi_rect.adjusted(
+            -self._detach_margin,
+            -self._detach_margin,
+            self._detach_margin,
+            self._detach_margin,
+        )
+        return not expanded.contains(global_pos)
 
 
 class MainWindow(QMainWindow):
@@ -277,7 +358,7 @@ class MainWindow(QMainWindow):
         self.sequence_window.show()
 
         self.data_browser_windows: dict[
-            QMainWindow,
+            QMdiSubWindow | QMainWindow,
             DatBrowserWidget,
         ] = {}
 
@@ -771,13 +852,25 @@ class MainWindow(QMainWindow):
             "sequence",
             self.sequence_window.geometry(),
         )
-        if self.data_browser_windows:
-            data_window = next(
-                reversed(self.data_browser_windows)
-            )
+        docked_browsers = [
+            window
+            for window in self.data_browser_windows
+            if isinstance(window, QMdiSubWindow)
+        ]
+        if docked_browsers:
             store.set_rect(
                 "data_browser",
-                data_window.geometry(),
+                docked_browsers[-1].geometry(),
+            )
+        floating_browsers = [
+            window
+            for window in self.data_browser_windows
+            if isinstance(window, QMainWindow)
+        ]
+        if floating_browsers:
+            store.set_geometry(
+                "data_browser_floating",
+                floating_browsers[-1].saveGeometry(),
             )
         store.set_geometry(
             "live_trend",
@@ -2877,53 +2970,220 @@ class MainWindow(QMainWindow):
     def _show_data_browser(
         self,
         path: str | Path | None = None,
-    ) -> QMainWindow:
+    ) -> QMdiSubWindow:
         browser = DatBrowserWidget(self.config.project_root)
-        data_window = QMainWindow(self, Qt.WindowType.Window)
-        data_window.setCentralWidget(browser)
-        data_window.setWindowTitle("Data Browser")
+        browser.fileChanged.connect(
+            lambda changed_path, widget=browser: (
+                self._data_browser_file_changed_for_browser(
+                    widget,
+                    changed_path,
+                )
+            )
+        )
+        browser.detachToggled.connect(
+            lambda widget=browser: self._toggle_data_browser_detached(widget)
+        )
+        data_window = self._create_mdi_data_browser_window(
+            browser,
+            title="Data Browser",
+            restore_rect=True,
+        )
+        if path is not None:
+            browser.load_path(path, show_errors=True)
+        return data_window
+
+    def _create_mdi_data_browser_window(
+        self,
+        browser: DatBrowserWidget,
+        *,
+        title: str,
+        size: QSize | None = None,
+        restore_rect: bool = False,
+    ) -> _DataBrowserMdiSubWindow:
+        docked_count = sum(
+            isinstance(window, QMdiSubWindow)
+            for window in self.data_browser_windows
+        )
+        data_window = _DataBrowserMdiSubWindow(self.mdi, scaled(20))
+        data_window.setWidget(browser)
+        data_window.setWindowTitle(title)
         data_window.setAttribute(
             Qt.WidgetAttribute.WA_DeleteOnClose,
             True,
         )
-        data_window.resize(scaled(900), scaled(620))
+        self.mdi.addSubWindow(data_window)
+        if size is not None:
+            data_window.resize(size)
+        else:
+            data_window.resize(scaled(900), scaled(620))
         store = self.ui_preference_store
         if (
-            store is not None
+            restore_rect
+            and store is not None
             and self.ui_preferences.window_mode == "remember"
         ):
             rect = store.rect("data_browser")
             if rect is not None:
                 data_window.setGeometry(rect)
-        offset = scaled(24) * (
-            len(self.data_browser_windows) % 8
-        )
+        offset = scaled(24) * (docked_count % 8)
         self.data_browser_windows[data_window] = browser
         data_window.destroyed.connect(
             lambda _object=None, window=data_window: (
-                self.data_browser_windows.pop(window)
+                self.data_browser_windows.pop(window, None)
             )
         )
-        browser.fileChanged.connect(
-            lambda changed_path, window=data_window: (
-                self._data_browser_file_changed(
-                    window,
-                    changed_path,
-                )
+        data_window.detachRequested.connect(
+            lambda drop_pos, window=data_window: self._detach_data_browser(
+                window,
+                drop_pos=drop_pos,
             )
         )
+        browser.set_detached(False)
+        browser.show()
         data_window.show()
-        data_window.move(
-            data_window.x() + offset,
-            data_window.y() + offset,
-        )
+        if offset:
+            data_window.move(
+                data_window.x() + offset,
+                data_window.y() + offset,
+            )
+        self.mdi.setActiveSubWindow(data_window)
         data_window.raise_()
-        if path is not None:
-            browser.load_path(path, show_errors=True)
+        QTimer.singleShot(0, self._fit_mdi_windows)
         return data_window
 
+    def _create_floating_data_browser_window(
+        self,
+        browser: DatBrowserWidget,
+        *,
+        title: str,
+        size: QSize,
+        drop_pos: QPoint | None = None,
+        origin: QPoint | None = None,
+    ) -> QMainWindow:
+        # 独立顶层窗不设 parent=self，避免 Windows 下被 owner 强制压在主窗口之上。
+        floating = QMainWindow(None, Qt.WindowType.Window)
+        if not self.windowIcon().isNull():
+            floating.setWindowIcon(self.windowIcon())
+        floating.setCentralWidget(browser)
+        floating.setWindowTitle(title)
+        floating.setAttribute(
+            Qt.WidgetAttribute.WA_DeleteOnClose,
+            True,
+        )
+        floating.resize(size)
+        restored_geometry = False
+        store = self.ui_preference_store
+        if (
+            drop_pos is None
+            and store is not None
+            and self.ui_preferences.window_mode == "remember"
+        ):
+            saved = store.geometry("data_browser_floating")
+            if saved is not None and not saved.isEmpty():
+                restored_geometry = floating.restoreGeometry(saved)
+        if drop_pos is not None:
+            target_x = drop_pos.x() - floating.width() // 2
+            target_y = drop_pos.y() - scaled(16)
+            screen = (
+                QGuiApplication.screenAt(drop_pos)
+                or QApplication.primaryScreen()
+            )
+            if screen is not None:
+                avail = screen.availableGeometry()
+                target_x = max(
+                    avail.left(),
+                    min(target_x, max(avail.left(), avail.right() - floating.width() + 1)),
+                )
+                target_y = max(
+                    avail.top(),
+                    min(target_y, max(avail.top(), avail.bottom() - scaled(40))),
+                )
+            floating.move(target_x, target_y)
+        elif not restored_geometry and origin is not None:
+            floating.move(origin)
+
+        self.data_browser_windows[floating] = browser
+        floating.destroyed.connect(
+            lambda _object=None, window=floating: (
+                self.data_browser_windows.pop(window, None)
+            )
+        )
+        browser.set_detached(True)
+        browser.show()
+        floating.show()
+        floating.raise_()
+        floating.activateWindow()
+        return floating
+
+    def _window_for_data_browser(
+        self,
+        browser: DatBrowserWidget,
+    ) -> QMdiSubWindow | QMainWindow | None:
+        for window, candidate in self.data_browser_windows.items():
+            if candidate is browser:
+                return window
+        return None
+
+    def _toggle_data_browser_detached(
+        self,
+        browser: DatBrowserWidget,
+    ) -> QMdiSubWindow | QMainWindow | None:
+        window = self._window_for_data_browser(browser)
+        if window is None:
+            return None
+        if isinstance(window, QMdiSubWindow):
+            return self._detach_data_browser(window)
+        return self._dock_data_browser(window)
+
+    def _detach_data_browser(
+        self,
+        subwindow: QMdiSubWindow,
+        *,
+        drop_pos: QPoint | None = None,
+    ) -> QMainWindow | None:
+        browser = self.data_browser_windows.pop(subwindow, None)
+        if browser is None:
+            return None
+        title = subwindow.windowTitle()
+        size = subwindow.size()
+        origin = subwindow.mapToGlobal(QPoint(0, 0))
+        # 先摘出 DatBrowserWidget 再移除旧子窗口，保留当前图表与监控定时器。
+        subwindow.setWidget(None)
+        browser.setParent(None)
+        self.mdi.removeSubWindow(subwindow)
+        subwindow.close()
+        subwindow.deleteLater()
+        return self._create_floating_data_browser_window(
+            browser,
+            title=title,
+            size=size,
+            drop_pos=drop_pos,
+            origin=origin,
+        )
+
+    def _dock_data_browser(
+        self,
+        floating: QMainWindow,
+    ) -> QMdiSubWindow | None:
+        browser = self.data_browser_windows.pop(floating, None)
+        if browser is None:
+            return None
+        title = floating.windowTitle()
+        size = floating.size()
+        taken = floating.takeCentralWidget()
+        if isinstance(taken, DatBrowserWidget):
+            browser = taken
+        browser.setParent(None)
+        floating.close()
+        floating.deleteLater()
+        return self._create_mdi_data_browser_window(
+            browser,
+            title=title,
+            size=size,
+        )
+
     def _fit_mdi_windows(self) -> None:
-        """Keep floating document windows inside the current MDI viewport."""
+        """Keep docked document windows inside the current MDI viewport."""
         viewport = self.mdi.viewport().rect()
         if viewport.width() <= 8 or viewport.height() <= 8:
             return
@@ -2931,6 +3191,11 @@ class MainWindow(QMainWindow):
         max_height = max(240, viewport.height() - 4)
         for subwindow in (
             self.sequence_window,
+            *(
+                window
+                for window in self.data_browser_windows
+                if isinstance(window, QMdiSubWindow)
+            ),
         ):
             if subwindow.isMaximized():
                 continue
@@ -2968,9 +3233,18 @@ class MainWindow(QMainWindow):
                     window.showNormal()
             self._minimized_module_windows.clear()
 
+    def _data_browser_file_changed_for_browser(
+        self,
+        browser: DatBrowserWidget,
+        path: str,
+    ) -> None:
+        window = self._window_for_data_browser(browser)
+        if window is not None:
+            self._data_browser_file_changed(window, path)
+
     def _data_browser_file_changed(
         self,
-        window: QMainWindow,
+        window: QMdiSubWindow | QMainWindow,
         path: str,
     ) -> None:
         window.setWindowTitle(

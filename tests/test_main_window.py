@@ -125,14 +125,28 @@ class MainWindowLayoutTests(unittest.TestCase):
                 finally:
                     window.close()
 
-    def test_data_browser_can_resize_and_move_outside_the_main_viewport(self):
+    def test_data_browser_starts_in_mdi_and_can_detach_outside_the_main_viewport(self):
+        from PySide6.QtCore import QPoint
+
         window = MainWindow(self.config)
         try:
             window.show()
-            viewer = window._show_data_browser()
+            docked = window._show_data_browser()
             self.application.processEvents()
+            self.assertIn(docked, window.mdi.subWindowList())
+            browser = window.data_browser_windows[docked]
+            self.assertEqual(browser.detach_action.text(), "Pop Out")
+
+            # 点击 Pop Out 后弹出为无 owner 独立顶层窗，保持同一浏览器实例且可自由拖出主窗口。
+            browser.detach_action.trigger()
+            self.application.processEvents()
+            viewer = window._window_for_data_browser(browser)
+            self.assertIsNotNone(viewer)
+            self.assertIsNot(viewer, docked)
             self.assertTrue(viewer.isWindow())
+            self.assertIsNone(viewer.parent())
             self.assertNotIn(viewer, window.mdi.subWindowList())
+            self.assertEqual(browser.detach_action.text(), "Dock")
             self.assertLess(viewer.minimumSizeHint().width(), 640)
             viewer.resize(480, 340)
             viewer.move(60, window.y() + window.height() + 20)
@@ -141,6 +155,29 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
             self.assertEqual(viewer.pos(), position)
             self.assertLessEqual(viewer.width(), 480)
+
+            # 点击 Dock 可无损放回主窗口中央 MDI 区域。
+            browser.detach_action.trigger()
+            self.application.processEvents()
+            redocked = window._window_for_data_browser(browser)
+            self.assertIsNotNone(redocked)
+            self.assertIn(redocked, window.mdi.subWindowList())
+            self.assertEqual(browser.detach_action.text(), "Pop Out")
+
+            # 拖出中央 MDI 边界同样弹出为无 owner 独立顶层窗。
+            viewport = window.mdi.viewport()
+            inside_point = viewport.mapToGlobal(viewport.rect().center())
+            outside_point = viewport.mapToGlobal(
+                QPoint(viewport.width() + 80, viewport.height() + 80)
+            )
+            self.assertFalse(redocked._should_detach_at(inside_point))
+            self.assertTrue(redocked._should_detach_at(outside_point))
+            dragged_out = window._detach_data_browser(redocked, drop_pos=outside_point)
+            self.application.processEvents()
+            self.assertIsNotNone(dragged_out)
+            self.assertTrue(dragged_out.isWindow())
+            self.assertIsNone(dragged_out.parent())
+            self.assertIs(window.data_browser_windows[dragged_out], browser)
         finally:
             window.close()
 
@@ -299,7 +336,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
 
             viewport = window.mdi.viewport().rect()
-            for subwindow in (window.sequence_window,):
+            for subwindow in (window.sequence_window, data_window):
                 geometry = subwindow.geometry()
                 self.assertGreaterEqual(geometry.left(), viewport.left())
                 self.assertGreaterEqual(geometry.top(), viewport.top())

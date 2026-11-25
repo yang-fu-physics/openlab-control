@@ -101,6 +101,7 @@ class DatBrowserWidget(QWidget):
     """只跟踪用户明确打开或拖入文件的独立 DAT 查看器。"""
 
     fileChanged = Signal(str)
+    detachToggled = Signal()
 
     def __init__(self, start_directory: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -132,6 +133,9 @@ class DatBrowserWidget(QWidget):
         reload_action = controls.addAction("Reload")
         self.save_format_button = controls.addAction("Save PLT")
         reset_action = controls.addAction("Reset Zoom")
+        self.detach_action = controls.addAction("Pop Out")
+        self._detached = False
+        self.set_detached(False)
         layout.addWidget(controls)
 
         self.canvas = DatPlotCanvas()
@@ -146,6 +150,7 @@ class DatBrowserWidget(QWidget):
         reload_action.triggered.connect(self.reload)
         self.save_format_button.triggered.connect(lambda checked=False: self.save_format(show_errors=True))
         reset_action.triggered.connect(lambda checked=False: self.canvas.reset_zoom())
+        self.detach_action.triggered.connect(lambda checked=False: self.detachToggled.emit())
         self.layout_combo.currentIndexChanged.connect(self._layout_selected)
         self.canvas.openRequested.connect(self.open_dialog)
         self.canvas.reloadRequested.connect(self.reload)
@@ -159,6 +164,22 @@ class DatBrowserWidget(QWidget):
         self.monitor_timer.setInterval(750)
         self.monitor_timer.timeout.connect(self._check_for_updates)
         self.monitor_timer.start()
+
+    def set_detached(self, detached: bool) -> None:
+        """同步工具栏的独立窗口/放回主窗口按钮状态。"""
+
+        self._detached = bool(detached)
+        if self._detached:
+            self.detach_action.setText("Dock")
+            self.detach_action.setToolTip(
+                "Return Data Browser to the main window central area"
+            )
+        else:
+            self.detach_action.setText("Pop Out")
+            self.detach_action.setToolTip(
+                "Detach Data Browser into an independent window "
+                "(or drag its title bar outside the central area)"
+            )
 
     def canvas_reset_zoom(self) -> None:
         """供父窗口菜单转发 Reset Zoom。"""
