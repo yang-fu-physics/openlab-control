@@ -229,11 +229,19 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertIn(docked, window.mdi.subWindowList())
             self.assertIs(window._window_for_data_browser(browser), docked)
 
-            # 2) 按住真正标题栏中央（低于缩放边框、高于子内容区）拖出顶部：正常弹出无 owner 独立窗。
+            # 2) 鼠标移回真正标题栏中央（清除上一步残留的缩放光标），按住拖出顶部：正常弹出无 owner 独立窗。
             resize_border = docked._resize_border_width(child_rect)
             title_y = float((resize_border + child_rect.top()) // 2)
             title_local = QPointF(mid_x, title_y)
             title_global = QPointF(docked.mapToGlobal(title_local.toPoint()))
+            move_title = QMouseEvent(
+                QEvent.Type.MouseMove,
+                title_local,
+                title_global,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
             press_title = QMouseEvent(
                 QEvent.Type.MouseButtonPress,
                 title_local,
@@ -250,6 +258,7 @@ class MainWindowLayoutTests(unittest.TestCase):
                 Qt.MouseButton.NoButton,
                 Qt.KeyboardModifier.NoModifier,
             )
+            docked.mouseMoveEvent(move_title)
             docked.mousePressEvent(press_title)
             docked.mouseReleaseEvent(release_title)
             QTest.qWait(20)
