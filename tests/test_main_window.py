@@ -835,7 +835,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             configs = root / "configs"
             configs.mkdir()
             general = configs / "general.toml"
-            shutil.copy2(ROOT / "configs" / "general.toml", general)
+            shutil.copy2(ROOT / "configs" / "general.default.toml", general)
             (configs / "instruments").mkdir()
 
             window = MainWindow(load_config(general))

@@ -192,7 +192,7 @@ def _write_demo_project(temp_root: Path) -> Path:
     instruments_cfg.mkdir(parents=True)
     pid_dir.mkdir(parents=True)
     sys_dir.mkdir(parents=True)
-    shutil.copy2(ROOT / "configs" / "general.toml", configs / "general.toml")
+    shutil.copy2(ROOT / "configs" / "general.default.toml", configs / "general.toml")
     (pid_dir / "default.toml").write_text("zones = []\n", encoding="utf-8")
     (pid_dir / "rod_b.toml").write_text("zones = []\n", encoding="utf-8")
     (sys_dir / "instrument.toml").write_text(_CUSTOM_INSTRUMENT_TOML, encoding="utf-8")

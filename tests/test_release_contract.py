@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from labcontrol import __version__  # noqa: E402
 class ReleaseContractTests(unittest.TestCase):
     def test_release_enables_compact_measurement_data(self) -> None:
-        with (ROOT / "configs" / "general.toml").open("rb") as handle:
+        with (ROOT / "configs" / "general.default.toml").open("rb") as handle:
             general = tomllib.load(handle)
         self.assertIs(
             general["logging"]["compact_measurement_data"],
@@ -102,7 +102,9 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(source_launcher.count("run.py %*"), 2)
         source_ignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         for local_configuration in (
+            "/configs/general.toml",
             "/configs/visa.resources.toml",
+            "/configs/module_instances.toml",
             "/configs/instruments/*.toml",
             "/configs/pid/*.toml",
         ):
@@ -155,6 +157,15 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('"InstrumentScanner.exe"', staging_script)
         self.assertIn('"OpenLabControl.exe"', staging_script)
         self.assertIn("$releaseToolsPath", staging_script)
+        self.assertIn(r'"configs\general.default.toml"', staging_script)
+        for excluded_config in (
+            r'"configs\general.toml"',
+            r'"configs\visa.resources.toml"',
+            r'"configs\module_instances.toml"',
+            r'"configs\instruments"',
+            r'"configs\pid"',
+        ):
+            self.assertIn(excluded_config, staging_script)
         for name in (
             "configs",
             "examples",
@@ -203,7 +214,11 @@ class ReleaseContractTests(unittest.TestCase):
             "$process.Kill($true)",
             "Get-FileHash",
             "headless_demo.log",
+            "OpenLabControl/configs/general.default.toml",
             "OpenLabControl/configs/general.toml",
+            "OpenLabControl/configs/module_instances.toml",
+            "configs\\general.default.toml",
+            "configs\\general.toml",
             "configs\\visa.resources.toml",
             "examples\\headless_smoke.seq",
             "forbiddenNames",

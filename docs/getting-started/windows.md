@@ -57,9 +57,10 @@ Get-Content .\OpenLabControl-v0.20.6-windows-x64.zip.sha256
 
 点击 **Save** 并重启软件后生效（所有测量模块窗口会自动继承同一套字号）。该设置保存在 Windows 当前用户目录，不会改动项目里的 `configs/`、SEQ 或数据文件。
 
-## 5. 准备接入真实仪表前
+## 5. 升级发布包与接入真实仪表
 
-平时只需维护 `configs/general.toml`；扫描器生成的 `configs/visa.resources.toml`、`configs/instruments/` 含有本机地址，不要提交到公开仓库。已有 `configs/pid/` 文件在重新保存扫描器配置时不会被覆盖或删除。
+- **就地升级不覆盖配置**：关闭正在运行的 `OpenLabControl.exe` 与 `InstrumentScanner.exe`，直接将新版 ZIP 解压覆盖到原有目录即可。发布包仅包含默认模板 `configs/general.default.toml`，不包含 `configs/general.toml`、`configs/visa.resources.toml`、`configs/module_instances.toml`、`configs/instruments/` 与 `configs/pid/`，因此原有本机配置都会完整保留；首次启动全新安装目录时，程序会自动从 `configs/general.default.toml` 复制生成 `configs/general.toml`。
+- **现场配置文件维护**：平时只需维护 `configs/general.toml`（可随时对照同目录的 `configs/general.default.toml` 查看新版新增配置项）；扫描器生成的 `configs/visa.resources.toml`、`configs/instruments/` 含有本机地址，不要提交到公开仓库。已有 `configs/pid/` 文件在重新保存扫描器配置时不会被覆盖或删除。
 
 !!! danger "接入真实硬件前请先核对"
 

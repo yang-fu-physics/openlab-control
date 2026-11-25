@@ -23,7 +23,7 @@ from .instruments.manifest import (
 )
 from .models import RunProgress, RunState
 from .measurement.settings import load_settings
-from .paths import default_config_path
+from .paths import ensure_default_config
 from .runtime import RuntimeService
 from .system_instrument_commands import (
     configured_system_instrument_commands,
@@ -81,7 +81,12 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     """解析所有启动模式；返回值由 :func:`main` 统一执行和映射退出码。"""
 
     parser = argparse.ArgumentParser(description="OpenLab Control")
-    parser.add_argument("--config", type=Path, default=default_config_path())
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to general.toml (defaults to configs/general.toml).",
+    )
     parser.add_argument("--sequence", type=Path)
     parser.add_argument("--data-file", type=Path, help="Open an independent DAT file in Data Browser.")
     parser.add_argument("--headless-demo", action="store_true")
@@ -262,7 +267,12 @@ def main(argv: list[str] | None = None) -> int:
     multiprocessing.freeze_support()
     args = _arguments(argv)
     try:
-        config = load_config(args.config)
+        config_path = (
+            ensure_default_config()
+            if args.config is None
+            else args.config
+        )
+        config = load_config(config_path)
     except (OSError, ConfigurationError) as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2

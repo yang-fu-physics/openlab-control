@@ -15,7 +15,9 @@ runs/*
 /gui_smoke.png
 /source-gui-smoke.png
 /docs/source-gui-smoke.png
+/configs/general.toml
 /configs/visa.resources.toml
+/configs/module_instances.toml
 /configs/instruments/*.toml
 /configs/pid/*.toml
 /module_data/*

@@ -4,14 +4,16 @@ OpenLab Control 的配置按用途拆成五类，彼此清晰隔离：
 
 ```text
 configs/
-├─ general.toml                         # 通用配置（手工维护，随仓库提供）
+├─ general.default.toml                 # 通用配置默认模板（随仓库与发布包提供）
+├─ general.toml                         # 本机通用配置（首次启动从默认模板自动复制，后续保留）
 ├─ visa.resources.toml                  # 留给测量模块的 VISA 清单（扫描器生成）
 ├─ module_instances.toml                # 可选的测量模块多实例配置（Modules 窗口管理）
 ├─ instruments/<仪表ID>.toml            # 系统仪表实例、面板顺序与限值（扫描器生成）
 └─ pid/<实例ID>.toml                    # 单台温控实例自己的 PID 表（首次复制，后续保留）
 ```
 
-> 全新安装时只需有 `configs/general.toml` 即可正常启动（此时没有系统仪表面板，三个内置仿真默认关闭）。
+> 全新安装时发布包只包含 `configs/general.default.toml`；首次启动程序会自动复制一份生成 `configs/general.toml` 并正常启动（此时没有系统仪表面板，三个内置仿真默认关闭）。
+> 升级新版 Windows 发布包时，直接将新版 ZIP 解压覆盖到原目录即可：ZIP 中不含 `configs/general.toml`、`configs/visa.resources.toml`、`configs/module_instances.toml`、`configs/instruments/` 和 `configs/pid/`，已设定的现场配置不会被覆盖，同时 `configs/general.default.toml` 会自动更新到新版供对照新增配置项。
 > 每次运行 SEQ 时，程序会自动把当次实际使用的配置快照保存到 `runs/<运行目录>/configuration/`；对外分享前请注意检查并脱敏其中的本机地址、路径与现场 PID。
 
 ---

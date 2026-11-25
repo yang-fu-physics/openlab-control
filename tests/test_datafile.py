@@ -396,7 +396,7 @@ class DatafileTests(unittest.TestCase):
             instruments.mkdir(parents=True)
             pid.mkdir()
             general = configs / "general.toml"
-            shutil.copy2(ROOT / "configs" / "general.toml", general)
+            shutil.copy2(ROOT / "configs" / "general.default.toml", general)
             visa_text = (
                 '[[resources]]\n'
                 'id = "meter"\n'

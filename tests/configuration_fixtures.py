@@ -21,7 +21,7 @@ def write_simulated_configuration(project_root: Path) -> Path:
     configs = project_root / "configs"
     configs.mkdir(parents=True, exist_ok=True)
     general = configs / "general.toml"
-    shutil.copy2(ROOT / "configs" / "general.toml", general)
+    shutil.copy2(ROOT / "configs" / "general.default.toml", general)
     # 既有端到端用例继续验证兼容宽表；紧凑格式用例会显式开启发行默认值。
     general.write_text(
         general.read_text(encoding="utf-8").replace(
@@ -42,4 +42,4 @@ def load_simulated_config() -> AppConfig:
 
     with tempfile.TemporaryDirectory() as temporary:
         config = load_config(write_simulated_configuration(Path(temporary)))
-    return replace(config, source_path=ROOT / "configs" / "general.toml")
+    return replace(config, source_path=ROOT / "configs" / "general.default.toml")

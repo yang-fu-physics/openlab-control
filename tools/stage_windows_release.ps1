@@ -54,9 +54,12 @@ foreach ($directory in @(
     New-Item -ItemType Directory -Path (Join-Path $resolvedReleaseRoot $directory) -Force | Out-Null
 }
 
-# Scanner output is local laboratory configuration and must never be packaged.
+# Local laboratory configuration must never be packaged; releases ship only
+# configs\general.default.toml so extracting a newer zip preserves site files.
 foreach ($relativePath in @(
+    "configs\general.toml",
     "configs\visa.resources.toml",
+    "configs\module_instances.toml",
     "configs\instruments",
     "configs\pid"
 )) {
@@ -64,6 +67,11 @@ foreach ($relativePath in @(
     if (Test-Path -LiteralPath $stagedPath) {
         Remove-Item -LiteralPath $stagedPath -Recurse -Force
     }
+}
+
+$generalTemplate = Join-Path $resolvedReleaseRoot "configs\general.default.toml"
+if (-not (Test-Path -LiteralPath $generalTemplate -PathType Leaf)) {
+    throw "Missing default configuration template: $generalTemplate"
 }
 
 $cacheNames = @("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")

@@ -52,7 +52,7 @@ class AlarmReportingConfigTests(unittest.TestCase):
     def test_toml_qq_is_loaded_and_blank_qq_overrides_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "general.toml"
-            text = (ROOT / "configs/general.toml").read_text(encoding="utf-8")
+            text = (ROOT / "configs" / "general.default.toml").read_text(encoding="utf-8")
             text = text.replace("enabled = false", "enabled = true", 1)
             path.write_text(text, encoding="utf-8")
             self.assertFalse(load_config(path).alarms.reporting.enabled)
@@ -63,7 +63,7 @@ class AlarmReportingConfigTests(unittest.TestCase):
 
     def test_default_reporting_is_disabled_and_bounded(self) -> None:
         config = load_config(
-            ROOT / "configs" / "general.toml"
+            ROOT / "configs" / "general.default.toml"
         )
         reporting = config.alarms.reporting
         self.assertFalse(reporting.enabled)
@@ -82,7 +82,7 @@ class AlarmReportingConfigTests(unittest.TestCase):
             (root / "configs").mkdir()
             destination = root / "configs" / "general.toml"
             source = (
-                ROOT / "configs" / "general.toml"
+                ROOT / "configs" / "general.default.toml"
             ).read_text(encoding="utf-8")
             destination.write_text(
                 source.replace(

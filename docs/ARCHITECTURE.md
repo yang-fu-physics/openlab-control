@@ -34,7 +34,8 @@ GUI 主线程（PySide6）
 ## 3. 配置与地址边界
 
 ```text
-configs/general.toml                 通用设置（UI、日志、报警、超时、重连）
+configs/general.default.toml         随发布包提供的通用配置默认模板（只作首次初始化与升级参考）
+configs/general.toml                 本机通用设置（首次启动从默认模板自动复制，UI、日志、报警、超时、重连）
 system_instruments/<id>/instrument.toml  作者模板（字段、控制端点、固定面板、读数、指令）
         ▼ Instrument Scanner
 configs/instruments/<id>.toml        现场实例（[[instances]]、面板顺序、角色与限值）
