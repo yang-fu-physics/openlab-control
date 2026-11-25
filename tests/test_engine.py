@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
@@ -1435,6 +1436,163 @@ class SequenceEngineTests(unittest.TestCase):
                 "INSTRUMENT_NOT_CONFIGURED",
                 [notice.event.code for notice in notices if not notice.is_resolution],
             )
+
+    def test_scan_time_stops_at_deadline_and_adjusts_progress_under_slow_steps(
+        self,
+    ) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            notices = []
+            progresses = []
+            events.subscribe(notices.append)
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            logger = DatRunLogger(config, events)
+            now = 100.0
+            measured_steps: list[str] = []
+
+            class SlowModules:
+                async def prepare_sequence(self):
+                    return (), {}
+
+                async def begin_sequence(self) -> None:
+                    return None
+
+                async def end_sequence(self, _reason: str) -> bool:
+                    return True
+
+                def sequence_command_issues(self, _command) -> tuple[str, ...]:
+                    return ()
+
+                async def measure_all(self, _logger, step_path: str) -> None:
+                    nonlocal now
+                    measured_steps.append(step_path)
+                    now += 10.0
+
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                logger,
+                SlowModules(),  # type: ignore[arg-type]
+                progresses.append,
+            )
+            document = SequenceDocument(
+                [
+                    Command(
+                        CommandType.SCAN_TIME,
+                        {"duration_seconds": 60.0, "steps": 61},
+                        [Command(CommandType.MEASURE)],
+                    ),
+                    Command(CommandType.REMARK, {"text": "after scan"}),
+                ],
+                "scan-time-deadline.seq",
+            )
+            with patch("labcontrol.sequence.engine.time.monotonic", side_effect=lambda: now):
+                state = await engine.run(document)
+            await manager.disconnect_all()
+
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertEqual(len(measured_steps), 6)
+            self.assertEqual(progresses[-1].completed_steps, 8)
+            self.assertEqual(progresses[-1].total_steps, 8)
+            reached = [
+                notice.event
+                for notice in notices
+                if notice.event.code == "SCAN_TIME_REACHED" and not notice.is_resolution
+            ]
+            self.assertEqual(len(reached), 1)
+            self.assertIn("after 6/61 steps", reached[0].message)
+            remarks = [
+                notice.event.message
+                for notice in notices
+                if notice.event.code == "REMARK" and not notice.is_resolution
+            ]
+            self.assertEqual(remarks, ["after scan"])
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
+
+    def test_scan_time_executes_all_scheduled_points_when_fast_and_excludes_pause(
+        self,
+    ) -> None:
+        async def scenario(config) -> None:
+            events = EventManager()
+            notices = []
+            progresses = []
+            events.subscribe(notices.append)
+            manager = InstrumentManager(config, events, isolate_processes=False)
+            await manager.connect_all()
+            await manager.poll_all()
+            logger = DatRunLogger(config, events)
+            now = 50.0
+            measured_at: list[float] = []
+
+            class FastModules:
+                async def prepare_sequence(self):
+                    return (), {}
+
+                async def begin_sequence(self) -> None:
+                    return None
+
+                async def end_sequence(self, _reason: str) -> bool:
+                    return True
+
+                def sequence_command_issues(self, _command) -> tuple[str, ...]:
+                    return ()
+
+                async def measure_all(self, _logger, _step_path: str) -> None:
+                    nonlocal now
+                    measured_at.append(now)
+                    now += 0.5
+                    if len(measured_at) == 1:
+                        # Pause for longer than the 60 s scan duration; active time must not advance.
+                        engine.pause()
+                        now += 120.0
+                        engine.resume()
+
+            engine = SequenceEngine(
+                config,
+                manager,
+                events,
+                logger,
+                FastModules(),  # type: ignore[arg-type]
+                progresses.append,
+            )
+
+            async def fake_sleep(seconds: float) -> None:
+                nonlocal now
+                now += seconds
+
+            document = SequenceDocument(
+                [
+                    Command(
+                        CommandType.SCAN_TIME,
+                        {"duration_seconds": 60.0, "steps": 3},
+                        [Command(CommandType.MEASURE)],
+                    )
+                ],
+                "scan-time-pause.seq",
+            )
+            with (
+                patch("labcontrol.sequence.engine.time.monotonic", side_effect=lambda: now),
+                patch("labcontrol.sequence.engine.asyncio.sleep", side_effect=fake_sleep),
+            ):
+                state = await engine.run(document)
+            await manager.disconnect_all()
+
+            self.assertEqual(state, RunState.COMPLETED)
+            self.assertEqual(len(measured_at), 3)
+            self.assertEqual(progresses[-1].completed_steps, 4)
+            self.assertEqual(progresses[-1].total_steps, 4)
+            self.assertNotIn(
+                "SCAN_TIME_REACHED",
+                [notice.event.code for notice in notices if not notice.is_resolution],
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(scenario(self._fast_config(Path(temp))))
 
 
 if __name__ == "__main__":

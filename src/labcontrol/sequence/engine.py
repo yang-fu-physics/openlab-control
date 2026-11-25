@@ -815,9 +815,23 @@ class SequenceEngine:
         duration = float(command.params.get("duration_seconds", 0.0))
         steps = int(command.params.get("steps", 1))
         offsets = self._linspace(0.0, duration, steps)
+        await self._checkpoint()
         started = self._active_time()
+        deadline = started + duration
         scan_label = format_command(command)
+        executed_points = 0
         for index, offset in enumerate(offsets, start=1):
+            await self._checkpoint()
+            if duration > 0.0 and index > 1 and self._active_time() >= deadline:
+                self._current_path = " / ".join(path)
+                self.events.report(
+                    Severity.INFO,
+                    "sequence",
+                    "SCAN_TIME_REACHED",
+                    f"Scan Time reached {duration:g} s after {executed_points}/{steps} steps",
+                    self._current_path,
+                )
+                break
             point_label = f"time {index}/{steps}={offset:g} s"
             point_path = path + [point_label]
             self._set_current_command(command.id)
@@ -825,6 +839,20 @@ class SequenceEngine:
             self._publish(f"{scan_label} ({point_label})")
             await self._sleep_until(started + offset)
             await self._execute_commands(command.children, point_path)
+            executed_points += 1
+        if executed_points < steps:
+            base_directory = (
+                self._call_stack[-1].parent
+                if self._call_stack
+                else self.config.project_root
+            )
+            self._total_steps -= (
+                steps - executed_points
+            ) * self._estimate_execution_steps(
+                command.children,
+                base_directory,
+                frozenset(self._call_stack),
+            )
 
     async def _execute_module_command(self, command: Command) -> bool:
         """执行一个不写 DAT 的模块动作，并在调用前后保留统一控制检查点。"""
