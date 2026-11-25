@@ -1777,6 +1777,7 @@
 <li>选择记录间隔：默认 <strong>30 s</strong>，只接受正整数秒。</li>
 <li>按系统仪表实例分页勾选记录项，每页提供 Select All / Select None。同型号的不同实例各占一页。</li>
 <li>点击 <strong>Start Log</strong>，立即记录一行已有缓存，此后按所选间隔持续记录；点击 <strong>Stop Log</strong> 停止。</li>
+<li>点击日志文件路径右侧的 <strong>View</strong>，可直接用 <strong>Data Browser</strong> 打开当前 <code>.log</code> 文件查看曲线（记录过程中也可随时点开并自动刷新）。</li>
 </ol>
 <p>日志在空闲、手动调温、SEQ 运行和暂停期间都可以继续记录。关闭设置窗口不会停止记录；退出程序会关闭日志文件。记录中锁定路径、间隔和记录项，停止后可以修改。</p>
 <p>记录器只拿已有缓存值，不发送查询、不触发测量，也不改变仪表轮询频率。缓存未更新时会记录相同值，Reading Age 可以辅助判断读数新鲜度。22C 可选主控温度、目标、速率、动作与稳定状态、CH B 温度、加热输出、Heater Range 等。时间戳自动记录，使用程序配置的 LabVIEW 1904 或 Unix 时间基准。</p>
