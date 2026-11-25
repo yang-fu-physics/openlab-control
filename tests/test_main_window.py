@@ -1515,6 +1515,152 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_main_window_sequence_cut_undo_shortcuts_and_focus_isolation(
+        self,
+    ) -> None:
+        from PySide6.QtCore import QItemSelectionModel
+        from PySide6.QtGui import QKeySequence
+
+        window = MainWindow(self.config)
+        try:
+            window.show()
+            window.activateWindow()
+            first = Command(CommandType.WAIT, {"seconds": 1.0})
+            second = Command(CommandType.REMARK, {"text": "second"})
+            window._set_document(SequenceDocument([first, second], "shortcuts.seq"))
+            window._focus_sequence()
+            self.application.processEvents()
+
+            # File shortcuts are configured cleanly.
+            self.assertIn(QKeySequence("Ctrl+N"), window.new_action.shortcuts())
+            self.assertIn(QKeySequence("Ctrl+O"), window.open_action.shortcuts())
+            self.assertIn(QKeySequence("Ctrl+S"), window.save_action.shortcuts())
+            self.assertIn(QKeySequence("Ctrl+Shift+S"), window.save_as_action.shortcuts())
+
+            # Edit menu exposes Undo/Redo, Cut/Copy/Paste/Delete, and Move Up/Down.
+            edit_labels = [
+                action.text()
+                for action in window.edit_menu.actions()
+                if not action.isSeparator()
+            ]
+            self.assertEqual(
+                edit_labels,
+                [
+                    "Undo",
+                    "Redo",
+                    "Disable",
+                    "Enable",
+                    "Cut",
+                    "Copy",
+                    "Paste",
+                    "Delete",
+                    "Move Up",
+                    "Move Down",
+                ],
+            )
+
+            # Dialog edit via _edit_command is undoable with Ctrl+Z and redoable with Ctrl+Y.
+            with patch("labcontrol.ui.main_window.CommandDialog") as dialog_cls:
+                dialog = dialog_cls.return_value
+                dialog.exec.return_value = dialog_cls.DialogCode.Accepted
+                dialog.values.return_value = {"seconds": 5.0}
+                window._edit_command(first)
+            self.application.processEvents()
+            self.assertEqual(window.document.commands[0].params["seconds"], 5.0)
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(window.document.commands[0].params["seconds"], 1.0)
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Y,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(window.document.commands[0].params["seconds"], 5.0)
+
+            # Cut row 0 with Ctrl+X and undo with Ctrl+Z inside MainWindow.
+            window.editor.list.clearSelection()
+            window.editor.list.item(0).setSelected(True)
+            window.editor.list.setCurrentItem(
+                window.editor.list.item(0),
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_X,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(len(window.document.commands), 1)
+            self.assertEqual(window.document.commands[0].type, CommandType.REMARK)
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(len(window.document.commands), 2)
+            self.assertEqual(window.document.commands[0].type, CommandType.WAIT)
+
+            # Ctrl+S triggers save directly from the focused SEQ list.
+            with patch.object(window, "_save_sequence", return_value=True) as save_mock:
+                window.save_action.triggered.disconnect()
+                window.save_action.triggered.connect(save_mock)
+                QTest.keyClick(
+                    window.editor.list,
+                    Qt.Key.Key_S,
+                    Qt.KeyboardModifier.ControlModifier,
+                )
+                self.application.processEvents()
+                save_mock.assert_called_once()
+
+            # Change Data File is also undoable via Ctrl+Z and syncs the data file label.
+            chosen_path = ROOT / "undo_datafile.dat"
+            with patch(
+                "labcontrol.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(chosen_path), "Data (*.dat)"),
+            ):
+                window._change_datafile()
+            self.assertEqual(window.document.commands[0].type, CommandType.SET_DATAFILE)
+            self.assertEqual(window.data_file_label.fullText(), str(chosen_path.resolve()))
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(window.document.commands[0].type, CommandType.WAIT)
+            self.assertEqual(window.data_file_label.fullText(), "")
+
+            # Focusing docked Data Browser must NOT leak Ctrl+X / Delete / Ctrl+Z into SEQ.
+            docked_browser_win = window._show_data_browser()
+            docked_browser = window.data_browser_windows[docked_browser_win]
+            docked_browser.setFocus()
+            self.application.processEvents()
+            QTest.keyClick(
+                docked_browser,
+                Qt.Key.Key_X,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            QTest.keyClick(docked_browser, Qt.Key.Key_Delete)
+            QTest.keyClick(
+                docked_browser,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(len(window.document.commands), 2)
+            self.assertEqual(window.document.commands[0].params["seconds"], 5.0)
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()

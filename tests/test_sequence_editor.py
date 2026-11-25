@@ -77,10 +77,29 @@ class SequenceEditorTests(unittest.TestCase):
         self._select_rows(editor, 0)
         menu = editor.build_context_menu()
         labels = [action.text() for action in menu.actions() if not action.isSeparator()]
-        self.assertEqual(labels, ["Disable", "Enable", "Delete", "Copy", "Paste"])
+        self.assertEqual(
+            labels,
+            [
+                "Undo",
+                "Redo",
+                "Disable",
+                "Enable",
+                "Cut",
+                "Copy",
+                "Paste",
+                "Delete",
+                "Move Up",
+                "Move Down",
+            ],
+        )
+        self.assertFalse(editor.undo_action.isEnabled())
+        self.assertFalse(editor.redo_action.isEnabled())
         self.assertTrue(editor.disable_action.isEnabled())
         self.assertFalse(editor.enable_action.isEnabled())
+        self.assertTrue(editor.cut_action.isEnabled())
         self.assertFalse(editor.paste_action.isEnabled())
+        self.assertFalse(editor.move_up_action.isEnabled())
+        self.assertTrue(editor.move_down_action.isEnabled())
 
         changes: list[bool] = []
         editor.documentChanged.connect(lambda: changes.append(True))
@@ -190,16 +209,139 @@ class SequenceEditorTests(unittest.TestCase):
         editor.close()
 
     def test_edit_lock_disables_mutating_actions_but_allows_copy(self) -> None:
-        document = SequenceDocument([Command(CommandType.WAIT, {"seconds": 1.0})])
+        document = SequenceDocument([
+            Command(CommandType.WAIT, {"seconds": 1.0}),
+            Command(CommandType.REMARK, {"text": "second"}),
+        ])
         editor = SequenceEditorWidget(document)
         self._select_rows(editor, 0)
+        editor.insert_command(Command(CommandType.MEASURE))
+        editor.undo()
+        self._select_rows(editor, 0)
         editor.set_editable(False)
+        self.assertFalse(editor.undo_action.isEnabled())
+        self.assertFalse(editor.redo_action.isEnabled())
         self.assertFalse(editor.disable_action.isEnabled())
         self.assertFalse(editor.enable_action.isEnabled())
+        self.assertFalse(editor.cut_action.isEnabled())
         self.assertFalse(editor.delete_action.isEnabled())
         self.assertFalse(editor.paste_action.isEnabled())
+        self.assertFalse(editor.move_up_action.isEnabled())
+        self.assertFalse(editor.move_down_action.isEnabled())
         self.assertTrue(editor.copy_action.isEnabled())
+        editor.cut_selected()
+        self.assertEqual(len(document.commands), 2)
+        self.assertEqual(editor._clipboard, ())
         editor.close()
+
+    def test_cut_paste_move_and_undo_redo_shortcuts(self) -> None:
+        scan = Command(
+            CommandType.SCAN_TIME,
+            {"duration_seconds": 1.0, "steps": 2},
+            [Command(CommandType.MEASURE)],
+        )
+        first = Command(CommandType.WAIT, {"seconds": 1.0})
+        tail = Command(CommandType.REMARK, {"text": "tail"})
+        document = SequenceDocument([first, scan, tail], "cut-undo.seq")
+        editor = SequenceEditorWidget(document)
+        editor.resize(760, 480)
+        editor.show()
+        editor.activateWindow()
+        editor.list.setFocus()
+        self.application.processEvents()
+
+        try:
+            # 1) Cut a Scan block while both the Scan and its child are selected (deduplicated).
+            self._select_rows(editor, 1, 2)
+            QTest.keyClick(
+                editor.list,
+                Qt.Key.Key_X,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual([c.type for c in document.commands], [CommandType.WAIT, CommandType.REMARK])
+            self.assertEqual(len(editor._clipboard), 1)
+            self.assertEqual(editor._clipboard[0].type, CommandType.SCAN_TIME)
+            self.assertEqual(len(editor._clipboard[0].children), 1)
+            self.assertTrue(editor.undo_action.isEnabled())
+
+            # 2) Paste at End Sequence, then paste a second time to confirm distinct IDs.
+            self._select_rows(editor, editor.list.count() - 1)
+            QTest.keyClick(
+                editor.list,
+                Qt.Key.Key_V,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK, CommandType.SCAN_TIME],
+            )
+            pasted_once = document.commands[2]
+            self.assertNotEqual(pasted_once.id, scan.id)
+            self.assertEqual(len(pasted_once.children), 1)
+
+            # 3) Move pasted Scan up with Alt+Up, then back down with Alt+Down.
+            QTest.keyClick(editor.list, Qt.Key.Key_Up, Qt.KeyboardModifier.AltModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.SCAN_TIME, CommandType.REMARK],
+            )
+
+            # 4) Undo move, undo paste, undo cut via Ctrl+Z -> restores exact original tree.
+            QTest.keyClick(editor.list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK, CommandType.SCAN_TIME],
+            )
+            QTest.keyClick(editor.list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK],
+            )
+            QTest.keyClick(editor.list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.SCAN_TIME, CommandType.REMARK],
+            )
+            self.assertEqual(document.commands[1].id, scan.id)
+            self.assertFalse(editor.undo_action.isEnabled())
+            self.assertTrue(editor.redo_action.isEnabled())
+
+            # 5) Redo cut with Ctrl+Y and redo paste with Ctrl+Shift+Z.
+            QTest.keyClick(editor.list, Qt.Key.Key_Y, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK],
+            )
+            QTest.keyClick(
+                editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK, CommandType.SCAN_TIME],
+            )
+
+            # 6) New mutation clears redo stack; set_document clears both stacks.
+            self._select_rows(editor, 0)
+            QTest.keyClick(editor.list, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertFalse(editor.redo_action.isEnabled())
+            self.assertFalse(document.commands[0].enabled)
+
+            editor.set_document(SequenceDocument([Command(CommandType.MEASURE)]))
+            self.assertFalse(editor.undo_action.isEnabled())
+            self.assertFalse(editor.redo_action.isEnabled())
+        finally:
+            editor.close()
 
     def test_batch_paste_keeps_items_after_a_scan_as_siblings(self) -> None:
         scan = Command(
