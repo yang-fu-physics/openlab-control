@@ -109,7 +109,11 @@ from .measurement_modules import (
     ModuleWindow,
 )
 from .module_monitor import ModuleMonitorPanel
-from .instrument_panels import InstrumentPanelHost
+from .instrument_panels import (
+    HIGH_FIELD_WARNING_OE,
+    InstrumentPanelHost,
+    field_magnitude_oe,
+)
 from .instrument_setup import InstrumentSetupDialog
 from .preferences import UiPreferences, UiPreferenceStore, default_ui_preferences_path
 from .scaling import (
@@ -350,6 +354,7 @@ class MainWindow(QMainWindow):
         self._last_active_subwindow: QMdiSubWindow | None = None
         self._unread_log_count = 0
         self._unread_log_level = ""
+        self._high_field_target: tuple[str, str] | None = None
         self.ui_scale = current_ui_scale()
         self.font_scale = current_font_scale()
         application = QApplication.instance()
@@ -795,6 +800,16 @@ class MainWindow(QMainWindow):
         self.commands_toolbar_action.setToolTip("Show or hide the Sequence Command Bar")
         self.commands_toolbar_action.triggered.connect(self._on_commands_toolbar_toggled)
         self.command_dock.visibilityChanged.connect(self._sync_commands_toolbar_state)
+        self.high_field_action = QAction(
+            qta.icon("fa5s.magnet", color="#b45309"),
+            "",
+            self,
+        )
+        self.high_field_action.setVisible(False)
+        self.high_field_action.setToolTip(
+            "Magnetic field exceeds 100 Oe — click to open manual field control"
+        )
+        self.high_field_action.triggered.connect(self._open_high_field_control)
         self.about_action = QAction("About", self)
         self.exit_action = QAction("Exit", self)
 
@@ -915,6 +930,22 @@ class MainWindow(QMainWindow):
             commands_btn.setToolButtonStyle(
                 Qt.ToolButtonStyle.ToolButtonTextBesideIcon
             )
+        toolbar_spacer = QWidget(toolbar)
+        toolbar_spacer.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        toolbar.addWidget(toolbar_spacer)
+        toolbar.addAction(self.high_field_action)
+        high_field_btn = toolbar.widgetForAction(self.high_field_action)
+        if isinstance(high_field_btn, QToolButton):
+            high_field_btn.setObjectName("highFieldToolButton")
+            high_field_btn.setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            )
+            self._high_field_button: QToolButton | None = high_field_btn
+        else:
+            self._high_field_button = None
         self.addToolBar(toolbar)
 
     def _restore_dialog_geometry(
@@ -1139,6 +1170,17 @@ class MainWindow(QMainWindow):
             "  border-color: #e4a1a6;"
             "  color: #b42318;"
             "  font-weight: 600;"
+            "}"
+            "QToolBar#mainToolbar QToolButton#highFieldToolButton {"
+            "  background: #fef3c7;"
+            "  border: 1px solid #d97706;"
+            "  color: #92400e;"
+            "  font-weight: bold;"
+            f"  padding: {toolbar_pad_v}px {scaled(10)}px;"
+            "}"
+            "QToolBar#mainToolbar QToolButton#highFieldToolButton:hover {"
+            "  background: #fde68a;"
+            "  border-color: #b45309;"
             "}"
             "QDockWidget::title {"
             "  background: #eef2f6;"
@@ -2546,7 +2588,78 @@ class MainWindow(QMainWindow):
             if self.instrument_setup_dialog is not None:
                 self.instrument_setup_dialog.update_snapshot(snapshot)
         self.trend_dialog.add_snapshots(snapshots)
+        self._update_high_field_indicator(snapshots)
         self._update_run_availability()
+
+    def _open_high_field_control(self) -> None:
+        if self._high_field_target is not None:
+            self._open_manual_control(*self._high_field_target)
+
+    def _update_high_field_indicator(
+        self,
+        snapshots: dict[str, InstrumentSnapshot],
+    ) -> None:
+        """当任一已连接磁场面板读数超过 100 Oe 时，在顶部工具栏显示强磁提示胶囊。"""
+
+        active_fields: list[tuple[float, str, tuple[str, str] | None]] = []
+        for panel in self.config.panels:
+            if not panel.enabled or panel.template not in {"controller", "readout"}:
+                continue
+            snapshot = snapshots.get(panel.instrument_id)
+            if snapshot is None or not snapshot.connected:
+                continue
+            instrument = self.config.instrument(panel.instrument_id)
+            is_field = panel.role == "field" or snapshot.kind is InstrumentKind.FIELD
+            if not is_field:
+                continue
+            if panel.template == "controller":
+                control_state = snapshot.controls.get(panel.id)
+                value = None if control_state is None else control_state.current
+                reading = instrument.reading(panel.reading)
+                target_key: tuple[str, str] | None = (instrument.id, panel.id)
+            else:
+                reading_key = panel.readings[0] if panel.readings else instrument.main_reading
+                reading = instrument.reading(reading_key)
+                if reading_key == instrument.main_reading:
+                    raw = snapshot.current
+                else:
+                    metric = snapshot.metrics.get(reading_key)
+                    raw = None if metric is None else metric.value
+                value = (
+                    float(raw)
+                    if isinstance(raw, (int, float)) and not isinstance(raw, bool)
+                    else None
+                )
+                target_key = None
+            magnitude_oe = field_magnitude_oe(value, reading.unit)
+            if magnitude_oe is None or magnitude_oe <= HIGH_FIELD_WARNING_OE or value is None:
+                continue
+            precision = (
+                reading.decimals
+                if reading.decimals is not None
+                else control_decimals(InstrumentKind.FIELD, reading.unit)
+            )
+            label = f"Field {fixed_number(value, precision)} {reading.unit}"
+            active_fields.append((magnitude_oe, label, target_key))
+
+        if not active_fields:
+            self._high_field_target = None
+            self.high_field_action.setVisible(False)
+            self.high_field_action.setText("")
+            return
+
+        active_fields.sort(key=lambda item: item[0], reverse=True)
+        _, strongest_label, strongest_target = active_fields[0]
+        if len(active_fields) > 1:
+            strongest_label += f" (+{len(active_fields) - 1})"
+        self._high_field_target = strongest_target
+        self.high_field_action.setText(strongest_label)
+        self.high_field_action.setToolTip(
+            "Magnetic field exceeds 100 Oe — click to open manual field control"
+            if strongest_target is not None
+            else "Magnetic field exceeds 100 Oe"
+        )
+        self.high_field_action.setVisible(True)
 
     def _update_run_availability(self) -> None:
         if (

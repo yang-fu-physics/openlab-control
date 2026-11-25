@@ -32,11 +32,13 @@ from labcontrol.models import (  # noqa: E402
     EventNotice,
     InstrumentConnectionState,
     InstrumentControlState,
+    InstrumentKind,
     InstrumentSnapshot,
     LabEvent,
     RunProgress,
     RunState,
     Severity,
+    StabilityState,
 )
 from labcontrol.sequence.model import (  # noqa: E402
     Command,
@@ -1607,6 +1609,97 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
             self.assertTrue(window.log_dock.isHidden())
             self.assertFalse(window.log_toggle_button.isChecked())
+        finally:
+            window.close()
+
+    def test_toolbar_high_field_indicator_tracks_field_and_opens_manual_control(
+        self,
+    ) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            self.application.processEvents()
+
+            self.assertFalse(window.high_field_action.isVisible())
+
+            now = time.monotonic()
+            # At 100 Oe (not strictly above 100), pill stays hidden.
+            window._handle_snapshots(
+                {
+                    "field": InstrumentSnapshot(
+                        "field",
+                        "Simulated Magnetic Field",
+                        InstrumentKind.FIELD,
+                        now,
+                        "Oe",
+                        100.0,
+                        100.0,
+                        controls={
+                            "main": InstrumentControlState(
+                                current=100.0,
+                                target=100.0,
+                                stability=StabilityState.STABLE,
+                            )
+                        },
+                    )
+                }
+            )
+            self.assertFalse(window.high_field_action.isVisible())
+
+            # Negative high field activates toolbar pill and card warning.
+            window._handle_snapshots(
+                {
+                    "field": InstrumentSnapshot(
+                        "field",
+                        "Simulated Magnetic Field",
+                        InstrumentKind.FIELD,
+                        now,
+                        "Oe",
+                        -12500.0,
+                        -12500.0,
+                        controls={
+                            "main": InstrumentControlState(
+                                current=-12500.0,
+                                target=-12500.0,
+                                stability=StabilityState.STABLE,
+                            )
+                        },
+                    )
+                }
+            )
+            self.assertTrue(window.high_field_action.isVisible())
+            self.assertIn("-12500.000 Oe", window.high_field_action.text())
+            self.assertTrue(window.status_panel.panels["field.main"].high_field_active)
+
+            # Clicking the pill opens manual control for the active field panel.
+            with patch.object(window, "_open_manual_control") as open_manual:
+                window.high_field_action.trigger()
+            open_manual.assert_called_once_with("field", "main")
+
+            # Returning below 100 Oe hides the pill again.
+            window._handle_snapshots(
+                {
+                    "field": InstrumentSnapshot(
+                        "field",
+                        "Simulated Magnetic Field",
+                        InstrumentKind.FIELD,
+                        now,
+                        "Oe",
+                        25.0,
+                        0.0,
+                        controls={
+                            "main": InstrumentControlState(
+                                current=25.0,
+                                target=0.0,
+                                stability=StabilityState.MOVING,
+                            )
+                        },
+                    )
+                }
+            )
+            self.assertFalse(window.high_field_action.isVisible())
+            self.assertFalse(window.status_panel.panels["field.main"].high_field_active)
         finally:
             window.close()
 
