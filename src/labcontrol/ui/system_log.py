@@ -15,6 +15,7 @@ from .scaling import scaled
 class SystemLogDialog(QDialog):
     startRequested = Signal(str, int, object)
     stopRequested = Signal()
+    viewRequested = Signal(str)
 
     def __init__(self, config: AppConfig, default_path: str, parent=None):
         super().__init__(parent)
@@ -30,8 +31,13 @@ class SystemLogDialog(QDialog):
         self.path_input = QLineEdit(default_path)
         self.browse_button = QPushButton("Browse…")
         self.browse_button.clicked.connect(self._browse)
+        self.view_button = QPushButton("View")
+        self.view_button.setToolTip("Open this System Log file in Data Browser")
+        self.view_button.clicked.connect(self._view)
+        self.path_input.textChanged.connect(self._update_view_button)
         path_layout.addWidget(self.path_input)
         path_layout.addWidget(self.browse_button)
+        path_layout.addWidget(self.view_button)
         form.addRow("Log file", path_row)
         self.interval_input = QSpinBox()
         self.interval_input.setRange(1, 2_000_000_000)
@@ -106,6 +112,21 @@ class SystemLogDialog(QDialog):
         if path:
             self.path_input.setText(path)
 
+    def _selected_log_path(self) -> str:
+        if self._active and self._state.get("path"):
+            return str(self._state["path"]).strip()
+        return self.path_input.text().strip()
+
+    def _update_view_button(self, *_args) -> None:
+        self.view_button.setEnabled(bool(self._selected_log_path()))
+
+    def _view(self, _checked: bool = False):
+        path = self._selected_log_path()
+        if not path:
+            QMessageBox.warning(self, "System Log", "Choose a System Log file first.")
+            return
+        self.viewRequested.emit(path)
+
     def _start(self):
         fields = tuple(key for key, box in self.checkboxes.items() if box.isChecked())
         if not fields or not self.path_input.text().strip():
@@ -145,3 +166,4 @@ class SystemLogDialog(QDialog):
             self.status_label.setText(f"Recording every {state['interval_seconds']} s: {state['path']}")
         else:
             self.status_label.setText("Stopped" + (f": {state['path']}" if state["path"] else ""))
+        self._update_view_button()

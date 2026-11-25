@@ -125,14 +125,28 @@ class MainWindowLayoutTests(unittest.TestCase):
                 finally:
                     window.close()
 
-    def test_data_browser_can_resize_and_move_outside_the_main_viewport(self):
+    def test_data_browser_starts_in_mdi_and_can_detach_outside_the_main_viewport(self):
+        from PySide6.QtCore import QPoint
+
         window = MainWindow(self.config)
         try:
             window.show()
-            viewer = window._show_data_browser()
+            docked = window._show_data_browser()
             self.application.processEvents()
+            self.assertIn(docked, window.mdi.subWindowList())
+            browser = window.data_browser_windows[docked]
+            self.assertEqual(browser.detach_action.text(), "Pop Out")
+
+            # 点击 Pop Out 后弹出为无 owner 独立顶层窗，保持同一浏览器实例且可自由拖出主窗口。
+            browser.detach_action.trigger()
+            self.application.processEvents()
+            viewer = window._window_for_data_browser(browser)
+            self.assertIsNotNone(viewer)
+            self.assertIsNot(viewer, docked)
             self.assertTrue(viewer.isWindow())
+            self.assertIsNone(viewer.parent())
             self.assertNotIn(viewer, window.mdi.subWindowList())
+            self.assertEqual(browser.detach_action.text(), "Dock")
             self.assertLess(viewer.minimumSizeHint().width(), 640)
             viewer.resize(480, 340)
             viewer.move(60, window.y() + window.height() + 20)
@@ -141,6 +155,120 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
             self.assertEqual(viewer.pos(), position)
             self.assertLessEqual(viewer.width(), 480)
+
+            # 点击 Dock 可无损放回主窗口中央 MDI 区域。
+            browser.detach_action.trigger()
+            self.application.processEvents()
+            redocked = window._window_for_data_browser(browser)
+            self.assertIsNotNone(redocked)
+            self.assertIn(redocked, window.mdi.subWindowList())
+            self.assertEqual(browser.detach_action.text(), "Pop Out")
+
+            # 拖出中央 MDI 边界同样弹出为无 owner 独立顶层窗。
+            viewport = window.mdi.viewport()
+            inside_point = viewport.mapToGlobal(viewport.rect().center())
+            outside_point = viewport.mapToGlobal(
+                QPoint(viewport.width() + 80, viewport.height() + 80)
+            )
+            self.assertFalse(redocked._should_detach_at(inside_point))
+            self.assertTrue(redocked._should_detach_at(outside_point))
+            dragged_out = window._detach_data_browser(redocked, drop_pos=outside_point)
+            self.application.processEvents()
+            self.assertIsNotNone(dragged_out)
+            self.assertTrue(dragged_out.isWindow())
+            self.assertIsNone(dragged_out.parent())
+            self.assertIs(window.data_browser_windows[dragged_out], browser)
+        finally:
+            window.close()
+
+    def test_dragging_top_resize_border_at_mdi_top_does_not_detach_data_browser(
+        self,
+    ) -> None:
+        from PySide6.QtCore import QPoint, QPointF
+        from PySide6.QtGui import QMouseEvent
+
+        window = MainWindow(self.config)
+        try:
+            window.show()
+            docked = window._show_data_browser()
+            self.application.processEvents()
+            docked.move(docked.x(), 0)
+            self.application.processEvents()
+
+            viewport = window.mdi.viewport()
+            browser = window.data_browser_windows[docked]
+            child_rect = browser.geometry()
+            mid_x = float(docked.width() // 2)
+            outside_top = QPointF(
+                viewport.mapToGlobal(QPoint(docked.x() + docked.width() // 2, -60))
+            )
+
+            # 1) 贴住 MDI 顶部拖动上边框（y=1）向上缩放：即使 Qt 钳位尺寸不变，也绝不误弹出。
+            top_border_local = QPointF(mid_x, 1.0)
+            top_border_global = QPointF(docked.mapToGlobal(top_border_local.toPoint()))
+            press = QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                top_border_local,
+                top_border_global,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            release = QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                top_border_local,
+                outside_top,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            docked.mousePressEvent(press)
+            docked.mouseReleaseEvent(release)
+            QTest.qWait(20)
+            self.application.processEvents()
+            self.assertIn(docked, window.mdi.subWindowList())
+            self.assertIs(window._window_for_data_browser(browser), docked)
+
+            # 2) 鼠标移回真正标题栏中央（清除上一步残留的缩放光标），按住拖出顶部：正常弹出无 owner 独立窗。
+            resize_border = docked._resize_border_width(child_rect)
+            title_y = float((resize_border + child_rect.top()) // 2)
+            title_local = QPointF(mid_x, title_y)
+            title_global = QPointF(docked.mapToGlobal(title_local.toPoint()))
+            move_title = QMouseEvent(
+                QEvent.Type.MouseMove,
+                title_local,
+                title_global,
+                Qt.MouseButton.NoButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            press_title = QMouseEvent(
+                QEvent.Type.MouseButtonPress,
+                title_local,
+                title_global,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            release_title = QMouseEvent(
+                QEvent.Type.MouseButtonRelease,
+                title_local,
+                outside_top,
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            docked.mouseMoveEvent(move_title)
+            docked.mousePressEvent(press_title)
+            docked.mouseReleaseEvent(release_title)
+            QTest.qWait(20)
+            self.application.processEvents()
+            detached = window._window_for_data_browser(browser)
+            self.assertIsNotNone(detached)
+            self.assertIsNot(detached, docked)
+            self.assertTrue(detached.isWindow())
+            self.assertIsNone(detached.parent())
+            self.assertNotIn(detached, window.mdi.subWindowList())
         finally:
             window.close()
 
@@ -299,7 +427,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.application.processEvents()
 
             viewport = window.mdi.viewport().rect()
-            for subwindow in (window.sequence_window,):
+            for subwindow in (window.sequence_window, data_window):
                 geometry = subwindow.geometry()
                 self.assertGreaterEqual(geometry.left(), viewport.left())
                 self.assertGreaterEqual(geometry.top(), viewport.top())
