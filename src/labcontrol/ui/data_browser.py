@@ -192,9 +192,9 @@ class DatBrowserWidget(QWidget):
         directory = self.current_path.parent if self.current_path is not None else self.start_directory
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "Open DAT File",
+            "Open DAT or System Log File",
             str(directory),
-            "DAT data (*.dat);;All files (*)",
+            "Data files (*.dat *.log);;DAT data (*.dat);;Log files (*.log);;All files (*)",
         )
         if selected:
             self.load_path(selected, show_errors=True)
@@ -386,7 +386,7 @@ class DatBrowserWidget(QWidget):
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 path = Path(url.toLocalFile())
-                if path.is_file() and path.suffix.casefold() == ".dat":
+                if path.is_file() and path.suffix.casefold() in {".dat", ".log"}:
                     return path
         return None
 

@@ -2783,6 +2783,7 @@ class MainWindow(QMainWindow):
             dialog = SystemLogDialog(self.config, str(path), self)
             dialog.startRequested.connect(self._start_system_log)
             dialog.stopRequested.connect(self._stop_system_log)
+            dialog.viewRequested.connect(self._view_system_log)
             self.system_log_dialog = dialog
         self.system_log_dialog.set_state(self._system_log_state)
         self.system_log_dialog.show()
@@ -2799,6 +2800,26 @@ class MainWindow(QMainWindow):
 
     def _stop_system_log(self) -> None:
         self.system_log_dialog.set_pending(self.runtime.stop_system_log())
+
+    def _view_system_log(self, path: str) -> None:
+        text = path.strip()
+        if not text:
+            QMessageBox.warning(
+                self.system_log_dialog or self,
+                "System Log",
+                "Choose a System Log file first.",
+            )
+            return
+        resolved = self.config.resolve_project_path(text)
+        if not resolved.is_file():
+            QMessageBox.information(
+                self.system_log_dialog or self,
+                "System Log",
+                f"System Log file does not exist yet:\n{resolved}\n\n"
+                "Click Start Log first or choose an existing .log file.",
+            )
+            return
+        self._show_data_browser(resolved)
 
     def _open_manual_control(
         self,

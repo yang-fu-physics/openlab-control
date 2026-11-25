@@ -256,3 +256,50 @@ class SystemLogUITests(unittest.TestCase):
                 self.assertFalse(selected.exists())
         finally:
             window.close()
+
+    def test_system_log_view_button_opens_log_file_in_data_browser(self):
+        config, snapshots = log_fixture()
+        window = MainWindow(config)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                log_path = Path(directory) / "status.log"
+                recorder = SystemLogRecorder(config)
+                recorder.start(
+                    str(log_path),
+                    30,
+                    ("temperature.control:main:current",),
+                    snapshots,
+                )
+                recorder.close()
+
+                window._open_system_log()
+                dialog = window.system_log_dialog
+                self.assertIsNotNone(dialog)
+                dialog.path_input.setText(str(log_path))
+                dialog.set_state(
+                    {
+                        "active": True,
+                        "path": str(log_path),
+                        "interval_seconds": 30,
+                        "fields": ["temperature.control:main:current"],
+                    }
+                )
+                # 记录进行中仍允许点击 View 直接用 Data Browser 打开 .log。
+                self.assertTrue(dialog.view_button.isEnabled())
+                dialog.view_button.click()
+                self.app.processEvents()
+
+                self.assertEqual(len(window.data_browser_windows), 1)
+                viewer = next(iter(window.data_browser_windows))
+                browser = window.data_browser_windows[viewer]
+                self.assertEqual(browser.current_path, log_path.resolve())
+                self.assertEqual(viewer.windowTitle(), "status.log - Data Browser")
+
+                # 文件尚未生成时给出友好提示，不打开空白窗口。
+                missing_path = Path(directory) / "missing.log"
+                with patch("labcontrol.ui.main_window.QMessageBox.information") as info:
+                    window._view_system_log(str(missing_path))
+                info.assert_called_once()
+                self.assertEqual(len(window.data_browser_windows), 1)
+        finally:
+            window.close()
