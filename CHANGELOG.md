@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.20.7 - 2026-11-25
+
 - 顶部增加 Settings → Alarm Notifications，支持设备名称、服务地址、Token、接收 QQ、即时保存和异步测试 Warning；消息格式为 `[设备名][级别][来源]：错误内容`，QQ 留空关闭通知。凭据保存在本机独立文件中，发送请求携带 target_qq。
 
 - SEQ 支持运行中编辑、下次 Run 生效；恢复上次保存的 SEQ 并显示其 DAT 路径，调用子序列也使用运行快照。
@@ -10,6 +12,15 @@
 - 稳定超时提示后继续等待；仅驱动明确报告 moving 时暂停稳定超时计时，ready=False 仅阻止判稳。
 - 温度和磁场 Sweep 先稳定并采集起点，再一次设置终点连续扫过；按阈值顺序追赶，到达实际终点时执行末次测量（若在当前组执行期间已达终点则完成该组）后继续 SEQ，不在终点补做跳过的中间轮次。
 - 增加手动 System Log：按仪表实例分页选择记录项，默认 30 个整数秒，独立选择路径并同名续写；只记缓存，不增加查询或改变轮询，空闲及 SEQ 期间均可记录。
+
+
+- 同步发布的 LR700 模块支持通用配置、独立固定量程/电流、自定义限流 Trace、按通道缓存量程和固定基准 ×10；可恢复的自动量程未稳警告不退出自动量程。
+- LR700 设置写入后立即读至 EOI，取消 GET 的额外查询延时；异常关闭连接后等待 5 秒再重连，操作超时预算覆盖错误后的安全清理重连等待。
+- Cryo-con 22C PID 表采用包含等号的温度上边界，保留现场确认的 PID 参数范围，并附操作者表格示例。
+- 软件回归共 687 项通过。LR700 新版取消 GET 延时和故障恢复路径尚未通过实机故障复现验证，不据此宣称已解决现场 GPIB 失联。
+- Windows 通用包、System Instruments 与 Measurement Modules 分别发布；另附 22C＋LR700＋压缩机完整预置包，配置方法及验证边界见包内说明。
+  [System Instruments v0.20.7](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/instruments-v0.20.7)；
+  [Measurement Modules v0.20.7](https://github.com/yang-fu-physics/openlab-control-Module/releases/tag/modules-v0.20.7)。
 
 
 ## 0.20.6 - 2026-11-21

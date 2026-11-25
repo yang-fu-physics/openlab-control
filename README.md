@@ -1,6 +1,6 @@
 # OpenLab Control
 
-**OpenLab Control** 是一套参考 Quantum Design MultiVu 交互方式、用 Python / PySide6 开发的低温与磁场输运实验控制框架（当前版本 `0.20.6`）。它不控制 PPMS，而是用来统一管理你自己搭建的低温、磁场与电输运测量系统。
+**OpenLab Control** 是一套参考 Quantum Design MultiVu 交互方式、用 Python / PySide6 开发的低温与磁场输运实验控制框架（当前版本 `0.20.7`）。它不控制 PPMS，而是用来统一管理你自己搭建的低温、磁场与电输运测量系统。
 
 > **在线使用与开发手册**：<https://yang-fu-physics.github.io/openlab-control/>
 
@@ -42,7 +42,7 @@ OpenLab Control 把实验室里的硬件按“职责”分成两类，目录和�
 
 ### 方式一：Windows 离线发布包（推荐实验员使用）
 
-从 GitHub Releases 下载对应版本的 `OpenLabControl-v0.20.6-windows-x64.zip`，完整解压到可写目录（无需安装 Python）：
+从 GitHub Releases 下载对应版本的 `OpenLabControl-v0.20.7-windows-x64.zip`，完整解压到可写目录（无需安装 Python）：
 
 1. 如需配置真实仪表或打开内置仿真，先双击根目录的 **`InstrumentScanner.exe`** 完成扫描与保存。
 2. 双击 **`OpenLabControl.exe`** 启动主程序。
