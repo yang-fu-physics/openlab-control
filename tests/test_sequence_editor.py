@@ -500,6 +500,93 @@ class SequenceEditorTests(unittest.TestCase):
         finally:
             editor.close()
 
+    def test_mini_toolbar_semantic_styles_and_elided_datafile_tooltip(self) -> None:
+        long_path = (
+            r"C:\Users\researcher\Desktop\cryostat-runs\2026\November\SampleGroupA"
+            r"\20261125-O157S1-O157S2-O146IIS1-O146IIS2-LR700-warming.dat"
+        )
+        datafile = Command(
+            CommandType.SET_DATAFILE,
+            {"mode": "open|create", "path_scope": "Custom folder", "path": long_path},
+        )
+        disabled_remark = Command(CommandType.REMARK, {"text": "disabled note"}, enabled=False)
+        wait_cmd = Command(CommandType.WAIT, {"wait_temperature": True, "seconds": 300.0})
+        set_temp = Command(CommandType.SET_TEMPERATURE, {"target": 4.0, "rate": 2.0})
+        inner_scan = Command(
+            CommandType.SCAN_FIELD,
+            {"start": 0.0, "stop": 1000.0, "steps": 11, "rate": 100.0, "unit": "Oe"},
+            [Command(CommandType.MEASURE)],
+        )
+        outer_scan = Command(
+            CommandType.SCAN_TEMPERATURE,
+            {"start": 3.0, "stop": 30.0, "steps": 28, "rate": 0.5, "mode": "Sweep"},
+            [inner_scan],
+        )
+        remark = Command(CommandType.REMARK, {"text": "comment line"})
+        doc = SequenceDocument([datafile, disabled_remark, wait_cmd, set_temp, outer_scan, remark])
+        editor = SequenceEditorWidget(doc)
+        try:
+            editor.resize(620, 420)
+            editor.show()
+            editor.activateWindow()
+            editor.list.setFocus()
+            self.application.processEvents()
+
+            # Mini toolbar exposes all editing actions and buttons keep focus on the list.
+            toolbar_actions = [a for a in editor.toolbar.actions() if not a.isSeparator()]
+            self.assertEqual(
+                [a.text() for a in toolbar_actions],
+                [
+                    "Undo",
+                    "Redo",
+                    "Cut",
+                    "Copy",
+                    "Paste",
+                    "Delete",
+                    "Move Up",
+                    "Move Down",
+                    "Disable",
+                    "Enable",
+                ],
+            )
+            for action in toolbar_actions:
+                btn = editor.toolbar.widgetForAction(action)
+                self.assertEqual(btn.focusPolicy(), Qt.FocusPolicy.NoFocus)
+
+            # Long Set Datafile path is middle-elided in text while full command lives in tooltip.
+            df_item = editor.list.item(0)
+            self.assertIn("…", df_item.text())
+            self.assertIn("LR700-warming.dat", df_item.text())
+            self.assertIn(long_path, df_item.toolTip())
+
+            # Disabled row uses strikeout muted text regardless of command type.
+            disabled_item = editor.list.item(1)
+            self.assertTrue(disabled_item.font().strikeOut())
+            self.assertEqual(disabled_item.foreground().color().name(), "#98a2b3")
+
+            # Semantic color coding differentiates Wait, Set Temp, Scan, Measure, Remark, End Sequence.
+            self.assertEqual(editor.list.item(2).foreground().color().name(), "#8a5300")
+            self.assertEqual(editor.list.item(3).foreground().color().name(), "#0f5c6e")
+            scan_item = editor.list.item(4)
+            self.assertEqual(scan_item.foreground().color().name(), "#1b4b8a")
+            self.assertTrue(scan_item.font().bold())
+            measure_item = editor.list.item(6)
+            self.assertEqual(measure_item.foreground().color().name(), "#1a6f3c")
+            self.assertTrue(measure_item.font().bold())
+            remark_item = editor.list.item(9)
+            self.assertTrue(remark_item.font().italic())
+            end_seq_item = editor.list.item(editor.list.count() - 1)
+            self.assertEqual(end_seq_item.text(), "End Sequence")
+            self.assertTrue(end_seq_item.font().italic())
+
+            # Running highlight + nested indent guides paint cleanly.
+            editor.set_running_command(wait_cmd.id)
+            self.application.processEvents()
+            pixmap = editor.grab()
+            self.assertFalse(pixmap.isNull())
+        finally:
+            editor.close()
+
 
 if __name__ == "__main__":
     unittest.main()
