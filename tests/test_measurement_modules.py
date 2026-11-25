@@ -67,13 +67,13 @@ def copied_project(temp_root: Path):
 
 class ManifestAndSettingsTests(unittest.TestCase):
     def test_module_timeouts_are_loaded_and_must_be_positive(self) -> None:
-        config = load_config(ROOT / "configs" / "general.toml")
+        config = load_config(ROOT / "configs" / "general.default.toml")
         self.assertEqual(config.modules.startup_timeout_seconds, 10.0)
         self.assertEqual(config.modules.operation_timeout_seconds, 120.0)
         self.assertEqual(config.modules.shutdown_timeout_seconds, 3.0)
         with tempfile.TemporaryDirectory() as temp:
             invalid = Path(temp) / "invalid.toml"
-            source = (ROOT / "configs" / "general.toml").read_text(encoding="utf-8")
+            source = (ROOT / "configs" / "general.default.toml").read_text(encoding="utf-8")
             invalid.write_text(
                 source.replace(
                     "operation_timeout_seconds = 120.0",

@@ -39,7 +39,7 @@ def main() -> int:
     project_root = Path(temporary_project.name)
     (project_root / "configs").mkdir()
     shutil.copy2(
-        ROOT / "configs" / "general.toml",
+        ROOT / "configs" / "general.default.toml",
         project_root / "configs" / "general.toml",
     )
     shutil.copytree(

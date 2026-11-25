@@ -111,8 +111,10 @@ class Module:
 
 ```text
 configs/
-├─ general.toml              唯一通用配置（界面、日志、报警、超时）
+├─ general.default.toml      随发布包提供的通用配置默认模板（升级时刷新，不覆盖现场配置）
+├─ general.toml              本机通用配置（首次启动从默认模板自动生成，界面、日志、报警、超时）
 ├─ visa.resources.toml       测量模块可用的 VISA 清单（扫描器生成）
+├─ module_instances.toml     可选的测量模块同源码多实例配置（Modules 窗口管理）
 ├─ instruments/              系统仪表实例与限值配置（扫描器生成）
 └─ pid/                      各温控实例独立的现场 PID 参数
 modules/                     测量模块目录（自带教学与仿真示例）

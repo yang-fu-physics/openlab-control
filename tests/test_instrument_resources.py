@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 from pathlib import Path
 import shutil
 import sys
@@ -11,6 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from labcontrol.app import main as app_main  # noqa: E402
 from labcontrol.config import ConfigurationError, load_config  # noqa: E402
 from labcontrol.instrument_resources import (  # noqa: E402
     InstrumentResource,
@@ -22,7 +25,11 @@ from labcontrol.instrument_resources import (  # noqa: E402
 from labcontrol.instruments.manifest import (  # noqa: E402
     discover_system_instruments,
 )
-from labcontrol.paths import default_config_path  # noqa: E402
+from labcontrol.paths import (  # noqa: E402
+    default_config_path,
+    default_config_template_path,
+    ensure_default_config,
+)
 
 
 EXTERNAL_MANIFEST = """\
@@ -137,7 +144,7 @@ def _copy_general(root: Path) -> Path:
     configs = root / "configs"
     configs.mkdir(parents=True)
     destination = configs / "general.toml"
-    shutil.copy2(ROOT / "configs" / "general.toml", destination)
+    shutil.copy2(ROOT / "configs" / "general.default.toml", destination)
     return destination
 
 
@@ -261,6 +268,132 @@ class InstrumentResourceTests(unittest.TestCase):
             (configs / "default.toml").write_text("", encoding="utf-8")
             with patch("labcontrol.paths.project_root", return_value=root):
                 self.assertEqual(default_config_path(), configs / "general.toml")
+                self.assertEqual(
+                    default_config_template_path(),
+                    configs / "general.default.toml",
+                )
+
+    def test_ensure_default_config_seeds_once_and_preserves_existing_site_config(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configs = root / "configs"
+            configs.mkdir()
+            template = configs / "general.default.toml"
+            shutil.copy2(ROOT / "configs" / "general.default.toml", template)
+            target = configs / "general.toml"
+
+            with patch("labcontrol.paths.project_root", return_value=root):
+                seeded = ensure_default_config()
+
+            self.assertEqual(seeded, target)
+            self.assertTrue(target.is_file())
+            self.assertEqual(
+                target.read_bytes(),
+                template.read_bytes(),
+            )
+            self.assertEqual(list(configs.glob("*.tmp")), [])
+
+            custom_text = template.read_text(encoding="utf-8").replace(
+                'title = "OpenLab Control"',
+                'title = "Lab 2K Cryostat"',
+                1,
+            )
+            target.write_text(custom_text, encoding="utf-8")
+            template.write_text(
+                template.read_text(encoding="utf-8").replace(
+                    'title = "OpenLab Control"',
+                    'title = "New Release Default"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("labcontrol.paths.project_root", return_value=root):
+                preserved = ensure_default_config()
+
+            self.assertEqual(preserved, target)
+            self.assertEqual(target.read_text(encoding="utf-8"), custom_text)
+            self.assertEqual(load_config(target).title, "Lab 2K Cryostat")
+
+    def test_ensure_default_config_falls_back_when_hardlink_is_unavailable(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configs = root / "configs"
+            configs.mkdir()
+            template = configs / "general.default.toml"
+            shutil.copy2(ROOT / "configs" / "general.default.toml", template)
+            target = configs / "general.toml"
+
+            with patch("labcontrol.paths.os.link", side_effect=OSError("unsupported")):
+                result = ensure_default_config(target)
+
+            self.assertEqual(result, target)
+            self.assertEqual(target.read_bytes(), template.read_bytes())
+            self.assertEqual(list(configs.glob("*.tmp")), [])
+
+    def test_app_main_seeds_default_config_only_when_config_flag_is_omitted(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            configs = root / "configs"
+            configs.mkdir()
+            template = configs / "general.default.toml"
+            shutil.copy2(ROOT / "configs" / "general.default.toml", template)
+            target = configs / "general.toml"
+            sequence = root / "smoke.seq"
+            sequence.write_text("Wait 0\n", encoding="utf-8")
+
+            captured_configs = []
+
+            def fake_headless(config, *_args) -> int:
+                captured_configs.append(config)
+                return 0
+
+            with (
+                patch("labcontrol.paths.project_root", return_value=root),
+                patch("labcontrol.app._headless_demo", side_effect=fake_headless),
+            ):
+                first_exit = app_main(
+                    ["--headless-demo", "--sequence", str(sequence)]
+                )
+                self.assertEqual(first_exit, 0)
+                self.assertTrue(target.is_file())
+                self.assertEqual(captured_configs[-1].source_path, target.resolve())
+
+                custom_text = template.read_text(encoding="utf-8").replace(
+                    'title = "OpenLab Control"',
+                    'title = "Custom Bench"',
+                    1,
+                )
+                target.write_text(custom_text, encoding="utf-8")
+
+                second_exit = app_main(
+                    ["--headless-demo", "--sequence", str(sequence)]
+                )
+                self.assertEqual(second_exit, 0)
+                self.assertEqual(captured_configs[-1].title, "Custom Bench")
+                self.assertEqual(target.read_text(encoding="utf-8"), custom_text)
+
+                missing_explicit = configs / "missing.toml"
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    third_exit = app_main(
+                        [
+                            "--config",
+                            str(missing_explicit),
+                            "--headless-demo",
+                            "--sequence",
+                            str(sequence),
+                        ]
+                    )
+                self.assertEqual(third_exit, 2)
+                self.assertIn("Configuration error:", stderr.getvalue())
+                self.assertFalse(missing_explicit.exists())
 
     def test_clean_general_loads_without_local_or_system_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

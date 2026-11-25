@@ -115,7 +115,7 @@ def _copy_general(root: Path):
     configs = root / "configs"
     configs.mkdir()
     general = configs / "general.toml"
-    shutil.copy2(ROOT / "configs" / "general.toml", general)
+    shutil.copy2(ROOT / "configs" / "general.default.toml", general)
     return load_config(general)
 
 

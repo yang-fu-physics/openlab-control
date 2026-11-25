@@ -191,7 +191,7 @@ class InstrumentManagerTests(unittest.TestCase):
     def test_configuration_confines_and_separates_run_log_file_names(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_root = Path(temp)
-            source = (ROOT / "configs" / "general.toml").read_text(encoding="utf-8")
+            source = (ROOT / "configs" / "general.default.toml").read_text(encoding="utf-8")
 
             escaped = temp_root / "escaped.toml"
             escaped.write_text(

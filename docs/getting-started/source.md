@@ -19,7 +19,7 @@ cd openlab-control
 
 ## 2. 配置仿真或真实仪表
 
-程序启动默认读取 `configs/general.toml`，没有任何系统仪表面板也能正常打开。要启用内置仿真或接入真实仪表，运行扫描向导：
+程序启动默认读取 `configs/general.toml`（首次启动若不存在，会自动从仓库随附的 `configs/general.default.toml` 复制一份，并已被 `.gitignore` 忽略），没有任何系统仪表面板也能正常打开。要启用内置仿真或接入真实仪表，运行扫描向导：
 
 ```powershell
 .\.venv\Scripts\python.exe .\tools\instrument_scanner.py
@@ -72,6 +72,6 @@ cd openlab-control
 
 !!! danger "不要提交本机配置和实验隐私"
 
-    真实仪表地址、`configs/instruments/`、`configs/visa.resources.toml`、`configs/pid/`、
+    真实仪表地址、`configs/general.toml`、`configs/instruments/`、`configs/visa.resources.toml`、`configs/module_instances.toml`、`configs/pid/`、
     报警 Token、实验 `.dat` 以及 `module_data/` 都不要提交到 Git。
     此外，每次运行自动保存的 `runs/<运行目录>/configuration/` 包含当次使用的配置快照，对外分享前请先检查并脱敏。
