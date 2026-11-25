@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStyle,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -129,6 +130,14 @@ class _DataBrowserMdiSubWindow(QMdiSubWindow):
     """中央 MDI 区内的数据浏览子窗口；将标题栏拖出中央区域后自动弹出为独立窗口。"""
 
     detachRequested = Signal(QPoint)
+    _RESIZE_CURSORS = frozenset(
+        {
+            Qt.CursorShape.SizeVerCursor,
+            Qt.CursorShape.SizeHorCursor,
+            Qt.CursorShape.SizeBDiagCursor,
+            Qt.CursorShape.SizeFDiagCursor,
+        }
+    )
 
     def __init__(self, mdi: QMdiArea, detach_margin: int) -> None:
         super().__init__()
@@ -138,23 +147,48 @@ class _DataBrowserMdiSubWindow(QMdiSubWindow):
         self._drag_start_size: QSize | None = None
         self._pressed_title_bar = False
 
+    def _resize_border_width(self, child_rect: QRect) -> int:
+        style = self.style()
+        style_frame = (
+            style.pixelMetric(
+                QStyle.PixelMetric.PM_MdiSubWindowFrameWidth,
+                None,
+                self,
+            )
+            if style is not None
+            else 0
+        )
+        return max(child_rect.left(), int(style_frame), scaled(6))
+
+    def _is_draggable_title_bar_point(self, pos: QPoint) -> bool:
+        child = self.widget()
+        if child is None:
+            return False
+        if self.cursor().shape() in self._RESIZE_CURSORS:
+            return False
+        child_rect = child.geometry()
+        resize_border = self._resize_border_width(child_rect)
+        if not (resize_border <= pos.y() < child_rect.top()):
+            return False
+        left_bound = max(resize_border, child_rect.left() + scaled(24))
+        right_bound = min(
+            self.width() - resize_border - 1,
+            child_rect.right() - scaled(96),
+        )
+        if right_bound < left_bound:
+            right_bound = max(left_bound, self.width() - resize_border - 1)
+        return left_bound <= pos.x() <= right_bound
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
         self._drag_start_pos = None
         self._drag_start_size = None
         self._pressed_title_bar = False
         if event.button() == Qt.MouseButton.LeftButton and not self.isMaximized():
-            self._drag_start_pos = QPoint(self.pos())
-            self._drag_start_size = QSize(self.size())
-            child = self.widget()
             pos = event.position().toPoint()
-            if child is not None:
-                child_rect = child.geometry()
-                left_bound = child_rect.left() + scaled(24)
-                right_bound = max(left_bound, child_rect.right() - scaled(96))
-                self._pressed_title_bar = (
-                    pos.y() < child_rect.top()
-                    and left_bound <= pos.x() <= right_bound
-                )
+            if self._is_draggable_title_bar_point(pos):
+                self._drag_start_pos = QPoint(self.pos())
+                self._drag_start_size = QSize(self.size())
+                self._pressed_title_bar = True
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -169,13 +203,12 @@ class _DataBrowserMdiSubWindow(QMdiSubWindow):
             event.button() != Qt.MouseButton.LeftButton
             or start_pos is None
             or start_size is None
+            or not pressed_title_bar
             or self.isMaximized()
         ):
             return
-        # 拉边缩放会改变窗口尺寸，绝不误触发弹出；仅在标题栏拖动并越出中央 MDI 边界时弹出。
+        # 拉边缩放会改变窗口尺寸，且必须起源于标题栏而非任何缩放边框，防止贴顶拉边误弹出。
         if self.size() != start_size:
-            return
-        if self.pos() == start_pos and not pressed_title_bar:
             return
         global_pos = event.globalPosition().toPoint()
         if self._should_detach_at(global_pos):
