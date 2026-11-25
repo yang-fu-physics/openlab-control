@@ -1940,7 +1940,7 @@
 <li>上述命令检出与本手册一致的稳定版；若准备给核心仓库提 PR，再切换到 <code>main</code> 分支。</li>
 </ul>
 <h2 id="2">2. 配置仿真或真实仪表<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
-<p>程序启动默认读取 <code>configs/general.toml</code>，没有任何系统仪表面板也能正常打开。要启用内置仿真或接入真实仪表，运行扫描向导：</p>
+<p>程序启动默认读取 <code>configs/general.toml</code>（首次启动若不存在，会自动从仓库随附的 <code>configs/general.default.toml</code> 复制一份，并已被 <code>.gitignore</code> 忽略），没有任何系统仪表面板也能正常打开。要启用内置仿真或接入真实仪表，运行扫描向导：</p>
 <div class="language-powershell highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">.\.</span><span class="n">venv</span><span class="p">\</span><span class="n">Scripts</span><span class="p">\</span><span class="n">python</span><span class="p">.</span><span class="n">exe</span> <span class="p">.\</span><span class="n">tools</span><span class="p">\</span><span class="n">instrument_scanner</span><span class="p">.</span><span class="n">py</span>
 </span></code></pre></div>
 <p>扫描器会按职责生成三类本地配置文件（均已被 <code>.gitignore</code> 忽略）：</p>
@@ -1975,7 +1975,7 @@
 </ol>
 <div class="admonition danger">
 <p class="admonition-title">不要提交本机配置和实验隐私</p>
-<p>真实仪表地址、<code>configs/instruments/</code>、<code>configs/visa.resources.toml</code>、<code>configs/pid/</code>、
+<p>真实仪表地址、<code>configs/general.toml</code>、<code>configs/instruments/</code>、<code>configs/visa.resources.toml</code>、<code>configs/module_instances.toml</code>、<code>configs/pid/</code>、
 报警 Token、实验 <code>.dat</code> 以及 <code>module_data/</code> 都不要提交到 Git。
 此外，每次运行自动保存的 <code>runs/&lt;运行目录&gt;/configuration/</code> 包含当次使用的配置快照，对外分享前请先检查并脱敏。</p>
 </div>

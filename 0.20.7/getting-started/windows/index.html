@@ -645,7 +645,7 @@
   <a href="#5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. 准备接入真实仪表前
+        5. 升级发布包与接入真实仪表
       
     </span>
   </a>
@@ -1898,7 +1898,7 @@
   <a href="#5" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. 准备接入真实仪表前
+        5. 升级发布包与接入真实仪表
       
     </span>
   </a>
@@ -1973,8 +1973,11 @@
 <li><strong>At startup</strong>：选择记住上次窗口位置、始终最大化或恢复默认布局。</li>
 </ul>
 <p>点击 <strong>Save</strong> 并重启软件后生效（所有测量模块窗口会自动继承同一套字号）。该设置保存在 Windows 当前用户目录，不会改动项目里的 <code>configs/</code>、SEQ 或数据文件。</p>
-<h2 id="5">5. 准备接入真实仪表前<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
-<p>平时只需维护 <code>configs/general.toml</code>；扫描器生成的 <code>configs/visa.resources.toml</code>、<code>configs/instruments/</code> 含有本机地址，不要提交到公开仓库。已有 <code>configs/pid/</code> 文件在重新保存扫描器配置时不会被覆盖或删除。</p>
+<h2 id="5">5. 升级发布包与接入真实仪表<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>就地升级不覆盖配置</strong>：关闭正在运行的 <code>OpenLabControl.exe</code> 与 <code>InstrumentScanner.exe</code>，直接将新版 ZIP 解压覆盖到原有目录即可。发布包仅包含默认模板 <code>configs/general.default.toml</code>，不包含 <code>configs/general.toml</code>、<code>configs/visa.resources.toml</code>、<code>configs/module_instances.toml</code>、<code>configs/instruments/</code> 与 <code>configs/pid/</code>，因此原有本机配置都会完整保留；首次启动全新安装目录时，程序会自动从 <code>configs/general.default.toml</code> 复制生成 <code>configs/general.toml</code>。</li>
+<li><strong>现场配置文件维护</strong>：平时只需维护 <code>configs/general.toml</code>（可随时对照同目录的 <code>configs/general.default.toml</code> 查看新版新增配置项）；扫描器生成的 <code>configs/visa.resources.toml</code>、<code>configs/instruments/</code> 含有本机地址，不要提交到公开仓库。已有 <code>configs/pid/</code> 文件在重新保存扫描器配置时不会被覆盖或删除。</li>
+</ul>
 <div class="admonition danger">
 <p class="admonition-title">接入真实硬件前请先核对</p>
 <p>复制驱动或改完地址后，请先阅读该型号的 README 并完成 <a href="../../guides/safety-checklist/">真实仪表安全清单</a>，

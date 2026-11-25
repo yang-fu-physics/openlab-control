@@ -2215,7 +2215,7 @@
 </span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>T     Measure
 </span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>T End Scan
 </span></code></pre></div>
-<p>使用单调时钟调度（不受系统校时影响）：第 1 点在 <code>t = 0</code>，最后一点在 <code>duration</code> 处；范围 <code>0</code>–<code>31,536,000</code> 秒，<code>steps</code> 为 <code>1</code>–<code>1,000,000</code>。</p>
+<p>使用单调时钟调度（不受系统校时影响，扣除 Pause 与主仪表恢复等待）：第 1 点在 <code>t = 0</code>，最后一点在 <code>duration</code> 处；范围 <code>0</code>–<code>31,536,000</code> 秒，<code>steps</code> 为 <code>1</code>–<code>1,000,000</code>。当 <code>duration &gt; 0</code> 时，若单步测量耗时长于步距，达到 <code>duration</code> 后会立即结束扫描并记录 <code>SCAN_TIME_REACHED</code>，不再补跑剩余步数（正在执行中的当前步会安全完成，不中途打断仪表测量）。</p>
 <h3 id="system-instrument">System Instrument 无参数指令<a class="headerlink" href="#system-instrument" title="Permanent link">&para;</a></h3>
 <p>配置了无参数指令的系统仪表（例如压缩机开关）会直接按显示名出现在 SEQ 中：</p>
 <div class="language-text highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>T Compressor On
