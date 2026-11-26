@@ -114,10 +114,15 @@
 
 ### 基本编辑
 
-- **新建 / 打开 / 保存**：通过 **File → New / Open / Save / Save As**（若不小心关掉了浮动 SEQ 窗口，再点 New/Open/Edit 即可唤回）。
-- **插入指令**：在右侧 **Sequence Command Bar** 双击指令，在弹窗中填好参数即可插入；选中 `Scan` 或 `End Scan` 行再插入时，新指令会自动缩进到该扫描块内部。
+- **新建 / 打开 / 保存**：通过 **File → New (`Ctrl+N`) / Open (`Ctrl+O`) / Save (`Ctrl+S`) / Save As (`Ctrl+Shift+S`)**（若不小心关掉了浮动 SEQ 窗口，再点 New/Open/Edit 即可唤回）。
+- **插入指令**：在右侧 **Sequence Command Bar** 双击指令，在弹窗中填好参数即可插入；选中 `Scan` 或 `End Scan` 行再插入时，新指令会自动缩进到该扫描块内部，插入后焦点自动回到 SEQ 列表方便继续使用快捷键。
 - **修改已有指令**：直接双击 SEQ 里的任意一行。
-- **批量操作**：按住 `Ctrl` 或 `Shift` 选中多行，可通过右键菜单或快捷键执行 **Enable / Disable / Delete / Copy / Paste**（同时选中父 `Scan` 和内部子行时，操作自动只作用于外层块，避免误删或重复复制）。SEQ 运行中禁止修改，但仍允许复制。
+- **批量操作与快捷键**：按住 `Ctrl` 或 `Shift` 选中多行，可通过右键菜单、顶部 **Edit** 菜单或快捷键执行：
+  - 撤销 / 重做：`Ctrl+Z`（Undo）、`Ctrl+Y` / `Ctrl+Shift+Z`（Redo），覆盖插入、修改参数、剪切、粘贴、删除、启停、移动与切换数据文件；
+  - 剪切 / 复制 / 粘贴 / 删除：`Ctrl+X`、`Ctrl+C`、`Ctrl+V`、`Delete`（同时选中父 `Scan` 和内部子行时，操作自动只作用于外层块，避免误删或重复复制/剪切）；
+  - 批量禁用 / 启用：`Ctrl+D`、`Ctrl+E`；
+  - 上下移动当前行：`Alt+Up`、`Alt+Down`（仅在同一父块内移动）。
+  - 锁定不可编辑时所有修改动作禁用，但仍允许复制。
 
 ### 常用指令要点
 

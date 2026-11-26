@@ -1,18 +1,72 @@
 """SEQ 树形文档的列表编辑器。
 
 控件把命令、End Scan 和 End Sequence 展平成可多选列表，但所有修改仍通过
-``SequenceDocument`` 完成。运行期间只关闭修改动作，列表保持可查看；复制/粘贴会克隆完整
-扫描子树并刷新节点 ID，防止一个命令在模型中出现重复身份。
+``SequenceDocument`` 完成。运行期间只关闭修改动作，列表保持可查看；剪切/复制/粘贴会
+克隆完整扫描子树并刷新节点 ID，防止一个命令在模型中出现重复身份；编辑历史支持多步撤销
+（Ctrl+Z）与重做（Ctrl+Y / Ctrl+Shift+Z）。
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QItemSelectionModel, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence, QPalette
-from PySide6.QtWidgets import QListWidget, QListWidgetItem, QMenu, QStyledItemDelegate, QVBoxLayout, QWidget
+from copy import deepcopy
+from dataclasses import dataclass
+
+import qtawesome as qta
+from PySide6.QtCore import QItemSelectionModel, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPalette, QPen
+from PySide6.QtWidgets import (
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..sequence.model import Command, CommandType, FlatRow, SequenceDocument
 from ..sequence.parser import format_command
+from .scaling import scaled
+
+
+_MAX_UNDO_DEPTH = 100
+_DATAFILE_PATH_MAX_CHARS = 56
+_ROLE_ROW = Qt.ItemDataRole.UserRole
+_ROLE_RUNNING = Qt.ItemDataRole.UserRole + 1
+
+
+@dataclass(frozen=True, slots=True)
+class _EditorSnapshot:
+    commands: list[Command]
+    selected_keys: tuple[tuple[str | None, bool, bool], ...]
+    current_key: tuple[str | None, bool, bool] | None
+
+
+def _unique_shortcuts(*sequences: QKeySequence) -> list[QKeySequence]:
+    result: list[QKeySequence] = []
+    for sequence in sequences:
+        if not sequence.isEmpty() and sequence not in result:
+            result.append(sequence)
+    return result
+
+
+def _elide_middle_path(path_text: str, max_chars: int = _DATAFILE_PATH_MAX_CHARS) -> str:
+    """在列表行内中段省略过长的数据文件路径，保留盘符前缀与末尾文件名。"""
+
+    if len(path_text) <= max_chars:
+        return path_text
+    sep_index = max(path_text.rfind("\\"), path_text.rfind("/"))
+    if sep_index > 0:
+        filename = path_text[sep_index + 1 :]
+        if filename and len(filename) <= max_chars - 12:
+            head_len = max(8, max_chars - len(filename) - 5)
+            return f"{path_text[:head_len]}…{path_text[sep_index:]}"
+    head = max(12, (max_chars - 1) // 2)
+    tail = max(12, max_chars - head - 1)
+    return f"{path_text[:head]}…{path_text[-tail:]}"
 
 
 def _display_command(command: Command) -> str:
@@ -29,17 +83,116 @@ def _display_command(command: Command) -> str:
     return format_command(command, preserve_raw=not is_temperature_list)
 
 
+def _display_command_and_tooltip(command: Command) -> tuple[str, str]:
+    """返回列表行展示文本与可选完整路径提示。"""
+
+    full_text = _display_command(command)
+    if command.type is not CommandType.SET_DATAFILE:
+        return full_text, ""
+    raw_path = str(command.params.get("path", "")).strip()
+    if not raw_path or len(raw_path) <= _DATAFILE_PATH_MAX_CHARS:
+        return full_text, ""
+    elided = _elide_middle_path(raw_path)
+    if raw_path in full_text:
+        return full_text.replace(raw_path, elided, 1), full_text
+    return full_text, ""
+
+
+def _semantic_style(command: Command) -> tuple[QColor, bool, bool]:
+    """返回 ``(前景色, 是否加粗, 是否斜体)``，用于温和区分命令语义层级。"""
+
+    if command.type in {
+        CommandType.SCAN_TEMPERATURE,
+        CommandType.SCAN_FIELD,
+        CommandType.SCAN_TIME,
+        CommandType.MODULE_SCAN,
+    }:
+        return QColor("#1b4b8a"), True, False
+    if command.type is CommandType.MEASURE:
+        return QColor("#1a6f3c"), True, False
+    if command.type in {
+        CommandType.SET_TEMPERATURE,
+        CommandType.SET_FIELD,
+        CommandType.INSTRUMENT_COMMAND,
+        CommandType.MODULE_COMMAND,
+    }:
+        return QColor("#0f5c6e"), False, False
+    if command.type is CommandType.WAIT:
+        return QColor("#8a5300"), False, False
+    if command.type in {CommandType.SET_DATAFILE, CommandType.CALL_SEQUENCE}:
+        return QColor("#475467"), False, False
+    if command.type is CommandType.REMARK:
+        return QColor("#667085"), False, True
+    if command.type in {CommandType.INJECT_WARNING, CommandType.INJECT_ERROR}:
+        return QColor("#a61b29"), False, False
+    return QColor("#1f2328"), False, False
+
+
 class RunningCommandDelegate(QStyledItemDelegate):
-    """Keep the execution marker visible even when the row is selected."""
+    """绘制嵌套缩进参考线、当前执行行左侧强调条与高亮底色。"""
+
+    def sizeHint(self, option, index) -> QSize:
+        hint = super().sizeHint(option, index)
+        min_height = max(scaled(22), option.fontMetrics.height() + scaled(6))
+        return QSize(hint.width(), max(hint.height(), min_height))
 
     def initStyleOption(self, option, index) -> None:
         super().initStyleOption(option, index)
-        if index.data(Qt.ItemDataRole.UserRole + 1):
-            option.backgroundBrush = QColor("#ffe082")
-            option.palette.setColor(QPalette.ColorRole.Highlight, QColor("#ffe082"))
-            option.palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#332600"))
-            option.palette.setColor(QPalette.ColorRole.Text, QColor("#332600"))
+        if index.data(_ROLE_RUNNING):
+            option.backgroundBrush = QColor("#ffebb0")
+            option.palette.setColor(QPalette.ColorRole.Highlight, QColor("#ffebb0"))
+            option.palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#3b2600"))
+            option.palette.setColor(QPalette.ColorRole.Text, QColor("#3b2600"))
             option.font.setBold(True)
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        running = bool(index.data(_ROLE_RUNNING))
+        row = index.data(_ROLE_ROW)
+        draw_option = option
+        if running:
+            draw_option = QStyleOptionViewItem(option)
+            self.initStyleOption(draw_option, index)
+            # Clear State_Selected before delegating so QSS ::item:selected never
+            # overrides the warm amber execution highlight on the running row.
+            draw_option.state &= ~QStyle.StateFlag.State_Selected
+            painter.save()
+            painter.fillRect(draw_option.rect, QColor("#ffebb0"))
+            painter.restore()
+            draw_option.backgroundBrush = QColor(Qt.GlobalColor.transparent)
+            super().paint(painter, draw_option, index)
+        else:
+            super().paint(painter, option, index)
+        painter.save()
+        try:
+            rect: QRect = option.rect
+            if isinstance(row, FlatRow) and row.depth > 0:
+                indent_step = max(scaled(14), option.fontMetrics.horizontalAdvance("    "))
+                base_left = rect.left() + scaled(7)
+                guide_color = (
+                    QColor("#d0a242")
+                    if running
+                    else QColor("#b9cbe0")
+                    if option.state & QStyle.StateFlag.State_Selected
+                    else QColor("#d4dde8")
+                )
+                painter.setPen(QPen(guide_color, 1))
+                for level in range(row.depth):
+                    x = int(base_left + level * indent_step)
+                    painter.drawLine(x, rect.top(), x, rect.bottom())
+            if running:
+                bar_width = scaled(3)
+                painter.fillRect(
+                    rect.left(),
+                    rect.top(),
+                    bar_width,
+                    rect.height(),
+                    QColor("#d98200"),
+                )
+                painter.setPen(QPen(QColor("#e8c468"), 1))
+                painter.drawLine(rect.left() + bar_width, rect.top(), rect.right(), rect.top())
+                painter.drawLine(rect.left() + bar_width, rect.bottom(), rect.right(), rect.bottom())
+        finally:
+            painter.restore()
 
 
 class SequenceEditorWidget(QWidget):
@@ -55,11 +208,16 @@ class SequenceEditorWidget(QWidget):
             tuple[str, str]
         ] = set()
         self._clipboard: tuple[Command, ...] = ()
+        self._undo_stack: list[_EditorSnapshot] = []
+        self._redo_stack: list[_EditorSnapshot] = []
         self._editable = True
         self._running_command_id = ""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
         self.list = QListWidget()
+        self.list.setObjectName("sequenceCommandList")
         self.list.setItemDelegate(RunningCommandDelegate(self.list))
         self.list.setAlternatingRowColors(True)
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
@@ -68,46 +226,191 @@ class SequenceEditorWidget(QWidget):
         self.list.itemSelectionChanged.connect(self._update_action_states)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addWidget(self.list)
+        self.list.setStyleSheet(
+            "QListWidget#sequenceCommandList {"
+            "  background: #ffffff;"
+            "  alternate-background-color: #f8fafc;"
+            "  border: none;"
+            f"  padding: {scaled(2)}px 0px;"
+            "}"
+            "QListWidget#sequenceCommandList::item:selected {"
+            "  background: #dbeafe;"
+            "  color: #101828;"
+            "}"
+            "QListWidget#sequenceCommandList::item:hover:!selected {"
+            "  background: #f1f5f9;"
+            "}"
+        )
+
         self._build_actions()
+        self.toolbar = self._build_toolbar()
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.list, 1)
+        self.setFocusProxy(self.list)
         self.rebuild()
+
+    def _build_toolbar(self) -> QToolBar:
+        """构建紧贴 SEQ 列表顶部的紧凑图标编辑栏，点击不抢占列表键盘焦点。"""
+
+        toolbar = QToolBar("Sequence Edit", self)
+        toolbar.setObjectName("sequenceMiniToolbar")
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setIconSize(QSize(scaled(14), scaled(14)))
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setStyleSheet(
+            "QToolBar#sequenceMiniToolbar {"
+            "  background: #f6f8fa;"
+            "  border: none;"
+            "  border-bottom: 1px solid #d5dce4;"
+            f"  spacing: {scaled(2)}px;"
+            f"  padding: {scaled(2)}px {scaled(4)}px;"
+            "}"
+            "QToolBar#sequenceMiniToolbar::separator {"
+            "  background: #d0d7de;"
+            "  width: 1px;"
+            f"  margin: {scaled(3)}px {scaled(3)}px;"
+            "}"
+            "QToolBar#sequenceMiniToolbar QToolButton {"
+            "  border: 1px solid transparent;"
+            f"  border-radius: {scaled(3)}px;"
+            f"  padding: {scaled(2)}px {scaled(4)}px;"
+            "}"
+            "QToolBar#sequenceMiniToolbar QToolButton:hover:enabled {"
+            "  background: #e6edf5;"
+            "  border-color: #c8d4e3;"
+            "}"
+            "QToolBar#sequenceMiniToolbar QToolButton:pressed:enabled {"
+            "  background: #d9e4f1;"
+            "}"
+        )
+        groups = (
+            (self.undo_action, self.redo_action),
+            (self.cut_action, self.copy_action, self.paste_action, self.delete_action),
+            (self.move_up_action, self.move_down_action),
+            (self.disable_action, self.enable_action),
+        )
+        for index, group in enumerate(groups):
+            if index > 0:
+                toolbar.addSeparator()
+            for action in group:
+                toolbar.addAction(action)
+                button = toolbar.widgetForAction(action)
+                if isinstance(button, QToolButton):
+                    button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        return toolbar
 
     def _build_actions(self) -> None:
         """创建一次性复用的 QAction，避免每次右键菜单重复连接信号。"""
 
-        self.disable_action = QAction("Disable", self)
+        icon_color = "#3b4652"
+        disabled_color = "#a8b2bd"
+
+        def _icon(name: str, color: str = icon_color):
+            return qta.icon(name, color=color, color_disabled=disabled_color)
+
+        self.undo_action = QAction(_icon("fa5s.undo"), "Undo", self)
+        self.undo_action.setShortcuts(
+            _unique_shortcuts(
+                *QKeySequence.keyBindings(QKeySequence.StandardKey.Undo),
+                QKeySequence("Ctrl+Z"),
+            )
+        )
+        self.undo_action.setToolTip("Undo (Ctrl+Z)")
+        self.undo_action.setStatusTip("Undo the last sequence edit (Ctrl+Z)")
+        self.undo_action.triggered.connect(self.undo)
+
+        self.redo_action = QAction(_icon("fa5s.redo"), "Redo", self)
+        self.redo_action.setShortcuts(
+            _unique_shortcuts(
+                *QKeySequence.keyBindings(QKeySequence.StandardKey.Redo),
+                QKeySequence("Ctrl+Y"),
+                QKeySequence("Ctrl+Shift+Z"),
+            )
+        )
+        self.redo_action.setToolTip("Redo (Ctrl+Y / Ctrl+Shift+Z)")
+        self.redo_action.setStatusTip("Redo the undone sequence edit (Ctrl+Y / Ctrl+Shift+Z)")
+        self.redo_action.triggered.connect(self.redo)
+
+        self.disable_action = QAction(_icon("fa5s.ban", "#8a5700"), "Disable", self)
         self.disable_action.setShortcut(QKeySequence("Ctrl+D"))
+        self.disable_action.setToolTip("Disable selected (Ctrl+D)")
         self.disable_action.setStatusTip("Disable the selected commands (Ctrl+D)")
         self.disable_action.triggered.connect(self.disable_selected)
 
-        self.enable_action = QAction("Enable", self)
+        self.enable_action = QAction(_icon("fa5s.check-circle", "#1a6f3c"), "Enable", self)
         self.enable_action.setShortcut(QKeySequence("Ctrl+E"))
+        self.enable_action.setToolTip("Enable selected (Ctrl+E)")
         self.enable_action.setStatusTip("Enable the selected commands (Ctrl+E)")
         self.enable_action.triggered.connect(self.enable_selected)
 
-        self.delete_action = QAction("Delete", self)
-        self.delete_action.setShortcuts(
-            QKeySequence.keyBindings(QKeySequence.StandardKey.Delete)
+        self.cut_action = QAction(_icon("fa5s.cut"), "Cut", self)
+        self.cut_action.setShortcuts(
+            _unique_shortcuts(
+                *QKeySequence.keyBindings(QKeySequence.StandardKey.Cut),
+                QKeySequence("Ctrl+X"),
+            )
         )
-        self.delete_action.setStatusTip("Delete the selected commands or Scan blocks (Delete)")
-        self.delete_action.triggered.connect(self.delete_selected)
+        self.cut_action.setToolTip("Cut (Ctrl+X)")
+        self.cut_action.setStatusTip("Cut the selected commands or Scan blocks (Ctrl+X)")
+        self.cut_action.triggered.connect(self.cut_selected)
 
-        self.copy_action = QAction("Copy", self)
-        self.copy_action.setShortcuts(QKeySequence.keyBindings(QKeySequence.StandardKey.Copy))
+        self.copy_action = QAction(_icon("fa5s.copy"), "Copy", self)
+        self.copy_action.setShortcuts(
+            _unique_shortcuts(
+                *QKeySequence.keyBindings(QKeySequence.StandardKey.Copy),
+                QKeySequence("Ctrl+C"),
+            )
+        )
+        self.copy_action.setToolTip("Copy (Ctrl+C)")
         self.copy_action.setStatusTip("Copy the selected commands or Scan blocks (Ctrl+C)")
         self.copy_action.triggered.connect(self.copy_selected)
 
-        self.paste_action = QAction("Paste", self)
-        self.paste_action.setShortcuts(QKeySequence.keyBindings(QKeySequence.StandardKey.Paste))
-        self.paste_action.setStatusTip("Paste the copied command set (Ctrl+V)")
+        self.paste_action = QAction(_icon("fa5s.paste"), "Paste", self)
+        self.paste_action.setShortcuts(
+            _unique_shortcuts(
+                *QKeySequence.keyBindings(QKeySequence.StandardKey.Paste),
+                QKeySequence("Ctrl+V"),
+            )
+        )
+        self.paste_action.setToolTip("Paste (Ctrl+V)")
+        self.paste_action.setStatusTip("Paste the copied or cut command set (Ctrl+V)")
         self.paste_action.triggered.connect(self.paste)
 
+        self.delete_action = QAction(_icon("fa5s.trash-alt", "#b42318"), "Delete", self)
+        self.delete_action.setShortcuts(
+            _unique_shortcuts(
+                *QKeySequence.keyBindings(QKeySequence.StandardKey.Delete),
+                QKeySequence(Qt.Key.Key_Delete),
+            )
+        )
+        self.delete_action.setToolTip("Delete (Del)")
+        self.delete_action.setStatusTip("Delete the selected commands or Scan blocks (Delete)")
+        self.delete_action.triggered.connect(self.delete_selected)
+
+        self.move_up_action = QAction(_icon("fa5s.arrow-up"), "Move Up", self)
+        self.move_up_action.setShortcut(QKeySequence("Alt+Up"))
+        self.move_up_action.setToolTip("Move Up (Alt+Up)")
+        self.move_up_action.setStatusTip("Move the selected command up (Alt+Up)")
+        self.move_up_action.triggered.connect(lambda _checked=False: self.move_selected(-1))
+
+        self.move_down_action = QAction(_icon("fa5s.arrow-down"), "Move Down", self)
+        self.move_down_action.setShortcut(QKeySequence("Alt+Down"))
+        self.move_down_action.setToolTip("Move Down (Alt+Down)")
+        self.move_down_action.setStatusTip("Move the selected command down (Alt+Down)")
+        self.move_down_action.triggered.connect(lambda _checked=False: self.move_selected(1))
+
         actions = (
+            self.undo_action,
+            self.redo_action,
             self.disable_action,
             self.enable_action,
-            self.delete_action,
+            self.cut_action,
             self.copy_action,
             self.paste_action,
+            self.delete_action,
+            self.move_up_action,
+            self.move_down_action,
         )
         for action in actions:
             action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -115,10 +418,12 @@ class SequenceEditorWidget(QWidget):
         self._update_action_states()
 
     def set_document(self, document: SequenceDocument) -> None:
-        """切换当前文档并清除旧选择。"""
+        """切换当前文档并清除旧选择与撤销历史。"""
 
         self.document = document
         self._running_command_id = ""
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self.rebuild(preserve_selection=False)
 
     def set_available_module_commands(
@@ -176,19 +481,25 @@ class SequenceEditorWidget(QWidget):
         *,
         select_command_ids: set[str] | None = None,
         preserve_selection: bool = True,
+        restore_selected_keys: tuple[tuple[str | None, bool, bool], ...] | None = None,
+        restore_current_key: tuple[str | None, bool, bool] | None = None,
     ) -> None:
         """从文档重新生成列表，并尽可能恢复多选、当前项和水平滚动位置。"""
 
-        selected_keys = (
-            {self._row_key(row) for row in self.selected_rows()}
-            if preserve_selection and select_command_id is None and select_command_ids is None
-            else set()
-        )
-        current_key = (
-            self._row_key(self.selected_row())
-            if preserve_selection and select_command_id is None and select_command_ids is None
-            else None
-        )
+        if restore_selected_keys is not None or restore_current_key is not None:
+            selected_keys = set(restore_selected_keys or ())
+            current_key = restore_current_key
+        else:
+            selected_keys = (
+                {self._row_key(row) for row in self.selected_rows()}
+                if preserve_selection and select_command_id is None and select_command_ids is None
+                else set()
+            )
+            current_key = (
+                self._row_key(self.selected_row())
+                if preserve_selection and select_command_id is None and select_command_ids is None
+                else None
+            )
         forced_ids = set(select_command_ids or ())
         if select_command_id is not None:
             forced_ids.add(select_command_id)
@@ -197,20 +508,39 @@ class SequenceEditorWidget(QWidget):
         selected_items: list[QListWidgetItem] = []
         for row in self.document.flat_rows():
             command = self.document.find(row.command_id or "") if row.command_id else None
+            row_tooltip = ""
             if row.is_sequence_end:
                 text = "End Sequence"
             elif row.is_end:
                 text = "    " * row.depth + "End Scan"
             else:
-                body = _display_command(command) if command is not None else "Unknown"
+                if command is not None:
+                    body, row_tooltip = _display_command_and_tooltip(command)
+                else:
+                    body = "Unknown"
                 if command is not None and not command.enabled:
                     body = f"[Disabled] {body}"
                 text = "    " * row.depth + body
             item = QListWidgetItem(text)
-            item.setData(Qt.ItemDataRole.UserRole, row)
-            if row.is_end or row.is_sequence_end:
-                item.setForeground(QColor("#6b7280"))
+            item.setData(_ROLE_ROW, row)
+            if row_tooltip:
+                item.setToolTip(row_tooltip)
+            if row.is_sequence_end:
+                item.setForeground(QColor("#8c959f"))
+                font = item.font()
+                font.setItalic(True)
+                item.setFont(font)
+            elif row.is_end:
+                item.setForeground(QColor("#7b8794"))
             else:
+                if command is not None:
+                    fg, is_bold, is_italic = _semantic_style(command)
+                    item.setForeground(fg)
+                    if is_bold or is_italic:
+                        font = item.font()
+                        font.setBold(is_bold)
+                        font.setItalic(is_italic)
+                        item.setFont(font)
                 unavailable_module_command = (
                     command is not None
                     and command.type
@@ -232,8 +562,9 @@ class SequenceEditorWidget(QWidget):
                 elif command is not None and command.type is CommandType.UNKNOWN:
                     item.setBackground(QColor("#fff4cc"))
             if not row.effective_enabled:
-                item.setForeground(QColor("#8a9099"))
+                item.setForeground(QColor("#98a2b3"))
                 font = item.font()
+                font.setBold(False)
                 font.setStrikeOut(True)
                 item.setFont(font)
                 if command is not None and not command.enabled:
@@ -308,11 +639,77 @@ class SequenceEditorWidget(QWidget):
             return None
         return self.document.find(row.command_id)
 
+    def _capture_snapshot(self) -> _EditorSnapshot:
+        selected_keys = tuple(
+            key
+            for row in self.selected_rows()
+            if (key := self._row_key(row)) is not None
+        )
+        return _EditorSnapshot(
+            commands=deepcopy(self.document.commands),
+            selected_keys=selected_keys,
+            current_key=self._row_key(self.selected_row()),
+        )
+
+    def _push_undo_snapshot(self, snapshot: _EditorSnapshot) -> None:
+        self._undo_stack.append(snapshot)
+        if len(self._undo_stack) > _MAX_UNDO_DEPTH:
+            del self._undo_stack[:-_MAX_UNDO_DEPTH]
+        self._redo_stack.clear()
+
+    def record_undo_state(self) -> None:
+        """在外部弹窗直接修改当前文档前记录一次撤销点。"""
+
+        self._push_undo_snapshot(self._capture_snapshot())
+        self._update_action_states()
+
+    def _restore_snapshot(self, snapshot: _EditorSnapshot) -> None:
+        self.document.commands[:] = deepcopy(snapshot.commands)
+        self.rebuild(
+            preserve_selection=False,
+            restore_selected_keys=snapshot.selected_keys,
+            restore_current_key=snapshot.current_key,
+        )
+        self.documentChanged.emit()
+
+    def undo(self) -> None:
+        """撤销最近一次 SEQ 编辑，并恢复当时选中行。"""
+
+        if not self._editable or not self._undo_stack:
+            return
+        self._redo_stack.append(self._capture_snapshot())
+        if len(self._redo_stack) > _MAX_UNDO_DEPTH:
+            del self._redo_stack[:-_MAX_UNDO_DEPTH]
+        snapshot = self._undo_stack.pop()
+        self._restore_snapshot(snapshot)
+
+    def redo(self) -> None:
+        """重做最近一次撤销的 SEQ 编辑，并恢复当时选中行。"""
+
+        if not self._editable or not self._redo_stack:
+            return
+        self._undo_stack.append(self._capture_snapshot())
+        if len(self._undo_stack) > _MAX_UNDO_DEPTH:
+            del self._undo_stack[:-_MAX_UNDO_DEPTH]
+        snapshot = self._redo_stack.pop()
+        self._restore_snapshot(snapshot)
+
+    def _can_move_selected(self, offset: int) -> bool:
+        command = self.selected_command()
+        if command is None:
+            return False
+        location = self.document._locate(command.id)
+        if location is None:
+            return False
+        parent, index = location
+        return 0 <= index + offset < len(parent)
+
     def insert_command(self, command: Command) -> None:
         """按当前行的树形语义插入命令并发出一次文档变化信号。"""
 
         if not self._editable:
             return
+        self._push_undo_snapshot(self._capture_snapshot())
         self.document.insert(command, self.selected_row(), before=True)
         self.rebuild(command.id)
         self.documentChanged.emit()
@@ -323,6 +720,9 @@ class SequenceEditorWidget(QWidget):
         if not self._editable:
             return
         commands = self.selected_commands(prune_descendants=True)
+        if not commands:
+            return
+        snapshot = self._capture_snapshot()
         selected_indices = [
             index for index in range(self.list.count()) if self.list.item(index).isSelected()
         ]
@@ -330,6 +730,32 @@ class SequenceEditorWidget(QWidget):
         for command in commands:
             changed = self.document.delete(command.id) or changed
         if changed:
+            self._push_undo_snapshot(snapshot)
+            target_index = min(selected_indices, default=0)
+            self.rebuild(preserve_selection=False)
+            if self.list.count():
+                self.list.setCurrentRow(min(target_index, self.list.count() - 1))
+            self.documentChanged.emit()
+
+    def cut_selected(self) -> None:
+        """剪切顶层选中子树到控件内剪贴板，并在单次撤销步内删除原节点。"""
+
+        if not self._editable:
+            return
+        commands = self.selected_commands(prune_descendants=True)
+        if not commands:
+            return
+        snapshot = self._capture_snapshot()
+        cloned = tuple(command.clone() for command in commands)
+        selected_indices = [
+            index for index in range(self.list.count()) if self.list.item(index).isSelected()
+        ]
+        changed = False
+        for command in commands:
+            changed = self.document.delete(command.id) or changed
+        if changed:
+            self._clipboard = cloned
+            self._push_undo_snapshot(snapshot)
             target_index = min(selected_indices, default=0)
             self.rebuild(preserve_selection=False)
             if self.list.count():
@@ -348,10 +774,14 @@ class SequenceEditorWidget(QWidget):
         if not self._editable:
             return
         commands = self.selected_commands()
+        if not commands:
+            return
+        snapshot = self._capture_snapshot()
         changed = False
         for command in commands:
             changed = self.document.set_enabled(command.id, enabled) or changed
         if changed:
+            self._push_undo_snapshot(snapshot)
             self.rebuild()
             self.documentChanged.emit()
 
@@ -359,7 +789,11 @@ class SequenceEditorWidget(QWidget):
         if not self._editable:
             return
         command = self.selected_command()
-        if command is not None and self.document.move(command.id, offset):
+        if command is None:
+            return
+        snapshot = self._capture_snapshot()
+        if self.document.move(command.id, offset):
+            self._push_undo_snapshot(snapshot)
             self.rebuild(command.id)
             self.documentChanged.emit()
 
@@ -376,6 +810,7 @@ class SequenceEditorWidget(QWidget):
 
         if not self._editable or not self._clipboard:
             return
+        self._push_undo_snapshot(self._capture_snapshot())
         anchor = self.selected_row()
         inserted: list[Command] = []
         for template in self._clipboard:
@@ -397,27 +832,38 @@ class SequenceEditorWidget(QWidget):
             return
         commands = self.selected_commands()
         has_command = bool(commands)
+        self.undo_action.setEnabled(self._editable and bool(self._undo_stack))
+        self.redo_action.setEnabled(self._editable and bool(self._redo_stack))
         self.disable_action.setEnabled(
             self._editable and any(command.enabled for command in commands)
         )
         self.enable_action.setEnabled(
             self._editable and any(not command.enabled for command in commands)
         )
-        self.delete_action.setEnabled(self._editable and has_command)
+        self.cut_action.setEnabled(self._editable and has_command)
         self.copy_action.setEnabled(has_command)
         self.paste_action.setEnabled(self._editable and bool(self._clipboard))
+        self.delete_action.setEnabled(self._editable and has_command)
+        self.move_up_action.setEnabled(self._editable and self._can_move_selected(-1))
+        self.move_down_action.setEnabled(self._editable and self._can_move_selected(1))
 
     def build_context_menu(self) -> QMenu:
         """构造 SEQ 行菜单；单独暴露以便确定性 UI 测试。"""
 
         self._update_action_states()
         menu = QMenu(self)
-        menu.addAction(self.disable_action)
-        menu.addAction(self.enable_action)
+        menu.addActions([self.undo_action, self.redo_action])
         menu.addSeparator()
-        menu.addAction(self.delete_action)
-        menu.addAction(self.copy_action)
-        menu.addAction(self.paste_action)
+        menu.addActions([self.disable_action, self.enable_action])
+        menu.addSeparator()
+        menu.addActions([
+            self.cut_action,
+            self.copy_action,
+            self.paste_action,
+            self.delete_action,
+        ])
+        menu.addSeparator()
+        menu.addActions([self.move_up_action, self.move_down_action])
         return menu
 
     def _show_context_menu(self, position) -> None:

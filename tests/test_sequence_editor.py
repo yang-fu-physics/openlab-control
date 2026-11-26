@@ -77,10 +77,29 @@ class SequenceEditorTests(unittest.TestCase):
         self._select_rows(editor, 0)
         menu = editor.build_context_menu()
         labels = [action.text() for action in menu.actions() if not action.isSeparator()]
-        self.assertEqual(labels, ["Disable", "Enable", "Delete", "Copy", "Paste"])
+        self.assertEqual(
+            labels,
+            [
+                "Undo",
+                "Redo",
+                "Disable",
+                "Enable",
+                "Cut",
+                "Copy",
+                "Paste",
+                "Delete",
+                "Move Up",
+                "Move Down",
+            ],
+        )
+        self.assertFalse(editor.undo_action.isEnabled())
+        self.assertFalse(editor.redo_action.isEnabled())
         self.assertTrue(editor.disable_action.isEnabled())
         self.assertFalse(editor.enable_action.isEnabled())
+        self.assertTrue(editor.cut_action.isEnabled())
         self.assertFalse(editor.paste_action.isEnabled())
+        self.assertFalse(editor.move_up_action.isEnabled())
+        self.assertTrue(editor.move_down_action.isEnabled())
 
         changes: list[bool] = []
         editor.documentChanged.connect(lambda: changes.append(True))
@@ -190,16 +209,139 @@ class SequenceEditorTests(unittest.TestCase):
         editor.close()
 
     def test_edit_lock_disables_mutating_actions_but_allows_copy(self) -> None:
-        document = SequenceDocument([Command(CommandType.WAIT, {"seconds": 1.0})])
+        document = SequenceDocument([
+            Command(CommandType.WAIT, {"seconds": 1.0}),
+            Command(CommandType.REMARK, {"text": "second"}),
+        ])
         editor = SequenceEditorWidget(document)
         self._select_rows(editor, 0)
+        editor.insert_command(Command(CommandType.MEASURE))
+        editor.undo()
+        self._select_rows(editor, 0)
         editor.set_editable(False)
+        self.assertFalse(editor.undo_action.isEnabled())
+        self.assertFalse(editor.redo_action.isEnabled())
         self.assertFalse(editor.disable_action.isEnabled())
         self.assertFalse(editor.enable_action.isEnabled())
+        self.assertFalse(editor.cut_action.isEnabled())
         self.assertFalse(editor.delete_action.isEnabled())
         self.assertFalse(editor.paste_action.isEnabled())
+        self.assertFalse(editor.move_up_action.isEnabled())
+        self.assertFalse(editor.move_down_action.isEnabled())
         self.assertTrue(editor.copy_action.isEnabled())
+        editor.cut_selected()
+        self.assertEqual(len(document.commands), 2)
+        self.assertEqual(editor._clipboard, ())
         editor.close()
+
+    def test_cut_paste_move_and_undo_redo_shortcuts(self) -> None:
+        scan = Command(
+            CommandType.SCAN_TIME,
+            {"duration_seconds": 1.0, "steps": 2},
+            [Command(CommandType.MEASURE)],
+        )
+        first = Command(CommandType.WAIT, {"seconds": 1.0})
+        tail = Command(CommandType.REMARK, {"text": "tail"})
+        document = SequenceDocument([first, scan, tail], "cut-undo.seq")
+        editor = SequenceEditorWidget(document)
+        editor.resize(760, 480)
+        editor.show()
+        editor.activateWindow()
+        editor.list.setFocus()
+        self.application.processEvents()
+
+        try:
+            # 1) Cut a Scan block while both the Scan and its child are selected (deduplicated).
+            self._select_rows(editor, 1, 2)
+            QTest.keyClick(
+                editor.list,
+                Qt.Key.Key_X,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual([c.type for c in document.commands], [CommandType.WAIT, CommandType.REMARK])
+            self.assertEqual(len(editor._clipboard), 1)
+            self.assertEqual(editor._clipboard[0].type, CommandType.SCAN_TIME)
+            self.assertEqual(len(editor._clipboard[0].children), 1)
+            self.assertTrue(editor.undo_action.isEnabled())
+
+            # 2) Paste at End Sequence, then paste a second time to confirm distinct IDs.
+            self._select_rows(editor, editor.list.count() - 1)
+            QTest.keyClick(
+                editor.list,
+                Qt.Key.Key_V,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK, CommandType.SCAN_TIME],
+            )
+            pasted_once = document.commands[2]
+            self.assertNotEqual(pasted_once.id, scan.id)
+            self.assertEqual(len(pasted_once.children), 1)
+
+            # 3) Move pasted Scan up with Alt+Up, then back down with Alt+Down.
+            QTest.keyClick(editor.list, Qt.Key.Key_Up, Qt.KeyboardModifier.AltModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.SCAN_TIME, CommandType.REMARK],
+            )
+
+            # 4) Undo move, undo paste, undo cut via Ctrl+Z -> restores exact original tree.
+            QTest.keyClick(editor.list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK, CommandType.SCAN_TIME],
+            )
+            QTest.keyClick(editor.list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK],
+            )
+            QTest.keyClick(editor.list, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.SCAN_TIME, CommandType.REMARK],
+            )
+            self.assertEqual(document.commands[1].id, scan.id)
+            self.assertFalse(editor.undo_action.isEnabled())
+            self.assertTrue(editor.redo_action.isEnabled())
+
+            # 5) Redo cut with Ctrl+Y and redo paste with Ctrl+Shift+Z.
+            QTest.keyClick(editor.list, Qt.Key.Key_Y, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK],
+            )
+            QTest.keyClick(
+                editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in document.commands],
+                [CommandType.WAIT, CommandType.REMARK, CommandType.SCAN_TIME],
+            )
+
+            # 6) New mutation clears redo stack; set_document clears both stacks.
+            self._select_rows(editor, 0)
+            QTest.keyClick(editor.list, Qt.Key.Key_D, Qt.KeyboardModifier.ControlModifier)
+            self.application.processEvents()
+            self.assertFalse(editor.redo_action.isEnabled())
+            self.assertFalse(document.commands[0].enabled)
+
+            editor.set_document(SequenceDocument([Command(CommandType.MEASURE)]))
+            self.assertFalse(editor.undo_action.isEnabled())
+            self.assertFalse(editor.redo_action.isEnabled())
+        finally:
+            editor.close()
 
     def test_batch_paste_keeps_items_after_a_scan_as_siblings(self) -> None:
         scan = Command(
@@ -355,6 +497,93 @@ class SequenceEditorTests(unittest.TestCase):
                         for index in range(editor.list.count())
                     )
                 )
+        finally:
+            editor.close()
+
+    def test_mini_toolbar_semantic_styles_and_elided_datafile_tooltip(self) -> None:
+        long_path = (
+            r"C:\Users\researcher\Desktop\cryostat-runs\2026\November\SampleGroupA"
+            r"\20261125-O157S1-O157S2-O146IIS1-O146IIS2-LR700-warming.dat"
+        )
+        datafile = Command(
+            CommandType.SET_DATAFILE,
+            {"mode": "open|create", "path_scope": "Custom folder", "path": long_path},
+        )
+        disabled_remark = Command(CommandType.REMARK, {"text": "disabled note"}, enabled=False)
+        wait_cmd = Command(CommandType.WAIT, {"wait_temperature": True, "seconds": 300.0})
+        set_temp = Command(CommandType.SET_TEMPERATURE, {"target": 4.0, "rate": 2.0})
+        inner_scan = Command(
+            CommandType.SCAN_FIELD,
+            {"start": 0.0, "stop": 1000.0, "steps": 11, "rate": 100.0, "unit": "Oe"},
+            [Command(CommandType.MEASURE)],
+        )
+        outer_scan = Command(
+            CommandType.SCAN_TEMPERATURE,
+            {"start": 3.0, "stop": 30.0, "steps": 28, "rate": 0.5, "mode": "Sweep"},
+            [inner_scan],
+        )
+        remark = Command(CommandType.REMARK, {"text": "comment line"})
+        doc = SequenceDocument([datafile, disabled_remark, wait_cmd, set_temp, outer_scan, remark])
+        editor = SequenceEditorWidget(doc)
+        try:
+            editor.resize(620, 420)
+            editor.show()
+            editor.activateWindow()
+            editor.list.setFocus()
+            self.application.processEvents()
+
+            # Mini toolbar exposes all editing actions and buttons keep focus on the list.
+            toolbar_actions = [a for a in editor.toolbar.actions() if not a.isSeparator()]
+            self.assertEqual(
+                [a.text() for a in toolbar_actions],
+                [
+                    "Undo",
+                    "Redo",
+                    "Cut",
+                    "Copy",
+                    "Paste",
+                    "Delete",
+                    "Move Up",
+                    "Move Down",
+                    "Disable",
+                    "Enable",
+                ],
+            )
+            for action in toolbar_actions:
+                btn = editor.toolbar.widgetForAction(action)
+                self.assertEqual(btn.focusPolicy(), Qt.FocusPolicy.NoFocus)
+
+            # Long Set Datafile path is middle-elided in text while full command lives in tooltip.
+            df_item = editor.list.item(0)
+            self.assertIn("…", df_item.text())
+            self.assertIn("LR700-warming.dat", df_item.text())
+            self.assertIn(long_path, df_item.toolTip())
+
+            # Disabled row uses strikeout muted text regardless of command type.
+            disabled_item = editor.list.item(1)
+            self.assertTrue(disabled_item.font().strikeOut())
+            self.assertEqual(disabled_item.foreground().color().name(), "#98a2b3")
+
+            # Semantic color coding differentiates Wait, Set Temp, Scan, Measure, Remark, End Sequence.
+            self.assertEqual(editor.list.item(2).foreground().color().name(), "#8a5300")
+            self.assertEqual(editor.list.item(3).foreground().color().name(), "#0f5c6e")
+            scan_item = editor.list.item(4)
+            self.assertEqual(scan_item.foreground().color().name(), "#1b4b8a")
+            self.assertTrue(scan_item.font().bold())
+            measure_item = editor.list.item(6)
+            self.assertEqual(measure_item.foreground().color().name(), "#1a6f3c")
+            self.assertTrue(measure_item.font().bold())
+            remark_item = editor.list.item(9)
+            self.assertTrue(remark_item.font().italic())
+            end_seq_item = editor.list.item(editor.list.count() - 1)
+            self.assertEqual(end_seq_item.text(), "End Sequence")
+            self.assertTrue(end_seq_item.font().italic())
+
+            # Running highlight + nested indent guides paint cleanly.
+            editor.set_running_command(wait_cmd.id)
+            self.application.processEvents()
+            pixmap = editor.grab()
+            self.assertFalse(pixmap.isNull())
         finally:
             editor.close()
 
