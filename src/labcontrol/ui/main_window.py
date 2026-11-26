@@ -10,14 +10,16 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
+import json
 from pathlib import Path
 
 import qtawesome as qta
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, QTimer, Qt, Signal
+from PySide6.QtCore import QByteArray, QEvent, QMimeData, QObject, QPoint, QRect, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
+    QDrag,
     QDragEnterEvent,
     QDropEvent,
     QFocusEvent,
@@ -91,6 +93,7 @@ from ..sequence.model import (
     Command,
     CommandSpec,
     CommandType,
+    FlatRow,
     SequenceDocument,
     SystemInstrumentCommandSpec,
 )
@@ -123,7 +126,11 @@ from .scaling import (
     scaled,
     scaled_text,
 )
-from .sequence_editor import SequenceEditorWidget
+from .sequence_editor import (
+    PALETTE_COMMAND_MIME,
+    SequenceEditorWidget,
+    build_drag_badge_pixmap,
+)
 from .system_log import SystemLogDialog
 from .trend import TrendDialog
 from .widgets import ElidedLabel
@@ -235,6 +242,32 @@ class _DataBrowserMdiSubWindow(QMdiSubWindow):
             self._detach_margin,
         )
         return not expanded.contains(global_pos)
+
+
+class _CommandPaletteTreeWidget(QTreeWidget):
+    """右侧指令栏树控件，支持将命令叶子节点直接拖入 SEQ 编辑器指定行。"""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
+
+    def startDrag(self, supportedActions) -> None:  # noqa: N802
+        item = self.currentItem()
+        if item is None:
+            return
+        value = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(value, tuple) or not value:
+            return
+        mime = QMimeData()
+        payload = json.dumps([str(part) for part in value]).encode("utf-8")
+        mime.setData(PALETTE_COMMAND_MIME, QByteArray(payload))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        pixmap = build_drag_badge_pixmap(item.text(0), self.font())
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(QPoint(scaled(12), pixmap.height() // 2))
+        drag.exec(Qt.DropAction.CopyAction)
 
 
 class MainWindow(QMainWindow):
@@ -399,6 +432,11 @@ class MainWindow(QMainWindow):
         self.editor = SequenceEditorWidget(self.document)
         self.editor.commandDoubleClicked.connect(self._edit_command)
         self.editor.documentChanged.connect(self._mark_dirty)
+        # 排队到 dropEvent 返回后再弹参数配置框，避免模态窗口在原生 OLE 拖拽循环内部阻塞光标释放。
+        self.editor.paletteCommandDropped.connect(
+            self._insert_palette_command_at,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.sequence_window = QMdiSubWindow()
         self.sequence_window.setWidget(self.editor)
         self.sequence_window.setFocusProxy(self.editor)
@@ -580,7 +618,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Preferred,
         )
         layout.addWidget(self.command_hint)
-        self.command_tree = QTreeWidget()
+        self.command_tree = _CommandPaletteTreeWidget()
         self.command_tree.setObjectName("commandTree")
         self.command_tree.setHeaderHidden(True)
         self.command_tree.setIndentation(scaled(14))
@@ -591,7 +629,11 @@ class MainWindow(QMainWindow):
             group = groups.get(spec.category)
             if group is None:
                 group = QTreeWidgetItem([spec.category])
-                group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+                group.setFlags(
+                    group.flags()
+                    & ~Qt.ItemFlag.ItemIsSelectable
+                    & ~Qt.ItemFlag.ItemIsDragEnabled
+                )
                 group_font = group.font(0)
                 group_font.setBold(True)
                 group.setFont(0, group_font)
@@ -684,6 +726,7 @@ class MainWindow(QMainWindow):
             group.setFlags(
                 group.flags()
                 & ~Qt.ItemFlag.ItemIsSelectable
+                & ~Qt.ItemFlag.ItemIsDragEnabled
             )
             group_font = group.font(0)
             group_font.setBold(True)
@@ -1948,6 +1991,25 @@ class MainWindow(QMainWindow):
 
     def _insert_palette_command(self, item: QTreeWidgetItem, column: int) -> None:
         value = item.data(0, Qt.ItemDataRole.UserRole)
+        self._insert_palette_payload(value)
+
+    def _insert_palette_command_at(
+        self,
+        payload: object,
+        anchor: FlatRow | None,
+        after: bool,
+    ) -> None:
+        if not self.editor._editable:
+            return
+        self._insert_palette_payload(payload, anchor=anchor, after=after)
+
+    def _insert_palette_payload(
+        self,
+        value: object,
+        *,
+        anchor: FlatRow | None = None,
+        after: bool | None = None,
+    ) -> None:
         if not value:
             return
         if not isinstance(value, tuple) or not value:
@@ -1957,7 +2019,11 @@ class MainWindow(QMainWindow):
                 (str(value[1]), str(value[2]))
             )
             if spec is not None:
-                self.editor.insert_command(spec.create())
+                self.editor.insert_command(
+                    spec.create(),
+                    anchor=anchor,
+                    after=after,
+                )
                 self.editor.list.setFocus()
             return
         if value[0] == "core" and len(value) == 2:
@@ -1972,6 +2038,14 @@ class MainWindow(QMainWindow):
         else:
             return
         command = spec.create()
+        if isinstance(spec, CommandSpec) and not spec.fields:
+            self.editor.insert_command(
+                command,
+                anchor=anchor,
+                after=after,
+            )
+            self.editor.list.setFocus()
+            return
         if isinstance(spec, ModuleCommandSpec) and spec.custom_editor:
             values = self._edit_custom_module_command(
                 command,
@@ -1979,7 +2053,11 @@ class MainWindow(QMainWindow):
             )
             if values is not None:
                 command.update_params(values)
-                self.editor.insert_command(command)
+                self.editor.insert_command(
+                    command,
+                    anchor=anchor,
+                    after=after,
+                )
                 self.editor.list.setFocus()
             return
         dialog = CommandDialog(
@@ -2011,7 +2089,11 @@ class MainWindow(QMainWindow):
                         return
                 command.update_params(values)
                 self._remember_datafile_directory(command)
-                self.editor.insert_command(command)
+                self.editor.insert_command(
+                    command,
+                    anchor=anchor,
+                    after=after,
+                )
                 self.editor.list.setFocus()
         finally:
             dialog.deleteLater()
@@ -2033,6 +2115,8 @@ class MainWindow(QMainWindow):
                         f"{command.module_command_id!r} before editing this line."
                     ),
                 )
+            return
+        if isinstance(spec, CommandSpec) and not spec.fields:
             return
         if isinstance(spec, ModuleCommandSpec) and spec.custom_editor:
             values = self._edit_custom_module_command(

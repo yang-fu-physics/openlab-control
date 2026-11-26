@@ -1986,6 +1986,181 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_seq_drag_drop_syncs_datafile_and_accepts_command_palette_drops(
+        self,
+    ) -> None:
+        import json
+
+        from PySide6.QtCore import QByteArray, QMimeData, QPointF
+        from PySide6.QtGui import QDropEvent
+
+        from labcontrol.ui.dialogs import CommandDialog
+        from labcontrol.ui.sequence_editor import PALETTE_COMMAND_MIME, SEQUENCE_COMMAND_MIME
+
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            chosen_path = ROOT / "drag_datafile.dat"
+            expected_path = str(chosen_path.resolve())
+            datafile_cmd = Command(
+                CommandType.SET_DATAFILE,
+                {
+                    "mode": "open|create",
+                    "path_scope": "Custom folder",
+                    "path": expected_path,
+                },
+            )
+            scan_cmd = Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 10.0, "steps": 2},
+                [Command(CommandType.MEASURE)],
+            )
+            window._set_document(
+                SequenceDocument([datafile_cmd, scan_cmd], "drag-main.seq")
+            )
+            self.application.processEvents()
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+
+            # 1) Drag Set Datafile below Scan's End Scan -> after Measure, so datafile selection clears.
+            end_scan_rect = window.editor.list.visualItemRect(window.editor.list.item(3))
+            below_end_scan = QPointF(end_scan_rect.center().x(), end_scan_rect.bottom() - 2)
+            mime = QMimeData()
+            mime.setData(
+                SEQUENCE_COMMAND_MIME,
+                QByteArray(json.dumps([datafile_cmd.id]).encode("utf-8")),
+            )
+            window.editor.list.dropEvent(
+                QDropEvent(
+                    below_end_scan,
+                    Qt.DropAction.MoveAction,
+                    mime,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+            )
+            self.application.processEvents()
+            self.assertEqual(
+                [c.type for c in window.document.commands],
+                [CommandType.SCAN_TIME, CommandType.SET_DATAFILE],
+            )
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+
+            # Undo restores Set Datafile before Scan and restores sidebar state.
+            window.editor.undo()
+            self.application.processEvents()
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+
+            # Palette tree allows dragging leaf commands while blocking category headers.
+            first_group = window.command_tree.topLevelItem(0)
+            self.assertIsNotNone(first_group)
+            self.assertFalse(bool(first_group.flags() & Qt.ItemFlag.ItemIsDragEnabled))
+            self.assertTrue(bool(first_group.child(0).flags() & Qt.ItemFlag.ItemIsDragEnabled))
+
+            # 2) Drop a palette command ("core", "wait") directly inside Scan (below Scan header).
+            scan_rect = window.editor.list.visualItemRect(window.editor.list.item(1))
+            below_scan = QPointF(scan_rect.center().x(), scan_rect.bottom() - 2)
+            palette_mime = QMimeData()
+            palette_mime.setData(
+                PALETTE_COMMAND_MIME,
+                QByteArray(json.dumps(["core", CommandType.WAIT.value]).encode("utf-8")),
+            )
+            with patch.object(
+                CommandDialog,
+                "exec",
+                return_value=CommandDialog.DialogCode.Accepted,
+            ):
+                window.editor.list.dropEvent(
+                    QDropEvent(
+                        below_scan,
+                        Qt.DropAction.CopyAction,
+                        palette_mime,
+                        Qt.MouseButton.LeftButton,
+                        Qt.KeyboardModifier.NoModifier,
+                    )
+                )
+                self.application.processEvents()
+            live_scan = window.document.commands[1]
+            self.assertEqual(
+                [c.type for c in live_scan.children],
+                [CommandType.WAIT, CommandType.MEASURE],
+            )
+        finally:
+            window.close()
+
+    def test_measure_inserts_and_drops_directly_without_dialog(self) -> None:
+        import json
+
+        from PySide6.QtCore import QByteArray, QMimeData, QPointF
+        from PySide6.QtGui import QDropEvent
+
+        from labcontrol.ui.sequence_editor import PALETTE_COMMAND_MIME
+
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            scan_cmd = Command(
+                CommandType.SCAN_TIME,
+                {"duration_seconds": 10.0, "steps": 2},
+                [],
+            )
+            window._set_document(SequenceDocument([scan_cmd], "measure-direct.seq"))
+            self.application.processEvents()
+
+            measurement_group = window.command_tree.findItems(
+                "Measurement Commands",
+                Qt.MatchFlag.MatchExactly,
+            )[0]
+            measure_item = next(
+                measurement_group.child(index)
+                for index in range(measurement_group.childCount())
+                if measurement_group.child(index).text(0) == "Measure"
+            )
+
+            with patch(
+                "labcontrol.ui.main_window.CommandDialog",
+                side_effect=AssertionError("Measure should not open CommandDialog"),
+            ):
+                # 1) Double-clicking Measure in the command palette inserts directly.
+                window.editor.list.setCurrentRow(window.editor.list.count() - 1)
+                window._insert_palette_command(measure_item, 0)
+                self.assertEqual(
+                    [c.type for c in window.document.commands],
+                    [CommandType.SCAN_TIME, CommandType.MEASURE],
+                )
+
+                # 2) Drag-dropping Measure below Scan header inserts inside Scan without dialog.
+                scan_rect = window.editor.list.visualItemRect(window.editor.list.item(0))
+                below_scan = QPointF(scan_rect.center().x(), scan_rect.bottom() - 2)
+                palette_mime = QMimeData()
+                palette_mime.setData(
+                    PALETTE_COMMAND_MIME,
+                    QByteArray(json.dumps(["core", CommandType.MEASURE.value]).encode("utf-8")),
+                )
+                window.editor.list.dropEvent(
+                    QDropEvent(
+                        below_scan,
+                        Qt.DropAction.CopyAction,
+                        palette_mime,
+                        Qt.MouseButton.LeftButton,
+                        Qt.KeyboardModifier.NoModifier,
+                    )
+                )
+                self.application.processEvents()
+                self.assertEqual(
+                    [c.type for c in scan_cmd.children],
+                    [CommandType.MEASURE],
+                )
+
+                # 3) Double-clicking an existing Measure row does not open an empty dialog.
+                window._edit_command(scan_cmd.children[0])
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,13 +8,36 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 
 import qtawesome as qta
-from PySide6.QtCore import QItemSelectionModel, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPalette, QPen
+from PySide6.QtCore import (
+    QByteArray,
+    QItemSelectionModel,
+    QMimeData,
+    QPoint,
+    QRect,
+    QSize,
+    QTimer,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDrag,
+    QFontMetrics,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -36,6 +59,8 @@ _MAX_UNDO_DEPTH = 100
 _DATAFILE_PATH_MAX_CHARS = 56
 _ROLE_ROW = Qt.ItemDataRole.UserRole
 _ROLE_RUNNING = Qt.ItemDataRole.UserRole + 1
+SEQUENCE_COMMAND_MIME = "application/x-openlab-seq-commands"
+PALETTE_COMMAND_MIME = "application/x-openlab-palette-command"
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,11 +220,311 @@ class RunningCommandDelegate(QStyledItemDelegate):
             painter.restore()
 
 
+def build_drag_badge_pixmap(label: str, font) -> QPixmap:
+    """绘制拖拽过程中的轻量语句胶囊预览，提升拖放时的可视反馈。"""
+
+    metrics = QFontMetrics(font)
+    max_text_width = scaled(240)
+    elided = metrics.elidedText(
+        label.strip() or "Command",
+        Qt.TextElideMode.ElideRight,
+        max_text_width,
+    )
+    pad_x = scaled(10)
+    pad_y = scaled(4)
+    width = max(scaled(48), metrics.horizontalAdvance(elided) + pad_x * 2)
+    height = max(scaled(22), metrics.height() + pad_y * 2)
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(239, 246, 255, 238))
+        painter.setPen(QPen(QColor("#1d63b8"), 1.2))
+        radius = scaled(5)
+        painter.drawRoundedRect(QRect(1, 1, width - 2, height - 2), radius, radius)
+        painter.setFont(font)
+        painter.setPen(QColor("#102a43"))
+        painter.drawText(
+            QRect(pad_x, 0, width - pad_x * 2, height),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            elided,
+        )
+    finally:
+        painter.end()
+    return pixmap
+
+
+class _SequenceListWidget(QListWidget):
+    """支持语句拖拽重排、跨层移入/移出 Scan 和指令栏拖入插入的列表视图。"""
+
+    def __init__(self, editor: "SequenceEditorWidget") -> None:
+        super().__init__(editor)
+        self._editor = editor
+        self._drop_indicator: tuple[int, int] | None = None
+        self._autoscroll_direction = 0
+        self._last_drag_pos: QPoint | None = None
+        self._autoscroll_timer = QTimer(self)
+        self._autoscroll_timer.setInterval(40)
+        self._autoscroll_timer.timeout.connect(self._on_autoscroll_tick)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDropIndicatorShown(False)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def _clear_drop_indicator(self) -> None:
+        if self._drop_indicator is not None:
+            self._drop_indicator = None
+            self.viewport().update()
+
+    def _stop_autoscroll(self) -> None:
+        self._autoscroll_direction = 0
+        self._last_drag_pos = None
+        if self._autoscroll_timer.isActive():
+            self._autoscroll_timer.stop()
+
+    def _update_autoscroll(self, pos: QPoint) -> None:
+        self._last_drag_pos = QPoint(pos)
+        margin = scaled(22)
+        viewport_height = self.viewport().height()
+        if viewport_height <= margin * 2:
+            self._stop_autoscroll()
+            return
+        if pos.y() < margin:
+            self._autoscroll_direction = -1
+        elif pos.y() > viewport_height - margin:
+            self._autoscroll_direction = 1
+        else:
+            self._autoscroll_direction = 0
+        if self._autoscroll_direction != 0:
+            if not self._autoscroll_timer.isActive():
+                self._autoscroll_timer.start()
+        elif self._autoscroll_timer.isActive():
+            self._autoscroll_timer.stop()
+
+    def _on_autoscroll_tick(self) -> None:
+        if self._autoscroll_direction == 0:
+            self._autoscroll_timer.stop()
+            return
+        bar = self.verticalScrollBar()
+        step = max(1, bar.singleStep())
+        new_value = max(
+            bar.minimum(),
+            min(bar.maximum(), bar.value() + self._autoscroll_direction * step),
+        )
+        if new_value == bar.value():
+            return
+        bar.setValue(new_value)
+        if self._last_drag_pos is not None and self._drop_indicator is not None:
+            _, _, indicator_y, depth = self._drop_target_at(self._last_drag_pos)
+            self._drop_indicator = (indicator_y, depth)
+            self.viewport().update()
+
+    def _drop_target_at(self, pos: QPoint) -> tuple[FlatRow | None, bool, int, int]:
+        """根据鼠标位置计算 ``(锚点行, 是否插在行后, 指示线 Y, 目标缩进深度)``。"""
+
+        item = self.itemAt(pos)
+        if item is None:
+            if self.count() > 0:
+                last_item = self.item(self.count() - 1)
+                last_row = last_item.data(_ROLE_ROW)
+                last_rect = self.visualItemRect(last_item)
+                if isinstance(last_row, FlatRow) and last_row.is_sequence_end:
+                    return last_row, False, last_rect.top(), 0
+                return None, False, last_rect.bottom(), 0
+            return None, False, scaled(2), 0
+
+        row = item.data(_ROLE_ROW)
+        rect = self.visualItemRect(item)
+        if not isinstance(row, FlatRow):
+            return None, False, rect.bottom(), 0
+        if row.is_sequence_end:
+            return row, False, rect.top(), 0
+        after = pos.y() >= rect.center().y()
+        indicator_y = rect.bottom() if after else rect.top()
+        _, _, depth = self._editor.document.resolve_drop_target(row, after=after)
+        return row, after, indicator_y, depth
+
+    @staticmethod
+    def _decode_command_ids(mime: QMimeData) -> list[str] | None:
+        if not mime.hasFormat(SEQUENCE_COMMAND_MIME):
+            return None
+        try:
+            raw = bytes(mime.data(SEQUENCE_COMMAND_MIME)).decode("utf-8")
+            parsed = json.loads(raw)
+        except (UnicodeDecodeError, ValueError):
+            return None
+        if isinstance(parsed, list) and all(isinstance(item, str) for item in parsed):
+            return parsed
+        return None
+
+    @staticmethod
+    def _decode_palette_payload(mime: QMimeData) -> tuple[str, ...] | None:
+        if not mime.hasFormat(PALETTE_COMMAND_MIME):
+            return None
+        try:
+            raw = bytes(mime.data(PALETTE_COMMAND_MIME)).decode("utf-8")
+            parsed = json.loads(raw)
+        except (UnicodeDecodeError, ValueError):
+            return None
+        if isinstance(parsed, list) and parsed and all(isinstance(item, str) for item in parsed):
+            return tuple(parsed)
+        return None
+
+    def startDrag(self, supportedActions) -> None:  # noqa: N802
+        if not self._editor._editable:
+            return
+        current_row = self._editor.selected_row()
+        if current_row is not None and (current_row.is_end or current_row.is_sequence_end):
+            return
+        commands = self._editor.selected_commands(prune_descendants=True)
+        if not commands:
+            return
+        mime = QMimeData()
+        payload = json.dumps([command.id for command in commands]).encode("utf-8")
+        mime.setData(SEQUENCE_COMMAND_MIME, QByteArray(payload))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        if len(commands) == 1:
+            label = format_command(commands[0])
+            if commands[0].children:
+                label = f"{label} (+{len(commands[0].children)})"
+        else:
+            label = f"{len(commands)} commands"
+        pixmap = build_drag_badge_pixmap(label, self.font())
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(QPoint(scaled(12), pixmap.height() // 2))
+        drag.exec(Qt.DropAction.MoveAction)
+        self._stop_autoscroll()
+        self._clear_drop_indicator()
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802
+        if not self._editor._editable:
+            event.ignore()
+            return
+        mime = event.mimeData()
+        if (
+            self._decode_command_ids(mime) is not None
+            or self._decode_palette_payload(mime) is not None
+        ):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if not self._editor._editable:
+            self._stop_autoscroll()
+            self._clear_drop_indicator()
+            event.ignore()
+            return
+        mime = event.mimeData()
+        pos = event.position().toPoint()
+        target_row, after, indicator_y, depth = self._drop_target_at(pos)
+        command_ids = self._decode_command_ids(mime)
+        if command_ids is not None:
+            self._update_autoscroll(pos)
+            if not self._editor.document.can_relocate(
+                command_ids,
+                target_row,
+                after=after,
+            ):
+                self._clear_drop_indicator()
+                event.ignore()
+                return
+            self._drop_indicator = (indicator_y, depth)
+            self.viewport().update()
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+            return
+        if self._decode_palette_payload(mime) is not None:
+            self._update_autoscroll(pos)
+            self._drop_indicator = (indicator_y, depth)
+            self.viewport().update()
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        self._stop_autoscroll()
+        self._clear_drop_indicator()
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802
+        self._stop_autoscroll()
+        self._clear_drop_indicator()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        self._stop_autoscroll()
+        self._clear_drop_indicator()
+        if not self._editor._editable:
+            event.ignore()
+            return
+        mime = event.mimeData()
+        pos = event.position().toPoint()
+        target_row, after, _, _ = self._drop_target_at(pos)
+
+        command_ids = self._decode_command_ids(mime)
+        if command_ids is not None:
+            if self._editor.document.can_relocate(
+                command_ids,
+                target_row,
+                after=after,
+            ):
+                self._editor.relocate_commands(
+                    command_ids,
+                    target_row,
+                    after=after,
+                )
+                event.setDropAction(Qt.DropAction.MoveAction)
+                event.accept()
+                return
+            event.ignore()
+            return
+
+        palette_payload = self._decode_palette_payload(mime)
+        if palette_payload is not None:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            self._editor.paletteCommandDropped.emit(
+                palette_payload,
+                target_row,
+                after,
+            )
+            return
+
+        event.ignore()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if self._drop_indicator is None:
+            return
+        indicator_y, depth = self._drop_indicator
+        viewport_rect = self.viewport().rect()
+        y = max(viewport_rect.top() + 1, min(indicator_y, viewport_rect.bottom() - 1))
+        indent_step = max(scaled(14), self.fontMetrics().horizontalAdvance("    "))
+        left_x = scaled(7) + depth * indent_step
+        right_x = max(left_x + scaled(12), viewport_rect.right() - scaled(6))
+        painter = QPainter(self.viewport())
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            color = QColor("#1d63b8")
+            painter.setPen(QPen(color, 2))
+            painter.drawLine(left_x, y, right_x, y)
+            painter.setBrush(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            radius = scaled(3)
+            painter.drawEllipse(QPoint(left_x, y), radius, radius)
+        finally:
+            painter.end()
+
+
 class SequenceEditorWidget(QWidget):
-    """支持任意嵌套、批量启停、复制粘贴和键盘快捷键的 SEQ 编辑控件。"""
+    """支持任意嵌套、批量启停、复制粘贴、拖拽重排和键盘快捷键的 SEQ 编辑控件。"""
 
     commandDoubleClicked = Signal(object)
     documentChanged = Signal()
+    paletteCommandDropped = Signal(object, object, bool)
 
     def __init__(self, document: SequenceDocument, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -216,7 +541,7 @@ class SequenceEditorWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.list = QListWidget()
+        self.list = _SequenceListWidget(self)
         self.list.setObjectName("sequenceCommandList")
         self.list.setItemDelegate(RunningCommandDelegate(self.list))
         self.list.setAlternatingRowColors(True)
@@ -442,10 +767,13 @@ class SequenceEditorWidget(QWidget):
         self.rebuild()
 
     def set_editable(self, editable: bool) -> None:
-        """控制修改动作是否可用；运行时仍允许滚动和查看列表。"""
+        """控制修改动作与拖放是否可用；运行时仍允许滚动和查看列表。"""
 
         self._editable = editable
         self.list.setEnabled(True)
+        self.list.setDragEnabled(editable)
+        self.list.setAcceptDrops(editable)
+        self.list.viewport().setAcceptDrops(editable)
         self._update_action_states()
 
     @staticmethod
@@ -526,11 +854,13 @@ class SequenceEditorWidget(QWidget):
             if row_tooltip:
                 item.setToolTip(row_tooltip)
             if row.is_sequence_end:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
                 item.setForeground(QColor("#8c959f"))
                 font = item.font()
                 font.setItalic(True)
                 item.setFont(font)
             elif row.is_end:
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
                 item.setForeground(QColor("#7b8794"))
             else:
                 if command is not None:
@@ -704,15 +1034,51 @@ class SequenceEditorWidget(QWidget):
         parent, index = location
         return 0 <= index + offset < len(parent)
 
-    def insert_command(self, command: Command) -> None:
-        """按当前行的树形语义插入命令并发出一次文档变化信号。"""
+    def insert_command(
+        self,
+        command: Command,
+        *,
+        anchor: FlatRow | None = None,
+        after: bool | None = None,
+    ) -> None:
+        """按当前行或拖放目标的树形语义插入命令并发出一次文档变化信号。"""
 
         if not self._editable:
             return
         self._push_undo_snapshot(self._capture_snapshot())
-        self.document.insert(command, self.selected_row(), before=True)
+        if after is not None:
+            self.document.insert_at(command, anchor, after=after)
+        else:
+            self.document.insert(command, self.selected_row(), before=True)
         self.rebuild(command.id)
         self.documentChanged.emit()
+
+    def relocate_commands(
+        self,
+        command_ids: Sequence[str],
+        target_row: FlatRow | None,
+        *,
+        after: bool = False,
+    ) -> bool:
+        """在单次撤销步内把拖拽的命令（含完整 Scan 子树）移动到目标行间位置。"""
+
+        if not self._editable:
+            return False
+        moved_commands = self.document._top_level_commands_in_order(command_ids)
+        if not moved_commands:
+            return False
+        snapshot = self._capture_snapshot()
+        if not self.document.relocate(command_ids, target_row, after=after):
+            return False
+        self._push_undo_snapshot(snapshot)
+        moved_ids = {command.id for command in moved_commands}
+        self.rebuild(
+            moved_commands[-1].id,
+            select_command_ids=moved_ids,
+            preserve_selection=False,
+        )
+        self.documentChanged.emit()
+        return True
 
     def delete_selected(self) -> None:
         """批量删除命令；选中扫描时整块删除且不重复处理其子节点。"""
