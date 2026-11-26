@@ -8,6 +8,7 @@ ID，避免视图操作命中原节点。
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
@@ -205,6 +206,149 @@ class SequenceDocument:
             return
         parent, index = location
         parent.insert(index + 1, command)
+
+    def resolve_drop_target(
+        self,
+        target_row: FlatRow | None,
+        *,
+        after: bool = False,
+    ) -> tuple[list[Command], int, int]:
+        """解析行间拖放位置，返回 ``(目标父列表, 插入下标, 目标缩进深度)``。
+
+        规则覆盖嵌套 Scan 的所有行间缝隙：
+        - 拖到 ``Scan`` 标题下方（``after=True``）插入为该 Scan 的首条子命令；
+        - 拖到 ``End Scan`` 上方（``after=False``）追加到该 Scan 末尾；
+        - 拖到 ``End Scan`` 下方（``after=True``）跳出该 Scan，插在其同级之后。
+        """
+
+        if (
+            target_row is None
+            or target_row.is_sequence_end
+            or target_row.command_id is None
+        ):
+            return self.commands, len(self.commands), 0
+        target_command = self.find(target_row.command_id)
+        location = self._locate(target_row.command_id)
+        if target_command is None or location is None:
+            return self.commands, len(self.commands), 0
+        parent, index = location
+        if target_row.is_end:
+            if after:
+                return parent, index + 1, target_row.depth
+            return target_command.children, len(target_command.children), target_row.depth + 1
+        if target_command.type.is_container and after:
+            return target_command.children, 0, target_row.depth + 1
+        return parent, index + 1 if after else index, target_row.depth
+
+    def insert_at(
+        self,
+        command: Command,
+        target_row: FlatRow | None,
+        *,
+        after: bool = False,
+    ) -> None:
+        """按行间拖放语义把命令插入到指定位置（支持移入或移出 Scan）。"""
+
+        parent, index, _ = self.resolve_drop_target(target_row, after=after)
+        parent.insert(index, command)
+
+    def _top_level_commands_in_order(
+        self,
+        command_ids: Sequence[str],
+    ) -> list[Command]:
+        wanted = set(command_ids)
+        if not wanted:
+            return []
+        result: list[Command] = []
+
+        def visit(commands: list[Command], ancestor_selected: bool) -> None:
+            for command in commands:
+                selected = command.id in wanted
+                if selected and not ancestor_selected:
+                    result.append(command)
+                visit(command.children, ancestor_selected or selected)
+
+        visit(self.commands, False)
+        return result
+
+    @staticmethod
+    def _collect_subtree_nodes(commands: Sequence[Command]) -> list[Command]:
+        nodes: list[Command] = []
+
+        def visit(items: Sequence[Command]) -> None:
+            for command in items:
+                nodes.append(command)
+                if command.children:
+                    visit(command.children)
+
+        visit(commands)
+        return nodes
+
+    def can_relocate(
+        self,
+        command_ids: Sequence[str],
+        target_row: FlatRow | None,
+        *,
+        after: bool = False,
+    ) -> bool:
+        """检查把所选命令（含完整 Scan 子树）拖放到目标位置是否合法（无自嵌套环）。"""
+
+        moved = self._top_level_commands_in_order(command_ids)
+        if not moved:
+            return False
+        target_parent, _, _ = self.resolve_drop_target(target_row, after=after)
+        subtree_nodes = self._collect_subtree_nodes(moved)
+        return not any(target_parent is node.children for node in subtree_nodes)
+
+    def relocate(
+        self,
+        command_ids: Sequence[str],
+        target_row: FlatRow | None,
+        *,
+        after: bool = False,
+    ) -> bool:
+        """原子把一组命令（含完整 Scan 子树）移动到目标行间位置；原地无变化返回 False。"""
+
+        moved = self._top_level_commands_in_order(command_ids)
+        if not moved:
+            return False
+        target_parent, target_index, _ = self.resolve_drop_target(
+            target_row,
+            after=after,
+        )
+        subtree_nodes = self._collect_subtree_nodes(moved)
+        if any(target_parent is node.children for node in subtree_nodes):
+            return False
+
+        moved_ids = {command.id for command in moved}
+        shift = sum(
+            1
+            for index, existing in enumerate(target_parent)
+            if index < target_index and existing.id in moved_ids
+        )
+        final_index = target_index - shift
+
+        if all(any(existing is command for existing in target_parent) for command in moved):
+            before_ids = [existing.id for existing in target_parent]
+            remaining_ids = [
+                existing.id for existing in target_parent if existing.id not in moved_ids
+            ]
+            after_ids = (
+                remaining_ids[:final_index]
+                + [command.id for command in moved]
+                + remaining_ids[final_index:]
+            )
+            if after_ids == before_ids:
+                return False
+
+        for command in moved:
+            location = self._locate(command.id)
+            if location is not None:
+                parent, index = location
+                del parent[index]
+        for offset, command in enumerate(moved):
+            target_parent.insert(final_index + offset, command)
+        return True
 
     def delete(self, command_id: str) -> bool:
         """删除命令及其完整子树，并返回是否找到节点。"""

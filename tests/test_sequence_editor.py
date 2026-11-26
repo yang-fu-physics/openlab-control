@@ -587,6 +587,226 @@ class SequenceEditorTests(unittest.TestCase):
         finally:
             editor.close()
 
+    def test_drag_and_drop_reorders_crosses_scans_prevents_cycles_and_supports_undo(
+        self,
+    ) -> None:
+        import json
+
+        from PySide6.QtCore import QByteArray, QMimeData, QPointF
+        from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent
+
+        from labcontrol.ui.sequence_editor import SEQUENCE_COMMAND_MIME
+
+        def _make_mime(ids: list[str]) -> QMimeData:
+            mime = QMimeData()
+            mime.setData(
+                SEQUENCE_COMMAND_MIME,
+                QByteArray(json.dumps(ids).encode("utf-8")),
+            )
+            return mime
+
+        def _drop(editor: SequenceEditorWidget, ids: list[str], pos: QPointF) -> tuple[bool, bool]:
+            mime = _make_mime(ids)
+            enter_ev = QDragEnterEvent(
+                pos.toPoint(),
+                Qt.DropAction.MoveAction,
+                mime,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            editor.list.dragEnterEvent(enter_ev)
+            move_ev = QDragMoveEvent(
+                pos.toPoint(),
+                Qt.DropAction.MoveAction,
+                mime,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            editor.list.dragMoveEvent(move_ev)
+            move_accepted = move_ev.isAccepted()
+            if move_accepted:
+                # Exercise drop indicator paint path while active.
+                editor.list.grab()
+            drop_ev = QDropEvent(
+                pos,
+                Qt.DropAction.MoveAction,
+                mime,
+                Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier,
+            )
+            editor.list.dropEvent(drop_ev)
+            return move_accepted, drop_ev.isAccepted()
+
+        wait_cmd = Command(CommandType.WAIT, {"seconds": 10.0})
+        measure_cmd = Command(CommandType.MEASURE)
+        inner_scan = Command(
+            CommandType.SCAN_TIME,
+            {"duration_seconds": 5.0, "steps": 2},
+            [measure_cmd],
+        )
+        outer_scan = Command(
+            CommandType.SCAN_TEMPERATURE,
+            {"start": 3.0, "stop": 10.0, "steps": 3, "rate": 1.0, "mode": "Settle"},
+            [inner_scan],
+        )
+        tail_remark = Command(CommandType.REMARK, {"text": "tail"})
+        doc = SequenceDocument([wait_cmd, outer_scan, tail_remark], "drag.seq")
+        editor = SequenceEditorWidget(doc)
+        try:
+            editor.resize(620, 440)
+            editor.show()
+            self.application.processEvents()
+
+            # End Scan and End Sequence markers must not be draggable.
+            for idx in range(editor.list.count()):
+                item = editor.list.item(idx)
+                row = item.data(Qt.ItemDataRole.UserRole)
+                if row.is_end or row.is_sequence_end:
+                    self.assertFalse(bool(item.flags() & Qt.ItemFlag.ItemIsDragEnabled))
+                else:
+                    self.assertTrue(bool(item.flags() & Qt.ItemFlag.ItemIsDragEnabled))
+
+            changes: list[bool] = []
+            editor.documentChanged.connect(lambda: changes.append(True))
+
+            # 1) Drag Wait INTO inner_scan (drop on lower half of inner_scan header -> index 0 inside).
+            inner_rect = editor.list.visualItemRect(editor.list.item(2))
+            below_inner = QPointF(inner_rect.center().x(), inner_rect.bottom() - 2)
+            moved_ok, dropped_ok = _drop(editor, [wait_cmd.id], below_inner)
+            self.assertTrue(moved_ok)
+            self.assertTrue(dropped_ok)
+            self.assertEqual([c.id for c in doc.commands], [outer_scan.id, tail_remark.id])
+            self.assertEqual([c.id for c in inner_scan.children], [wait_cmd.id, measure_cmd.id])
+            self.assertEqual(len(changes), 1)
+
+            # 2) Drag Wait OUT of inner_scan below outer_scan's End Scan -> root after outer_scan.
+            outer_end_idx = next(
+                i
+                for i in range(editor.list.count())
+                if (r := editor.list.item(i).data(Qt.ItemDataRole.UserRole)).is_end
+                and r.command_id == outer_scan.id
+            )
+            outer_end_rect = editor.list.visualItemRect(editor.list.item(outer_end_idx))
+            below_outer_end = QPointF(outer_end_rect.center().x(), outer_end_rect.bottom() - 2)
+            moved_ok, dropped_ok = _drop(editor, [wait_cmd.id], below_outer_end)
+            self.assertTrue(moved_ok)
+            self.assertTrue(dropped_ok)
+            self.assertEqual(
+                [c.id for c in doc.commands],
+                [outer_scan.id, wait_cmd.id, tail_remark.id],
+            )
+            self.assertEqual([c.id for c in inner_scan.children], [measure_cmd.id])
+
+            # 3) Cycle guard: dragging outer_scan into inner_scan must be rejected cleanly.
+            inner_idx = next(
+                i
+                for i in range(editor.list.count())
+                if (r := editor.list.item(i).data(Qt.ItemDataRole.UserRole)).command_id
+                == inner_scan.id
+                and not r.is_end
+            )
+            inner_rect = editor.list.visualItemRect(editor.list.item(inner_idx))
+            below_inner = QPointF(inner_rect.center().x(), inner_rect.bottom() - 2)
+            moved_ok, dropped_ok = _drop(editor, [outer_scan.id], below_inner)
+            self.assertFalse(moved_ok)
+            self.assertFalse(dropped_ok)
+            self.assertEqual(
+                [c.id for c in doc.commands],
+                [outer_scan.id, wait_cmd.id, tail_remark.id],
+            )
+            self.assertEqual(len(changes), 2)
+
+            # 4) Multi-select + descendant pruning: drag [outer_scan, measure_cmd] to end of sequence.
+            end_seq_rect = editor.list.visualItemRect(editor.list.item(editor.list.count() - 1))
+            above_end_seq = QPointF(end_seq_rect.center().x(), end_seq_rect.top() + 2)
+            moved_ok, dropped_ok = _drop(editor, [outer_scan.id, measure_cmd.id], above_end_seq)
+            self.assertTrue(moved_ok)
+            self.assertTrue(dropped_ok)
+            self.assertEqual(
+                [c.id for c in doc.commands],
+                [wait_cmd.id, tail_remark.id, outer_scan.id],
+            )
+            self.assertEqual([c.id for c in inner_scan.children], [measure_cmd.id])
+            self.assertEqual(len(changes), 3)
+
+            # 5) No-op drop (dropping wait_cmd right above itself) does not emit or push Undo.
+            wait_rect = editor.list.visualItemRect(editor.list.item(0))
+            above_wait = QPointF(wait_rect.center().x(), wait_rect.top() + 2)
+            undo_depth_before = len(editor._undo_stack)
+            _drop(editor, [wait_cmd.id], above_wait)
+            self.assertEqual(len(changes), 3)
+            self.assertEqual(len(editor._undo_stack), undo_depth_before)
+
+            # 6) Undo & Redo restore exact pre-drag and post-drag trees.
+            editor.undo()
+            self.assertEqual(
+                [c.id for c in doc.commands],
+                [outer_scan.id, wait_cmd.id, tail_remark.id],
+            )
+            editor.redo()
+            self.assertEqual(
+                [c.id for c in doc.commands],
+                [wait_cmd.id, tail_remark.id, outer_scan.id],
+            )
+
+            # 7) Edit lock rejects drops cleanly.
+            editor.set_editable(False)
+            self.assertFalse(editor.list.dragEnabled())
+            self.assertFalse(editor.list.acceptDrops())
+            moved_ok, dropped_ok = _drop(editor, [tail_remark.id], above_wait)
+            self.assertFalse(moved_ok)
+            self.assertFalse(dropped_ok)
+            self.assertEqual(
+                [c.id for c in doc.commands],
+                [wait_cmd.id, tail_remark.id, outer_scan.id],
+            )
+
+            # 8) Drag badge preview pixmap and edge auto-scroll on long sequences.
+            from labcontrol.ui.sequence_editor import build_drag_badge_pixmap
+
+            badge = build_drag_badge_pixmap("Wait 10 s", editor.list.font())
+            self.assertFalse(badge.isNull())
+            self.assertGreater(badge.width(), 0)
+
+            long_doc = SequenceDocument(
+                [Command(CommandType.WAIT, {"seconds": float(i)}) for i in range(40)],
+                "long.seq",
+            )
+            editor.set_document(long_doc)
+            editor.set_editable(True)
+            editor.resize(420, 180)
+            self.application.processEvents()
+            bar = editor.list.verticalScrollBar()
+            self.assertGreater(bar.maximum(), 0)
+            bar.setValue(0)
+            bottom_edge = QPointF(
+                editor.list.viewport().width() / 2,
+                editor.list.viewport().height() - 4,
+            )
+            drag_mime = QMimeData()
+            drag_mime.setData(
+                SEQUENCE_COMMAND_MIME,
+                QByteArray(json.dumps([long_doc.commands[0].id]).encode("utf-8")),
+            )
+            editor.list.dragMoveEvent(
+                QDragMoveEvent(
+                    bottom_edge.toPoint(),
+                    Qt.DropAction.MoveAction,
+                    drag_mime,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+            )
+            self.assertEqual(editor.list._autoscroll_direction, 1)
+            self.assertTrue(editor.list._autoscroll_timer.isActive())
+            editor.list._on_autoscroll_tick()
+            self.assertGreater(bar.value(), 0)
+            editor.list.dragLeaveEvent(QDragLeaveEvent())
+            self.assertFalse(editor.list._autoscroll_timer.isActive())
+            self.assertIsNone(editor.list._drop_indicator)
+        finally:
+            editor.close()
+
 
 if __name__ == "__main__":
     unittest.main()
