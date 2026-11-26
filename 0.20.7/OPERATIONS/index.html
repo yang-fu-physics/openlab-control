@@ -2555,10 +2555,15 @@
 <h2 id="seq">编辑实验序列（SEQ）<a class="headerlink" href="#seq" title="Permanent link">&para;</a></h2>
 <h3 id="_6">基本编辑<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>新建 / 打开 / 保存</strong>：通过 <strong>File → New / Open / Save / Save As</strong>（若不小心关掉了浮动 SEQ 窗口，再点 New/Open/Edit 即可唤回）。</li>
-<li><strong>插入指令</strong>：在右侧 <strong>Sequence Command Bar</strong> 双击指令，在弹窗中填好参数即可插入；选中 <code>Scan</code> 或 <code>End Scan</code> 行再插入时，新指令会自动缩进到该扫描块内部。</li>
+<li><strong>新建 / 打开 / 保存</strong>：通过 <strong>File → New (<code>Ctrl+N</code>) / Open (<code>Ctrl+O</code>) / Save (<code>Ctrl+S</code>) / Save As (<code>Ctrl+Shift+S</code>)</strong>（若不小心关掉了浮动 SEQ 窗口，再点 New/Open/Edit 即可唤回）。</li>
+<li><strong>插入指令</strong>：在右侧 <strong>Sequence Command Bar</strong> 双击指令，在弹窗中填好参数即可插入；选中 <code>Scan</code> 或 <code>End Scan</code> 行再插入时，新指令会自动缩进到该扫描块内部，插入后焦点自动回到 SEQ 列表方便继续使用快捷键。</li>
 <li><strong>修改已有指令</strong>：直接双击 SEQ 里的任意一行。</li>
-<li><strong>批量操作</strong>：按住 <code>Ctrl</code> 或 <code>Shift</code> 选中多行，可通过右键菜单或快捷键执行 <strong>Enable / Disable / Delete / Copy / Paste</strong>（同时选中父 <code>Scan</code> 和内部子行时，操作自动只作用于外层块，避免误删或重复复制）。SEQ 运行中禁止修改，但仍允许复制。</li>
+<li><strong>批量操作与快捷键</strong>：按住 <code>Ctrl</code> 或 <code>Shift</code> 选中多行，可通过右键菜单、顶部 <strong>Edit</strong> 菜单或快捷键执行：</li>
+<li>撤销 / 重做：<code>Ctrl+Z</code>（Undo）、<code>Ctrl+Y</code> / <code>Ctrl+Shift+Z</code>（Redo），覆盖插入、修改参数、剪切、粘贴、删除、启停、移动与切换数据文件；</li>
+<li>剪切 / 复制 / 粘贴 / 删除：<code>Ctrl+X</code>、<code>Ctrl+C</code>、<code>Ctrl+V</code>、<code>Delete</code>（同时选中父 <code>Scan</code> 和内部子行时，操作自动只作用于外层块，避免误删或重复复制/剪切）；</li>
+<li>批量禁用 / 启用：<code>Ctrl+D</code>、<code>Ctrl+E</code>；</li>
+<li>上下移动当前行：<code>Alt+Up</code>、<code>Alt+Down</code>（仅在同一父块内移动）。</li>
+<li>锁定不可编辑时所有修改动作禁用，但仍允许复制。</li>
 </ul>
 <h3 id="_7">常用指令要点<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
 <ul>
