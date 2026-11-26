@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.20.8 - 2026-11-26
+
+- SEQ 增加剪切、撤销/重做与键盘快捷键，以及紧凑编辑工具栏、语义配色、嵌套参考线和长路径省略。撤销/重做、启停和移动 Set Datafile 时同步恢复 DAT 路径与 Run 状态。
+- Data Browser 默认在中央 MDI 内显示，支持拖出或 Pop Out 为独立窗口、Dock 返回，并提供 Window 排列菜单。修复贴顶缩放边框误触发弹出。
+- Data Browser 提供紧凑绘图区、悬停读数及复制文件路径；缓存基础绘图和自然范围，以二维屏幕索引处理大数据选点，保留恒定 X 曲线中部的悬停与双击原始行查看。
+- System Log 可直接用 Data Browser 查看。Live Trend 支持选择曲线、辅助读数和点击检视，并修复延迟快照的时刻显示及同名辅助曲线混合问题。
+- 主界面压缩仪表卡片和侧栏，命令栏随 SEQ/数据窗口切换展开或收起；增加 Run Log 未读提示和绝对磁场超过 100 Oe 的视觉提示。
+- 发布包仅提供 configs/general.default.toml，首次启动生成本机 general.toml；就地升级保留已有通用配置、仪表实例、PID、VISA 清单和模块实例配置。
+- Scan Time 达到时长后完成当前内部语句组并结束，不补跑剩余点；暂停和主仪表恢复等待不计入扫描时间。
+- 同步发布 LR700 模块：专用 VISA 会话的 GET 与设置命令回读采用 100 ms 写后读延时，保留 EOI 及 5 s 重连等待，不修改框架通用 VISA 默认值。该延时有有限真机样本支持，尚未完成新版全测量/切换流程的长期真机验证，不据此宣称解决现场 GPIB 失联。
+- System Instrument 驱动与 v0.20.7 相同；本次未追加真机整机测量。完整包包含 22C＋LR700 配置和压缩机驱动；压缩机未创建现场实例。
+  [System Instruments v0.20.8](https://github.com/yang-fu-physics/openlab-control-Device/releases/tag/instruments-v0.20.8)；
+  [Measurement Modules v0.20.8](https://github.com/yang-fu-physics/openlab-control-Module/releases/tag/modules-v0.20.8)。
+
 ## 0.20.7 - 2026-11-25
 
 - PID 文件路径校验统一解析项目根目录，避免 Windows 短路径或等价路径误报文件越界。
