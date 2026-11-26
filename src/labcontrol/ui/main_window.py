@@ -812,7 +812,7 @@ class MainWindow(QMainWindow):
         self.alarm_settings_action.triggered.connect(self._show_alarm_settings)
         self.log_action = self.log_dock.toggleViewAction()
         self._system_log_idle_icon = qta.icon("fa5s.clipboard-list", color=icon_color)
-        self._system_log_recording_icon = qta.icon("fa5s.dot-circle", color="#cf222e")
+        self._system_log_recording_icon = qta.icon("fa5s.dot-circle", color="#238636")
         self.system_log_action = QAction(self._system_log_idle_icon, "System Log…", self)
         self.system_log_action.triggered.connect(self._open_system_log)
         self.commands_toolbar_action = QAction(
@@ -1207,10 +1207,14 @@ class MainWindow(QMainWindow):
             "  border-color: #aeb9c6;"
             "}"
             "QToolBar#mainToolbar QToolButton#systemLogToolButton[recording=\"true\"] {"
-            "  background: #fdecec;"
-            "  border-color: #e4a1a6;"
-            "  color: #b42318;"
+            "  background: #eaf7ef;"
+            "  border-color: #86c99a;"
+            "  color: #1b7a3d;"
             "  font-weight: 600;"
+            "}"
+            "QToolBar#mainToolbar QToolButton#systemLogToolButton[recording=\"true\"]:hover {"
+            "  background: #dbf2e3;"
+            "  border-color: #5cb87a;"
             "}"
             "QToolBar#mainToolbar QToolButton#highFieldToolButton {"
             "  background: #fef3c7;"
