@@ -99,7 +99,9 @@ from ..sequence.model import (
 )
 from ..sequence.module_settings import (
     SequenceModuleSettings,
+    SequenceModuleSyncPlan,
     load_sequence_module_settings,
+    plan_sequence_module_sync,
     save_sequence_module_settings,
     sequence_module_settings_path,
 )
@@ -342,6 +344,14 @@ class MainWindow(QMainWindow):
             str,
             dict[str, object],
         ] = {}
+        # 用户在打开 SEQ 弹窗确认“加载并填入参数”后，为尚未完成初始化的模块暂存待填入参数。
+        self._pending_seq_module_settings: dict[
+            str,
+            dict[str, object],
+        ] = {}
+        # 启动自动恢复上次启用模块期间的跟踪集合，避免逐个恢复完成时覆盖尚未就绪的模块列表。
+        self._session_restore_pending: set[str] = set()
+        self._session_restore_unapplied: set[str] = set()
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
@@ -417,6 +427,7 @@ class MainWindow(QMainWindow):
         self._last_active_subwindow = self.mdi.activeSubWindow() or self.sequence_window
         self._initializing_ui = False
         self.runtime.start()
+        self._restore_last_enabled_modules()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._drain_runtime_messages)
         self.timer.start(config.ui_refresh_ms)
@@ -1506,6 +1517,8 @@ class MainWindow(QMainWindow):
         module_settings: (
             SequenceModuleSettings | None
         ) = None,
+        *,
+        apply_to_enabled_windows: bool = True,
     ) -> None:
         self.document = document
         self.current_data_file = None
@@ -1529,6 +1542,7 @@ class MainWindow(QMainWindow):
         )
         self._sequence_module_window_issues = []
         self._deferred_sequence_module_settings.clear()
+        self._pending_seq_module_settings.clear()
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
@@ -1544,36 +1558,37 @@ class MainWindow(QMainWindow):
             self.current_run_state not in self.TERMINAL_STATES
             or self._pending_run is not None
         )
-        for module_id, settings in (
-            self._sequence_module_settings.items()
-        ):
-            if module_id not in self.enabled_modules:
-                continue
-            window = self.module_windows.get(module_id)
-            if window is None:
-                continue
-            if run_locked:
-                self._deferred_sequence_module_settings[module_id] = deepcopy(
-                    settings
-                )
-                self._sequence_module_window_issues.append(
-                    f"Module {module_id!r} window is locked during an active Run; "
-                    "imported settings were preserved and will load when this Run finishes"
-                )
-                continue
-            try:
-                window.load_settings(
-                    settings,
-                    mark_unapplied=True,
-                )
-            except Exception as exc:
-                # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
-                # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
-                self._sequence_module_window_issues.append(
-                    f"Could not load imported settings "
-                    f"into enabled module {module_id!r}: "
-                    f"{exc}"
-                )
+        if apply_to_enabled_windows:
+            for module_id, settings in (
+                self._sequence_module_settings.items()
+            ):
+                if module_id not in self.enabled_modules:
+                    continue
+                window = self.module_windows.get(module_id)
+                if window is None:
+                    continue
+                if run_locked:
+                    self._deferred_sequence_module_settings[module_id] = deepcopy(
+                        settings
+                    )
+                    self._sequence_module_window_issues.append(
+                        f"Module {module_id!r} window is locked during an active Run; "
+                        "imported settings were preserved and will load when this Run finishes"
+                    )
+                    continue
+                try:
+                    window.load_settings(
+                        settings,
+                        mark_unapplied=True,
+                    )
+                except Exception as exc:
+                    # 第三方前端可能升级后不再接受旧字段。保留导入数据供用户修复，
+                    # 但不让一个模块的 UI 异常阻止 SEQ 文本本身打开。
+                    self._sequence_module_window_issues.append(
+                        f"Could not load imported settings "
+                        f"into enabled module {module_id!r}: "
+                        f"{exc}"
+                    )
         self._dirty = False
         self._sync_datafile_label()
         # Closing an MDI subwindow hides it because WA_DeleteOnClose is false.
@@ -1624,6 +1639,7 @@ class MainWindow(QMainWindow):
         document: SequenceDocument,
         *,
         runnable_only: bool = False,
+        enabling_modules: set[str] | frozenset[str] = frozenset(),
     ) -> list[str]:
         """说明文档中的模块指令为何尚不可执行；绝不删除或改写原参数。"""
 
@@ -1652,9 +1668,10 @@ class MainWindow(QMainWindow):
                             f"{prefix}: measurement module is not installed"
                         )
                     elif module_id not in self.enabled_modules:
-                        issues.append(
-                            f"{prefix}: module must be Enabled before Run or editing"
-                        )
+                        if module_id not in enabling_modules:
+                            issues.append(
+                                f"{prefix}: module must be Enabled before Run or editing"
+                            )
                     elif spec is None:
                         issues.append(
                             f"{prefix}: the Enabled module does not declare this command ID"
@@ -1833,6 +1850,179 @@ class MainWindow(QMainWindow):
             return
         self._set_document(SequenceDocument())
 
+    def _active_module_ids(self) -> set[str]:
+        """返回当前实际生效（含正在启用中、排除正在停用中）的模块集合。"""
+
+        pending_enables = {
+            module_id
+            for module_id, (_, requested) in self._pending_module_operations.items()
+            if requested
+        }
+        pending_disables = {
+            module_id
+            for module_id, (_, requested) in self._pending_module_operations.items()
+            if not requested
+        }
+        return (
+            self.enabled_modules | self._session_restore_pending | pending_enables
+        ) - pending_disables
+
+    def _current_module_pending_settings(
+        self,
+        module_id: str,
+    ) -> dict[str, object]:
+        """返回当前模块的待设置状态（Settings 页当前显示值或已排队参数）。"""
+
+        if module_id in self._pending_seq_module_settings:
+            return deepcopy(self._pending_seq_module_settings[module_id])
+        if module_id in self._deferred_sequence_module_settings:
+            return deepcopy(self._deferred_sequence_module_settings[module_id])
+        window = self.module_windows.get(module_id)
+        if window is not None:
+            return window.settings()
+        return load_settings(self._module_settings_path(module_id))
+
+    def _module_display_name(self, module_id: str) -> str:
+        try:
+            return self._module_descriptor(module_id).name
+        except KeyError:
+            return module_id
+
+    def _plan_sequence_module_sync(
+        self,
+        imported: SequenceModuleSettings,
+    ) -> SequenceModuleSyncPlan:
+        installed_ids = {
+            descriptor.id
+            for descriptor in self.module_descriptors
+            if descriptor.valid
+        }
+        current_enabled = self._active_module_ids()
+        current_settings: dict[str, dict[str, object]] = {}
+        for module_id in current_enabled:
+            try:
+                current_settings[module_id] = self._current_module_pending_settings(
+                    module_id
+                )
+            except Exception:
+                continue
+        return plan_sequence_module_sync(
+            imported,
+            installed_ids=installed_ids,
+            current_enabled=current_enabled,
+            current_settings=current_settings,
+        )
+
+    def _format_module_sync_summary(
+        self,
+        plan: SequenceModuleSyncPlan,
+        imported: SequenceModuleSettings,
+    ) -> str:
+        sections: list[str] = []
+        if plan.to_enable:
+            lines = ["Enable modules and fill pending settings:"]
+            for module_id in plan.to_enable:
+                lines.append(f"  • {self._module_display_name(module_id)}")
+            sections.append("\n".join(lines))
+        if plan.to_update_settings:
+            lines = ["Update pending settings on enabled modules:"]
+            for module_id in plan.to_update_settings:
+                lines.append(f"  • {self._module_display_name(module_id)}")
+            sections.append("\n".join(lines))
+        if plan.to_disable:
+            lines = ["Disable modules not saved in this SEQ:"]
+            for module_id in plan.to_disable:
+                lines.append(f"  • {self._module_display_name(module_id)}")
+            sections.append("\n".join(lines))
+        if plan.unavailable:
+            lines = ["Unavailable modules (not installed, skipped):"]
+            for module_id in plan.unavailable:
+                lines.append(f"  • {module_id}")
+            sections.append("\n".join(lines))
+        version_notes: list[str] = []
+        for module_id in (*plan.to_enable, *plan.to_update_settings):
+            recorded = imported.versions.get(module_id, "")
+            try:
+                descriptor = self._module_descriptor(module_id)
+            except KeyError:
+                continue
+            if recorded and recorded != descriptor.version:
+                version_notes.append(
+                    f"  • {descriptor.name}: saved with {recorded}, installed {descriptor.version}"
+                )
+        if version_notes:
+            sections.append("Version differences:\n" + "\n".join(version_notes))
+        sections.append(
+            "Settings will only be filled into each module's Settings tab and will NOT be "
+            "written to instruments until you click Apply Settings."
+        )
+        return "\n\n".join(sections)
+
+    def _confirm_sequence_module_sync(
+        self,
+        sequence_name: str,
+        plan: SequenceModuleSyncPlan,
+        imported: SequenceModuleSettings,
+    ) -> bool:
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setWindowTitle("Sync Module State from SEQ")
+        dialog.setText(
+            f"The module state saved in {sequence_name} differs from the current modules "
+            "or pending settings."
+        )
+        dialog.setInformativeText(
+            self._format_module_sync_summary(plan, imported)
+        )
+        confirm_button = dialog.addButton(
+            "Load Modules and Fill Settings",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        cancel_button = dialog.addButton(
+            "Keep Current State",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(confirm_button)
+        fit_initial_window_width(dialog)
+        dialog.exec()
+        return dialog.clickedButton() is confirm_button and dialog.clickedButton() is not cancel_button
+
+    def _apply_sequence_module_sync(
+        self,
+        plan: SequenceModuleSyncPlan,
+        imported: SequenceModuleSettings,
+    ) -> list[str]:
+        """按已确认的同步计划加载/停用模块并填写待设置参数，绝不自动写入仪表。"""
+
+        issues: list[str] = []
+        for module_id in plan.to_disable:
+            self._pending_seq_module_settings.pop(module_id, None)
+            self._deferred_sequence_module_settings.pop(module_id, None)
+            self._set_module_enabled(module_id, False)
+
+        for module_id in plan.to_update_settings:
+            values = deepcopy(imported.settings[module_id])
+            window = self.module_windows.get(module_id)
+            if window is not None and module_id in self.enabled_modules:
+                try:
+                    window.load_settings(values, mark_unapplied=True)
+                    window.tabs.setCurrentIndex(0)
+                    window.show_in_front()
+                except Exception as exc:
+                    issues.append(
+                        f"Could not load imported settings into enabled module {module_id!r}: {exc}"
+                    )
+            else:
+                self._pending_seq_module_settings[module_id] = values
+
+        for module_id in plan.to_enable:
+            self._pending_seq_module_settings[module_id] = deepcopy(
+                imported.settings[module_id]
+            )
+            self._set_module_enabled(module_id, True)
+
+        return issues
+
     def _open_sequence(self) -> None:
         if not self._confirm_discard():
             return
@@ -1854,10 +2044,37 @@ class MainWindow(QMainWindow):
         imported = load_sequence_module_settings(
             path
         )
+        plan = self._plan_sequence_module_sync(imported)
         self._set_document(
             result.document,
             imported,
+            apply_to_enabled_windows=False,
         )
+        sync_confirmed = False
+        sync_issues: list[str] = []
+        run_locked = (
+            self.current_run_state not in self.TERMINAL_STATES
+            or self._pending_run is not None
+        )
+        if plan.has_changes:
+            if run_locked:
+                if plan.to_enable or plan.to_disable:
+                    sync_issues.append(
+                        "Module enable/disable changes saved in this SEQ cannot run while "
+                        "another sequence is active; reload or switch modules after the Run ends."
+                    )
+                for module_id in plan.to_update_settings:
+                    self._deferred_sequence_module_settings[module_id] = deepcopy(
+                        imported.settings[module_id]
+                    )
+                    sync_issues.append(
+                        f"Module {module_id!r} window is locked during an active Run; "
+                        "imported settings were preserved and will load when this Run finishes"
+                    )
+            elif self._confirm_sequence_module_sync(Path(path).name, plan, imported):
+                sync_confirmed = True
+                sync_issues = self._apply_sequence_module_sync(plan, imported)
+
         messages = [
             (
                 f"Line {item.line_number}: "
@@ -1867,7 +2084,8 @@ class MainWindow(QMainWindow):
         ]
         messages.extend(
             self._module_command_document_issues(
-                result.document
+                result.document,
+                enabling_modules=set(plan.to_enable) if sync_confirmed else frozenset(),
             )
         )
         messages.extend(
@@ -1875,17 +2093,27 @@ class MainWindow(QMainWindow):
                 imported
             )
         )
+        messages.extend(sync_issues)
         if messages:
             summary = "\n".join(messages[:12])
             QMessageBox.warning(self, "SEQ Validation", summary)
-        if imported.settings:
+        if sync_confirmed:
             self.statusBar().showMessage(
                 (
-                    f"Imported {len(imported.settings)} "
-                    "module setting set(s); the import did "
-                    "not enable modules or apply settings"
+                    f"Loaded {Path(path).name} · synchronized module state "
+                    "(review Settings and click Apply Settings to write to instruments)"
                 ),
                 8000,
+            )
+        elif plan.has_changes:
+            self.statusBar().showMessage(
+                f"Loaded {Path(path).name} (kept current module state)",
+                5000,
+            )
+        elif imported.has_saved_state and not messages:
+            self.statusBar().showMessage(
+                f"Loaded {Path(path).name} · module state matches",
+                4000,
             )
         elif not messages:
             self.statusBar().showMessage(
@@ -1938,9 +2166,9 @@ class MainWindow(QMainWindow):
             destination
         )
         try:
-            # 不为完全没有模块关系的旧 SEQ 强行增加文件；若伴随文件已经存在，则用
-            # 空 modules 表覆盖，确保用户清空关系后不会再次导入旧设置。
-            if associated_settings or sidecar.exists():
+            # 只要安装了测量模块、存在关联设置或已有伴随文件，就写入配套状态文件，
+            # 以便“0 个启用模块”也能作为明确状态在下次加载 SEQ 时触发比对。
+            if associated_settings or sidecar.exists() or bool(self.module_descriptors):
                 sidecar = save_sequence_module_settings(
                     destination,
                     associated_settings,
@@ -2616,6 +2844,10 @@ class MainWindow(QMainWindow):
                 exception = exc
             if exception is None:
                 continue
+            if requested_enabled:
+                self._pending_seq_module_settings.pop(module_id, None)
+                self._session_restore_pending.discard(module_id)
+                self._session_restore_unapplied.discard(module_id)
 
             actual_enabled = (
                 module_id in self.enabled_modules
@@ -2960,13 +3192,47 @@ class MainWindow(QMainWindow):
         return root / module_id / "settings.toml"
 
     def _saved_module_settings(self, module_id: str) -> dict[str, object]:
-        if module_id in self._sequence_module_settings:
-            return deepcopy(
-                self._sequence_module_settings[
-                    module_id
-                ]
-            )
+        if module_id in self._pending_seq_module_settings:
+            return deepcopy(self._pending_seq_module_settings[module_id])
         return load_settings(self._module_settings_path(module_id))
+
+    def _persist_last_enabled_modules(self) -> None:
+        if self.ui_preference_store is None:
+            return
+        self.ui_preference_store.set_last_enabled_modules(
+            sorted(self._active_module_ids())
+        )
+
+    def _restore_last_enabled_modules(self) -> None:
+        """启动时自动恢复上次会话启用的模块并装入其上次待设置参数（不自动 Apply）。"""
+
+        if self.ui_preference_store is None:
+            return
+        remembered = self.ui_preference_store.last_enabled_modules()
+        if not remembered:
+            return
+        valid_ids = {
+            descriptor.id
+            for descriptor in self.module_descriptors
+            if descriptor.valid
+        }
+        to_restore: list[str] = []
+        for module_id in remembered:
+            if module_id not in valid_ids:
+                self._append_log(
+                    "WARNING",
+                    "modules",
+                    "SESSION_MODULE_MISSING",
+                    f"Last enabled module {module_id!r} is unavailable and was skipped on startup",
+                )
+                continue
+            to_restore.append(module_id)
+        if not to_restore:
+            return
+        self._session_restore_pending.update(to_restore)
+        self._session_restore_unapplied.update(to_restore)
+        for module_id in to_restore:
+            self._set_module_enabled(module_id, True)
 
     def _remember_sequence_module_settings(
         self,
@@ -3053,25 +3319,35 @@ class MainWindow(QMainWindow):
         dict[str, dict[str, object]],
         dict[str, str],
     ]:
-        """合并已导入关系和当前 Enabled 模块的 Settings 页快照。
+        """收集当前启用模块的 Settings 页快照，同时保留本机未安装的第三方模块配置。
 
-        未安装或当前 Disabled 的关联模块会原样保留，避免仅打开再保存一次 SEQ 就丢掉
-        第三方模块设置；运行中暂存的新 SEQ 参数亦优先保留，不被锁定中的旧窗口值覆盖。
+        本机已安装但当前已停用的模块不会继续写入伴随文件，确保保存的 SEQ 准确记录当前
+        模块启用状态与待设置参数；运行中暂存的新 SEQ 参数亦优先保留，不被锁定窗口覆盖。
         """
 
         self._apply_deferred_sequence_module_settings()
-        settings = deepcopy(
-            self._sequence_module_settings
-        )
-        versions = dict(
-            self._sequence_module_versions
-        )
-        for module_id in sorted(
-            self.enabled_modules
-        ):
+        installed_ids = {
+            descriptor.id
+            for descriptor in self.module_descriptors
+            if descriptor.valid
+        }
+        settings: dict[str, dict[str, object]] = {}
+        versions: dict[str, str] = {}
+        for module_id, values in self._sequence_module_settings.items():
+            if module_id not in installed_ids:
+                settings[module_id] = deepcopy(values)
+                if module_id in self._sequence_module_versions:
+                    versions[module_id] = self._sequence_module_versions[module_id]
+        for module_id in sorted(self._active_module_ids()):
+            if module_id not in installed_ids:
+                continue
             if module_id in self._deferred_sequence_module_settings:
                 values = deepcopy(
                     self._deferred_sequence_module_settings[module_id]
+                )
+            elif module_id in self._pending_seq_module_settings:
+                values = deepcopy(
+                    self._pending_seq_module_settings[module_id]
                 )
             else:
                 window = self.module_windows.get(
@@ -3094,14 +3370,20 @@ class MainWindow(QMainWindow):
             )
         return settings, versions
 
-    def _save_module_window(self, module_id: str) -> dict[str, object]:
+    def _save_module_window(
+        self,
+        module_id: str,
+        *,
+        remember_in_sequence: bool = True,
+    ) -> dict[str, object]:
         window = self.module_windows.get(module_id)
         settings = window.settings() if window is not None else self._saved_module_settings(module_id)
         save_settings(self._module_settings_path(module_id), settings)
-        self._remember_sequence_module_settings(
-            module_id,
-            settings,
-        )
+        if remember_in_sequence:
+            self._remember_sequence_module_settings(
+                module_id,
+                settings,
+            )
         return settings
 
     def _save_and_collect_enabled_module_settings(self) -> dict[str, dict[str, object]]:
@@ -3130,22 +3412,45 @@ class MainWindow(QMainWindow):
         if module_id in self._pending_module_operations:
             return
         try:
+            descriptor = self._module_descriptor(module_id)
             if enabled:
+                self.module_manager.update_state(
+                    module_id,
+                    True,
+                    "initializing",
+                    f"Initializing {descriptor.name}...",
+                )
                 future = self.runtime.enable_module(module_id)
                 self._pending_module_operations[
                     module_id
                 ] = (future, True)
-                self.statusBar().showMessage(f"Initializing {self._module_descriptor(module_id).name}...")
+                self.statusBar().showMessage(f"Initializing {descriptor.name}...")
             else:
-                self._save_module_window(module_id)
+                self._pending_seq_module_settings.pop(module_id, None)
+                self._deferred_sequence_module_settings.pop(module_id, None)
+                self._session_restore_pending.discard(module_id)
+                self._session_restore_unapplied.discard(module_id)
+                self._save_module_window(module_id, remember_in_sequence=False)
+                self._sequence_module_settings.pop(module_id, None)
+                self._sequence_module_versions.pop(module_id, None)
+                self.module_manager.update_state(
+                    module_id,
+                    False,
+                    "disabling",
+                    f"Stopping {descriptor.name}...",
+                )
                 future = self.runtime.disable_module(
                     module_id
                 )
                 self._pending_module_operations[
                     module_id
                 ] = (future, False)
-                self.statusBar().showMessage(f"Stopping {self._module_descriptor(module_id).name}...")
+                self.statusBar().showMessage(f"Stopping {descriptor.name}...")
         except Exception as exc:
+            if enabled:
+                self._pending_seq_module_settings.pop(module_id, None)
+                self._session_restore_pending.discard(module_id)
+                self._session_restore_unapplied.discard(module_id)
             self.module_manager.update_state(
                 module_id,
                 module_id in self.enabled_modules,
@@ -3163,13 +3468,6 @@ class MainWindow(QMainWindow):
             descriptor,
             self,
             resources=self.config.resource_payload("measurement"),
-        )
-        window.load_settings(
-            self._saved_module_settings(module_id),
-            mark_unapplied=(
-                module_id
-                in self._sequence_module_settings
-            ),
         )
         window.applyRequested.connect(self._apply_module_settings)
         window.actionRequested.connect(self._module_action)
@@ -3196,8 +3494,10 @@ class MainWindow(QMainWindow):
             [],
         )
         was_enabled = module_id in self.enabled_modules
+        had_window = module_id in self.module_windows
         if enabled:
             self.enabled_modules.add(module_id)
+            self._session_restore_pending.discard(module_id)
         else:
             self.enabled_modules.discard(module_id)
         self.module_manager.update_state(
@@ -3224,17 +3524,60 @@ class MainWindow(QMainWindow):
                 module_id,
                 sequence_commands,
             )
-            if not was_enabled:
-                window.load_settings(
-                    self._saved_module_settings(
-                        module_id
-                    ),
-                    mark_unapplied=(
-                        module_id
-                        in self._sequence_module_settings
-                    ),
+            if not was_enabled or not had_window:
+                pending_seq = self._pending_seq_module_settings.pop(
+                    module_id,
+                    None,
                 )
-                window.show_in_front()
+                restored_from_session = (
+                    module_id in self._session_restore_unapplied
+                )
+                self._session_restore_unapplied.discard(module_id)
+                if pending_seq is not None:
+                    try:
+                        window.load_settings(
+                            pending_seq,
+                            mark_unapplied=True,
+                        )
+                    except Exception as exc:
+                        issue = (
+                            f"Could not load SEQ settings into {module_id!r}: {exc}"
+                        )
+                        self._append_log(
+                            "WARNING",
+                            "sequence",
+                            "MODULE_SETTINGS_IMPORT",
+                            issue,
+                        )
+                        QMessageBox.warning(
+                            self,
+                            "SEQ Module Settings Import",
+                            issue,
+                        )
+                    window.tabs.setCurrentIndex(0)
+                    window.show_in_front()
+                elif restored_from_session:
+                    try:
+                        window.load_settings(
+                            load_settings(self._module_settings_path(module_id)),
+                            mark_unapplied=True,
+                            unapplied_message="Last session settings restored — not applied",
+                        )
+                    except Exception as exc:
+                        self._append_log(
+                            "WARNING",
+                            "modules",
+                            "SESSION_MODULE_SETTINGS_RESTORE",
+                            f"Could not restore saved settings for {module_id!r}: {exc}",
+                        )
+                    window.tabs.setCurrentIndex(0)
+                    window.show_in_front()
+                else:
+                    window.load_settings(
+                        load_settings(self._module_settings_path(module_id)),
+                        mark_unapplied=False,
+                    )
+                    window.show_in_front()
             elif state == "faulted":
                 window.tabs.setCurrentIndex(1)
                 window.show_in_front()
@@ -3244,6 +3587,11 @@ class MainWindow(QMainWindow):
             self._set_module_command_palette(module_id, [])
         elif not enabled:
             self._set_module_command_palette(module_id, [])
+        if state in {"enabled", "disabled"} and (enabled != was_enabled or state == "disabled"):
+            try:
+                self._persist_last_enabled_modules()
+            except OSError:
+                pass
         self.module_monitor_group.update_module(
             self._module_descriptor(module_id),
             enabled=enabled,
@@ -4052,7 +4400,7 @@ class MainWindow(QMainWindow):
                 return
         for module_id in tuple(self.enabled_modules):
             try:
-                self._save_module_window(module_id)
+                self._save_module_window(module_id, remember_in_sequence=False)
             except Exception as exc:
                 QMessageBox.warning(
                     self,
@@ -4060,6 +4408,7 @@ class MainWindow(QMainWindow):
                     f"{module_id}: {exc}\n\nThe application will continue closing.",
                 )
         try:
+            self._persist_last_enabled_modules()
             self._save_window_layout()
         except Exception as exc:
             QMessageBox.warning(

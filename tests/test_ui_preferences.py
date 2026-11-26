@@ -37,6 +37,16 @@ class UiPreferenceStoreTests(unittest.TestCase):
             store.set_last_sequence(None)
             self.assertIsNone(store.last_sequence())
 
+    def test_last_enabled_modules_round_trips_and_survives_layout_reset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = UiPreferenceStore(Path(directory) / "ui.ini")
+            self.assertEqual(store.last_enabled_modules(), ())
+            store.set_last_enabled_modules(["mod_b", "mod_a", "mod_b", ""])
+            store.clear_window_layout()
+            self.assertEqual(store.last_enabled_modules(), ("mod_a", "mod_b"))
+            store.set_last_enabled_modules([])
+            self.assertEqual(store.last_enabled_modules(), ())
+
     def test_missing_values_use_site_scale_and_safe_defaults(
         self,
     ) -> None:

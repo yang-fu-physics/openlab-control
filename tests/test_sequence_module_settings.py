@@ -20,7 +20,10 @@ from labcontrol.models import (  # noqa: E402
     RuntimeMessage,
 )
 from labcontrol.sequence.module_settings import (  # noqa: E402
+    SequenceModuleSettings,
     load_sequence_module_settings,
+    module_settings_equal,
+    plan_sequence_module_sync,
     save_sequence_module_settings,
     sequence_module_settings_path,
 )
@@ -385,6 +388,83 @@ class SequenceModuleSettingsTests(unittest.TestCase):
                     }
                 },
             )
+
+    def test_module_settings_equal_distinguishes_bool_and_int(self) -> None:
+        self.assertTrue(module_settings_equal({"a": 1, "b": [2.0, "x"]}, {"a": 1.0, "b": [2, "x"]}))
+        self.assertFalse(module_settings_equal({"enabled": True}, {"enabled": 1}))
+        self.assertFalse(module_settings_equal({"enabled": False}, {"enabled": 0}))
+        self.assertFalse(module_settings_equal({"a": {"x": 1}}, {"a": {"x": 2}}))
+
+    def test_plan_sequence_module_sync_handles_diffs_empty_legacy_and_corrupt(self) -> None:
+        # 1) Legacy SEQ without sidecar produces no changes and never disables active modules.
+        legacy = SequenceModuleSettings({}, {}, source=None, issues=())
+        plan = plan_sequence_module_sync(
+            legacy,
+            installed_ids=("mod_a", "mod_b"),
+            current_enabled=("mod_a",),
+            current_settings={"mod_a": {"gain": 1}},
+        )
+        self.assertFalse(plan.has_changes)
+        self.assertEqual(plan.to_disable, ())
+
+        # 2) Corrupt sidecar with issues never proposes disabling active modules.
+        corrupt = SequenceModuleSettings({}, {}, source=Path("bad.modules.toml"), issues=("bad",))
+        plan = plan_sequence_module_sync(
+            corrupt,
+            installed_ids=("mod_a",),
+            current_enabled=("mod_a",),
+            current_settings={"mod_a": {"gain": 1}},
+        )
+        self.assertFalse(plan.has_changes)
+
+        # 3) Explicit empty sidecar disables currently enabled modules.
+        empty_saved = SequenceModuleSettings({}, {}, source=Path("empty.modules.toml"), issues=())
+        plan = plan_sequence_module_sync(
+            empty_saved,
+            installed_ids=("mod_a",),
+            current_enabled=("mod_a",),
+            current_settings={"mod_a": {"gain": 1}},
+        )
+        self.assertTrue(plan.has_changes)
+        self.assertEqual(plan.to_disable, ("mod_a",))
+
+        # 4) Mixed diff covers enable, disable, update, unchanged, and unavailable.
+        saved = SequenceModuleSettings(
+            {
+                "mod_enable": {"v": 1},
+                "mod_update": {"v": 2},
+                "mod_same": {"v": 3.0},
+                "mod_missing": {"v": 4},
+            },
+            {},
+            source=Path("mix.modules.toml"),
+        )
+        plan = plan_sequence_module_sync(
+            saved,
+            installed_ids=("mod_enable", "mod_update", "mod_same", "mod_disable"),
+            current_enabled=("mod_update", "mod_same", "mod_disable"),
+            current_settings={"mod_update": {"v": 99}, "mod_same": {"v": 3}, "mod_disable": {}},
+        )
+        self.assertTrue(plan.has_changes)
+        self.assertEqual(plan.to_enable, ("mod_enable",))
+        self.assertEqual(plan.to_disable, ("mod_disable",))
+        self.assertEqual(plan.to_update_settings, ("mod_update",))
+        self.assertEqual(plan.unchanged, ("mod_same",))
+        self.assertEqual(plan.unavailable, ("mod_missing",))
+
+        # 5) Exact match produces has_changes == False.
+        matching = SequenceModuleSettings(
+            {"mod_same": {"v": 3}},
+            {},
+            source=Path("same.modules.toml"),
+        )
+        plan = plan_sequence_module_sync(
+            matching,
+            installed_ids=("mod_same",),
+            current_enabled=("mod_same",),
+            current_settings={"mod_same": {"v": 3.0}},
+        )
+        self.assertFalse(plan.has_changes)
 
 
 if __name__ == "__main__":

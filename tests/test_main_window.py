@@ -1132,7 +1132,7 @@ class MainWindowLayoutTests(unittest.TestCase):
             finally:
                 window.close()
 
-    def test_open_sequence_imports_module_settings_without_enabling_or_applying(
+    def test_open_sequence_prompts_and_keeps_current_state_when_declined(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -1173,6 +1173,11 @@ class MainWindowLayoutTests(unittest.TestCase):
                         ),
                     ),
                     patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        return_value=False,
+                    ) as confirm_sync,
+                    patch.object(
                         window.runtime,
                         "enable_module",
                     ) as enable_module,
@@ -1191,12 +1196,9 @@ class MainWindowLayoutTests(unittest.TestCase):
                     window.sequence_path,
                     sequence.resolve(),
                 )
-                self.assertEqual(
-                    window._saved_module_settings(
-                        "simulated_transport"
-                    )["delay_seconds"],
-                    0.375,
-                )
+                confirm_sync.assert_called_once()
+                plan = confirm_sync.call_args.args[1]
+                self.assertEqual(plan.to_enable, ("simulated_transport",))
                 self.assertEqual(
                     window.enabled_modules,
                     set(),
@@ -1214,6 +1216,230 @@ class MainWindowLayoutTests(unittest.TestCase):
                 warning.assert_not_called()
             finally:
                 window.close()
+
+    def test_open_sequence_syncs_modules_and_fills_pending_settings_when_confirmed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            general = write_simulated_configuration(root)
+            shutil.copytree(
+                ROOT / "modules",
+                root / "modules",
+            )
+            sequence = root / "sync.seq"
+            sequence.write_text(
+                "T Remark sync test\n"
+                "T End Sequence\n",
+                encoding="utf-8",
+            )
+            window = MainWindow(load_config(general))
+            try:
+                # Start with simulated_transport enabled (extra module that sync.seq does not use).
+                window._set_module_enabled("simulated_transport", True)
+                deadline = time.monotonic() + 5.0
+                while "simulated_transport" not in window.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+                self.assertIn("simulated_transport", window.enabled_modules)
+
+                # Prepare sync.seq with only tutorial_resistance and custom pending parameters.
+                window._set_module_enabled("tutorial_resistance", True)
+                deadline = time.monotonic() + 5.0
+                while "tutorial_resistance" not in window.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+                tut_window = window.module_windows["tutorial_resistance"]
+                expected_settings = tut_window.settings()
+                expected_settings["delay_seconds"] = 0.375
+                expected_settings["base_resistance_ohm"] = 250.0
+                save_sequence_module_settings(
+                    sequence,
+                    {"tutorial_resistance": expected_settings},
+                    {"tutorial_resistance": tut_window.descriptor.version},
+                )
+
+                # Disable tutorial_resistance so only simulated_transport is enabled before Open SEQ.
+                window._set_module_enabled("tutorial_resistance", False)
+                deadline = time.monotonic() + 5.0
+                while "tutorial_resistance" in window.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+                self.assertEqual(window.enabled_modules, {"simulated_transport"})
+
+                # 1) Open sync.seq and confirm -> disables simulated_transport, enables tutorial_resistance,
+                #    fills delay_seconds=0.375 / base_resistance_ohm=250.0 as unapplied, and NEVER applies.
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(sequence), "Sequence (*.seq)"),
+                    ),
+                    patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        return_value=True,
+                    ) as confirm_sync,
+                    patch.object(
+                        window.runtime,
+                        "apply_module_settings",
+                    ) as apply_settings,
+                    patch("labcontrol.ui.main_window.QMessageBox.warning") as warning,
+                ):
+                    window._open_sequence()
+                    deadline = time.monotonic() + 5.0
+                    while (
+                        window.enabled_modules != {"tutorial_resistance"}
+                        and time.monotonic() < deadline
+                    ):
+                        QTest.qWait(20)
+                        window._drain_runtime_messages()
+
+                confirm_sync.assert_called_once()
+                plan = confirm_sync.call_args.args[1]
+                self.assertEqual(plan.to_enable, ("tutorial_resistance",))
+                self.assertEqual(plan.to_disable, ("simulated_transport",))
+                self.assertEqual(window.enabled_modules, {"tutorial_resistance"})
+                self.assertAlmostEqual(
+                    window.module_windows["tutorial_resistance"].settings()["delay_seconds"],
+                    0.375,
+                )
+                self.assertAlmostEqual(
+                    window.module_windows["tutorial_resistance"].settings()["base_resistance_ohm"],
+                    250.0,
+                )
+                self.assertTrue(window.module_windows["tutorial_resistance"].has_unapplied_edits())
+                apply_settings.assert_not_called()
+                warning.assert_not_called()
+
+                # 2) Re-opening the same sync.seq when module set & pending settings already match -> NO popup.
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(sequence), "Sequence (*.seq)"),
+                    ),
+                    patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        side_effect=AssertionError("Should not prompt when state already matches"),
+                    ),
+                ):
+                    window._open_sequence()
+
+                # 3) Change pending setting in the Settings tab, then re-open sync.seq -> prompts again & restores 0.375.
+                modified = window.module_windows["tutorial_resistance"].settings()
+                modified["delay_seconds"] = 0.9
+                window.module_windows["tutorial_resistance"].load_settings(modified, mark_unapplied=False)
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(sequence), "Sequence (*.seq)"),
+                    ),
+                    patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        return_value=True,
+                    ) as confirm_again,
+                    patch.object(
+                        window.runtime,
+                        "apply_module_settings",
+                    ) as apply_again,
+                ):
+                    window._open_sequence()
+
+                confirm_again.assert_called_once()
+                update_plan = confirm_again.call_args.args[1]
+                self.assertEqual(update_plan.to_enable, ())
+                self.assertEqual(update_plan.to_disable, ())
+                self.assertEqual(update_plan.to_update_settings, ("tutorial_resistance",))
+                self.assertAlmostEqual(
+                    window.module_windows["tutorial_resistance"].settings()["delay_seconds"],
+                    0.375,
+                )
+                self.assertTrue(window.module_windows["tutorial_resistance"].has_unapplied_edits())
+                apply_again.assert_not_called()
+            finally:
+                window.close()
+
+    def test_save_sequence_clears_disabled_module_and_records_zero_module_state(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            general = write_simulated_configuration(root)
+            shutil.copytree(ROOT / "modules", root / "modules")
+            sequence = root / "state.seq"
+            sequence.write_text("T End Sequence\n", encoding="utf-8")
+            window = MainWindow(load_config(general))
+            try:
+                window._set_document(load_sequence(sequence).document)
+                window._set_module_enabled("simulated_transport", True)
+                deadline = time.monotonic() + 5.0
+                while "simulated_transport" not in window.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+                self.assertTrue(window._save_sequence())
+                self.assertIn(
+                    "simulated_transport",
+                    load_sequence_module_settings(sequence).settings,
+                )
+
+                window._set_module_enabled("simulated_transport", False)
+                deadline = time.monotonic() + 5.0
+                while "simulated_transport" in window.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+                self.assertTrue(window._save_sequence())
+                loaded = load_sequence_module_settings(sequence)
+                self.assertEqual(loaded.settings, {})
+                self.assertTrue(loaded.has_saved_state)
+            finally:
+                window.close()
+
+    def test_startup_restores_last_enabled_modules_and_pending_settings_without_applying(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            general = write_simulated_configuration(root)
+            shutil.copytree(ROOT / "modules", root / "modules")
+            store = UiPreferenceStore(root / "ui.ini")
+            first = MainWindow(load_config(general), ui_preference_store=store)
+            try:
+                first._set_module_enabled("tutorial_resistance", True)
+                deadline = time.monotonic() + 5.0
+                while "tutorial_resistance" not in first.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    first._drain_runtime_messages()
+                mod_win = first.module_windows["tutorial_resistance"]
+                edited = mod_win.settings()
+                edited["delay_seconds"] = 0.625
+                edited["base_resistance_ohm"] = 180.0
+                mod_win.load_settings(edited, mark_unapplied=True)
+            finally:
+                first.close()
+
+            self.assertEqual(store.last_enabled_modules(), ("tutorial_resistance",))
+
+            second = MainWindow(load_config(general), ui_preference_store=store)
+            try:
+                with patch.object(
+                    second.runtime,
+                    "apply_module_settings",
+                ) as apply_settings:
+                    deadline = time.monotonic() + 5.0
+                    while "tutorial_resistance" not in second.enabled_modules and time.monotonic() < deadline:
+                        QTest.qWait(20)
+                        second._drain_runtime_messages()
+
+                self.assertEqual(second.enabled_modules, {"tutorial_resistance"})
+                restored_win = second.module_windows["tutorial_resistance"]
+                self.assertAlmostEqual(restored_win.settings()["delay_seconds"], 0.625)
+                self.assertAlmostEqual(restored_win.settings()["base_resistance_ohm"], 180.0)
+                self.assertTrue(restored_win.has_unapplied_edits())
+                self.assertIn("not applied", restored_win.message_label.text().casefold())
+                apply_settings.assert_not_called()
+            finally:
+                second.close()
 
     def test_save_sequence_writes_its_module_settings_companion(
         self,

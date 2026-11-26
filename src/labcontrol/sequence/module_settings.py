@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +39,84 @@ class SequenceModuleSettings:
     versions: dict[str, str]
     source: Path | None = None
     issues: tuple[str, ...] = ()
+
+    @property
+    def has_saved_state(self) -> bool:
+        """是否携带有效的 SEQ 模块状态快照（区分“显式保存了 0 个模块”与“无伴随文件/损坏”）。"""
+
+        return (self.source is not None or bool(self.settings)) and not self.issues
+
+
+@dataclass(frozen=True, slots=True)
+class SequenceModuleSyncPlan:
+    """比较 SEQ 保存的模块状态与当前状态后得到的同步计划。"""
+
+    to_enable: tuple[str, ...] = ()
+    to_disable: tuple[str, ...] = ()
+    to_update_settings: tuple[str, ...] = ()
+    unchanged: tuple[str, ...] = ()
+    unavailable: tuple[str, ...] = ()
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.to_enable or self.to_disable or self.to_update_settings)
+
+
+def module_settings_equal(left: Any, right: Any) -> bool:
+    """严格比较两组模块参数（区分 bool 与 int，兼容 int/float 数值等价）。"""
+
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return float(left) == float(right)
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        if set(left.keys()) != set(right.keys()):
+            return False
+        return all(module_settings_equal(left[key], right[key]) for key in left)
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        return len(left) == len(right) and all(
+            module_settings_equal(a, b) for a, b in zip(left, right)
+        )
+    return left == right
+
+
+def plan_sequence_module_sync(
+    imported: SequenceModuleSettings,
+    *,
+    installed_ids: Iterable[str],
+    current_enabled: Iterable[str],
+    current_settings: Mapping[str, Mapping[str, Any]],
+) -> SequenceModuleSyncPlan:
+    """对比 SEQ 保存的模块集合/待设置参数与当前状态，生成无副作用的同步计划。"""
+
+    if not imported.has_saved_state:
+        return SequenceModuleSyncPlan()
+    target_ids = set(imported.settings)
+    installed = set(installed_ids)
+    enabled = set(current_enabled)
+
+    to_enable = tuple(sorted((target_ids & installed) - enabled))
+    to_disable = tuple(sorted(enabled - target_ids))
+    unavailable = tuple(sorted(target_ids - installed))
+
+    to_update_settings: list[str] = []
+    unchanged: list[str] = []
+    for module_id in sorted(target_ids & enabled):
+        if module_id in current_settings and module_settings_equal(
+            current_settings[module_id],
+            imported.settings[module_id],
+        ):
+            unchanged.append(module_id)
+        else:
+            to_update_settings.append(module_id)
+
+    return SequenceModuleSyncPlan(
+        to_enable=to_enable,
+        to_disable=to_disable,
+        to_update_settings=tuple(to_update_settings),
+        unchanged=tuple(unchanged),
+        unavailable=unavailable,
+    )
 
 
 def sequence_module_settings_path(sequence_path: str | Path) -> Path:
