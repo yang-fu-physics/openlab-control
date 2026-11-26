@@ -46,11 +46,14 @@ from labcontrol.ui.dialogs import (  # noqa: E402
 from labcontrol.ui.trend import TrendCanvas, TrendDialog  # noqa: E402
 from tests.configuration_fixtures import load_simulated_config  # noqa: E402
 from labcontrol.ui.instrument_panels import (  # noqa: E402
+    HIGH_FIELD_WARNING_OE,
+    PANEL_MAX_HEIGHT,
     ControllerPanel,
     InstrumentPanelHost,
     ReadoutGridPanel,
     ReadoutPanel,
     SwitchPanel,
+    field_magnitude_oe,
 )
 
 
@@ -87,7 +90,7 @@ class InstrumentPanelTests(unittest.TestCase):
         )
         self.assertIsInstance(panel, QFrame)
         self.assertEqual(panel.minimumWidth(), 205)
-        self.assertEqual(panel.maximumHeight(), 135)
+        self.assertEqual(panel.maximumHeight(), PANEL_MAX_HEIGHT)
         self.assertEqual(
             panel.value_label.objectName(),
             "panelValue",
@@ -185,7 +188,7 @@ class InstrumentPanelTests(unittest.TestCase):
             readout.value_labels["heater_range"].text(),
             "LOW",
         )
-        self.assertEqual(panel.maximumHeight(), 135)
+        self.assertEqual(panel.maximumHeight(), PANEL_MAX_HEIGHT)
 
         host.update_snapshot(
             InstrumentSnapshot(
@@ -1171,6 +1174,133 @@ class InstrumentPanelTests(unittest.TestCase):
                 self.assertEqual(dialog.result(), dialog.DialogCode.Rejected)
         finally:
             dialog.close()
+
+    def test_field_controller_panel_highlights_above_100_oe_and_preserves_fault_priority(
+        self,
+    ) -> None:
+        self.assertAlmostEqual(field_magnitude_oe(-250.0, "Oe"), 250.0)
+        self.assertAlmostEqual(field_magnitude_oe(0.02, "T"), 200.0)
+        self.assertAlmostEqual(field_magnitude_oe(-15.0, "mT"), 150.0)
+        self.assertAlmostEqual(field_magnitude_oe(0.5, "kOe"), 500.0)
+        self.assertIsNone(field_magnitude_oe(300.0, "K"))
+        self.assertEqual(HIGH_FIELD_WARNING_OE, 100.0)
+
+        config = load_simulated_config()
+        field_cfg = config.instrument("field")
+        temp_cfg = config.instrument("temperature")
+        field_panel = ControllerPanel(field_cfg, field_cfg.panel("main"))
+        temp_panel = ControllerPanel(temp_cfg, temp_cfg.panel("main"))
+        try:
+            now = time.monotonic()
+            # Temperature at 300 K must never trigger high-field caution.
+            temp_panel.update_snapshot(
+                InstrumentSnapshot(
+                    "temperature",
+                    "Temperature",
+                    InstrumentKind.TEMPERATURE,
+                    now,
+                    "K",
+                    300.0,
+                    300.0,
+                    10.0,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=300.0,
+                            target=300.0,
+                            stability=StabilityState.STABLE,
+                        )
+                    },
+                )
+            )
+            self.assertFalse(temp_panel.high_field_active)
+            self.assertTrue(temp_panel.field_warning_label.isHidden())
+
+            # Boundary at exactly 100.0 Oe stays calm white.
+            field_panel.update_snapshot(
+                InstrumentSnapshot(
+                    "field",
+                    "Magnetic Field",
+                    InstrumentKind.FIELD,
+                    now,
+                    "Oe",
+                    100.0,
+                    100.0,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=100.0,
+                            target=100.0,
+                            stability=StabilityState.STABLE,
+                        )
+                    },
+                )
+            )
+            self.assertFalse(field_panel.high_field_active)
+            self.assertTrue(field_panel.field_warning_label.isHidden())
+            self.assertIn("background-color: #ffffff", field_panel.styleSheet())
+
+            # Above 100 Oe (including negative field while Stable) activates amber caution.
+            field_panel.update_snapshot(
+                InstrumentSnapshot(
+                    "field",
+                    "Magnetic Field",
+                    InstrumentKind.FIELD,
+                    now,
+                    "Oe",
+                    -5000.0,
+                    -5000.0,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=-5000.0,
+                            target=-5000.0,
+                            stability=StabilityState.STABLE,
+                        )
+                    },
+                )
+            )
+            self.assertTrue(field_panel.high_field_active)
+            self.assertFalse(field_panel.field_warning_label.isHidden())
+            self.assertIn("background-color: #fff8e1", field_panel.styleSheet())
+            self.assertIn("border: 1px solid #d97706", field_panel.styleSheet())
+
+            # Timed Out keeps red fault border priority while retaining the >100 Oe badge.
+            field_panel.update_snapshot(
+                InstrumentSnapshot(
+                    "field",
+                    "Magnetic Field",
+                    InstrumentKind.FIELD,
+                    now,
+                    "Oe",
+                    2500.0,
+                    5000.0,
+                    controls={
+                        "main": InstrumentControlState(
+                            current=2500.0,
+                            target=5000.0,
+                            stability=StabilityState.TIMED_OUT,
+                        )
+                    },
+                )
+            )
+            self.assertTrue(field_panel.high_field_active)
+            self.assertFalse(field_panel.field_warning_label.isHidden())
+            self.assertIn("border: 1px solid #cf222e", field_panel.styleSheet())
+
+            # Disconnected clears caution state.
+            field_panel.update_snapshot(
+                InstrumentSnapshot(
+                    "field",
+                    "Magnetic Field",
+                    InstrumentKind.FIELD,
+                    now,
+                    "Oe",
+                    connection_state=InstrumentConnectionState.DISCONNECTED,
+                )
+            )
+            self.assertFalse(field_panel.high_field_active)
+            self.assertTrue(field_panel.field_warning_label.isHidden())
+        finally:
+            field_panel.close()
+            temp_panel.close()
 
 
 if __name__ == "__main__":

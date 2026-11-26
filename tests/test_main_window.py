@@ -32,11 +32,13 @@ from labcontrol.models import (  # noqa: E402
     EventNotice,
     InstrumentConnectionState,
     InstrumentControlState,
+    InstrumentKind,
     InstrumentSnapshot,
     LabEvent,
     RunProgress,
     RunState,
     Severity,
+    StabilityState,
 )
 from labcontrol.sequence.model import (  # noqa: E402
     Command,
@@ -577,6 +579,10 @@ class MainWindowLayoutTests(unittest.TestCase):
                 window.command_dock.features(),
                 QDockWidget.DockWidgetFeature.NoDockWidgetFeatures,
             )
+            self.assertTrue(window.command_dock.isHidden())
+            window._focus_sequence()
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
             self.assertIsNotNone(window.status_dock.titleBarWidget())
             self.assertEqual(window.status_dock.titleBarWidget().height(), 0)
             compact_width = window.command_dock.minimumWidth()
@@ -1512,6 +1518,188 @@ class MainWindowLayoutTests(unittest.TestCase):
             self.assertEqual(window.document.commands[0].params["path"], str(chosen_path.resolve()))
             self.assertTrue(window._datafile_selected)
             self.assertEqual(window.data_file_label.fullText(), str(chosen_path.resolve()))
+        finally:
+            window.close()
+
+    def test_command_dock_defaults_hidden_and_follows_sequence_selection(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            self.application.processEvents()
+
+            # Collapsed by default on startup so workspace width stays maximized.
+            self.assertTrue(window.command_dock.isHidden())
+            self.assertFalse(window.commands_toolbar_action.isChecked())
+
+            # Clicking inside the SEQ list auto-expands the command bar.
+            QTest.mousePress(
+                window.editor.list.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=window.editor.list.viewport().rect().center(),
+            )
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
+            self.assertTrue(window.commands_toolbar_action.isChecked())
+
+            # Opening/activating a Data Browser auto-collapses the command bar.
+            browser_window = window._show_data_browser()
+            self.application.processEvents()
+            self.assertIs(window.mdi.activeSubWindow(), browser_window)
+            self.assertTrue(window.command_dock.isHidden())
+            self.assertFalse(window.commands_toolbar_action.isChecked())
+
+            # Switching back to SEQ auto-expands the command bar again.
+            window.mdi.setActiveSubWindow(window.sequence_window)
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
+
+            # Manually collapsing while editing SEQ keeps it hidden on clicks inside SEQ.
+            window.commands_toolbar_action.trigger()
+            self.application.processEvents()
+            self.assertTrue(window.command_dock.isHidden())
+            QTest.mousePress(
+                window.editor.list.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=window.editor.list.viewport().rect().center(),
+            )
+            self.application.processEvents()
+            self.assertTrue(window.command_dock.isHidden())
+
+            # Switching to Data Browser and back to SEQ re-enables auto-expand.
+            window.mdi.setActiveSubWindow(browser_window)
+            self.application.processEvents()
+            window.mdi.setActiveSubWindow(window.sequence_window)
+            self.application.processEvents()
+            self.assertFalse(window.command_dock.isHidden())
+        finally:
+            window.close()
+
+    def test_status_bar_run_log_toggle_tracks_unread_severity_and_clears_on_open(self) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            self.application.processEvents()
+
+            self.assertTrue(window.log_dock.isHidden())
+            self.assertFalse(window.log_toggle_button.isChecked())
+            self.assertEqual(window.log_toggle_button.text(), "Run Log")
+
+            window._append_log("INFO", "sequence", "STEP", "Started step 1")
+            self.assertEqual(window.log_toggle_button.text(), "Run Log (1)")
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "")
+
+            window._append_log("WARNING", "instrument", "WARN", "High heater output")
+            self.assertIn("warn", window.log_toggle_button.text())
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "warning")
+
+            window._append_log("ERROR", "instrument", "ERR", "Timeout")
+            self.assertIn("err", window.log_toggle_button.text())
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "error")
+
+            window.log_toggle_button.click()
+            self.application.processEvents()
+            self.assertFalse(window.log_dock.isHidden())
+            self.assertTrue(window.log_toggle_button.isChecked())
+            self.assertEqual(window.log_toggle_button.text(), "Run Log")
+            self.assertEqual(window.log_toggle_button.property("logSeverity"), "")
+
+            window.log_toggle_button.click()
+            self.application.processEvents()
+            self.assertTrue(window.log_dock.isHidden())
+            self.assertFalse(window.log_toggle_button.isChecked())
+        finally:
+            window.close()
+
+    def test_toolbar_high_field_indicator_tracks_field_and_opens_manual_control(
+        self,
+    ) -> None:
+        window = MainWindow(self.config)
+        try:
+            window.resize(1380, 820)
+            window.show()
+            self.application.processEvents()
+
+            self.assertFalse(window.high_field_action.isVisible())
+
+            now = time.monotonic()
+            # At 100 Oe (not strictly above 100), pill stays hidden.
+            window._handle_snapshots(
+                {
+                    "field": InstrumentSnapshot(
+                        "field",
+                        "Simulated Magnetic Field",
+                        InstrumentKind.FIELD,
+                        now,
+                        "Oe",
+                        100.0,
+                        100.0,
+                        controls={
+                            "main": InstrumentControlState(
+                                current=100.0,
+                                target=100.0,
+                                stability=StabilityState.STABLE,
+                            )
+                        },
+                    )
+                }
+            )
+            self.assertFalse(window.high_field_action.isVisible())
+
+            # Negative high field activates toolbar pill and card warning.
+            window._handle_snapshots(
+                {
+                    "field": InstrumentSnapshot(
+                        "field",
+                        "Simulated Magnetic Field",
+                        InstrumentKind.FIELD,
+                        now,
+                        "Oe",
+                        -12500.0,
+                        -12500.0,
+                        controls={
+                            "main": InstrumentControlState(
+                                current=-12500.0,
+                                target=-12500.0,
+                                stability=StabilityState.STABLE,
+                            )
+                        },
+                    )
+                }
+            )
+            self.assertTrue(window.high_field_action.isVisible())
+            self.assertIn("-12500.000 Oe", window.high_field_action.text())
+            self.assertTrue(window.status_panel.panels["field.main"].high_field_active)
+
+            # Clicking the pill opens manual control for the active field panel.
+            with patch.object(window, "_open_manual_control") as open_manual:
+                window.high_field_action.trigger()
+            open_manual.assert_called_once_with("field", "main")
+
+            # Returning below 100 Oe hides the pill again.
+            window._handle_snapshots(
+                {
+                    "field": InstrumentSnapshot(
+                        "field",
+                        "Simulated Magnetic Field",
+                        InstrumentKind.FIELD,
+                        now,
+                        "Oe",
+                        25.0,
+                        0.0,
+                        controls={
+                            "main": InstrumentControlState(
+                                current=25.0,
+                                target=0.0,
+                                stability=StabilityState.MOVING,
+                            )
+                        },
+                    )
+                }
+            )
+            self.assertFalse(window.high_field_action.isVisible())
+            self.assertFalse(window.status_panel.panels["field.main"].high_field_active)
         finally:
             window.close()
 
