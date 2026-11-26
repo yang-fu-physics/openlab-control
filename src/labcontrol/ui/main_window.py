@@ -307,6 +307,7 @@ class MainWindow(QMainWindow):
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
         self._datafile_selected = False
+        self._effective_datafile_text = ""
         self.current_snapshots: dict[str, InstrumentSnapshot] = {}
         self._runtime_connection_summary: tuple[int, int] | None = None
         self.current_run_state = RunState.IDLE
@@ -1111,6 +1112,7 @@ class MainWindow(QMainWindow):
         self.document = document
         self.current_data_file = None
         self._datafile_selected = False
+        self._effective_datafile_text = ""
         self.sequence_path = document.path
         self._datafile_selected = self._first_effective_datafile_command() is not None
         if self.ui_preference_store is not None:
@@ -1404,17 +1406,20 @@ class MainWindow(QMainWindow):
         return None
 
     def _sync_datafile_label(self) -> None:
-        if not self._datafile_selected:
-            self.data_file_label.setFullText("")
-            return
         command = self._first_effective_datafile_command()
         if command is not None:
-            path_text = str(command.params.get("path", "experiment.dat"))
-            self.data_file_label.setFullText(path_text)
-            path = Path(path_text)
-            if path.is_absolute():
-                self._last_data_directory = path.parent
-            return
+            path_text = str(command.params.get("path", "experiment.dat")).strip()
+            if path_text:
+                if path_text != self._effective_datafile_text:
+                    self._effective_datafile_text = path_text
+                    self.current_data_file = None
+                self._datafile_selected = True
+                self.data_file_label.setFullText(path_text)
+                path = Path(path_text)
+                if path.is_absolute():
+                    self._last_data_directory = path.parent
+                return
+        self._effective_datafile_text = ""
         self._datafile_selected = False
         self.current_data_file = None
         self.data_file_label.setFullText("")

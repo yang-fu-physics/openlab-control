@@ -1661,6 +1661,143 @@ class MainWindowLayoutTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_datafile_selection_syncs_across_undo_redo_cut_disable_and_move(
+        self,
+    ) -> None:
+        from PySide6.QtCore import QItemSelectionModel
+
+        window = MainWindow(self.config)
+        try:
+            window.resize(1280, 760)
+            window.show()
+            window._set_document(
+                SequenceDocument(
+                    [Command(CommandType.MEASURE)],
+                    "datafile-redo.seq",
+                )
+            )
+            window.activateWindow()
+            window.editor.list.setFocus()
+            self.application.processEvents()
+
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+
+            # 1) Select DAT -> Undo -> Redo must restore sidebar label, flag, and Run readiness.
+            chosen_path = ROOT / "redo_datafile.dat"
+            expected_path = str(chosen_path.resolve())
+            with patch(
+                "labcontrol.ui.main_window.QFileDialog.getSaveFileName",
+                return_value=(str(chosen_path), "Data (*.dat)"),
+            ):
+                window._change_datafile()
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+            with (
+                patch.object(window.runtime, "run_sequence") as run_seq,
+                patch("labcontrol.ui.main_window.QMessageBox.warning") as warn,
+            ):
+                window._run_sequence()
+            run_seq.assert_not_called()
+            warn.assert_called_once()
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Y,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertEqual(window.document.commands[0].type, CommandType.SET_DATAFILE)
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+            with (
+                patch.object(window, "_start_sequence") as start_seq,
+                patch("labcontrol.ui.main_window.QMessageBox.warning") as warn,
+            ):
+                window._run_sequence()
+            warn.assert_not_called()
+            start_seq.assert_called_once()
+
+            # 2) Cut Set Datafile -> Undo restores selection state.
+            window.editor.list.clearSelection()
+            window.editor.list.item(0).setSelected(True)
+            window.editor.list.setCurrentItem(
+                window.editor.list.item(0),
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_X,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Z,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+
+            # 3) Disable -> Enable restores selection state.
+            window.editor.list.clearSelection()
+            window.editor.list.item(0).setSelected(True)
+            window.editor.list.setCurrentItem(
+                window.editor.list.item(0),
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_D,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_E,
+                Qt.KeyboardModifier.ControlModifier,
+            )
+            self.application.processEvents()
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+
+            # 4) Move Down below Measure clears selection; Move Up above Measure restores it.
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Down,
+                Qt.KeyboardModifier.AltModifier,
+            )
+            self.application.processEvents()
+            self.assertFalse(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), "")
+
+            QTest.keyClick(
+                window.editor.list,
+                Qt.Key.Key_Up,
+                Qt.KeyboardModifier.AltModifier,
+            )
+            self.application.processEvents()
+            self.assertTrue(window._datafile_selected)
+            self.assertEqual(window.data_file_label.fullText(), expected_path)
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()
