@@ -2034,6 +2034,14 @@ class MainWindow(QMainWindow):
         else:
             return
         command = spec.create()
+        if isinstance(spec, CommandSpec) and not spec.fields:
+            self.editor.insert_command(
+                command,
+                anchor=anchor,
+                after=after,
+            )
+            self.editor.list.setFocus()
+            return
         if isinstance(spec, ModuleCommandSpec) and spec.custom_editor:
             values = self._edit_custom_module_command(
                 command,
@@ -2103,6 +2111,8 @@ class MainWindow(QMainWindow):
                         f"{command.module_command_id!r} before editing this line."
                     ),
                 )
+            return
+        if isinstance(spec, CommandSpec) and not spec.fields:
             return
         if isinstance(spec, ModuleCommandSpec) and spec.custom_editor:
             values = self._edit_custom_module_command(
