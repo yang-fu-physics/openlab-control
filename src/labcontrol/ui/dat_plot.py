@@ -1151,8 +1151,20 @@ class DatPlotCanvas(QWidget):
         points: tuple[DatPoint, ...],
         plot: QRectF,
         ranges: tuple[float, float, float, float],
+        *,
+        series_name: str = "",
+        hit_grid: dict[
+            tuple[int, int],
+            list[tuple[float, float, str, DatPoint]],
+        ] | None = None,
+        build_segments: bool = True,
     ) -> list[list[tuple[float, float, DatPoint]]]:
-        """把曲线投影为屏幕坐标连续折线段；超大数据按像素列保留首/极小/极大/尾点。"""
+        """把曲线投影为屏幕坐标折线，并按 2D 屏幕像素格同步填充命中网格。
+
+        折线绘制在超过 3000 点时按连续 X 像素列做保峰（first / min_y / max_y / last）抽稀；
+        命中索引不依赖 1D X 列抽稀，而是对所有可见点按 2D ``2×2 px`` 屏幕格去重入桶，确保
+        恒定 X 竖直线（如恒温扫时间）或陡峭相变曲线中段的任意位置都能准确悬停和双击选点。
+        """
 
         if not points or plot.width() <= 0.0 or plot.height() <= 0.0:
             return []
@@ -1178,6 +1190,14 @@ class DatPlotCanvas(QWidget):
         kx = plot.width() / dx_span
         ky = plot.height() / dy_span
         log10 = math.log10
+        floor = math.floor
+
+        cell = max(1.0, self._hit_cell_size)
+        inv_cell = 1.0 / cell
+        hit_min_x = left - cell
+        hit_max_x = right + cell
+        hit_min_y = plot.top() - cell
+        hit_max_y = bottom + cell
 
         segments: list[list[tuple[float, float, DatPoint]]] = []
         current_seg: list[tuple[float, float, DatPoint]] = []
@@ -1187,19 +1207,54 @@ class DatPlotCanvas(QWidget):
                 px_val = point.x
                 py_val = point.y
                 if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
-                    if current_seg:
+                    if build_segments and current_seg:
                         segments.append(current_seg)
                         current_seg = []
                     continue
                 sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
                 sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
-                current_seg.append((sx, sy, point))
-            if current_seg:
+                if build_segments:
+                    current_seg.append((sx, sy, point))
+                if (
+                    hit_grid is not None
+                    and hit_min_x <= sx <= hit_max_x
+                    and hit_min_y <= sy <= hit_max_y
+                ):
+                    cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                    bucket = hit_grid.get(cell_key)
+                    if bucket is None:
+                        hit_grid[cell_key] = [(sx, sy, series_name, point)]
+                    else:
+                        bucket.append((sx, sy, series_name, point))
+            if build_segments and current_seg:
                 segments.append(current_seg)
             return segments
 
-        # 超过 3000 点时按连续像素列做保峰（first / min_y / max_y / last）抽稀，
-        # 既保留所有尖峰与磁滞回线分支，又把绘图和命中索引压到 O(width)。
+        seen_pixels: set[tuple[int, int]] | None = set() if hit_grid is not None else None
+        if not build_segments:
+            if hit_grid is None or seen_pixels is None:
+                return []
+            for point in points:
+                px_val = point.x
+                py_val = point.y
+                if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
+                    continue
+                sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
+                sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
+                if hit_min_x <= sx <= hit_max_x and hit_min_y <= sy <= hit_max_y:
+                    pixel_key = (floor(sx) >> 1, floor(sy) >> 1)
+                    if pixel_key not in seen_pixels:
+                        seen_pixels.add(pixel_key)
+                        cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                        bucket = hit_grid.get(cell_key)
+                        if bucket is None:
+                            hit_grid[cell_key] = [(sx, sy, series_name, point)]
+                        else:
+                            bucket.append((sx, sy, series_name, point))
+            return []
+
+        # 超过 3000 点时绘制折线按连续 X 像素列做保峰抽稀，同时所有可见点仍按
+        # 2D 2×2 px 屏幕格写入 hit_grid，确保垂直/陡峭曲线中段无命中盲区。
         bucket_px: int | None = None
         first_entry: tuple[int, float, float, DatPoint] | None = None
         min_entry: tuple[int, float, float, DatPoint] | None = None
@@ -1229,7 +1284,7 @@ class DatPlotCanvas(QWidget):
             bucket_px = None
             first_entry = min_entry = max_entry = last_entry = None
 
-        margin = max(2.0, self._hit_cell_size)
+        margin = max(2.0, cell)
         vis_left = left - margin
         vis_right = right + margin
 
@@ -1250,6 +1305,22 @@ class DatPlotCanvas(QWidget):
             sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
             sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
 
+            if (
+                hit_grid is not None
+                and seen_pixels is not None
+                and hit_min_x <= sx <= hit_max_x
+                and hit_min_y <= sy <= hit_max_y
+            ):
+                pixel_key = (floor(sx) >> 1, floor(sy) >> 1)
+                if pixel_key not in seen_pixels:
+                    seen_pixels.add(pixel_key)
+                    cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                    bucket = hit_grid.get(cell_key)
+                    if bucket is None:
+                        hit_grid[cell_key] = [(sx, sy, series_name, point)]
+                    else:
+                        bucket.append((sx, sy, series_name, point))
+
             side = -1 if sx < vis_left else (1 if sx > vis_right else 0)
             if side != 0:
                 flush_bucket()
@@ -1269,7 +1340,7 @@ class DatPlotCanvas(QWidget):
                     off_last = None
                 off_side = 0
 
-            col = int(sx)
+            col = floor(sx)
             if bucket_px == col and first_entry is not None:
                 entry = (idx, sx, sy, point)
                 last_entry = entry
@@ -1290,40 +1361,6 @@ class DatPlotCanvas(QWidget):
             segments.append(current_seg)
         return segments
 
-    def _add_to_hit_grid(
-        self,
-        grid: dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]],
-        series_name: str,
-        segments: list[list[tuple[float, float, DatPoint]]],
-        plot: QRectF,
-        *,
-        deduplicate: bool,
-    ) -> None:
-        cell = max(1.0, self._hit_cell_size)
-        inv_cell = 1.0 / cell
-        pad = cell
-        min_x = plot.left() - pad
-        max_x = plot.right() + pad
-        min_y = plot.top() - pad
-        max_y = plot.bottom() + pad
-        seen_pixels: set[tuple[int, int]] | None = set() if deduplicate else None
-        floor = math.floor
-        for seg in segments:
-            for sx, sy, point in seg:
-                if sx < min_x or sx > max_x or sy < min_y or sy > max_y:
-                    continue
-                if seen_pixels is not None:
-                    pixel_key = (floor(sx) >> 1, floor(sy) >> 1)
-                    if pixel_key in seen_pixels:
-                        continue
-                    seen_pixels.add(pixel_key)
-                cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
-                bucket = grid.get(cell_key)
-                if bucket is None:
-                    grid[cell_key] = [(sx, sy, series_name, point)]
-                else:
-                    bucket.append((sx, sy, series_name, point))
-
     def _draw_series(
         self,
         painter: QPainter,
@@ -1338,15 +1375,14 @@ class DatPlotCanvas(QWidget):
             list[tuple[float, float, str, DatPoint]],
         ] | None = None,
     ) -> None:
-        segments = self._project_series_segments(points, plot, ranges)
-        if hit_grid is not None:
-            self._add_to_hit_grid(
-                hit_grid,
-                series_name,
-                segments,
-                plot,
-                deduplicate=len(points) > 3_000,
-            )
+        segments = self._project_series_segments(
+            points,
+            plot,
+            ranges,
+            series_name=series_name,
+            hit_grid=hit_grid,
+            build_segments=True,
+        )
         path = QPainterPath()
         for seg in segments:
             if not seg:
@@ -1517,13 +1553,13 @@ class DatPlotCanvas(QWidget):
             points = self.points_by_series.get(name, ())
             if not points:
                 continue
-            segments = self._project_series_segments(points, plot, ranges)
-            self._add_to_hit_grid(
-                grid,
-                name,
-                segments,
+            self._project_series_segments(
+                points,
                 plot,
-                deduplicate=len(points) > 3_000,
+                ranges,
+                series_name=name,
+                hit_grid=grid,
+                build_segments=False,
             )
         self._hit_grids[panel_series] = grid
         return grid

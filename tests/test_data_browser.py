@@ -466,6 +466,84 @@ class DataBrowserTests(unittest.TestCase):
         finally:
             canvas.close()
 
+    def test_constant_x_4000_rows_middle_points_remain_hoverable_and_clickable(
+        self,
+    ) -> None:
+        from PySide6.QtGui import QMouseEvent
+        from labcontrol.dat_reader import DatDocument
+        from labcontrol.ui.dat_plot import DatPlotCanvas
+
+        n_rows = 4_000
+        columns = ("Temp(K)", "R1(Ohm)")
+        rows = tuple(
+            ("300.000", f"{10.0 + 90.0 * i / (n_rows - 1):.4f}")
+            for i in range(n_rows)
+        )
+        document = DatDocument(
+            path=None,
+            header_lines=(),
+            columns=columns,
+            rows=rows,
+            modified_ns=0,
+            size_bytes=0,
+        )
+        canvas = DatPlotCanvas()
+        try:
+            canvas.resize(900, 620)
+            canvas.show()
+            canvas.set_document(document)
+            self.assertTrue(canvas.set_axes("Temp(K)", ("R1(Ohm)",)))
+
+            # Verify both lazy hit-grid path (before repaint) and painted cache path.
+            for painted in (False, True):
+                if painted:
+                    canvas.repaint()
+                    self.application.processEvents()
+                plot = canvas._plot_rect()
+                ranges = canvas._ranges("R1(Ohm)")
+                self.assertIsNotNone(ranges)
+
+                activated: list[PlotHit] = []
+                canvas.pointActivated.connect(activated.append)
+                try:
+                    for row_idx in (1_000, 2_000, 3_000):
+                        pt = canvas.points_by_series["R1(Ohm)"][row_idx]
+                        pos = canvas._screen_point(pt.x, pt.y, plot, ranges)
+                        self.assertIsNotNone(pos)
+
+                        hit = canvas._nearest_point(pos)
+                        self.assertIsNotNone(hit, f"row {row_idx} (painted={painted}) missed")
+                        self.assertAlmostEqual(hit.x, 300.0, places=6)
+                        self.assertAlmostEqual(hit.y, pt.y, delta=1.0)
+
+                        move_ev = QMouseEvent(
+                            QMouseEvent.Type.MouseMove,
+                            pos,
+                            pos,
+                            Qt.MouseButton.NoButton,
+                            Qt.MouseButton.NoButton,
+                            Qt.KeyboardModifier.NoModifier,
+                        )
+                        canvas.mouseMoveEvent(move_ev)
+                        self.assertIsNotNone(canvas._hover_hit)
+                        self.assertAlmostEqual(canvas._hover_hit.y, pt.y, delta=1.0)
+
+                        dclick_ev = QMouseEvent(
+                            QMouseEvent.Type.MouseButtonDblClick,
+                            pos,
+                            pos,
+                            Qt.MouseButton.LeftButton,
+                            Qt.MouseButton.LeftButton,
+                            Qt.KeyboardModifier.NoModifier,
+                        )
+                        canvas.mouseDoubleClickEvent(dclick_ev)
+                    self.assertEqual(len(activated), 3)
+                    self.assertAlmostEqual(activated[1].y, 55.0, delta=1.0)
+                finally:
+                    canvas.pointActivated.disconnect(activated.append)
+        finally:
+            canvas.close()
+
 
 if __name__ == "__main__":
     unittest.main()
