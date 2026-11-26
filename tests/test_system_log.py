@@ -252,6 +252,12 @@ class SystemLogUITests(unittest.TestCase):
                 window.runtime.messages.put(RuntimeMessage("system_log_state", state))
                 window._drain_runtime_messages()
                 self.assertIn("Recording", window.system_log_action.text())
+                self.assertIsNotNone(window._system_log_button)
+                self.assertTrue(window._system_log_button.property("recording"))
+                self.assertIn(
+                    'QToolButton#systemLogToolButton[recording="true"] {  background: #eaf7ef;',
+                    window.styleSheet(),
+                )
                 self.assertIn(str(selected.with_suffix(".log")), window.system_log_dialog.status_label.text())
                 self.assertFalse(selected.exists())
         finally:
