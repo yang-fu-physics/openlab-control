@@ -378,6 +378,94 @@ class DataBrowserTests(unittest.TestCase):
             self.assertNotIn("R1(Ohm) = 0.01328", browser.status_label.text())
             browser.close()
 
+    def test_large_dataset_100k_hover_reuses_cache_preserves_spikes_and_stays_fast(
+        self,
+    ) -> None:
+        import time
+
+        from PySide6.QtGui import QMouseEvent
+        from labcontrol.dat_reader import DatDocument
+        from labcontrol.ui.dat_plot import DatPlotCanvas
+
+        n_rows = 100_000
+        columns = ("Temp(K)", "R1(Ohm)", "R2(Ohm)", "R3(Ohm)", "R4(Ohm)")
+        rows = tuple(
+            (
+                f"{2.0 + 298.0 * i / (n_rows - 1):.4f}",
+                f"{0.013 + 0.001 * (i / n_rows) + (0.0005 if i == 50_000 else 0.0):.6f}",
+                f"{0.009 + 0.002 * (i / n_rows):.6f}",
+                f"{0.030 + 0.003 * (i / n_rows):.6f}",
+                f"{0.018 + 0.0015 * (i / n_rows):.6f}",
+            )
+            for i in range(n_rows)
+        )
+        document = DatDocument(
+            path=None,
+            header_lines=(),
+            columns=columns,
+            rows=rows,
+            modified_ns=0,
+            size_bytes=0,
+        )
+        canvas = DatPlotCanvas()
+        try:
+            canvas.resize(900, 620)
+            canvas.show()
+            canvas.set_document(document)
+            self.assertTrue(
+                canvas.set_axes(
+                    "Temp(K)",
+                    ("R1(Ohm)", "R2(Ohm)", "R3(Ohm)", "R4(Ohm)"),
+                )
+            )
+            for layout in ("overlay", "stacked"):
+                with self.subTest(layout=layout):
+                    self.assertTrue(canvas.set_layout(layout))
+                    canvas.repaint()
+                    self.application.processEvents()
+                    cached_pixmap = canvas._base_pixmap
+                    self.assertIsNotNone(cached_pixmap)
+
+                    panels = canvas._plot_rects()
+                    r1_rect = panels[0][1]
+                    ranges = canvas._ranges("R1(Ohm)")
+                    self.assertIsNotNone(ranges)
+
+                    # Single-row spike at index 50,000 must survive decimation and be hittable.
+                    spike = canvas.points_by_series["R1(Ohm)"][50_000]
+                    spike_pos = canvas._screen_point(spike.x, spike.y, r1_rect, ranges)
+                    self.assertIsNotNone(spike_pos)
+                    spike_hit = canvas._nearest_point(spike_pos)
+                    self.assertIsNotNone(spike_hit)
+                    self.assertAlmostEqual(spike_hit.y, spike.y, places=6)
+
+                    # 20 consecutive mouse moves + repaints must reuse base cache and stay fast.
+                    elapsed_ms: list[float] = []
+                    for step in range(20):
+                        idx = int((step + 1) * (n_rows - 2) / 21)
+                        pt = canvas.points_by_series["R1(Ohm)"][idx]
+                        pos = canvas._screen_point(pt.x, pt.y, r1_rect, ranges)
+                        self.assertIsNotNone(pos)
+                        event = QMouseEvent(
+                            QMouseEvent.Type.MouseMove,
+                            pos,
+                            pos,
+                            Qt.MouseButton.NoButton,
+                            Qt.MouseButton.NoButton,
+                            Qt.KeyboardModifier.NoModifier,
+                        )
+                        t0 = time.perf_counter()
+                        canvas.mouseMoveEvent(event)
+                        canvas.repaint()
+                        elapsed_ms.append((time.perf_counter() - t0) * 1000.0)
+                        self.assertIsNotNone(canvas._hover_hit)
+
+                    self.assertIs(canvas._base_pixmap, cached_pixmap)
+                    self.assertLess(max(elapsed_ms), 50.0)
+                    self.assertLess(sum(elapsed_ms) / len(elapsed_ms), 15.0)
+        finally:
+            canvas.close()
+
 
 if __name__ == "__main__":
     unittest.main()

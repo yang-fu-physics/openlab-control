@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -191,6 +192,20 @@ class DatPlotCanvas(QWidget):
         self._drag_series: str | None = None
         self._hover_hit: PlotHit | None = None
         self._timestamp_reference: TimestampReference | None = None
+        self._data_version = 0
+        self._natural_x_range_cache: tuple[float, float] | None = None
+        self._natural_x_range_valid = False
+        self._natural_y_range_cache: dict[str | None, tuple[float, float] | None] = {}
+        self._base_pixmap: QPixmap | None = None
+        self._base_cache_key: tuple[object, ...] | None = None
+        self._base_has_points = False
+        self._base_panels: list[tuple[str | None, QRectF]] = []
+        self._hit_grids: dict[
+            str | None,
+            dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]],
+        ] = {}
+        self._hit_grid_key: tuple[object, ...] | None = None
+        self._hit_cell_size = scaled_float(12.0)
 
     @property
     def x_label(self) -> str:
@@ -342,6 +357,7 @@ class DatPlotCanvas(QWidget):
         if not changed:
             return True
         setattr(self, attribute, normalized)
+        self._invalidate_data_cache()
         self.reset_zoom(notify=False)
         self.update()
         if notify:
@@ -356,6 +372,8 @@ class DatPlotCanvas(QWidget):
             return False
         changed = normalized != self.layout_mode
         self.layout_mode = normalized
+        if changed:
+            self._invalidate_render_cache()
         self.update()
         if notify and changed:
             self.displayChanged.emit()
@@ -453,10 +471,38 @@ class DatPlotCanvas(QWidget):
             self._hover_hit = None
             self.pointHovered.emit(None)
 
+    def _invalidate_render_cache(self) -> None:
+        self._base_pixmap = None
+        self._base_cache_key = None
+        self._hit_grids.clear()
+        self._hit_grid_key = None
+
+    def _invalidate_data_cache(self) -> None:
+        self._data_version += 1
+        self._natural_x_range_valid = False
+        self._natural_x_range_cache = None
+        self._natural_y_range_cache.clear()
+        self._invalidate_render_cache()
+
+    def _render_cache_key(self) -> tuple[object, ...]:
+        return (
+            self.width(),
+            self.height(),
+            round(float(self.devicePixelRatioF()), 3),
+            self._data_version,
+            self.layout_mode,
+            self.x_scale,
+            self.y_scale,
+            self._x_view,
+            self._overlay_y_view,
+            tuple(sorted(self._stacked_y_views.items())),
+        )
+
     def _rebuild_points(self) -> None:
         """从不可变 DAT 文档重建每条曲线的有限数值点。"""
 
         self._clear_hover()
+        self._invalidate_data_cache()
         if self.document is None:
             self.points_by_series = {}
             self._timestamp_reference = None
@@ -504,6 +550,30 @@ class DatPlotCanvas(QWidget):
         )
 
     @staticmethod
+    def _padded_bounds(
+        low: float | None,
+        high: float | None,
+        fraction: float,
+        scale: str,
+    ) -> tuple[float, float] | None:
+        """根据极值添加留白；对数坐标在 log10 空间计算。"""
+
+        if low is None or high is None:
+            return None
+        if scale == LOG_SCALE:
+            low = math.log10(low)
+            high = math.log10(high)
+        if low == high:
+            padding = max(abs(low) * 0.02, 0.05) if scale == LOG_SCALE else max(abs(low) * 0.02, 0.5)
+        else:
+            padding = (high - low) * fraction
+        low -= padding
+        high += padding
+        if scale == LOG_SCALE:
+            return 10**low, 10**high
+        return low, high
+
+    @staticmethod
     def _padded_range(
         values: list[float],
         fraction: float,
@@ -515,17 +585,7 @@ class DatPlotCanvas(QWidget):
             values = [value for value in values if value > 0]
         if not values:
             return None
-        transformed = [math.log10(value) for value in values] if scale == LOG_SCALE else values
-        low, high = min(transformed), max(transformed)
-        if low == high:
-            padding = max(abs(low) * 0.02, 0.05) if scale == LOG_SCALE else max(abs(low) * 0.02, 0.5)
-        else:
-            padding = (high - low) * fraction
-        low -= padding
-        high += padding
-        if scale == LOG_SCALE:
-            return 10**low, 10**high
-        return low, high
+        return DatPlotCanvas._padded_bounds(min(values), max(values), fraction, scale)
 
     def _point_is_plottable(self, point: DatPoint) -> bool:
         """对数轴下过滤零和负值，线性轴接受所有有限点。"""
@@ -536,29 +596,66 @@ class DatPlotCanvas(QWidget):
         )
 
     def _natural_x_range(self) -> tuple[float, float] | None:
-        values = [
-            point.x
-            for points in self.points_by_series.values()
-            for point in points
-            if self._point_is_plottable(point)
-        ]
-        return self._padded_range(values, 0.035, self.x_scale)
+        if self._natural_x_range_valid:
+            return self._natural_x_range_cache
+        x_log = self.x_scale == LOG_SCALE
+        y_log = self.y_scale == LOG_SCALE
+        low: float | None = None
+        high: float | None = None
+        for points in self.points_by_series.values():
+            if not x_log and not y_log:
+                for point in points:
+                    x = point.x
+                    if low is None or x < low:
+                        low = x
+                    if high is None or x > high:
+                        high = x
+            else:
+                for point in points:
+                    if (x_log and point.x <= 0) or (y_log and point.y <= 0):
+                        continue
+                    x = point.x
+                    if low is None or x < low:
+                        low = x
+                    if high is None or x > high:
+                        high = x
+        self._natural_x_range_cache = self._padded_bounds(low, high, 0.035, self.x_scale)
+        self._natural_x_range_valid = True
+        return self._natural_x_range_cache
 
     def _natural_y_range(self, series: str | None) -> tuple[float, float] | None:
-        if self.layout_mode == OVERLAY_LAYOUT:
-            values = [
-                point.y
-                for points in self.points_by_series.values()
-                for point in points
-                if self._point_is_plottable(point)
-            ]
-        else:
-            values = [
-                point.y
-                for point in self.points_by_series.get(series or "", ())
-                if self._point_is_plottable(point)
-            ]
-        return self._padded_range(values, 0.06, self.y_scale)
+        cache_key = None if self.layout_mode == OVERLAY_LAYOUT else series
+        if cache_key in self._natural_y_range_cache:
+            return self._natural_y_range_cache[cache_key]
+        x_log = self.x_scale == LOG_SCALE
+        y_log = self.y_scale == LOG_SCALE
+        low: float | None = None
+        high: float | None = None
+        series_iter = (
+            self.points_by_series.values()
+            if self.layout_mode == OVERLAY_LAYOUT
+            else (self.points_by_series.get(series or "", ()),)
+        )
+        for points in series_iter:
+            if not x_log and not y_log:
+                for point in points:
+                    y = point.y
+                    if low is None or y < low:
+                        low = y
+                    if high is None or y > high:
+                        high = y
+            else:
+                for point in points:
+                    if (x_log and point.x <= 0) or (y_log and point.y <= 0):
+                        continue
+                    y = point.y
+                    if low is None or y < low:
+                        low = y
+                    if high is None or y > high:
+                        high = y
+        result = self._padded_bounds(low, high, 0.06, self.y_scale)
+        self._natural_y_range_cache[cache_key] = result
+        return result
 
     def _ranges(self, series: str | None = None) -> tuple[float, float, float, float] | None:
         """合并手动范围与自然范围，得到一个面板的完整数据坐标。"""
@@ -693,11 +790,74 @@ class DatPlotCanvas(QWidget):
             )
         return y_min + fraction * (y_max - y_min)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._invalidate_render_cache()
+        super().resizeEvent(event)
+
+    def _ensure_base_render(self) -> None:
+        key = self._render_cache_key()
+        if self._base_pixmap is not None and self._base_cache_key == key:
+            return
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        pixel_w = max(1, int(round(self.width() * dpr)))
+        pixel_h = max(1, int(round(self.height() * dpr)))
+        pixmap = QPixmap(pixel_w, pixel_h)
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(QColor("#ffffff"))
+
+        panels = self._plot_rects()
+        self._hit_grids.clear()
+        self._hit_grid_key = key
+        self._hit_cell_size = max(1.0, scaled_float(12.0))
+
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            has_points = False
+            for panel_index, (series, plot) in enumerate(panels):
+                ranges = self._ranges(series)
+                panel_grid: dict[
+                    tuple[int, int],
+                    list[tuple[float, float, str, DatPoint]],
+                ] = {}
+                self._hit_grids[series] = panel_grid
+                self._draw_panel(
+                    painter,
+                    series,
+                    plot,
+                    ranges,
+                    show_x_labels=panel_index == len(panels) - 1,
+                    stacked_multi=len(panels) > 1,
+                    hit_grid=panel_grid,
+                )
+                has_points = has_points or ranges is not None
+
+            if not has_points:
+                painter.setPen(QColor("#657080"))
+                message = (
+                    "No positive points for the selected logarithmic axes"
+                    if LOG_SCALE in {self.x_scale, self.y_scale}
+                    else "No numeric points for the selected axes"
+                )
+                painter.drawText(
+                    panels[0][1],
+                    Qt.AlignmentFlag.AlignCenter,
+                    message,
+                )
+            elif self.layout_mode == OVERLAY_LAYOUT and len(self.y_columns) > 1:
+                self._draw_legend(painter, panels[0][1])
+        finally:
+            painter.end()
+
+        self._base_pixmap = pixmap
+        self._base_cache_key = key
+        self._base_panels = panels
+        self._base_has_points = has_points
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
         if self.document is None:
+            painter.fillRect(self.rect(), QColor("#ffffff"))
             painter.setPen(QColor("#657080"))
             painter.drawText(
                 self.rect(),
@@ -706,41 +866,18 @@ class DatPlotCanvas(QWidget):
             )
             return
         if not self.y_columns:
+            painter.fillRect(self.rect(), QColor("#ffffff"))
             painter.setPen(QColor("#657080"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No numeric Y series")
             return
 
-        panels = self._plot_rects()
-        has_points = False
-        for panel_index, (series, plot) in enumerate(panels):
-            ranges = self._ranges(series)
-            self._draw_panel(
-                painter,
-                series,
-                plot,
-                ranges,
-                show_x_labels=panel_index == len(panels) - 1,
-                stacked_multi=len(panels) > 1,
-            )
-            has_points = has_points or ranges is not None
+        self._ensure_base_render()
+        if self._base_pixmap is not None:
+            painter.drawPixmap(0, 0, self._base_pixmap)
 
-        if not has_points:
-            painter.setPen(QColor("#657080"))
-            message = (
-                "No positive points for the selected logarithmic axes"
-                if LOG_SCALE in {self.x_scale, self.y_scale}
-                else "No numeric points for the selected axes"
-            )
-            painter.drawText(
-                panels[0][1],
-                Qt.AlignmentFlag.AlignCenter,
-                message,
-            )
-        elif self.layout_mode == OVERLAY_LAYOUT and len(self.y_columns) > 1:
-            self._draw_legend(painter, panels[0][1])
-
-        if self._hover_hit is not None and self._drag_origin is None and has_points:
-            self._draw_hover(painter, panels, self._hover_hit)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._hover_hit is not None and self._drag_origin is None and self._base_has_points:
+            self._draw_hover(painter, self._base_panels, self._hover_hit)
 
         if self._drag_origin is not None and self._drag_current is not None:
             panel = self._panel_for_series(self._drag_series)
@@ -759,6 +896,10 @@ class DatPlotCanvas(QWidget):
         *,
         show_x_labels: bool,
         stacked_multi: bool = False,
+        hit_grid: dict[
+            tuple[int, int],
+            list[tuple[float, float, str, DatPoint]],
+        ] | None = None,
     ) -> None:
         painter.fillRect(plot, QColor("#ffffff"))
         frame_pen = QPen(QColor("#2c3440"), 1.2)
@@ -964,7 +1105,7 @@ class DatPlotCanvas(QWidget):
             if not points:
                 continue
             color = QColor(PLOT_COLORS[self.y_columns.index(name) % len(PLOT_COLORS)])
-            self._draw_series(painter, points, color, plot, ranges)
+            self._draw_series(painter, name, points, color, plot, ranges, hit_grid=hit_grid)
 
         # Draw crisp 4-sided scientific axis box last so edges remain sharp over curves.
         painter.setPen(frame_pen)
@@ -1005,32 +1146,215 @@ class DatPlotCanvas(QWidget):
                     painter.drawEllipse(screen, scaled_float(4.5), scaled_float(4.5))
                     painter.restore()
 
+    def _project_series_segments(
+        self,
+        points: tuple[DatPoint, ...],
+        plot: QRectF,
+        ranges: tuple[float, float, float, float],
+    ) -> list[list[tuple[float, float, DatPoint]]]:
+        """把曲线投影为屏幕坐标连续折线段；超大数据按像素列保留首/极小/极大/尾点。"""
+
+        if not points or plot.width() <= 0.0 or plot.height() <= 0.0:
+            return []
+        x_min, x_max, y_min, y_max = ranges
+        x_log = self.x_scale == LOG_SCALE
+        y_log = self.y_scale == LOG_SCALE
+        if (x_log and (x_min <= 0.0 or x_max <= 0.0)) or (
+            y_log and (y_min <= 0.0 or y_max <= 0.0)
+        ):
+            return []
+        x_low = math.log10(x_min) if x_log else x_min
+        x_high = math.log10(x_max) if x_log else x_max
+        y_low = math.log10(y_min) if y_log else y_min
+        y_high = math.log10(y_max) if y_log else y_max
+        dx_span = x_high - x_low
+        dy_span = y_high - y_low
+        if dx_span == 0.0 or dy_span == 0.0:
+            return []
+
+        left = plot.left()
+        right = plot.right()
+        bottom = plot.bottom()
+        kx = plot.width() / dx_span
+        ky = plot.height() / dy_span
+        log10 = math.log10
+
+        segments: list[list[tuple[float, float, DatPoint]]] = []
+        current_seg: list[tuple[float, float, DatPoint]] = []
+
+        if len(points) <= 3_000:
+            for point in points:
+                px_val = point.x
+                py_val = point.y
+                if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
+                    if current_seg:
+                        segments.append(current_seg)
+                        current_seg = []
+                    continue
+                sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
+                sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
+                current_seg.append((sx, sy, point))
+            if current_seg:
+                segments.append(current_seg)
+            return segments
+
+        # 超过 3000 点时按连续像素列做保峰（first / min_y / max_y / last）抽稀，
+        # 既保留所有尖峰与磁滞回线分支，又把绘图和命中索引压到 O(width)。
+        bucket_px: int | None = None
+        first_entry: tuple[int, float, float, DatPoint] | None = None
+        min_entry: tuple[int, float, float, DatPoint] | None = None
+        max_entry: tuple[int, float, float, DatPoint] | None = None
+        last_entry: tuple[int, float, float, DatPoint] | None = None
+        off_side = 0
+        off_last: tuple[float, float, DatPoint] | None = None
+
+        def flush_bucket() -> None:
+            nonlocal bucket_px, first_entry, min_entry, max_entry, last_entry
+            if first_entry is None:
+                return
+            candidates = [first_entry]
+            if min_entry is not None and min_entry[0] != first_entry[0]:
+                candidates.append(min_entry)
+            if (
+                max_entry is not None
+                and max_entry[0] != first_entry[0]
+                and (min_entry is None or max_entry[0] != min_entry[0])
+            ):
+                candidates.append(max_entry)
+            if last_entry is not None and all(last_entry[0] != item[0] for item in candidates):
+                candidates.append(last_entry)
+            candidates.sort(key=lambda item: item[0])
+            for _, ex, ey, ept in candidates:
+                current_seg.append((ex, ey, ept))
+            bucket_px = None
+            first_entry = min_entry = max_entry = last_entry = None
+
+        margin = max(2.0, self._hit_cell_size)
+        vis_left = left - margin
+        vis_right = right + margin
+
+        for idx, point in enumerate(points):
+            px_val = point.x
+            py_val = point.y
+            if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
+                flush_bucket()
+                if off_last is not None:
+                    current_seg.append(off_last)
+                    off_last = None
+                off_side = 0
+                if current_seg:
+                    segments.append(current_seg)
+                    current_seg = []
+                continue
+
+            sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
+            sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
+
+            side = -1 if sx < vis_left else (1 if sx > vis_right else 0)
+            if side != 0:
+                flush_bucket()
+                if side == off_side:
+                    off_last = (sx, sy, point)
+                else:
+                    if off_last is not None:
+                        current_seg.append(off_last)
+                        off_last = None
+                    current_seg.append((sx, sy, point))
+                    off_side = side
+                continue
+
+            if off_side != 0:
+                if off_last is not None:
+                    current_seg.append(off_last)
+                    off_last = None
+                off_side = 0
+
+            col = int(sx)
+            if bucket_px == col and first_entry is not None:
+                entry = (idx, sx, sy, point)
+                last_entry = entry
+                if min_entry is None or sy < min_entry[2]:
+                    min_entry = entry
+                if max_entry is None or sy > max_entry[2]:
+                    max_entry = entry
+            else:
+                flush_bucket()
+                bucket_px = col
+                entry = (idx, sx, sy, point)
+                first_entry = min_entry = max_entry = last_entry = entry
+
+        flush_bucket()
+        if off_last is not None:
+            current_seg.append(off_last)
+        if current_seg:
+            segments.append(current_seg)
+        return segments
+
+    def _add_to_hit_grid(
+        self,
+        grid: dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]],
+        series_name: str,
+        segments: list[list[tuple[float, float, DatPoint]]],
+        plot: QRectF,
+        *,
+        deduplicate: bool,
+    ) -> None:
+        cell = max(1.0, self._hit_cell_size)
+        inv_cell = 1.0 / cell
+        pad = cell
+        min_x = plot.left() - pad
+        max_x = plot.right() + pad
+        min_y = plot.top() - pad
+        max_y = plot.bottom() + pad
+        seen_pixels: set[tuple[int, int]] | None = set() if deduplicate else None
+        floor = math.floor
+        for seg in segments:
+            for sx, sy, point in seg:
+                if sx < min_x or sx > max_x or sy < min_y or sy > max_y:
+                    continue
+                if seen_pixels is not None:
+                    pixel_key = (floor(sx) >> 1, floor(sy) >> 1)
+                    if pixel_key in seen_pixels:
+                        continue
+                    seen_pixels.add(pixel_key)
+                cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                bucket = grid.get(cell_key)
+                if bucket is None:
+                    grid[cell_key] = [(sx, sy, series_name, point)]
+                else:
+                    bucket.append((sx, sy, series_name, point))
+
     def _draw_series(
         self,
         painter: QPainter,
+        series_name: str,
         points: tuple[DatPoint, ...],
         color: QColor,
         plot: QRectF,
         ranges: tuple[float, float, float, float],
+        *,
+        hit_grid: dict[
+            tuple[int, int],
+            list[tuple[float, float, str, DatPoint]],
+        ] | None = None,
     ) -> None:
-        stride = max(1, len(points) // 12_000)
+        segments = self._project_series_segments(points, plot, ranges)
+        if hit_grid is not None:
+            self._add_to_hit_grid(
+                hit_grid,
+                series_name,
+                segments,
+                plot,
+                deduplicate=len(points) > 3_000,
+            )
         path = QPainterPath()
-        segment_started = False
-        for index, point in enumerate(points):
-            if not self._point_is_plottable(point):
-                segment_started = False
+        for seg in segments:
+            if not seg:
                 continue
-            if segment_started and index % stride != 0 and index != len(points) - 1:
-                continue
-            screen = self._screen_point(point.x, point.y, plot, ranges)
-            if screen is None:
-                segment_started = False
-                continue
-            if segment_started:
-                path.lineTo(screen)
-            else:
-                path.moveTo(screen)
-                segment_started = True
+            sx0, sy0, _ = seg[0]
+            path.moveTo(sx0, sy0)
+            for sx, sy, _ in seg[1:]:
+                path.lineTo(sx, sy)
         painter.save()
         painter.setClipRect(plot)
         painter.setPen(QPen(color, 1.65))
@@ -1038,10 +1362,10 @@ class DatPlotCanvas(QWidget):
         if len(points) <= 3_000:
             painter.setBrush(color)
             painter.setPen(Qt.PenStyle.NoPen)
-            for point in points:
-                screen = self._screen_point(point.x, point.y, plot, ranges)
-                if screen is not None:
-                    painter.drawEllipse(screen, scaled_float(2.3), scaled_float(2.3))
+            radius = scaled_float(2.3)
+            for seg in segments:
+                for sx, sy, _ in seg:
+                    painter.drawEllipse(QPointF(sx, sy), radius, radius)
         painter.restore()
 
     def _draw_legend(self, painter: QPainter, plot: QRectF) -> None:
@@ -1169,30 +1493,68 @@ class DatPlotCanvas(QWidget):
                 return
         super().mouseDoubleClickEvent(event)
 
-    def _nearest_point(self, position: QPointF) -> PlotHit | None:
-        """在 12 个缩放像素半径内查找当前面板最近的可绘制点。"""
-
-        panel = self._panel_at(position)
-        if panel is None:
-            return None
-        panel_series, plot = panel
+    def _ensure_panel_hit_grid(
+        self,
+        panel_series: str | None,
+        plot: QRectF,
+    ) -> dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]]:
+        key = self._render_cache_key()
+        if self._hit_grid_key != key:
+            self._hit_grids.clear()
+            self._hit_grid_key = key
+            self._hit_cell_size = max(1.0, scaled_float(12.0))
+        cached = self._hit_grids.get(panel_series)
+        if cached is not None:
+            return cached
+        grid: dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]] = {}
         names = self.y_columns if self.layout_mode == OVERLAY_LAYOUT else (panel_series,)
-        nearest: PlotHit | None = None
-        nearest_distance = scaled_float(12.0) ** 2
         for name in names:
             if name is None:
                 continue
             ranges = self._ranges(name)
             if ranges is None:
                 continue
-            for point in self.points_by_series.get(name, ()):
-                screen = self._screen_point(point.x, point.y, plot, ranges)
-                if screen is None:
+            points = self.points_by_series.get(name, ())
+            if not points:
+                continue
+            segments = self._project_series_segments(points, plot, ranges)
+            self._add_to_hit_grid(
+                grid,
+                name,
+                segments,
+                plot,
+                deduplicate=len(points) > 3_000,
+            )
+        self._hit_grids[panel_series] = grid
+        return grid
+
+    def _nearest_point(self, position: QPointF) -> PlotHit | None:
+        """利用屏幕空间网格在 12 个缩放像素半径内 O(1) 查找当前面板最近点。"""
+
+        panel = self._panel_at(position)
+        if panel is None:
+            return None
+        panel_series, plot = panel
+        grid = self._ensure_panel_hit_grid(panel_series, plot)
+        if not grid:
+            return None
+        qx = position.x()
+        qy = position.y()
+        cell = max(1.0, self._hit_cell_size)
+        cx = math.floor(qx / cell)
+        cy = math.floor(qy / cell)
+        nearest: PlotHit | None = None
+        nearest_distance = scaled_float(12.0) ** 2
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                bucket = grid.get((cx + dx, cy + dy))
+                if not bucket:
                     continue
-                distance = (screen.x() - position.x()) ** 2 + (screen.y() - position.y()) ** 2
-                if distance <= nearest_distance:
-                    nearest = PlotHit(name, point)
-                    nearest_distance = distance
+                for sx, sy, name, point in bucket:
+                    distance = (sx - qx) ** 2 + (sy - qy) ** 2
+                    if distance <= nearest_distance:
+                        nearest = PlotHit(name, point)
+                        nearest_distance = distance
         return nearest
 
     def build_context_menu(self) -> QMenu:
