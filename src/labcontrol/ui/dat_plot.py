@@ -19,6 +19,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QPixmap,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -61,14 +62,14 @@ ROW_NUMBER_AXIS = "Row Number"
 OVERLAY_LAYOUT = "overlay"
 STACKED_LAYOUT = "stacked"
 PLOT_COLORS = (
-    "#2468b4",
-    "#d1495b",
-    "#2a9d6f",
-    "#8b5cf6",
-    "#e07a1f",
-    "#008c99",
-    "#b3449b",
-    "#6b7280",
+    "#1b5ea8",
+    "#c03546",
+    "#1e8259",
+    "#6f42c1",
+    "#c96a12",
+    "#0b7d8a",
+    "#9c3386",
+    "#4b5563",
 )
 
 
@@ -163,9 +164,11 @@ class DatPlotCanvas(QWidget):
     reloadRequested = Signal()
     saveFormatRequested = Signal()
     reloadFormatRequested = Signal()
+    copyPathRequested = Signal()
     axesChanged = Signal(str, object)
     displayChanged = Signal()
     pointActivated = Signal(object)
+    pointHovered = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -187,7 +190,22 @@ class DatPlotCanvas(QWidget):
         self._drag_origin: QPointF | None = None
         self._drag_current: QPointF | None = None
         self._drag_series: str | None = None
+        self._hover_hit: PlotHit | None = None
         self._timestamp_reference: TimestampReference | None = None
+        self._data_version = 0
+        self._natural_x_range_cache: tuple[float, float] | None = None
+        self._natural_x_range_valid = False
+        self._natural_y_range_cache: dict[str | None, tuple[float, float] | None] = {}
+        self._base_pixmap: QPixmap | None = None
+        self._base_cache_key: tuple[object, ...] | None = None
+        self._base_has_points = False
+        self._base_panels: list[tuple[str | None, QRectF]] = []
+        self._hit_grids: dict[
+            str | None,
+            dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]],
+        ] = {}
+        self._hit_grid_key: tuple[object, ...] | None = None
+        self._hit_cell_size = scaled_float(12.0)
 
     @property
     def x_label(self) -> str:
@@ -339,6 +357,7 @@ class DatPlotCanvas(QWidget):
         if not changed:
             return True
         setattr(self, attribute, normalized)
+        self._invalidate_data_cache()
         self.reset_zoom(notify=False)
         self.update()
         if notify:
@@ -353,6 +372,8 @@ class DatPlotCanvas(QWidget):
             return False
         changed = normalized != self.layout_mode
         self.layout_mode = normalized
+        if changed:
+            self._invalidate_render_cache()
         self.update()
         if notify and changed:
             self.displayChanged.emit()
@@ -445,9 +466,43 @@ class DatPlotCanvas(QWidget):
             )
         )
 
+    def _clear_hover(self) -> None:
+        if self._hover_hit is not None:
+            self._hover_hit = None
+            self.pointHovered.emit(None)
+
+    def _invalidate_render_cache(self) -> None:
+        self._base_pixmap = None
+        self._base_cache_key = None
+        self._hit_grids.clear()
+        self._hit_grid_key = None
+
+    def _invalidate_data_cache(self) -> None:
+        self._data_version += 1
+        self._natural_x_range_valid = False
+        self._natural_x_range_cache = None
+        self._natural_y_range_cache.clear()
+        self._invalidate_render_cache()
+
+    def _render_cache_key(self) -> tuple[object, ...]:
+        return (
+            self.width(),
+            self.height(),
+            round(float(self.devicePixelRatioF()), 3),
+            self._data_version,
+            self.layout_mode,
+            self.x_scale,
+            self.y_scale,
+            self._x_view,
+            self._overlay_y_view,
+            tuple(sorted(self._stacked_y_views.items())),
+        )
+
     def _rebuild_points(self) -> None:
         """从不可变 DAT 文档重建每条曲线的有限数值点。"""
 
+        self._clear_hover()
+        self._invalidate_data_cache()
         if self.document is None:
             self.points_by_series = {}
             self._timestamp_reference = None
@@ -495,6 +550,30 @@ class DatPlotCanvas(QWidget):
         )
 
     @staticmethod
+    def _padded_bounds(
+        low: float | None,
+        high: float | None,
+        fraction: float,
+        scale: str,
+    ) -> tuple[float, float] | None:
+        """根据极值添加留白；对数坐标在 log10 空间计算。"""
+
+        if low is None or high is None:
+            return None
+        if scale == LOG_SCALE:
+            low = math.log10(low)
+            high = math.log10(high)
+        if low == high:
+            padding = max(abs(low) * 0.02, 0.05) if scale == LOG_SCALE else max(abs(low) * 0.02, 0.5)
+        else:
+            padding = (high - low) * fraction
+        low -= padding
+        high += padding
+        if scale == LOG_SCALE:
+            return 10**low, 10**high
+        return low, high
+
+    @staticmethod
     def _padded_range(
         values: list[float],
         fraction: float,
@@ -506,17 +585,7 @@ class DatPlotCanvas(QWidget):
             values = [value for value in values if value > 0]
         if not values:
             return None
-        transformed = [math.log10(value) for value in values] if scale == LOG_SCALE else values
-        low, high = min(transformed), max(transformed)
-        if low == high:
-            padding = max(abs(low) * 0.02, 0.05) if scale == LOG_SCALE else max(abs(low) * 0.02, 0.5)
-        else:
-            padding = (high - low) * fraction
-        low -= padding
-        high += padding
-        if scale == LOG_SCALE:
-            return 10**low, 10**high
-        return low, high
+        return DatPlotCanvas._padded_bounds(min(values), max(values), fraction, scale)
 
     def _point_is_plottable(self, point: DatPoint) -> bool:
         """对数轴下过滤零和负值，线性轴接受所有有限点。"""
@@ -527,29 +596,66 @@ class DatPlotCanvas(QWidget):
         )
 
     def _natural_x_range(self) -> tuple[float, float] | None:
-        values = [
-            point.x
-            for points in self.points_by_series.values()
-            for point in points
-            if self._point_is_plottable(point)
-        ]
-        return self._padded_range(values, 0.035, self.x_scale)
+        if self._natural_x_range_valid:
+            return self._natural_x_range_cache
+        x_log = self.x_scale == LOG_SCALE
+        y_log = self.y_scale == LOG_SCALE
+        low: float | None = None
+        high: float | None = None
+        for points in self.points_by_series.values():
+            if not x_log and not y_log:
+                for point in points:
+                    x = point.x
+                    if low is None or x < low:
+                        low = x
+                    if high is None or x > high:
+                        high = x
+            else:
+                for point in points:
+                    if (x_log and point.x <= 0) or (y_log and point.y <= 0):
+                        continue
+                    x = point.x
+                    if low is None or x < low:
+                        low = x
+                    if high is None or x > high:
+                        high = x
+        self._natural_x_range_cache = self._padded_bounds(low, high, 0.035, self.x_scale)
+        self._natural_x_range_valid = True
+        return self._natural_x_range_cache
 
     def _natural_y_range(self, series: str | None) -> tuple[float, float] | None:
-        if self.layout_mode == OVERLAY_LAYOUT:
-            values = [
-                point.y
-                for points in self.points_by_series.values()
-                for point in points
-                if self._point_is_plottable(point)
-            ]
-        else:
-            values = [
-                point.y
-                for point in self.points_by_series.get(series or "", ())
-                if self._point_is_plottable(point)
-            ]
-        return self._padded_range(values, 0.06, self.y_scale)
+        cache_key = None if self.layout_mode == OVERLAY_LAYOUT else series
+        if cache_key in self._natural_y_range_cache:
+            return self._natural_y_range_cache[cache_key]
+        x_log = self.x_scale == LOG_SCALE
+        y_log = self.y_scale == LOG_SCALE
+        low: float | None = None
+        high: float | None = None
+        series_iter = (
+            self.points_by_series.values()
+            if self.layout_mode == OVERLAY_LAYOUT
+            else (self.points_by_series.get(series or "", ()),)
+        )
+        for points in series_iter:
+            if not x_log and not y_log:
+                for point in points:
+                    y = point.y
+                    if low is None or y < low:
+                        low = y
+                    if high is None or y > high:
+                        high = y
+            else:
+                for point in points:
+                    if (x_log and point.x <= 0) or (y_log and point.y <= 0):
+                        continue
+                    y = point.y
+                    if low is None or y < low:
+                        low = y
+                    if high is None or y > high:
+                        high = y
+        result = self._padded_bounds(low, high, 0.06, self.y_scale)
+        self._natural_y_range_cache[cache_key] = result
+        return result
 
     def _ranges(self, series: str | None = None) -> tuple[float, float, float, float] | None:
         """合并手动范围与自然范围，得到一个面板的完整数据坐标。"""
@@ -568,19 +674,29 @@ class DatPlotCanvas(QWidget):
     def _plot_rects(self) -> list[tuple[str | None, QRectF]]:
         """按布局和曲线数分配实际绘图面板，所有分图共享 X。"""
 
+        show_overlay_legend = (
+            self.layout_mode == OVERLAY_LAYOUT and len(self.y_columns) > 1
+        )
+        show_vertical_y_title = (
+            self.layout_mode == STACKED_LAYOUT or len(self.y_columns) == 1
+        )
+        left_margin = scaled(98 if show_vertical_y_title else 78)
+        top_margin = scaled(26 if show_overlay_legend else 10)
+        right_margin = scaled(16)
+        bottom_margin = scaled(42)
         frame = QRectF(
             self.rect().adjusted(
-                scaled(84),
-                scaled(38),
-                -scaled(24),
-                -scaled(66),
+                left_margin,
+                top_margin,
+                -right_margin,
+                -bottom_margin,
             )
         )
         if self.layout_mode == OVERLAY_LAYOUT or len(self.y_columns) <= 1:
             series = None if self.layout_mode == OVERLAY_LAYOUT else self.y_column
             return [(series, frame)]
         count = len(self.y_columns)
-        gap = scaled_float(14.0)
+        gap = scaled_float(6.0)
         height = max(1.0, (frame.height() - gap * (count - 1)) / count)
         return [
             (
@@ -674,80 +790,101 @@ class DatPlotCanvas(QWidget):
             )
         return y_min + fraction * (y_max - y_min)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._invalidate_render_cache()
+        super().resizeEvent(event)
+
+    def _ensure_base_render(self) -> None:
+        key = self._render_cache_key()
+        if self._base_pixmap is not None and self._base_cache_key == key:
+            return
+        dpr = max(1.0, float(self.devicePixelRatioF()))
+        pixel_w = max(1, int(round(self.width() * dpr)))
+        pixel_h = max(1, int(round(self.height() * dpr)))
+        pixmap = QPixmap(pixel_w, pixel_h)
+        pixmap.setDevicePixelRatio(dpr)
+        pixmap.fill(QColor("#ffffff"))
+
+        panels = self._plot_rects()
+        self._hit_grids.clear()
+        self._hit_grid_key = key
+        self._hit_cell_size = max(1.0, scaled_float(12.0))
+
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            has_points = False
+            for panel_index, (series, plot) in enumerate(panels):
+                ranges = self._ranges(series)
+                panel_grid: dict[
+                    tuple[int, int],
+                    list[tuple[float, float, str, DatPoint]],
+                ] = {}
+                self._hit_grids[series] = panel_grid
+                self._draw_panel(
+                    painter,
+                    series,
+                    plot,
+                    ranges,
+                    show_x_labels=panel_index == len(panels) - 1,
+                    stacked_multi=len(panels) > 1,
+                    hit_grid=panel_grid,
+                )
+                has_points = has_points or ranges is not None
+
+            if not has_points:
+                painter.setPen(QColor("#657080"))
+                message = (
+                    "No positive points for the selected logarithmic axes"
+                    if LOG_SCALE in {self.x_scale, self.y_scale}
+                    else "No numeric points for the selected axes"
+                )
+                painter.drawText(
+                    panels[0][1],
+                    Qt.AlignmentFlag.AlignCenter,
+                    message,
+                )
+            elif self.layout_mode == OVERLAY_LAYOUT and len(self.y_columns) > 1:
+                self._draw_legend(painter, panels[0][1])
+        finally:
+            painter.end()
+
+        self._base_pixmap = pixmap
+        self._base_cache_key = key
+        self._base_panels = panels
+        self._base_has_points = has_points
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#fbfbfc"))
         if self.document is None:
+            painter.fillRect(self.rect(), QColor("#ffffff"))
             painter.setPen(QColor("#657080"))
             painter.drawText(
                 self.rect(),
                 Qt.AlignmentFlag.AlignCenter,
-                "Drop a DAT file here\nor use Open DAT",
+                "Drop a DAT file here\nor use Open",
             )
             return
         if not self.y_columns:
+            painter.fillRect(self.rect(), QColor("#ffffff"))
             painter.setPen(QColor("#657080"))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No numeric Y series")
             return
 
-        panels = self._plot_rects()
-        has_points = False
-        for panel_index, (series, plot) in enumerate(panels):
-            ranges = self._ranges(series)
-            self._draw_panel(
-                painter,
-                series,
-                plot,
-                ranges,
-                show_x_labels=panel_index == len(panels) - 1,
-            )
-            has_points = has_points or ranges is not None
+        self._ensure_base_render()
+        if self._base_pixmap is not None:
+            painter.drawPixmap(0, 0, self._base_pixmap)
 
-        if not has_points:
-            painter.setPen(QColor("#657080"))
-            message = (
-                "No positive points for the selected logarithmic axes"
-                if LOG_SCALE in {self.x_scale, self.y_scale}
-                else "No numeric points for the selected axes"
-            )
-            painter.drawText(
-                panels[0][1],
-                Qt.AlignmentFlag.AlignCenter,
-                message,
-            )
-        elif self.layout_mode == OVERLAY_LAYOUT:
-            self._draw_legend(painter, panels[0][1])
-
-        total = sum(
-            1
-            for points in self.points_by_series.values()
-            for point in points
-            if self._point_is_plottable(point)
-        )
-        footer = panels[-1][1] if panels else self._plot_rect()
-        painter.setPen(QColor("#5e6875"))
-        painter.drawText(
-            QRectF(
-                footer.left(),
-                footer.bottom() + scaled_float(48),
-                footer.width(),
-                scaled_float(18),
-            ),
-            Qt.AlignmentFlag.AlignRight,
-            painter.fontMetrics().elidedText(
-                f"{total:,} plotted points | drag to zoom | double-click a point for details",
-                Qt.TextElideMode.ElideRight,
-                int(footer.width()),
-            ),
-        )
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._hover_hit is not None and self._drag_origin is None and self._base_has_points:
+            self._draw_hover(painter, self._base_panels, self._hover_hit)
 
         if self._drag_origin is not None and self._drag_current is not None:
             panel = self._panel_for_series(self._drag_series)
             if panel is not None:
                 selection = QRectF(self._drag_origin, self._drag_current).normalized().intersected(panel)
-                painter.setBrush(QColor(36, 104, 180, 35))
-                painter.setPen(QPen(QColor("#2468b4"), 1, Qt.PenStyle.DashLine))
+                painter.setBrush(QColor(27, 94, 168, 32))
+                painter.setPen(QPen(QColor("#1b5ea8"), 1, Qt.PenStyle.DashLine))
                 painter.drawRect(selection)
 
     def _draw_panel(
@@ -758,10 +895,17 @@ class DatPlotCanvas(QWidget):
         ranges: tuple[float, float, float, float] | None,
         *,
         show_x_labels: bool,
+        stacked_multi: bool = False,
+        hit_grid: dict[
+            tuple[int, int],
+            list[tuple[float, float, str, DatPoint]],
+        ] | None = None,
     ) -> None:
-        painter.setPen(QPen(QColor("#aeb5bf"), 1))
-        painter.drawRect(plot)
+        painter.fillRect(plot, QColor("#ffffff"))
+        frame_pen = QPen(QColor("#2c3440"), 1.2)
         if ranges is None:
+            painter.setPen(frame_pen)
+            painter.drawRect(plot)
             return
         x_min, x_max, y_min, y_max = ranges
         timestamp_axis = (
@@ -769,6 +913,8 @@ class DatPlotCanvas(QWidget):
             if self.x_scale == LINEAR_SCALE
             else None
         )
+        x_target = max(3, min(7, int(plot.width() // scaled_float(95.0))))
+        y_target = max(3, min(5, int(plot.height() // scaled_float(30.0))))
         if timestamp_axis is not None:
             x_ticks = timestamp_ticks(
                 x_min,
@@ -778,13 +924,21 @@ class DatPlotCanvas(QWidget):
         elif self.x_scale == LOG_SCALE:
             x_ticks = logarithmic_ticks(x_min, x_max)
         else:
-            x_ticks = linear_ticks(x_min, x_max)
+            x_ticks = linear_ticks(x_min, x_max, target_intervals=x_target)
         y_ticks = (
             logarithmic_ticks(y_min, y_max)
             if self.y_scale == LOG_SCALE
-            else linear_ticks(y_min, y_max)
+            else linear_ticks(y_min, y_max, target_intervals=y_target)
         )
 
+        grid_pen = QPen(QColor("#dce2ea"), 1.0, Qt.PenStyle.DashLine)
+        tick_pen = QPen(QColor("#2c3440"), 1.0)
+        tick_len = scaled_float(4.5)
+        tick_font = painter.font()
+        tick_font.setPointSizeF(max(7.0, tick_font.pointSizeF() * 0.92))
+        metrics = painter.fontMetrics()
+
+        last_x_right = -1e9
         for x_value in x_ticks.values:
             fraction = self._axis_fraction(
                 x_value,
@@ -793,10 +947,12 @@ class DatPlotCanvas(QWidget):
                 self.x_scale,
             )
             x = plot.left() + plot.width() * fraction
-            painter.setPen(QPen(QColor("#e1e5ea"), 1))
+            painter.setPen(grid_pen)
             painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+            painter.setPen(tick_pen)
+            painter.drawLine(QPointF(x, plot.bottom()), QPointF(x, plot.bottom() - tick_len))
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.top() + tick_len))
             if show_x_labels:
-                painter.setPen(QColor("#4c5562"))
                 label = (
                     timestamp_tick_label(
                         x_value,
@@ -811,22 +967,33 @@ class DatPlotCanvas(QWidget):
                         x_ticks.step,
                     )
                 )
-                label_width = scaled_float(
-                    140
-                    if timestamp_axis is not None
-                    else 110
-                )
-                painter.drawText(
-                    QRectF(
-                        x - label_width / 2,
-                        plot.bottom() + scaled_float(4),
-                        label_width,
-                        scaled_float(20),
-                    ),
-                    Qt.AlignmentFlag.AlignHCenter,
-                    label,
-                )
+                painter.save()
+                painter.setFont(tick_font)
+                t_metrics = painter.fontMetrics()
+                text_w = t_metrics.horizontalAdvance(label)
+                left_edge = x - text_w / 2.0
+                if left_edge >= last_x_right + scaled_float(8.0):
+                    painter.setPen(QColor("#2c3440"))
+                    label_width = max(text_w + scaled_float(6.0), scaled_float(40.0))
+                    painter.drawText(
+                        QRectF(
+                            x - label_width / 2.0,
+                            plot.bottom() + scaled_float(3.0),
+                            label_width,
+                            scaled_float(18.0),
+                        ),
+                        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+                        label,
+                    )
+                    last_x_right = x + text_w / 2.0
+                painter.restore()
 
+        painter.save()
+        painter.setFont(tick_font)
+        t_metrics = painter.fontMetrics()
+        min_y_sep = t_metrics.height() + scaled_float(2.0)
+        y_edge_pad = scaled_float(4.0) if stacked_multi else scaled_float(0.0)
+        y_entries: list[tuple[float, float]] = []
         for y_value in y_ticks.values:
             fraction = self._axis_fraction(
                 y_value,
@@ -835,28 +1002,45 @@ class DatPlotCanvas(QWidget):
                 self.y_scale,
             )
             y = plot.bottom() - plot.height() * fraction
-            painter.setPen(QPen(QColor("#e1e5ea"), 1))
-            painter.drawLine(
-                QPointF(plot.left(), y),
-                QPointF(plot.right(), y),
-            )
-            painter.setPen(QColor("#4c5562"))
-            painter.drawText(
-                QRectF(
-                    scaled_float(2),
-                    y - scaled_float(10),
-                    scaled_float(76),
-                    scaled_float(20),
-                ),
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                numeric_tick_label(
-                    y_value,
-                    y_ticks.step,
-                ),
-            )
+            y_entries.append((y, y_value))
+        y_entries.sort(key=lambda item: item[0])
+        last_drawn_y = -1e9
+        y_label_left = scaled_float(23.0) if (stacked_multi or len(self.y_columns) == 1) else scaled_float(2.0)
+        y_label_width = max(scaled_float(30.0), plot.left() - y_label_left - scaled_float(6.0))
+        for y, y_value in y_entries:
+            painter.setPen(grid_pen)
+            painter.drawLine(QPointF(plot.left(), y), QPointF(plot.right(), y))
+            painter.setPen(tick_pen)
+            painter.drawLine(QPointF(plot.left(), y), QPointF(plot.left() + tick_len, y))
+            painter.drawLine(QPointF(plot.right(), y), QPointF(plot.right() - tick_len, y))
+            if (
+                y - last_drawn_y >= min_y_sep
+                and y >= plot.top() + y_edge_pad
+                and y <= plot.bottom() - y_edge_pad
+            ):
+                painter.setPen(QColor("#2c3440"))
+                painter.drawText(
+                    QRectF(
+                        y_label_left,
+                        y - scaled_float(10.0),
+                        y_label_width,
+                        scaled_float(20.0),
+                    ),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    numeric_tick_label(
+                        y_value,
+                        y_ticks.step,
+                    ),
+                )
+                last_drawn_y = y
+        painter.restore()
 
         if show_x_labels:
-            painter.setPen(QColor("#26313f"))
+            painter.save()
+            title_font = painter.font()
+            title_font.setWeight(title_font.Weight.DemiBold)
+            painter.setFont(title_font)
+            painter.setPen(QColor("#1f2630"))
             x_axis_title = self.x_label
             if timestamp_axis is not None:
                 x_axis_title = timestamp_axis_title(
@@ -868,9 +1052,9 @@ class DatPlotCanvas(QWidget):
             painter.drawText(
                 QRectF(
                     plot.left(),
-                    plot.bottom() + scaled_float(27),
+                    plot.bottom() + scaled_float(22.0),
                     plot.width(),
-                    scaled_float(20),
+                    scaled_float(18.0),
                 ),
                 Qt.AlignmentFlag.AlignCenter,
                 x_axis_title
@@ -880,19 +1064,38 @@ class DatPlotCanvas(QWidget):
                     else ""
                 ),
             )
-        if self.layout_mode == STACKED_LAYOUT and series is not None:
-            color = QColor(PLOT_COLORS[self.y_columns.index(series) % len(PLOT_COLORS)])
-            painter.setPen(QPen(color, 1.5))
+            painter.restore()
+
+        y_title_series = series if (self.layout_mode == STACKED_LAYOUT and series is not None) else (
+            self.y_columns[0] if len(self.y_columns) == 1 else None
+        )
+        if y_title_series is not None:
+            color = QColor(PLOT_COLORS[self.y_columns.index(y_title_series) % len(PLOT_COLORS)])
+            y_title_text = y_title_series + (" [Log]" if self.y_scale == LOG_SCALE else "")
+            painter.save()
+            title_font = painter.font()
+            title_font.setPointSizeF(max(7.5, title_font.pointSizeF() * 0.94))
+            title_font.setWeight(title_font.Weight.DemiBold)
+            painter.setFont(title_font)
+            painter.setPen(color)
+            elided = painter.fontMetrics().elidedText(
+                y_title_text,
+                Qt.TextElideMode.ElideRight,
+                max(20, int(plot.height() - scaled_float(6.0))),
+            )
+            painter.translate(scaled_float(13.0), plot.center().y())
+            painter.rotate(-90.0)
             painter.drawText(
                 QRectF(
-                    plot.left() + scaled_float(7),
-                    plot.top() + scaled_float(4),
-                    plot.width() - scaled_float(14),
-                    scaled_float(20),
+                    -plot.height() / 2.0,
+                    -scaled_float(10.0),
+                    plot.height(),
+                    scaled_float(20.0),
                 ),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-                series + (" [Log]" if self.y_scale == LOG_SCALE else ""),
+                Qt.AlignmentFlag.AlignCenter,
+                elided,
             )
+            painter.restore()
 
         draw_series = self.y_columns if self.layout_mode == OVERLAY_LAYOUT else (series,)
         for name in draw_series:
@@ -902,54 +1105,312 @@ class DatPlotCanvas(QWidget):
             if not points:
                 continue
             color = QColor(PLOT_COLORS[self.y_columns.index(name) % len(PLOT_COLORS)])
-            self._draw_series(painter, points, color, plot, ranges)
+            self._draw_series(painter, name, points, color, plot, ranges, hit_grid=hit_grid)
+
+        # Draw crisp 4-sided scientific axis box last so edges remain sharp over curves.
+        painter.setPen(frame_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(plot)
+
+    def _draw_hover(
+        self,
+        painter: QPainter,
+        panels: list[tuple[str | None, QRectF]],
+        hit: PlotHit,
+    ) -> None:
+        guide_pen = QPen(QColor("#64748b"), 1.0, Qt.PenStyle.DotLine)
+        for series, plot in panels:
+            ranges = self._ranges(series)
+            if ranges is None:
+                continue
+            x_min, x_max, _, _ = ranges
+            if self.x_scale == LOG_SCALE and (hit.x <= 0 or x_min <= 0):
+                continue
+            frac = self._axis_fraction(hit.x, x_min, x_max, self.x_scale)
+            if 0.0 <= frac <= 1.0:
+                x = plot.left() + plot.width() * frac
+                painter.save()
+                painter.setPen(guide_pen)
+                painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+                painter.restore()
+            if (
+                (self.layout_mode == OVERLAY_LAYOUT or series == hit.series)
+                and hit.series in self.y_columns
+            ):
+                screen = self._screen_point(hit.x, hit.y, plot, ranges)
+                if screen is not None and plot.contains(screen):
+                    color = QColor(PLOT_COLORS[self.y_columns.index(hit.series) % len(PLOT_COLORS)])
+                    painter.save()
+                    painter.setPen(QPen(color, 2.0))
+                    painter.setBrush(QColor("#ffffff"))
+                    painter.drawEllipse(screen, scaled_float(4.5), scaled_float(4.5))
+                    painter.restore()
+
+    def _project_series_segments(
+        self,
+        points: tuple[DatPoint, ...],
+        plot: QRectF,
+        ranges: tuple[float, float, float, float],
+        *,
+        series_name: str = "",
+        hit_grid: dict[
+            tuple[int, int],
+            list[tuple[float, float, str, DatPoint]],
+        ] | None = None,
+        build_segments: bool = True,
+    ) -> list[list[tuple[float, float, DatPoint]]]:
+        """把曲线投影为屏幕坐标折线，并按 2D 屏幕像素格同步填充命中网格。
+
+        折线绘制在超过 3000 点时按连续 X 像素列做保峰（first / min_y / max_y / last）抽稀；
+        命中索引不依赖 1D X 列抽稀，而是对所有可见点按 2D ``2×2 px`` 屏幕格去重入桶，确保
+        恒定 X 竖直线（如恒温扫时间）或陡峭相变曲线中段的任意位置都能准确悬停和双击选点。
+        """
+
+        if not points or plot.width() <= 0.0 or plot.height() <= 0.0:
+            return []
+        x_min, x_max, y_min, y_max = ranges
+        x_log = self.x_scale == LOG_SCALE
+        y_log = self.y_scale == LOG_SCALE
+        if (x_log and (x_min <= 0.0 or x_max <= 0.0)) or (
+            y_log and (y_min <= 0.0 or y_max <= 0.0)
+        ):
+            return []
+        x_low = math.log10(x_min) if x_log else x_min
+        x_high = math.log10(x_max) if x_log else x_max
+        y_low = math.log10(y_min) if y_log else y_min
+        y_high = math.log10(y_max) if y_log else y_max
+        dx_span = x_high - x_low
+        dy_span = y_high - y_low
+        if dx_span == 0.0 or dy_span == 0.0:
+            return []
+
+        left = plot.left()
+        right = plot.right()
+        bottom = plot.bottom()
+        kx = plot.width() / dx_span
+        ky = plot.height() / dy_span
+        log10 = math.log10
+        floor = math.floor
+
+        cell = max(1.0, self._hit_cell_size)
+        inv_cell = 1.0 / cell
+        hit_min_x = left - cell
+        hit_max_x = right + cell
+        hit_min_y = plot.top() - cell
+        hit_max_y = bottom + cell
+
+        segments: list[list[tuple[float, float, DatPoint]]] = []
+        current_seg: list[tuple[float, float, DatPoint]] = []
+
+        if len(points) <= 3_000:
+            for point in points:
+                px_val = point.x
+                py_val = point.y
+                if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
+                    if build_segments and current_seg:
+                        segments.append(current_seg)
+                        current_seg = []
+                    continue
+                sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
+                sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
+                if build_segments:
+                    current_seg.append((sx, sy, point))
+                if (
+                    hit_grid is not None
+                    and hit_min_x <= sx <= hit_max_x
+                    and hit_min_y <= sy <= hit_max_y
+                ):
+                    cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                    bucket = hit_grid.get(cell_key)
+                    if bucket is None:
+                        hit_grid[cell_key] = [(sx, sy, series_name, point)]
+                    else:
+                        bucket.append((sx, sy, series_name, point))
+            if build_segments and current_seg:
+                segments.append(current_seg)
+            return segments
+
+        seen_pixels: set[tuple[int, int]] | None = set() if hit_grid is not None else None
+        if not build_segments:
+            if hit_grid is None or seen_pixels is None:
+                return []
+            for point in points:
+                px_val = point.x
+                py_val = point.y
+                if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
+                    continue
+                sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
+                sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
+                if hit_min_x <= sx <= hit_max_x and hit_min_y <= sy <= hit_max_y:
+                    pixel_key = (floor(sx) >> 1, floor(sy) >> 1)
+                    if pixel_key not in seen_pixels:
+                        seen_pixels.add(pixel_key)
+                        cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                        bucket = hit_grid.get(cell_key)
+                        if bucket is None:
+                            hit_grid[cell_key] = [(sx, sy, series_name, point)]
+                        else:
+                            bucket.append((sx, sy, series_name, point))
+            return []
+
+        # 超过 3000 点时绘制折线按连续 X 像素列做保峰抽稀，同时所有可见点仍按
+        # 2D 2×2 px 屏幕格写入 hit_grid，确保垂直/陡峭曲线中段无命中盲区。
+        bucket_px: int | None = None
+        first_entry: tuple[int, float, float, DatPoint] | None = None
+        min_entry: tuple[int, float, float, DatPoint] | None = None
+        max_entry: tuple[int, float, float, DatPoint] | None = None
+        last_entry: tuple[int, float, float, DatPoint] | None = None
+        off_side = 0
+        off_last: tuple[float, float, DatPoint] | None = None
+
+        def flush_bucket() -> None:
+            nonlocal bucket_px, first_entry, min_entry, max_entry, last_entry
+            if first_entry is None:
+                return
+            candidates = [first_entry]
+            if min_entry is not None and min_entry[0] != first_entry[0]:
+                candidates.append(min_entry)
+            if (
+                max_entry is not None
+                and max_entry[0] != first_entry[0]
+                and (min_entry is None or max_entry[0] != min_entry[0])
+            ):
+                candidates.append(max_entry)
+            if last_entry is not None and all(last_entry[0] != item[0] for item in candidates):
+                candidates.append(last_entry)
+            candidates.sort(key=lambda item: item[0])
+            for _, ex, ey, ept in candidates:
+                current_seg.append((ex, ey, ept))
+            bucket_px = None
+            first_entry = min_entry = max_entry = last_entry = None
+
+        margin = max(2.0, cell)
+        vis_left = left - margin
+        vis_right = right + margin
+
+        for idx, point in enumerate(points):
+            px_val = point.x
+            py_val = point.y
+            if (x_log and px_val <= 0.0) or (y_log and py_val <= 0.0):
+                flush_bucket()
+                if off_last is not None:
+                    current_seg.append(off_last)
+                    off_last = None
+                off_side = 0
+                if current_seg:
+                    segments.append(current_seg)
+                    current_seg = []
+                continue
+
+            sx = left + ((log10(px_val) if x_log else px_val) - x_low) * kx
+            sy = bottom - ((log10(py_val) if y_log else py_val) - y_low) * ky
+
+            if (
+                hit_grid is not None
+                and seen_pixels is not None
+                and hit_min_x <= sx <= hit_max_x
+                and hit_min_y <= sy <= hit_max_y
+            ):
+                pixel_key = (floor(sx) >> 1, floor(sy) >> 1)
+                if pixel_key not in seen_pixels:
+                    seen_pixels.add(pixel_key)
+                    cell_key = (floor(sx * inv_cell), floor(sy * inv_cell))
+                    bucket = hit_grid.get(cell_key)
+                    if bucket is None:
+                        hit_grid[cell_key] = [(sx, sy, series_name, point)]
+                    else:
+                        bucket.append((sx, sy, series_name, point))
+
+            side = -1 if sx < vis_left else (1 if sx > vis_right else 0)
+            if side != 0:
+                flush_bucket()
+                if side == off_side:
+                    off_last = (sx, sy, point)
+                else:
+                    if off_last is not None:
+                        current_seg.append(off_last)
+                        off_last = None
+                    current_seg.append((sx, sy, point))
+                    off_side = side
+                continue
+
+            if off_side != 0:
+                if off_last is not None:
+                    current_seg.append(off_last)
+                    off_last = None
+                off_side = 0
+
+            col = floor(sx)
+            if bucket_px == col and first_entry is not None:
+                entry = (idx, sx, sy, point)
+                last_entry = entry
+                if min_entry is None or sy < min_entry[2]:
+                    min_entry = entry
+                if max_entry is None or sy > max_entry[2]:
+                    max_entry = entry
+            else:
+                flush_bucket()
+                bucket_px = col
+                entry = (idx, sx, sy, point)
+                first_entry = min_entry = max_entry = last_entry = entry
+
+        flush_bucket()
+        if off_last is not None:
+            current_seg.append(off_last)
+        if current_seg:
+            segments.append(current_seg)
+        return segments
 
     def _draw_series(
         self,
         painter: QPainter,
+        series_name: str,
         points: tuple[DatPoint, ...],
         color: QColor,
         plot: QRectF,
         ranges: tuple[float, float, float, float],
+        *,
+        hit_grid: dict[
+            tuple[int, int],
+            list[tuple[float, float, str, DatPoint]],
+        ] | None = None,
     ) -> None:
-        stride = max(1, len(points) // 12_000)
+        segments = self._project_series_segments(
+            points,
+            plot,
+            ranges,
+            series_name=series_name,
+            hit_grid=hit_grid,
+            build_segments=True,
+        )
         path = QPainterPath()
-        segment_started = False
-        for index, point in enumerate(points):
-            if not self._point_is_plottable(point):
-                segment_started = False
+        for seg in segments:
+            if not seg:
                 continue
-            if segment_started and index % stride != 0 and index != len(points) - 1:
-                continue
-            screen = self._screen_point(point.x, point.y, plot, ranges)
-            if screen is None:
-                segment_started = False
-                continue
-            if segment_started:
-                path.lineTo(screen)
-            else:
-                path.moveTo(screen)
-                segment_started = True
+            sx0, sy0, _ = seg[0]
+            path.moveTo(sx0, sy0)
+            for sx, sy, _ in seg[1:]:
+                path.lineTo(sx, sy)
         painter.save()
         painter.setClipRect(plot)
-        painter.setPen(QPen(color, 1.45))
+        painter.setPen(QPen(color, 1.65))
         painter.drawPath(path)
         if len(points) <= 3_000:
             painter.setBrush(color)
             painter.setPen(Qt.PenStyle.NoPen)
-            for point in points:
-                screen = self._screen_point(point.x, point.y, plot, ranges)
-                if screen is not None:
-                    painter.drawEllipse(screen, scaled_float(2.1), scaled_float(2.1))
+            radius = scaled_float(2.3)
+            for seg in segments:
+                for sx, sy, _ in seg:
+                    painter.drawEllipse(QPointF(sx, sy), radius, radius)
         painter.restore()
 
     def _draw_legend(self, painter: QPainter, plot: QRectF) -> None:
-        cursor_x = plot.left() + scaled_float(8)
-        y = max(scaled_float(3.0), plot.top() - scaled_float(27))
+        cursor_x = plot.left() + scaled_float(4)
+        y = max(scaled_float(2.0), plot.top() - scaled_float(22))
         for index, name in enumerate(self.y_columns):
             width = max(
-                scaled_float(82.0),
-                painter.fontMetrics().horizontalAdvance(name) + scaled_float(34.0),
+                scaled_float(76.0),
+                painter.fontMetrics().horizontalAdvance(name) + scaled_float(30.0),
             )
             if cursor_x + width > plot.right():
                 break
@@ -957,17 +1418,17 @@ class DatPlotCanvas(QWidget):
             painter.setPen(QPen(color, 2.5))
             painter.drawLine(
                 QPointF(cursor_x, y + scaled_float(9)),
-                QPointF(cursor_x + scaled_float(18), y + scaled_float(9)),
+                QPointF(cursor_x + scaled_float(16), y + scaled_float(9)),
             )
-            painter.setPen(QColor("#26313f"))
+            painter.setPen(QColor("#1f2630"))
             painter.drawText(
                 QRectF(
-                    cursor_x + scaled_float(23),
+                    cursor_x + scaled_float(20),
                     y,
-                    width - scaled_float(23),
-                    scaled_float(20),
+                    width - scaled_float(20),
+                    scaled_float(18),
                 ),
-                Qt.AlignmentFlag.AlignLeft,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 name,
             )
             cursor_x += width
@@ -983,6 +1444,7 @@ class DatPlotCanvas(QWidget):
 
         panel = self._panel_at(event.position())
         if event.button() == Qt.MouseButton.LeftButton and panel is not None:
+            self._clear_hover()
             self._drag_series, _ = panel
             self._drag_origin = event.position()
             self._drag_current = event.position()
@@ -1002,7 +1464,18 @@ class DatPlotCanvas(QWidget):
                 self.update()
             event.accept()
             return
+        hit = self._nearest_point(event.position()) if self.document is not None else None
+        if hit != self._hover_hit:
+            self._hover_hit = hit
+            self.pointHovered.emit(hit)
+            self.update()
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self._hover_hit is not None:
+            self._clear_hover()
+            self.update()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """完成足够大的框选，写入共享 X 和对应面板的 Y 范围。"""
@@ -1056,30 +1529,68 @@ class DatPlotCanvas(QWidget):
                 return
         super().mouseDoubleClickEvent(event)
 
-    def _nearest_point(self, position: QPointF) -> PlotHit | None:
-        """在 12 个缩放像素半径内查找当前面板最近的可绘制点。"""
-
-        panel = self._panel_at(position)
-        if panel is None:
-            return None
-        panel_series, plot = panel
+    def _ensure_panel_hit_grid(
+        self,
+        panel_series: str | None,
+        plot: QRectF,
+    ) -> dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]]:
+        key = self._render_cache_key()
+        if self._hit_grid_key != key:
+            self._hit_grids.clear()
+            self._hit_grid_key = key
+            self._hit_cell_size = max(1.0, scaled_float(12.0))
+        cached = self._hit_grids.get(panel_series)
+        if cached is not None:
+            return cached
+        grid: dict[tuple[int, int], list[tuple[float, float, str, DatPoint]]] = {}
         names = self.y_columns if self.layout_mode == OVERLAY_LAYOUT else (panel_series,)
-        nearest: PlotHit | None = None
-        nearest_distance = scaled_float(12.0) ** 2
         for name in names:
             if name is None:
                 continue
             ranges = self._ranges(name)
             if ranges is None:
                 continue
-            for point in self.points_by_series.get(name, ()):
-                screen = self._screen_point(point.x, point.y, plot, ranges)
-                if screen is None:
+            points = self.points_by_series.get(name, ())
+            if not points:
+                continue
+            self._project_series_segments(
+                points,
+                plot,
+                ranges,
+                series_name=name,
+                hit_grid=grid,
+                build_segments=False,
+            )
+        self._hit_grids[panel_series] = grid
+        return grid
+
+    def _nearest_point(self, position: QPointF) -> PlotHit | None:
+        """利用屏幕空间网格在 12 个缩放像素半径内 O(1) 查找当前面板最近点。"""
+
+        panel = self._panel_at(position)
+        if panel is None:
+            return None
+        panel_series, plot = panel
+        grid = self._ensure_panel_hit_grid(panel_series, plot)
+        if not grid:
+            return None
+        qx = position.x()
+        qy = position.y()
+        cell = max(1.0, self._hit_cell_size)
+        cx = math.floor(qx / cell)
+        cy = math.floor(qy / cell)
+        nearest: PlotHit | None = None
+        nearest_distance = scaled_float(12.0) ** 2
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                bucket = grid.get((cx + dx, cy + dy))
+                if not bucket:
                     continue
-                distance = (screen.x() - position.x()) ** 2 + (screen.y() - position.y()) ** 2
-                if distance <= nearest_distance:
-                    nearest = PlotHit(name, point)
-                    nearest_distance = distance
+                for sx, sy, name, point in bucket:
+                    distance = (sx - qx) ** 2 + (sy - qy) ** 2
+                    if distance <= nearest_distance:
+                        nearest = PlotHit(name, point)
+                        nearest_distance = distance
         return nearest
 
     def build_context_menu(self) -> QMenu:
@@ -1088,12 +1599,15 @@ class DatPlotCanvas(QWidget):
         menu = QMenu(self)
         open_action = menu.addAction("Open DAT...")
         reload_action = menu.addAction("Reload DAT")
+        copy_path_action = menu.addAction("Copy File Path")
         menu.addSeparator()
         save_action = menu.addAction("Save Plot Format")
         load_action = menu.addAction("Reload Plot Format")
         reset_action = menu.addAction("Reset Zoom")
         open_action.triggered.connect(lambda checked=False: self.openRequested.emit())
         reload_action.triggered.connect(lambda checked=False: self.reloadRequested.emit())
+        copy_path_action.triggered.connect(lambda checked=False: self.copyPathRequested.emit())
+        copy_path_action.setEnabled(self.document is not None)
         save_action.triggered.connect(lambda checked=False: self.saveFormatRequested.emit())
         load_action.triggered.connect(lambda checked=False: self.reloadFormatRequested.emit())
         reset_action.triggered.connect(lambda checked=False: self.reset_zoom())

@@ -10,10 +10,12 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Signal
+import qtawesome as qta
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -111,42 +113,93 @@ class DatBrowserWidget(QWidget):
         self._signature: tuple[int, int] | None = None
         self._suspend_format_save = False
         self._format_status = ""
+        self._base_status_text = "Waiting for a DAT file"
+        self._hover_hit: PlotHit | None = None
         self._last_auto_save_error: str | None = None
         self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
-        self.path_label = QLabel("No DAT file selected - drop a file anywhere in this window")
-        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.path_label.setWordWrap(True)
-        self.path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        layout.addWidget(self.path_label)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Keep path_label for programmatic inspection without spending vertical
+        # canvas height on a wrapped two-line path header; the window title and
+        # tooltip surface the filename and full path cleanly.
+        self.path_label = QLabel("No DAT file selected")
+        self.path_label.hide()
+
+        icon_color = "#334155"
         controls = QToolBar(self)
         controls.setMovable(False)
         controls.setFloatable(False)
+        controls.setIconSize(QSize(scaled(13), scaled(13)))
+        controls.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        controls.setStyleSheet(
+            "QToolBar { background: #f4f6f8; border: none; "
+            "border-bottom: 1px solid #d0d7de; padding: 2px 4px; spacing: 2px; }"
+            "QToolButton { padding: 3px 6px; border-radius: 3px; color: #1f2630; }"
+            "QToolButton:hover { background: #e6ebf1; }"
+        )
         self.layout_combo = QComboBox()
         self.layout_combo.setToolTip("Overlay Y series or stack plots with a shared X axis")
         self.layout_combo.addItem("Overlay", OVERLAY_LAYOUT)
-        self.layout_combo.addItem("Stacked / Shared X", STACKED_LAYOUT)
-        controls.addWidget(QLabel("Layout:"))
+        self.layout_combo.addItem("Stacked", STACKED_LAYOUT)
         controls.addWidget(self.layout_combo)
-        open_action = controls.addAction("Open DAT")
-        reload_action = controls.addAction("Reload")
-        self.save_format_button = controls.addAction("Save PLT")
-        reset_action = controls.addAction("Reset Zoom")
-        self.detach_action = controls.addAction("Pop Out")
+        controls.addSeparator()
+        open_action = controls.addAction(
+            qta.icon("fa5s.folder-open", color=icon_color),
+            "Open",
+        )
+        open_action.setToolTip("Open DAT or System Log file")
+        y_series_action = controls.addAction(
+            qta.icon("fa5s.list-ul", color=icon_color),
+            "Y Series",
+        )
+        y_series_action.setToolTip("Select Y series to plot")
+        reload_action = controls.addAction(
+            qta.icon("fa5s.sync-alt", color=icon_color),
+            "Reload",
+        )
+        reload_action.setToolTip("Reload current DAT file")
+        self.save_format_button = controls.addAction(
+            qta.icon("fa5s.save", color=icon_color),
+            "Save PLT",
+        )
+        self.save_format_button.setToolTip("Save plot format (.plt)")
+        reset_action = controls.addAction(
+            qta.icon("fa5s.compress-arrows-alt", color=icon_color),
+            "Reset Zoom",
+        )
+        reset_action.setToolTip("Reset zoom to fit all points")
+        spacer = QWidget(controls)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        controls.addWidget(spacer)
+        self.detach_action = controls.addAction(
+            qta.icon("fa5s.external-link-alt", color=icon_color),
+            "Pop Out",
+        )
+        for text_action in (y_series_action, self.detach_action):
+            btn = controls.widgetForAction(text_action)
+            if btn is not None:
+                btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._detached = False
         self.set_detached(False)
         layout.addWidget(controls)
 
         self.canvas = DatPlotCanvas()
         layout.addWidget(self.canvas, 1)
-        self.status_label = QLabel("Waiting for a DAT file")
-        self.status_label.setStyleSheet("color: #5d6672;")
-        self.status_label.setWordWrap(True)
-        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+        self.status_label = QLabel(self._base_status_text)
+        self.status_label.setStyleSheet(
+            "QLabel { background: #f4f6f8; color: #475569; "
+            "border-top: 1px solid #d0d7de; padding: 2px 8px; }"
+        )
+        self.status_label.setWordWrap(False)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.status_label)
 
         open_action.triggered.connect(self.open_dialog)
+        y_series_action.triggered.connect(lambda checked=False: self.canvas.select_y_series())
         reload_action.triggered.connect(self.reload)
         self.save_format_button.triggered.connect(lambda checked=False: self.save_format(show_errors=True))
         reset_action.triggered.connect(lambda checked=False: self.canvas.reset_zoom())
@@ -156,9 +209,11 @@ class DatBrowserWidget(QWidget):
         self.canvas.reloadRequested.connect(self.reload)
         self.canvas.saveFormatRequested.connect(lambda: self.save_format(show_errors=True))
         self.canvas.reloadFormatRequested.connect(self.reload_format)
+        self.canvas.copyPathRequested.connect(self._copy_current_path)
         self.canvas.axesChanged.connect(self._update_status)
         self.canvas.displayChanged.connect(self._display_changed)
         self.canvas.pointActivated.connect(self._show_point_details)
+        self.canvas.pointHovered.connect(self._on_point_hovered)
 
         self.monitor_timer = QTimer(self)
         self.monitor_timer.setInterval(750)
@@ -170,16 +225,25 @@ class DatBrowserWidget(QWidget):
 
         self._detached = bool(detached)
         if self._detached:
+            self.detach_action.setIcon(qta.icon("fa5s.compress", color="#334155"))
             self.detach_action.setText("Dock")
             self.detach_action.setToolTip(
                 "Return Data Browser to the main window central area"
             )
         else:
+            self.detach_action.setIcon(qta.icon("fa5s.external-link-alt", color="#334155"))
             self.detach_action.setText("Pop Out")
             self.detach_action.setToolTip(
                 "Detach Data Browser into an independent window "
                 "(or drag its title bar outside the central area)"
             )
+
+    def _copy_current_path(self) -> None:
+        if self.current_path is None:
+            return
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(str(self.current_path))
 
     def canvas_reset_zoom(self) -> None:
         """供父窗口菜单转发 Reset Zoom。"""
@@ -217,6 +281,7 @@ class DatBrowserWidget(QWidget):
         self.document = document
         self._signature = (document.modified_ns, document.size_bytes)
         self.path_label.setText(str(source))
+        self.setToolTip(str(source))
 
         format_error: str | None = None
         format_loaded = False
@@ -343,19 +408,38 @@ class DatBrowserWidget(QWidget):
         if signature != self._signature:
             self.load_path(self.current_path, show_errors=False)
 
+    def _render_status_bar(self) -> None:
+        if self._hover_hit is not None and self.document is not None:
+            x_text = self.canvas.format_x_value(self._hover_hit.x, full=False)
+            self.status_label.setText(
+                f"{self.canvas.x_label} = {x_text}  ·  "
+                f"{self._hover_hit.series} = {self._hover_hit.y:.8g}  "
+                f"(row {self._hover_hit.row_index + 1:,})   |   {self._base_status_text}"
+            )
+        else:
+            self.status_label.setText(self._base_status_text)
+
+    def _on_point_hovered(self, hit: object) -> None:
+        self._hover_hit = hit if isinstance(hit, PlotHit) else None
+        self._render_status_bar()
+
     def _update_status(self, x_label: str, y_columns: object) -> None:
         if self.document is None:
             return
         names = tuple(str(name) for name in y_columns) if isinstance(y_columns, (tuple, list)) else (str(y_columns),)
         y_text = ", ".join(names) if names else "None"
-        layout = "Overlay" if self.canvas.layout_mode == OVERLAY_LAYOUT else "Stacked shared X"
-        format_text = f" | {self._format_status}" if self._format_status else ""
-        self.status_label.setText(
-            f"{len(self.document.rows):,} rows | "
-            f"X: {x_label} [{self.canvas.x_scale.title()}] | "
-            f"Y: {y_text} [{self.canvas.y_scale.title()}] | {layout} | "
-            f"refreshed {datetime.now().strftime('%H:%M:%S')} | auto-refresh 0.75 s{format_text}"
+        self._base_status_text = (
+            f"{len(self.document.rows):,} pts · "
+            f"X: {x_label} [{self.canvas.x_scale.title()}] · "
+            f"Y: {y_text} [{self.canvas.y_scale.title()}] · "
+            f"{datetime.now().strftime('%H:%M:%S')}"
         )
+        details = [str(self.current_path) if self.current_path else "", self._base_status_text]
+        if self._format_status:
+            details.append(self._format_status)
+        details.append("Drag to zoom · Double-click point for full row · Auto-refresh 0.75 s")
+        self.status_label.setToolTip("\n".join(line for line in details if line))
+        self._render_status_bar()
 
     def _show_point_details(self, hit: PlotHit) -> None:
         """用临时模态窗口展示完整行，并在关闭后安排 Qt 对象释放。"""
