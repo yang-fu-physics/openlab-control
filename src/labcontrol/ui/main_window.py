@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QDropEvent,
     QGuiApplication,
     QIcon,
+    QKeySequence,
     QResizeEvent,
 )
 from PySide6.QtWidgets import (
@@ -306,6 +307,7 @@ class MainWindow(QMainWindow):
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
         self._datafile_selected = False
+        self._effective_datafile_text = ""
         self.current_snapshots: dict[str, InstrumentSnapshot] = {}
         self._runtime_connection_summary: tuple[int, int] | None = None
         self.current_run_state = RunState.IDLE
@@ -384,9 +386,11 @@ class MainWindow(QMainWindow):
         self.editor.documentChanged.connect(self._mark_dirty)
         self.sequence_window = QMdiSubWindow()
         self.sequence_window.setWidget(self.editor)
+        self.sequence_window.setFocusProxy(self.editor)
         self.sequence_window.setWindowTitle(self.document.name)
         self.sequence_window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.mdi.addSubWindow(self.sequence_window)
+        self.mdi.subWindowActivated.connect(self._on_mdi_subwindow_activated)
         self.sequence_window.resize(scaled(780), scaled(560))
         self.sequence_window.show()
 
@@ -400,6 +404,7 @@ class MainWindow(QMainWindow):
         self._build_status_dock()
         self._build_log_dock()
         self._build_actions()
+        self.editor.list.setFocus()
         self.statusBar().showMessage(
             f"Starting instrument runtime · UI scale {self.ui_scale:.2f}x "
             f"({self.ui_scale_mode}) · text {self.font_scale:.0%}"
@@ -699,9 +704,27 @@ class MainWindow(QMainWindow):
         self.module_manager.removeInstanceRequested.connect(self._remove_module_instance)
         icon_color = "#3b4652"
         self.new_action = QAction(qta.icon("fa5s.file", color=icon_color), "New", self)
+        self.new_action.setShortcuts(
+            QKeySequence.keyBindings(QKeySequence.StandardKey.New)
+            or [QKeySequence("Ctrl+N")]
+        )
         self.open_action = QAction(qta.icon("fa5s.folder-open", color=icon_color), "Open", self)
+        self.open_action.setShortcuts(
+            QKeySequence.keyBindings(QKeySequence.StandardKey.Open)
+            or [QKeySequence("Ctrl+O")]
+        )
         self.save_action = QAction(qta.icon("fa5s.save", color=icon_color), "Save", self)
+        self.save_action.setShortcuts(
+            QKeySequence.keyBindings(QKeySequence.StandardKey.Save)
+            or [QKeySequence("Ctrl+S")]
+        )
         self.save_as_action = QAction(qta.icon("fa5s.file-signature", color=icon_color), "Save As", self)
+        save_as_shortcuts = list(
+            QKeySequence.keyBindings(QKeySequence.StandardKey.SaveAs)
+        )
+        if QKeySequence("Ctrl+Shift+S") not in save_as_shortcuts:
+            save_as_shortcuts.insert(0, QKeySequence("Ctrl+Shift+S"))
+        self.save_as_action.setShortcuts(save_as_shortcuts)
         self.run_action = QAction(qta.icon("fa5s.play", color="#238636"), "Run", self)
         self.pause_action = QAction(qta.icon("fa5s.pause", color="#b86b00"), "Pause/Resume", self)
         self.stop_action = QAction(qta.icon("fa5s.stop", color="#cf222e"), "Stop", self)
@@ -740,19 +763,25 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.data_browser_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
-        edit_menu = menu.addMenu("Edit")
-        edit_menu.addActions([self.editor.disable_action, self.editor.enable_action])
-        edit_menu.addSeparator()
-        edit_menu.addActions([
-            self.editor.delete_action,
+        self.edit_menu = menu.addMenu("Edit")
+        self.edit_menu.addActions([
+            self.editor.undo_action,
+            self.editor.redo_action,
+        ])
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([self.editor.disable_action, self.editor.enable_action])
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([
+            self.editor.cut_action,
             self.editor.copy_action,
             self.editor.paste_action,
+            self.editor.delete_action,
         ])
-        edit_menu.addSeparator()
-        up_action = edit_menu.addAction("Move Up")
-        down_action = edit_menu.addAction("Move Down")
-        up_action.triggered.connect(lambda: self.editor.move_selected(-1))
-        down_action.triggered.connect(lambda: self.editor.move_selected(1))
+        self.edit_menu.addSeparator()
+        self.edit_menu.addActions([
+            self.editor.move_up_action,
+            self.editor.move_down_action,
+        ])
         view_menu = menu.addMenu("View")
         view_menu.addActions([self.left_dock.toggleViewAction(), self.command_dock.toggleViewAction(), self.log_action])
         view_menu.addSeparator()
@@ -1083,6 +1112,7 @@ class MainWindow(QMainWindow):
         self.document = document
         self.current_data_file = None
         self._datafile_selected = False
+        self._effective_datafile_text = ""
         self.sequence_path = document.path
         self._datafile_selected = self._first_effective_datafile_command() is not None
         if self.ui_preference_store is not None:
@@ -1376,17 +1406,20 @@ class MainWindow(QMainWindow):
         return None
 
     def _sync_datafile_label(self) -> None:
-        if not self._datafile_selected:
-            self.data_file_label.setFullText("")
-            return
         command = self._first_effective_datafile_command()
         if command is not None:
-            path_text = str(command.params.get("path", "experiment.dat"))
-            self.data_file_label.setFullText(path_text)
-            path = Path(path_text)
-            if path.is_absolute():
-                self._last_data_directory = path.parent
-            return
+            path_text = str(command.params.get("path", "experiment.dat")).strip()
+            if path_text:
+                if path_text != self._effective_datafile_text:
+                    self._effective_datafile_text = path_text
+                    self.current_data_file = None
+                self._datafile_selected = True
+                self.data_file_label.setFullText(path_text)
+                path = Path(path_text)
+                if path.is_absolute():
+                    self._last_data_directory = path.parent
+                return
+        self._effective_datafile_text = ""
         self._datafile_selected = False
         self.current_data_file = None
         self.data_file_label.setFullText("")
@@ -1570,6 +1603,7 @@ class MainWindow(QMainWindow):
             )
             if spec is not None:
                 self.editor.insert_command(spec.create())
+                self.editor.list.setFocus()
             return
         if value[0] == "core" and len(value) == 2:
             command_type = CommandType(value[1])
@@ -1591,6 +1625,7 @@ class MainWindow(QMainWindow):
             if values is not None:
                 command.update_params(values)
                 self.editor.insert_command(command)
+                self.editor.list.setFocus()
             return
         dialog = CommandDialog(
             command,
@@ -1622,6 +1657,7 @@ class MainWindow(QMainWindow):
                 command.update_params(values)
                 self._remember_datafile_directory(command)
                 self.editor.insert_command(command)
+                self.editor.list.setFocus()
         finally:
             dialog.deleteLater()
 
@@ -1649,9 +1685,11 @@ class MainWindow(QMainWindow):
                 spec,
             )
             if values is not None:
+                self.editor.record_undo_state()
                 command.update_params(values)
                 self.editor.rebuild(command.id)
                 self._mark_dirty()
+                self.editor.list.setFocus()
             return
         try:
             dialog = CommandDialog(
@@ -1684,10 +1722,12 @@ class MainWindow(QMainWindow):
                             "\n".join(issues),
                         )
                         return
+                self.editor.record_undo_state()
                 command.update_params(values)
                 self._remember_datafile_directory(command)
                 self.editor.rebuild(command.id)
                 self._mark_dirty()
+                self.editor.list.setFocus()
         finally:
             dialog.deleteLater()
 
@@ -1772,6 +1812,7 @@ class MainWindow(QMainWindow):
             selected_path = selected_path.with_suffix(".dat")
         selected = str(selected_path.resolve())
         self._last_data_directory = selected_path.resolve().parent
+        self.editor.record_undo_state()
         command = self._top_level_datafile_before_measure()
         if command is None:
             command = Command(CommandType.SET_DATAFILE, {
@@ -1791,6 +1832,7 @@ class MainWindow(QMainWindow):
         self._datafile_selected = True
         self.current_data_file = None
         self._mark_dirty()
+        self.editor.list.setFocus()
 
     def _view_data(self) -> None:
         path = self.current_data_file
@@ -1800,15 +1842,19 @@ class MainWindow(QMainWindow):
                 path = displayed
         self._show_data_browser(path)
 
+    def _on_mdi_subwindow_activated(self, subwindow: QMdiSubWindow | None) -> None:
+        if subwindow is self.sequence_window and self.editor.isVisible():
+            self.editor.list.setFocus()
+
     def _focus_sequence(self) -> None:
         self.sequence_window.showNormal()
         # QMdiSubWindow.close() also hides its child widget even when the
         # subwindow itself is retained, so both layers must be restored.
         self.editor.show()
         self.sequence_window.show()
-        self.sequence_window.setFocus()
         self.mdi.setActiveSubWindow(self.sequence_window)
         self.sequence_window.raise_()
+        self.editor.list.setFocus()
         QTimer.singleShot(0, self._fit_mdi_windows)
 
     def _run_sequence(self) -> None:
