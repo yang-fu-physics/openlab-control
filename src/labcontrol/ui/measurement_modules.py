@@ -182,11 +182,12 @@ class ModuleWindow(QDialog):
         settings: Mapping[str, Any],
         *,
         mark_unapplied: bool = False,
+        unapplied_message: str | None = None,
     ) -> None:
         """只更新 Settings 控件，不把任何值发送给模块 worker。
 
-        普通 Enable 读取模块自己的持久设置时保持干净；从 SEQ 伴随文件切换实验参数时，
-        ``mark_unapplied`` 会明确标记为待 Apply，避免窗口仍显示上一组设置已应用。
+        普通 Enable 读取模块自己的持久设置时保持干净；从 SEQ 伴随文件切换实验参数或启动恢复
+        上次模块配置时，``mark_unapplied`` 会明确标记为待 Apply，等待操作者确认写入仪表。
         """
 
         self.frontend.load(deepcopy(dict(settings)))
@@ -194,7 +195,7 @@ class ModuleWindow(QDialog):
         self._dirty = mark_unapplied
         if mark_unapplied:
             self.message_label.setText(
-                "SEQ settings imported — not applied"
+                unapplied_message or "SEQ settings imported — not applied"
             )
 
     def settings(self) -> dict[str, Any]:

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -177,6 +178,22 @@ class UiPreferenceStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         settings = self._settings()
         settings.setValue("session/last_sequence", str(path.resolve()) if path is not None else "")
+        self._sync(settings)
+
+    def last_enabled_modules(self) -> tuple[str, ...]:
+        raw = str(self._settings().value("session/last_enabled_modules", "")).strip()
+        if not raw:
+            return ()
+        items = {part.strip() for part in raw.split(",") if part.strip()}
+        return tuple(sorted(items))
+
+    def set_last_enabled_modules(self, module_ids: Sequence[str]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        normalized = sorted(
+            {str(item).strip() for item in module_ids if str(item).strip()}
+        )
+        settings = self._settings()
+        settings.setValue("session/last_enabled_modules", ",".join(normalized))
         self._sync(settings)
 
     def geometry(self, key: str) -> QByteArray | None:
