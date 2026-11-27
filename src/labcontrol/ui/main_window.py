@@ -352,6 +352,8 @@ class MainWindow(QMainWindow):
         # 启动自动恢复上次启用模块期间的跟踪集合，避免逐个恢复完成时覆盖尚未就绪的模块列表。
         self._session_restore_pending: set[str] = set()
         self._session_restore_unapplied: set[str] = set()
+        # 模块已有进行中的 Enable/Disable Future 时，记录最新确认的目标启停态，待当前操作结束后收敛。
+        self._queued_module_enabled: dict[str, bool] = {}
         self._last_sequence_directory = self.config.project_root
         self._last_data_directory = self.config.resolve_project_path(self.config.logging.directory)
         self.current_data_file: Path | None = None
@@ -1542,7 +1544,6 @@ class MainWindow(QMainWindow):
         )
         self._sequence_module_window_issues = []
         self._deferred_sequence_module_settings.clear()
-        self._pending_seq_module_settings.clear()
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
@@ -1851,7 +1852,7 @@ class MainWindow(QMainWindow):
         self._set_document(SequenceDocument())
 
     def _active_module_ids(self) -> set[str]:
-        """返回当前实际生效（含正在启用中、排除正在停用中）的模块集合。"""
+        """返回当前实际生效（含正在启用/排队的最终目标态、排除正在停用/排队停用）的模块集合。"""
 
         pending_enables = {
             module_id
@@ -1863,9 +1864,15 @@ class MainWindow(QMainWindow):
             for module_id, (_, requested) in self._pending_module_operations.items()
             if not requested
         }
-        return (
+        active = (
             self.enabled_modules | self._session_restore_pending | pending_enables
         ) - pending_disables
+        for module_id, queued_enabled in self._queued_module_enabled.items():
+            if queued_enabled:
+                active.add(module_id)
+            else:
+                active.discard(module_id)
+        return active
 
     def _current_module_pending_settings(
         self,
@@ -2085,7 +2092,7 @@ class MainWindow(QMainWindow):
         messages.extend(
             self._module_command_document_issues(
                 result.document,
-                enabling_modules=set(plan.to_enable) if sync_confirmed else frozenset(),
+                enabling_modules=self._active_module_ids() - self.enabled_modules,
             )
         )
         messages.extend(
@@ -2843,11 +2850,22 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 exception = exc
             if exception is None:
+                queued_enabled = self._queued_module_enabled.pop(module_id, None)
+                if queued_enabled is False and (
+                    module_id in self.enabled_modules or requested_enabled
+                ):
+                    self._set_module_enabled(module_id, False)
+                elif queued_enabled is True and module_id not in self.enabled_modules:
+                    self._set_module_enabled(module_id, True)
                 continue
+            queued_enabled = self._queued_module_enabled.pop(module_id, None)
             if requested_enabled:
                 self._pending_seq_module_settings.pop(module_id, None)
                 self._session_restore_pending.discard(module_id)
                 self._session_restore_unapplied.discard(module_id)
+            elif queued_enabled is True:
+                # Disable 失败时可能仍保留资源锁，不盲目继续重启用，清理排队参数并报告错误。
+                self._pending_seq_module_settings.pop(module_id, None)
 
             actual_enabled = (
                 module_id in self.enabled_modules
@@ -3410,7 +3428,20 @@ class MainWindow(QMainWindow):
             )
             return
         if module_id in self._pending_module_operations:
+            _, in_flight_enabled = self._pending_module_operations[module_id]
+            if enabled == in_flight_enabled:
+                self._queued_module_enabled.pop(module_id, None)
+            else:
+                self._queued_module_enabled[module_id] = enabled
+                if not enabled:
+                    self._pending_seq_module_settings.pop(module_id, None)
+                    self._deferred_sequence_module_settings.pop(module_id, None)
+                    self._session_restore_pending.discard(module_id)
+                    self._session_restore_unapplied.discard(module_id)
+                    self._sequence_module_settings.pop(module_id, None)
+                    self._sequence_module_versions.pop(module_id, None)
             return
+        self._queued_module_enabled.pop(module_id, None)
         try:
             descriptor = self._module_descriptor(module_id)
             if enabled:
@@ -3430,7 +3461,8 @@ class MainWindow(QMainWindow):
                 self._deferred_sequence_module_settings.pop(module_id, None)
                 self._session_restore_pending.discard(module_id)
                 self._session_restore_unapplied.discard(module_id)
-                self._save_module_window(module_id, remember_in_sequence=False)
+                if module_id in self.module_windows:
+                    self._save_module_window(module_id, remember_in_sequence=False)
                 self._sequence_module_settings.pop(module_id, None)
                 self._sequence_module_versions.pop(module_id, None)
                 self.module_manager.update_state(
@@ -3500,6 +3532,23 @@ class MainWindow(QMainWindow):
             self._session_restore_pending.discard(module_id)
         else:
             self.enabled_modules.discard(module_id)
+        pending_disable = (
+            self._queued_module_enabled.get(module_id) is False
+            or (
+                module_id in self._pending_module_operations
+                and not self._pending_module_operations[module_id][1]
+            )
+        )
+        if enabled and pending_disable:
+            # 启用期间用户已确认停用该模块：不弹出窗口，保持禁用中状态等待后续停用收敛。
+            self.module_manager.update_state(
+                module_id,
+                False,
+                "disabling",
+                f"Stopping {self._module_display_name(module_id)}...",
+                resources_retained=bool(payload.get("resources_retained", False)),
+            )
+            return
         self.module_manager.update_state(
             module_id,
             enabled,
@@ -4399,6 +4448,8 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         for module_id in tuple(self.enabled_modules):
+            if module_id not in self.module_windows:
+                continue
             try:
                 self._save_module_window(module_id, remember_in_sequence=False)
             except Exception as exc:

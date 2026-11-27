@@ -1441,6 +1441,294 @@ class MainWindowLayoutTests(unittest.TestCase):
             finally:
                 second.close()
 
+    def test_sync_disables_initializing_module_and_reenables_disabling_module(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            general = write_simulated_configuration(root)
+            shutil.copytree(ROOT / "modules", root / "modules")
+            empty_seq = root / "empty.seq"
+            empty_seq.write_text("T End Sequence\n", encoding="utf-8")
+            save_sequence_module_settings(empty_seq, {}, {})
+
+            tut_seq = root / "tut.seq"
+            tut_seq.write_text("T End Sequence\n", encoding="utf-8")
+
+            window = MainWindow(load_config(general))
+            tut_version = window._module_descriptor("tutorial_resistance").version
+            save_sequence_module_settings(
+                tut_seq,
+                {
+                    "tutorial_resistance": {
+                        "base_resistance_ohm": 220.0,
+                        "channel_step_ohm": 10.0,
+                        "delay_seconds": 0.375,
+                        "noise_ohm": 0.001,
+                        "over_range_ohm": 1e6,
+                    }
+                },
+                {"tutorial_resistance": tut_version},
+            )
+            try:
+                # Part A: simulated_transport is mid-initializing -> open empty.seq and confirm ->
+                # disable is queued and executes immediately once enable finishes, never flashing a window.
+                in_flight_enable: Future[object] = Future()
+                in_flight_disable: Future[object] = Future()
+                with patch.object(
+                    window.runtime,
+                    "enable_module",
+                    return_value=in_flight_enable,
+                ):
+                    window._set_module_enabled("simulated_transport", True)
+                self.assertIn("simulated_transport", window._pending_module_operations)
+
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(empty_seq), "Sequence (*.seq)"),
+                    ),
+                    patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        return_value=True,
+                    ) as confirm_disable,
+                    patch.object(
+                        window.runtime,
+                        "disable_module",
+                        return_value=in_flight_disable,
+                    ) as disable_mock,
+                ):
+                    window._open_sequence()
+                    confirm_disable.assert_called_once()
+                    self.assertEqual(confirm_disable.call_args.args[1].to_disable, ("simulated_transport",))
+                    self.assertIs(window._queued_module_enabled.get("simulated_transport"), False)
+                    disable_mock.assert_not_called()
+
+                    # Enable completes: handler skips flashing a window, then pending-op reconciler disables.
+                    window._handle_module_state(
+                        {
+                            "module_id": "simulated_transport",
+                            "enabled": True,
+                            "state": "enabled",
+                            "status": {},
+                            "message": "Enabled",
+                        }
+                    )
+                    self.assertNotIn("simulated_transport", window.module_windows)
+                    in_flight_enable.set_result(None)
+                    window._check_pending_module_operations()
+                    disable_mock.assert_called_once_with("simulated_transport")
+
+                # Disable completes -> module settles cleanly as disabled.
+                window._handle_module_state(
+                    {
+                        "module_id": "simulated_transport",
+                        "enabled": False,
+                        "state": "disabled",
+                        "status": {},
+                        "message": "Disabled",
+                    }
+                )
+                in_flight_disable.set_result(None)
+                window._check_pending_module_operations()
+                self.assertNotIn("simulated_transport", window.enabled_modules)
+                self.assertEqual(
+                    window.module_manager.runtime_state("simulated_transport"),
+                    "disabled",
+                )
+
+                # Part B: tutorial_resistance is mid-disabling -> open tut.seq and confirm ->
+                # re-enable is queued and runs once disable completes, preserving SEQ 0.375 settings.
+                window.enabled_modules.add("tutorial_resistance")
+                disabling_future: Future[object] = Future()
+                reenable_future: Future[object] = Future()
+                with patch.object(
+                    window.runtime,
+                    "disable_module",
+                    return_value=disabling_future,
+                ):
+                    window._set_module_enabled("tutorial_resistance", False)
+
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(tut_seq), "Sequence (*.seq)"),
+                    ),
+                    patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        window.runtime,
+                        "enable_module",
+                        return_value=reenable_future,
+                    ) as reenable_mock,
+                    patch.object(
+                        window.runtime,
+                        "apply_module_settings",
+                    ) as apply_mock,
+                ):
+                    window._open_sequence()
+                    self.assertIs(window._queued_module_enabled.get("tutorial_resistance"), True)
+                    reenable_mock.assert_not_called()
+
+                    window._handle_module_state(
+                        {
+                            "module_id": "tutorial_resistance",
+                            "enabled": False,
+                            "state": "disabled",
+                            "status": {},
+                            "message": "Disabled",
+                        }
+                    )
+                    disabling_future.set_result(None)
+                    window._check_pending_module_operations()
+                    reenable_mock.assert_called_once_with("tutorial_resistance")
+
+                    window._handle_module_state(
+                        {
+                            "module_id": "tutorial_resistance",
+                            "enabled": True,
+                            "state": "enabled",
+                            "status": {},
+                            "message": "Enabled",
+                        }
+                    )
+                    reenable_future.set_result(None)
+                    window._check_pending_module_operations()
+
+                self.assertIn("tutorial_resistance", window.enabled_modules)
+                self.assertAlmostEqual(
+                    window.module_windows["tutorial_resistance"].settings()["delay_seconds"],
+                    0.375,
+                )
+                self.assertAlmostEqual(
+                    window.module_windows["tutorial_resistance"].settings()["base_resistance_ohm"],
+                    220.0,
+                )
+                self.assertTrue(window.module_windows["tutorial_resistance"].has_unapplied_edits())
+                apply_mock.assert_not_called()
+            finally:
+                window.enabled_modules.clear()
+                window.close()
+
+    def test_reopening_same_or_declined_seq_while_initializing_preserves_pending_settings(
+        self,
+    ) -> None:
+        from labcontrol.measurement.settings import save_settings
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            general = write_simulated_configuration(root)
+            shutil.copytree(ROOT / "modules", root / "modules")
+            # Local persisted module settings have old 0.1 s delay.
+            save_settings(
+                root / "module_data" / "tutorial_resistance" / "settings.toml",
+                {
+                    "base_resistance_ohm": 100.0,
+                    "channel_step_ohm": 10.0,
+                    "delay_seconds": 0.1,
+                    "noise_ohm": 0.001,
+                    "over_range_ohm": 1e6,
+                },
+            )
+            seq_a = root / "seq_a.seq"
+            seq_a.write_text("T End Sequence\n", encoding="utf-8")
+            seq_b = root / "seq_b.seq"
+            seq_b.write_text("T End Sequence\n", encoding="utf-8")
+
+            window = MainWindow(load_config(general))
+            tut_version = window._module_descriptor("tutorial_resistance").version
+            save_sequence_module_settings(
+                seq_a,
+                {
+                    "tutorial_resistance": {
+                        "base_resistance_ohm": 250.0,
+                        "channel_step_ohm": 10.0,
+                        "delay_seconds": 0.375,
+                        "noise_ohm": 0.001,
+                        "over_range_ohm": 1e6,
+                    }
+                },
+                {"tutorial_resistance": tut_version},
+            )
+            save_sequence_module_settings(
+                seq_b,
+                {
+                    "tutorial_resistance": {
+                        "base_resistance_ohm": 500.0,
+                        "channel_step_ohm": 10.0,
+                        "delay_seconds": 0.9,
+                        "noise_ohm": 0.001,
+                        "over_range_ohm": 1e6,
+                    }
+                },
+                {"tutorial_resistance": tut_version},
+            )
+            try:
+                # 1) First open of seq_a -> confirms and starts enabling tutorial_resistance (still in flight).
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(seq_a), "Sequence (*.seq)"),
+                    ),
+                    patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        window.runtime,
+                        "apply_module_settings",
+                    ) as apply_mock,
+                    patch("labcontrol.ui.main_window.QMessageBox.warning") as warning_mock,
+                ):
+                    window._open_sequence()
+                    self.assertIn("tutorial_resistance", window._pending_module_operations)
+                    self.assertNotIn("tutorial_resistance", window.enabled_modules)
+
+                    # 2) Immediately re-open seq_a BEFORE initialization finishes -> no popup, 0.375 preserved!
+                    with patch.object(
+                        window,
+                        "_confirm_sequence_module_sync",
+                        side_effect=AssertionError("Re-opening matching SEQ while initializing should not prompt"),
+                    ):
+                        window._open_sequence()
+
+                    # 3) Open seq_b BEFORE initialization finishes and decline -> 0.375 STILL preserved!
+                    with (
+                        patch(
+                            "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                            return_value=(str(seq_b), "Sequence (*.seq)"),
+                        ),
+                        patch.object(
+                            window,
+                            "_confirm_sequence_module_sync",
+                            return_value=False,
+                        ) as decline_b,
+                    ):
+                        window._open_sequence()
+                        decline_b.assert_called_once()
+
+                    # 4) Let real tutorial_resistance worker finish initializing -> must load 0.375, NOT 0.1!
+                    deadline = time.monotonic() + 5.0
+                    while "tutorial_resistance" not in window.enabled_modules and time.monotonic() < deadline:
+                        QTest.qWait(20)
+                        window._drain_runtime_messages()
+
+                warning_mock.assert_not_called()
+
+                self.assertIn("tutorial_resistance", window.enabled_modules)
+                mod_win = window.module_windows["tutorial_resistance"]
+                self.assertAlmostEqual(mod_win.settings()["delay_seconds"], 0.375)
+                self.assertAlmostEqual(mod_win.settings()["base_resistance_ohm"], 250.0)
+                self.assertTrue(mod_win.has_unapplied_edits())
+                apply_mock.assert_not_called()
+            finally:
+                window.close()
+
     def test_save_sequence_writes_its_module_settings_companion(
         self,
     ) -> None:
