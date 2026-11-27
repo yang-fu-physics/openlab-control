@@ -101,6 +101,7 @@ from ..sequence.module_settings import (
     SequenceModuleSettings,
     SequenceModuleSyncPlan,
     load_sequence_module_settings,
+    module_settings_equal,
     plan_sequence_module_sync,
     save_sequence_module_settings,
     sequence_module_settings_path,
@@ -1543,7 +1544,6 @@ class MainWindow(QMainWindow):
             imported.source
         )
         self._sequence_module_window_issues = []
-        self._deferred_sequence_module_settings.clear()
         if document.path is not None:
             self._last_sequence_directory = document.path.resolve().parent
         self.editor.set_document(document)
@@ -1560,6 +1560,7 @@ class MainWindow(QMainWindow):
             or self._pending_run is not None
         )
         if apply_to_enabled_windows:
+            self._deferred_sequence_module_settings.clear()
             for module_id, settings in (
                 self._sequence_module_settings.items()
             ):
@@ -2071,13 +2072,20 @@ class MainWindow(QMainWindow):
                         "another sequence is active; reload or switch modules after the Run ends."
                     )
                 for module_id in plan.to_update_settings:
-                    self._deferred_sequence_module_settings[module_id] = deepcopy(
-                        imported.settings[module_id]
-                    )
-                    sync_issues.append(
-                        f"Module {module_id!r} window is locked during an active Run; "
-                        "imported settings were preserved and will load when this Run finishes"
-                    )
+                    values = deepcopy(imported.settings[module_id])
+                    window = self.module_windows.get(module_id)
+                    if window is not None and module_settings_equal(
+                        window.settings(),
+                        values,
+                    ):
+                        # 新打开的 SEQ 参数与当前锁定窗口本就一致，取消之前排队的旧延后参数即可。
+                        self._deferred_sequence_module_settings.pop(module_id, None)
+                    else:
+                        self._deferred_sequence_module_settings[module_id] = values
+                        sync_issues.append(
+                            f"Module {module_id!r} window is locked during an active Run; "
+                            "imported settings were preserved and will load when this Run finishes"
+                        )
             elif self._confirm_sequence_module_sync(Path(path).name, plan, imported):
                 sync_confirmed = True
                 sync_issues = self._apply_sequence_module_sync(plan, imported)

@@ -1729,6 +1729,104 @@ class MainWindowLayoutTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_reopening_same_seq_during_run_preserves_deferred_settings(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            general = write_simulated_configuration(root)
+            shutil.copytree(ROOT / "modules", root / "modules")
+            seq_new = root / "next_run.seq"
+            seq_new.write_text("T End Sequence\n", encoding="utf-8")
+            seq_orig = root / "orig_run.seq"
+            seq_orig.write_text("T End Sequence\n", encoding="utf-8")
+
+            window = MainWindow(load_config(general))
+            try:
+                window._set_module_enabled("tutorial_resistance", True)
+                deadline = time.monotonic() + 5.0
+                while "tutorial_resistance" not in window.enabled_modules and time.monotonic() < deadline:
+                    QTest.qWait(20)
+                    window._drain_runtime_messages()
+                mod_win = window.module_windows["tutorial_resistance"]
+                tut_version = mod_win.descriptor.version
+                orig_settings = mod_win.settings()
+                orig_settings["delay_seconds"] = 0.1
+                mod_win.load_settings(orig_settings, mark_unapplied=False)
+                new_settings = deepcopy(orig_settings)
+                new_settings["delay_seconds"] = 0.375
+                save_sequence_module_settings(
+                    seq_new,
+                    {"tutorial_resistance": new_settings},
+                    {"tutorial_resistance": tut_version},
+                )
+                save_sequence_module_settings(
+                    seq_orig,
+                    {"tutorial_resistance": orig_settings},
+                    {"tutorial_resistance": tut_version},
+                )
+
+                window.current_run_state = RunState.RUNNING
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(seq_new), "Sequence (*.seq)"),
+                    ),
+                    patch("labcontrol.ui.main_window.QMessageBox.warning") as warning_mock,
+                ):
+                    # 1) First open during active Run queues deferred 0.375.
+                    window._open_sequence()
+                    self.assertAlmostEqual(
+                        window._deferred_sequence_module_settings["tutorial_resistance"]["delay_seconds"],
+                        0.375,
+                    )
+                    self.assertAlmostEqual(mod_win.settings()["delay_seconds"], 0.1)
+
+                    # 2) Re-opening the same SEQ during active Run must NOT clear deferred 0.375.
+                    window._open_sequence()
+                    self.assertAlmostEqual(
+                        window._deferred_sequence_module_settings["tutorial_resistance"]["delay_seconds"],
+                        0.375,
+                    )
+
+                warning_mock.assert_called_once()
+
+                # 3) Once Run finishes, deferred 0.375 loads into the unlocked window as unapplied.
+                window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
+                self.assertAlmostEqual(mod_win.settings()["delay_seconds"], 0.375)
+                self.assertTrue(mod_win.has_unapplied_edits())
+                self.assertEqual(window._deferred_sequence_module_settings, {})
+
+                # 4) Switching back to a SEQ matching the locked window cancels stale deferred settings.
+                mod_win.load_settings(orig_settings, mark_unapplied=False)
+                window.current_run_state = RunState.RUNNING
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(seq_new), "Sequence (*.seq)"),
+                    ),
+                    patch("labcontrol.ui.main_window.QMessageBox.warning"),
+                ):
+                    window._open_sequence()
+                    self.assertIn("tutorial_resistance", window._deferred_sequence_module_settings)
+                with (
+                    patch(
+                        "labcontrol.ui.main_window.QFileDialog.getOpenFileName",
+                        return_value=(str(seq_orig), "Sequence (*.seq)"),
+                    ),
+                    patch("labcontrol.ui.main_window.QMessageBox.warning") as orig_warn,
+                ):
+                    window._open_sequence()
+                    self.assertNotIn("tutorial_resistance", window._deferred_sequence_module_settings)
+                    orig_warn.assert_not_called()
+                window._handle_progress(RunProgress(state=RunState.COMPLETED, message="done"))
+                self.assertAlmostEqual(mod_win.settings()["delay_seconds"], 0.1)
+                self.assertFalse(mod_win.has_unapplied_edits())
+            finally:
+                window.current_run_state = RunState.IDLE
+                window._deferred_sequence_module_settings.clear()
+                window.close()
+
     def test_save_sequence_writes_its_module_settings_companion(
         self,
     ) -> None:
